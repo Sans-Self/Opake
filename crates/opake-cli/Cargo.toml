@@ -1,0 +1,18 @@
+[package]
+name = "opake-cli"
+description = "CLI for Opake encrypted personal cloud"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "opake"
+path = "src/main.rs"
+
+[dependencies]
+opake-core = { path = "../opake-core" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true

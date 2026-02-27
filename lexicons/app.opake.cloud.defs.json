@@ -1,0 +1,89 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.defs",
+  "defs": {
+    "wrappedKey": {
+      "type": "object",
+      "description": "A symmetric key encrypted (wrapped) to a specific DID's public key. The recipient can decrypt this with their private key to recover the underlying symmetric key.",
+      "required": ["did", "ciphertext", "algo"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The DID whose public key was used to wrap this key."
+        },
+        "ciphertext": {
+          "type": "bytes",
+          "description": "The symmetric key, encrypted to the DID's public key. Base64-encoded in JSON.",
+          "maxLength": 512
+        },
+        "algo": {
+          "type": "string",
+          "description": "Asymmetric algorithm used for key wrapping.",
+          "knownValues": [
+            "ECDH-ES+A256KW",
+            "x25519-xsalsa20-poly1305"
+          ]
+        }
+      }
+    },
+
+    "encryptionEnvelope": {
+      "type": "object",
+      "description": "Describes how a blob's content was encrypted. Contains the algorithm, nonce/IV, and one or more wrapped copies of the content encryption key.",
+      "required": ["algo", "nonce", "keys"],
+      "properties": {
+        "algo": {
+          "type": "string",
+          "description": "Symmetric encryption algorithm used on the blob content.",
+          "knownValues": ["aes-256-gcm"]
+        },
+        "nonce": {
+          "type": "bytes",
+          "description": "The nonce / initialization vector used for encryption.",
+          "maxLength": 24
+        },
+        "keys": {
+          "type": "array",
+          "description": "One or more wrapped copies of the content encryption key, each encrypted to a different DID.",
+          "items": { "type": "ref", "ref": "#wrappedKey" },
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+
+    "keyringRef": {
+      "type": "object",
+      "description": "Instead of per-document key wrapping, references a keyring whose group key was used to encrypt the content key. The content key is stored encrypted under the group key.",
+      "required": ["keyring", "wrappedContentKey", "rotation"],
+      "properties": {
+        "keyring": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT URI of the app.opake.cloud.keyring record."
+        },
+        "wrappedContentKey": {
+          "type": "bytes",
+          "description": "The content encryption key, encrypted with the keyring's group symmetric key (using the same algo as the content encryption).",
+          "maxLength": 256
+        },
+        "rotation": {
+          "type": "integer",
+          "description": "The keyring rotation counter at the time this content key was wrapped. Clients use this to identify which generation of the group key to use for decryption.",
+          "minimum": 0
+        }
+      }
+    },
+
+    "visibility": {
+      "type": "string",
+      "description": "Hint for AppViews and clients about intended visibility of the content.",
+      "knownValues": [
+        "private",
+        "shared",
+        "public"
+      ]
+    }
+  }
+}

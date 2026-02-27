@@ -1,0 +1,108 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.document",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "An encrypted file or document stored in the personal cloud. The actual content is an encrypted blob; this record holds the metadata, encryption envelope, and optional plaintext metadata for discoverability.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "blob", "encryption", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Human-readable filename or title. Plaintext — intentionally unencrypted for indexing/search by your own AppView.",
+            "maxLength": 512
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "Original MIME type of the unencrypted content (e.g. 'application/pdf', 'image/png'). Plaintext metadata.",
+            "maxLength": 128
+          },
+          "size": {
+            "type": "integer",
+            "description": "Size of the original unencrypted content in bytes.",
+            "minimum": 0
+          },
+          "blob": {
+            "type": "blob",
+            "description": "The encrypted file content, uploaded via com.atproto.repo.uploadBlob. The PDS stores this as opaque bytes. MimeType on the blob itself will be 'application/octet-stream'.",
+            "accept": ["*/*"],
+            "maxSize": 52428800
+          },
+          "encryption": {
+            "type": "union",
+            "description": "How to decrypt the blob. Either a full encryption envelope (with per-document wrapped keys) or a keyring reference (for group-based access).",
+            "refs": [
+              "#directEncryption",
+              "#keyringEncryption"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "description": "Optional plaintext tags for categorization and search. Keep these non-sensitive — they're public.",
+            "items": { "type": "string", "maxLength": 128 },
+            "maxLength": 32
+          },
+          "parent": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional reference to a parent document (for folder-like hierarchy). Points to another app.opake.cloud.document record."
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional plaintext description or summary.",
+            "maxLength": 1024
+          },
+          "visibility": {
+            "type": "ref",
+            "ref": "app.opake.cloud.defs#visibility"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "modifiedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    },
+
+    "directEncryption": {
+      "type": "object",
+      "description": "Encryption where the content key is wrapped directly to one or more DIDs. Used for private files or ad-hoc sharing.",
+      "required": ["envelope"],
+      "properties": {
+        "envelope": {
+          "type": "ref",
+          "ref": "app.opake.cloud.defs#encryptionEnvelope"
+        }
+      }
+    },
+
+    "keyringEncryption": {
+      "type": "object",
+      "description": "Encryption where the content key is wrapped under a keyring's group key. Anyone with access to the keyring can decrypt.",
+      "required": ["keyringRef", "algo", "nonce"],
+      "properties": {
+        "keyringRef": {
+          "type": "ref",
+          "ref": "app.opake.cloud.defs#keyringRef"
+        },
+        "algo": {
+          "type": "string",
+          "description": "Symmetric algorithm used for content encryption.",
+          "knownValues": ["aes-256-gcm"]
+        },
+        "nonce": {
+          "type": "bytes",
+          "description": "Nonce/IV for the content encryption.",
+          "maxLength": 24
+        }
+      }
+    }
+  }
+}

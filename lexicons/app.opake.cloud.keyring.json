@@ -1,0 +1,52 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.keyring",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A named keyring for group-based access control. Contains a group symmetric key wrapped to each member's DID public key. Analogous to git-crypt's named keys — documents encrypted under this keyring are accessible to all members without per-document key management.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "algo", "members", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for this keyring (e.g. 'family-photos', 'work-projects').",
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of this keyring's purpose.",
+            "maxLength": 1024
+          },
+          "algo": {
+            "type": "string",
+            "description": "The symmetric algorithm the group key is intended for.",
+            "knownValues": ["aes-256-gcm"]
+          },
+          "members": {
+            "type": "array",
+            "description": "The group key wrapped to each member's DID public key. Each entry allows that DID to recover the group key.",
+            "items": { "type": "ref", "ref": "app.opake.cloud.defs#wrappedKey" },
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "rotation": {
+            "type": "integer",
+            "description": "Key rotation counter. Increment when the group key is rotated (e.g. after revoking a member). Documents should reference the rotation they were encrypted under.",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "modifiedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

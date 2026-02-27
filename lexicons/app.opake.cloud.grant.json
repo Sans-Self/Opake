@@ -1,0 +1,54 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.grant",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A share grant — gives a specific DID access to a specific document's content encryption key. Created by the document owner when sharing a file ad-hoc (outside of a keyring). The recipient discovers this via their AppView or a notification mechanism. To revoke: delete this record and optionally re-encrypt the document with a new key.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["document", "recipient", "wrappedKey", "createdAt"],
+        "properties": {
+          "document": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT URI of the app.opake.cloud.document record being shared."
+          },
+          "recipient": {
+            "type": "string",
+            "format": "did",
+            "description": "The DID being granted access."
+          },
+          "wrappedKey": {
+            "type": "ref",
+            "ref": "app.opake.cloud.defs#wrappedKey",
+            "description": "The document's content encryption key, wrapped to the recipient's DID public key."
+          },
+          "permissions": {
+            "type": "string",
+            "description": "What the recipient is allowed to do. Note: this is advisory — actual enforcement depends on the AppView / client. Cryptographically, anyone with the key can read.",
+            "knownValues": [
+              "read",
+              "read-write"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional expiration. After this time, clients should stop serving the content (advisory — the wrapped key remains valid unless the document is re-encrypted)."
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional message to the recipient (plaintext).",
+            "maxLength": 512
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

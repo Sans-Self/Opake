@@ -1,0 +1,16 @@
+[package]
+name = "opake-core"
+description = "Encryption, records, and XRPC client for Opake — platform-agnostic, WASM-compatible"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# Add when implementing crypto (Phase 1):
+# aes-gcm = "0.10"              # AES-256-GCM content encryption
+# x25519-dalek = "2"            # ECDH key agreement for key wrapping — WASM-safe
+# rand = "0.8"                  # key generation
+# base64 = "0.22"               # atproto bytes encoding
