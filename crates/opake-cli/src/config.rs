@@ -27,7 +27,10 @@ pub fn session_path() -> PathBuf {
 
 /// Restore a saved session and build an authenticated XRPC client.
 pub fn load_client() -> anyhow::Result<XrpcClient<ReqwestTransport>> {
-    todo!("read session from {}, reconstruct client", session_path().display())
+    todo!(
+        "read session from {}, reconstruct client",
+        session_path().display()
+    )
 }
 
 pub fn save_session(session: &Session) -> anyhow::Result<()> {

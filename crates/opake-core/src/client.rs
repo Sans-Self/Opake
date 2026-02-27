@@ -42,7 +42,10 @@ pub struct HttpResponse {
 /// The only thing a platform needs to provide: send an HTTP request, get bytes back.
 /// CLI implements this with reqwest, the SPA with browser fetch via web_sys.
 pub trait Transport {
-    fn send(&self, request: HttpRequest) -> impl std::future::Future<Output = Result<HttpResponse, Error>>;
+    fn send(
+        &self,
+        request: HttpRequest,
+    ) -> impl std::future::Future<Output = Result<HttpResponse, Error>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,11 +91,19 @@ pub struct XrpcClient<T: Transport> {
 
 impl<T: Transport> XrpcClient<T> {
     pub fn new(transport: T, base_url: String) -> Self {
-        Self { transport, base_url, session: None }
+        Self {
+            transport,
+            base_url,
+            session: None,
+        }
     }
 
     pub fn with_session(transport: T, base_url: String, session: Session) -> Self {
-        Self { transport, base_url, session: Some(session) }
+        Self {
+            transport,
+            base_url,
+            session: Some(session),
+        }
     }
 
     pub fn session(&self) -> Option<&Session> {
@@ -106,17 +117,21 @@ impl<T: Transport> XrpcClient<T> {
             "password": password,
         });
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Post,
-            url: format!("{}/xrpc/com.atproto.server.createSession", self.base_url),
-            headers: vec![
-                ("Content-Type".into(), "application/json".into()),
-            ],
-            body: Some(RequestBody::Json(body)),
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.server.createSession", self.base_url),
+                headers: vec![("Content-Type".into(), "application/json".into())],
+                body: Some(RequestBody::Json(body)),
+            })
+            .await?;
 
         if response.status != 200 {
-            return Err(Error::Auth(format!("login failed (HTTP {})", response.status)));
+            return Err(Error::Auth(format!(
+                "login failed (HTTP {})",
+                response.status
+            )));
         }
 
         let session: Session = serde_json::from_slice(&response.body)?;
@@ -125,12 +140,19 @@ impl<T: Transport> XrpcClient<T> {
     }
 
     fn auth_header(&self) -> Result<(String, String), Error> {
-        let session = self.session.as_ref().ok_or_else(|| Error::Auth("not logged in".into()))?;
-        Ok(("Authorization".into(), format!("Bearer {}", session.access_jwt)))
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| Error::Auth("not logged in".into()))?;
+        Ok((
+            "Authorization".into(),
+            format!("Bearer {}", session.access_jwt),
+        ))
     }
 
     fn did(&self) -> Result<&str, Error> {
-        self.session.as_ref()
+        self.session
+            .as_ref()
             .map(|s| s.did.as_str())
             .ok_or_else(|| Error::Auth("not logged in".into()))
     }
@@ -139,15 +161,23 @@ impl<T: Transport> XrpcClient<T> {
     pub async fn upload_blob(&self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
         let auth = self.auth_header()?;
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Post,
-            url: format!("{}/xrpc/com.atproto.repo.uploadBlob", self.base_url),
-            headers: vec![auth, ("Content-Type".into(), mime_type.into())],
-            body: Some(RequestBody::Bytes { data, content_type: mime_type.into() }),
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.repo.uploadBlob", self.base_url),
+                headers: vec![auth, ("Content-Type".into(), mime_type.into())],
+                body: Some(RequestBody::Bytes {
+                    data,
+                    content_type: mime_type.into(),
+                }),
+            })
+            .await?;
 
         #[derive(Deserialize)]
-        struct UploadResponse { blob: BlobRef }
+        struct UploadResponse {
+            blob: BlobRef,
+        }
         let parsed: UploadResponse = serde_json::from_slice(&response.body)?;
         Ok(parsed.blob)
     }
@@ -160,12 +190,15 @@ impl<T: Transport> XrpcClient<T> {
             self.base_url, did, cid,
         );
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Get,
-            url,
-            headers: vec![auth],
-            body: None,
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Get,
+                url,
+                headers: vec![auth],
+                body: None,
+            })
+            .await?;
 
         Ok(response.body)
     }
@@ -185,12 +218,15 @@ impl<T: Transport> XrpcClient<T> {
             "record": record,
         });
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Post,
-            url: format!("{}/xrpc/com.atproto.repo.createRecord", self.base_url),
-            headers: vec![auth, ("Content-Type".into(), "application/json".into())],
-            body: Some(RequestBody::Json(body)),
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.repo.createRecord", self.base_url),
+                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
+                body: Some(RequestBody::Json(body)),
+            })
+            .await?;
 
         Ok(serde_json::from_slice(&response.body)?)
     }
@@ -208,12 +244,15 @@ impl<T: Transport> XrpcClient<T> {
             self.base_url, did, collection, rkey,
         );
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Get,
-            url,
-            headers: vec![auth],
-            body: None,
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Get,
+                url,
+                headers: vec![auth],
+                body: None,
+            })
+            .await?;
 
         Ok(serde_json::from_slice(&response.body)?)
     }
@@ -239,12 +278,15 @@ impl<T: Transport> XrpcClient<T> {
             url.push_str(&format!("&cursor={}", cursor));
         }
 
-        let response = self.transport.send(HttpRequest {
-            method: HttpMethod::Get,
-            url,
-            headers: vec![auth],
-            body: None,
-        }).await?;
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Get,
+                url,
+                headers: vec![auth],
+                body: None,
+            })
+            .await?;
 
         Ok(serde_json::from_slice(&response.body)?)
     }
@@ -260,12 +302,14 @@ impl<T: Transport> XrpcClient<T> {
             "rkey": rkey,
         });
 
-        self.transport.send(HttpRequest {
-            method: HttpMethod::Post,
-            url: format!("{}/xrpc/com.atproto.repo.deleteRecord", self.base_url),
-            headers: vec![auth, ("Content-Type".into(), "application/json".into())],
-            body: Some(RequestBody::Json(body)),
-        }).await?;
+        self.transport
+            .send(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.repo.deleteRecord", self.base_url),
+                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
+                body: Some(RequestBody::Json(body)),
+            })
+            .await?;
 
         Ok(())
     }

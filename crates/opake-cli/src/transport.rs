@@ -9,7 +9,9 @@ pub struct ReqwestTransport {
 
 impl ReqwestTransport {
     pub fn new() -> Self {
-        Self { http: reqwest::Client::new() }
+        Self {
+            http: reqwest::Client::new(),
+        }
     }
 }
 
@@ -44,6 +46,9 @@ impl Transport for ReqwestTransport {
             message: e.to_string(),
         })?;
 
-        Ok(HttpResponse { status, body: body.to_vec() })
+        Ok(HttpResponse {
+            status,
+            body: body.to_vec(),
+        })
     }
 }
