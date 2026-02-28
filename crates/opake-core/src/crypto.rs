@@ -302,7 +302,7 @@ mod tests {
     // -- Key wrapping tests (x25519-hkdf-a256kw) --
 
     fn test_keypair() -> (StaticSecret, PublicKey) {
-        let private = StaticSecret::random_from_rng(&mut OsRng);
+        let private = StaticSecret::random_from_rng(OsRng);
         let public = PublicKey::from(&private);
         (private, public)
     }
