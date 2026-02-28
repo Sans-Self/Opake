@@ -21,8 +21,7 @@
           "type": "string",
           "description": "Asymmetric algorithm used for key wrapping.",
           "knownValues": [
-            "ECDH-ES+A256KW",
-            "x25519-xsalsa20-poly1305"
+            "x25519-hkdf-a256kw"
           ]
         }
       }

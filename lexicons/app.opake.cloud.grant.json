@@ -8,8 +8,13 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["document", "recipient", "wrappedKey", "createdAt"],
+        "required": ["version", "document", "recipient", "wrappedKey", "createdAt"],
         "properties": {
+          "version": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.cloud.* namespace. Clients should reject records with a version they do not understand.",
+            "minimum": 1
+          },
           "document": {
             "type": "string",
             "format": "at-uri",

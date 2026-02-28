@@ -8,8 +8,13 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["name", "blob", "encryption", "createdAt"],
+        "required": ["version", "name", "blob", "encryption", "createdAt"],
         "properties": {
+          "version": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.cloud.* namespace. Clients should reject records with a version they do not understand.",
+            "minimum": 1
+          },
           "name": {
             "type": "string",
             "description": "Human-readable filename or title. Plaintext — intentionally unencrypted for indexing/search by your own AppView.",

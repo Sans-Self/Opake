@@ -8,8 +8,13 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["name", "algo", "members", "createdAt"],
+        "required": ["version", "name", "algo", "members", "createdAt"],
         "properties": {
+          "version": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.cloud.* namespace. Clients should reject records with a version they do not understand.",
+            "minimum": 1
+          },
           "name": {
             "type": "string",
             "description": "Human-readable name for this keyring (e.g. 'family-photos', 'work-projects').",

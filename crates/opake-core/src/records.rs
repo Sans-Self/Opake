@@ -5,6 +5,26 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Error;
+
+/// The current app.opake.cloud.* schema version this client understands.
+/// Records with version <= this are compatible; higher versions must be rejected.
+pub const SCHEMA_VERSION: u32 = 1;
+
+fn default_version() -> u32 {
+    SCHEMA_VERSION
+}
+
+/// Reject records written by a newer schema version than this client understands.
+pub fn check_version(record_version: u32) -> Result<(), Error> {
+    if record_version > SCHEMA_VERSION {
+        return Err(Error::InvalidRecord(format!(
+            "record schema version {record_version} is newer than supported version {SCHEMA_VERSION}"
+        )));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // AT Protocol primitives
 // ---------------------------------------------------------------------------
@@ -101,6 +121,8 @@ pub enum Encryption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
+    #[serde(default = "default_version")]
+    pub version: u32,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
@@ -128,6 +150,8 @@ pub struct Document {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
+    #[serde(default = "default_version")]
+    pub version: u32,
     pub document: String,
     pub recipient: String,
     pub wrapped_key: WrappedKey,
@@ -147,6 +171,8 @@ pub struct Grant {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Keyring {
+    #[serde(default = "default_version")]
+    pub version: u32,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
