@@ -164,6 +164,13 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 
 6. **50MB blob limit is fine for now.** Covers documents, photos, and short media. Large file support (video, archives) can come later via a sidecar service similar to how Tangled uses "knots" alongside the PDS.
 
+7. **Multi-device key management: TBD.** The user's encryption keypair must be available on every device that needs to decrypt files. Three options under consideration — choice affects UX significantly:
+   - **(A) Key export/import** — User manually transfers an encrypted private key between devices. Simple to implement (git-crypt model), worst UX. Requires `opake export-key` / `opake import-key` commands.
+   - **(B) Multi-device keys** — Each device generates its own keypair and registers its public key in the DID document. Content keys get re-wrapped to all device keys. No key material leaves a device (most secure), but requires re-wrapping on device addition.
+   - **(C) Recovery seed** — Derive the keypair deterministically from a BIP-39-style mnemonic. Same seed on any device produces the same key. Best UX, but a leaked seed compromises everything.
+
+   Decision deferred until #9 (local keystore) is closer to implementation. UX matters here — this is the first thing a user hits after install.
+
 ## File Structure
 
 ```

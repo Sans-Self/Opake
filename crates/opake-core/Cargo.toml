@@ -10,8 +10,14 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
-# Add when implementing crypto (Phase 1):
-# aes-gcm = "0.10"              # AES-256-GCM content encryption
+aes-gcm = "0.10"
+
+# aes-gcm pulls in getrandom transitively. On wasm32, getrandom needs the
+# "js" feature to use crypto.getRandomValues() instead of OS-level randomness.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+# Add when implementing key wrapping (Phase 1, #4):
 # x25519-dalek = "2"            # ECDH key agreement for key wrapping — WASM-safe
-# rand = "0.8"                  # key generation
+# rand = "0.10"                 # key generation
 # base64 = "0.22"               # atproto bytes encoding
