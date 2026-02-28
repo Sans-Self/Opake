@@ -36,3 +36,31 @@ pub fn load_client() -> anyhow::Result<XrpcClient<ReqwestTransport>> {
 pub fn save_session(session: &Session) -> anyhow::Result<()> {
     todo!("write session to {}", session_path().display())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_session() -> Session {
+        Session {
+            did: "did:plc:test123".into(),
+            handle: "alice.test".into(),
+            access_jwt: "eyJ.access.token".into(),
+            refresh_jwt: "eyJ.refresh.token".into(),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn test_save_session_writes_to_disk() {
+        // will pass once #9 replaces the todo!() with real persistence
+        save_session(&fake_session()).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "not yet implemented")]
+    fn test_load_client_restores_session() {
+        // will pass once #9 implements session loading
+        load_client().unwrap();
+    }
+}
