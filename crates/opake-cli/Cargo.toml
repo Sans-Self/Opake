@@ -10,11 +10,18 @@ path = "src/main.rs"
 
 [dependencies]
 opake-core = { path = "../opake-core" }
+base64.workspace = true
+chrono.workspace = true
 clap = { version = "4", features = ["derive"] }
+mime_guess = "2"
 tokio = { version = "1", features = ["full"] }
+toml = "0.8"
 anyhow = "1"
 env_logger = "0.11"
 log.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

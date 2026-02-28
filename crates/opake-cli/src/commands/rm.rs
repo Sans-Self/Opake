@@ -12,7 +12,7 @@ pub struct RmCommand {
 
 impl Execute for RmCommand {
     async fn execute(self) -> Result<()> {
-        let _client = crate::config::load_client()?;
+        let _client = crate::session::load_client()?;
         anyhow::bail!("rm not yet implemented (tracking: chainlink #8)")
     }
 }

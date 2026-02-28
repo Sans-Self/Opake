@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+mod identity;
+mod session;
 mod transport;
 pub mod utils;
 

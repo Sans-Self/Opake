@@ -22,8 +22,11 @@ use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use crate::error::Error;
 use crate::records::{AtBytes, WrappedKey, SCHEMA_VERSION};
 
-/// Re-export so callers don't need a direct rand_core dependency.
-pub use aes_gcm::aead::rand_core::{CryptoRng, RngCore};
+/// Re-export so callers don't need direct rand_core / x25519_dalek dependencies.
+pub use aes_gcm::aead::rand_core::{CryptoRng, OsRng, RngCore};
+pub use x25519_dalek::{
+    PublicKey as X25519DalekPublicKey, StaticSecret as X25519DalekStaticSecret,
+};
 
 const WRAP_ALGO: &str = "x25519-hkdf-a256kw";
 const CONTENT_KEY_LEN: usize = 32;

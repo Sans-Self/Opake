@@ -4,7 +4,8 @@ use log::debug;
 use opake_core::client::XrpcClient;
 
 use crate::commands::Execute;
-use crate::config;
+use crate::identity;
+use crate::session;
 use crate::transport::ReqwestTransport;
 use crate::utils::prefixed_get_env;
 
@@ -50,11 +51,18 @@ impl Execute for LoginCommand {
         })?;
 
         let transport = ReqwestTransport::new();
-        let mut client = XrpcClient::new(transport, self.pds);
+        let mut client = XrpcClient::new(transport, self.pds.clone());
 
         let session = client.login(self.identifier.trim(), &password).await?;
 
-        config::save_session(session)?;
+        session::save_session(session, &self.pds)?;
+
+        let (_, generated) =
+            identity::ensure_identity(&session.did, &mut opake_core::crypto::OsRng)?;
+
+        if generated {
+            println!("Generated new encryption keypair");
+        }
 
         println!("Logged in as {}", session.handle);
 

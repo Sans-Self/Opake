@@ -13,7 +13,7 @@ pub struct LsCommand {
 
 impl Execute for LsCommand {
     async fn execute(self) -> Result<()> {
-        let _client = crate::config::load_client()?;
+        let _client = crate::session::load_client()?;
         anyhow::bail!("ls not yet implemented (tracking: chainlink #7)")
     }
 }

@@ -18,7 +18,7 @@ pub struct DownloadCommand {
 
 impl Execute for DownloadCommand {
     async fn execute(self) -> Result<()> {
-        let _client = crate::config::load_client()?;
+        let _client = crate::session::load_client()?;
         anyhow::bail!("download not yet implemented (tracking: chainlink #6)")
     }
 }

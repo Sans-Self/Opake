@@ -143,6 +143,28 @@ pub struct Document {
     pub modified_at: Option<String>,
 }
 
+impl Document {
+    /// Construct a new document with the current schema version and sensible
+    /// defaults for optional fields. Callers set tags/parent/description/etc.
+    /// via struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
+    pub fn new(name: String, blob: BlobRef, encryption: Encryption, created_at: String) -> Self {
+        Self {
+            version: SCHEMA_VERSION,
+            name,
+            mime_type: None,
+            size: None,
+            blob,
+            encryption,
+            tags: Vec::new(),
+            parent: None,
+            description: None,
+            visibility: None,
+            created_at,
+            modified_at: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // app.opake.cloud.grant
 // ---------------------------------------------------------------------------
