@@ -5,6 +5,8 @@
 // Core owns the XRPC protocol logic (endpoints, auth, response parsing)
 // but never touches the network directly.
 
+use log::{debug, info, warn};
+
 use crate::error::Error;
 use crate::records::BlobRef;
 use serde::{Deserialize, Serialize};
@@ -112,6 +114,8 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Authenticate via `com.atproto.server.createSession`.
     pub async fn login(&mut self, identifier: &str, password: &str) -> Result<&Session, Error> {
+        info!("authenticating as {} against {}", identifier, self.base_url);
+
         let body = serde_json::json!({
             "identifier": identifier,
             "password": password,
@@ -128,6 +132,7 @@ impl<T: Transport> XrpcClient<T> {
             .await?;
 
         if response.status != 200 {
+            warn!("login failed with HTTP {}", response.status);
             return Err(Error::Auth(format!(
                 "login failed (HTTP {})",
                 response.status
@@ -135,6 +140,7 @@ impl<T: Transport> XrpcClient<T> {
         }
 
         let session: Session = serde_json::from_slice(&response.body)?;
+        info!("authenticated as {} ({})", session.handle, session.did);
         self.session = Some(session);
         Ok(self.session.as_ref().unwrap())
     }
@@ -159,6 +165,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Upload raw bytes as a blob via `com.atproto.repo.uploadBlob`.
     pub async fn upload_blob(&self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
+        debug!("uploading blob ({} bytes, {})", data.len(), mime_type);
         let auth = self.auth_header()?;
 
         let response = self
@@ -184,6 +191,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Fetch a blob by DID + CID via `com.atproto.sync.getBlob`.
     pub async fn get_blob(&self, did: &str, cid: &str) -> Result<Vec<u8>, Error> {
+        debug!("fetching blob did={} cid={}", did, cid);
         let auth = self.auth_header()?;
         let url = format!(
             "{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}",
@@ -209,6 +217,7 @@ impl<T: Transport> XrpcClient<T> {
         collection: &str,
         record: &R,
     ) -> Result<RecordRef, Error> {
+        debug!("creating record in {}", collection);
         let auth = self.auth_header()?;
         let did = self.did()?;
 
@@ -238,6 +247,7 @@ impl<T: Transport> XrpcClient<T> {
         collection: &str,
         rkey: &str,
     ) -> Result<RecordEntry, Error> {
+        debug!("getting record {}/{}/{}", did, collection, rkey);
         let auth = self.auth_header()?;
         let url = format!(
             "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection={}&rkey={}",
@@ -264,6 +274,7 @@ impl<T: Transport> XrpcClient<T> {
         limit: Option<u32>,
         cursor: Option<&str>,
     ) -> Result<RecordPage, Error> {
+        debug!("listing records in {}", collection);
         let auth = self.auth_header()?;
         let did = self.did()?;
 
@@ -293,6 +304,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Delete a record via `com.atproto.repo.deleteRecord`.
     pub async fn delete_record(&self, collection: &str, rkey: &str) -> Result<(), Error> {
+        debug!("deleting record {}/{}", collection, rkey);
         let auth = self.auth_header()?;
         let did = self.did()?;
 
