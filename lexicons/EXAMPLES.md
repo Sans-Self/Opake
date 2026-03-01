@@ -163,10 +163,12 @@ the document with a fresh content key.
 - Dave can now decrypt *all* documents under this keyring. No per-document changes needed.
 
 **Removing a member:**
+- Archive the current rotation's remaining member entries into `keyHistory`
 - Increment `rotation`, generate new GK, re-wrap to remaining members
 - New documents use the new GK
-- Old documents remain readable with old GK (same limitation as git-crypt)
-- For true revocation of old content: re-encrypt affected documents with new content keys
+- Old documents remain readable: the client looks up the document's rotation in `keyHistory` to find the old wrapped group key
+- Removed members' wrapped keys are excluded from history, so they can't recover old GK from the record
+- For true revocation of old content: re-encrypt affected documents with new content keys (see #88)
 
 
 ## Design Decisions & Notes

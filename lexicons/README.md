@@ -82,6 +82,6 @@ sequenceDiagram
     Note right of PDS: Dave can now decrypt all<br/>documents under this keyring
 ```
 
-Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Removing a member rotates GK and re-wraps to the remaining members — per-document content keys and blobs stay untouched.
+Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Removing a member archives the old rotation's member entries into `keyHistory`, then rotates GK and re-wraps to the remaining members — per-document content keys and blobs stay untouched. The history lets remaining members decrypt pre-rotation documents even on new devices.
 
 For detailed sequence diagrams of every CLI operation, see [docs/FLOWS.md](../docs/FLOWS.md).

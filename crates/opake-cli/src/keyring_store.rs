@@ -4,6 +4,9 @@
 // never appear in plaintext on the PDS. Each key is stored as a JSON file
 // keyed by the keyring record's rkey (extracted from its AT-URI).
 //
+// The file stores an array of (rotation, group_key) pairs so that keys from
+// previous rotations remain available for decrypting older documents.
+//
 // Storage path: ~/.config/opake/accounts/<did>/keyrings/<rkey>.json
 
 use anyhow::Context;
@@ -14,8 +17,28 @@ use serde::{Deserialize, Serialize};
 use crate::config;
 
 #[derive(Serialize, Deserialize)]
-struct StoredGroupKey {
+struct RotationEntry {
+    rotation: u64,
     group_key: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredKeys {
+    keys: Vec<RotationEntry>,
+}
+
+/// Legacy format: a single group_key without rotation tracking.
+#[derive(Deserialize)]
+struct LegacyStoredGroupKey {
+    group_key: String,
+}
+
+/// Deserialize either the new `{ keys: [...] }` or legacy `{ group_key: "..." }` format.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredFile {
+    Current(StoredKeys),
+    Legacy(LegacyStoredGroupKey),
 }
 
 fn keyrings_dir(did: &str) -> std::path::PathBuf {
@@ -26,23 +49,7 @@ fn key_path(did: &str, rkey: &str) -> std::path::PathBuf {
     keyrings_dir(did).join(format!("{rkey}.json"))
 }
 
-pub fn save_group_key(did: &str, rkey: &str, group_key: &ContentKey) -> anyhow::Result<()> {
-    let dir = keyrings_dir(did);
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create keyrings dir: {}", dir.display()))?;
-    }
-
-    let stored = StoredGroupKey {
-        group_key: BASE64.encode(group_key.0),
-    };
-    let json = serde_json::to_string_pretty(&stored).context("failed to serialize group key")?;
-    let path = key_path(did, rkey);
-    std::fs::write(&path, json)
-        .with_context(|| format!("failed to write group key: {}", path.display()))
-}
-
-pub fn load_group_key(did: &str, rkey: &str) -> anyhow::Result<ContentKey> {
+fn load_stored(did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
     let path = key_path(did, rkey);
     let content = std::fs::read_to_string(&path).with_context(|| {
         format!(
@@ -50,11 +57,71 @@ pub fn load_group_key(did: &str, rkey: &str) -> anyhow::Result<ContentKey> {
         )
     })?;
 
-    let stored: StoredGroupKey =
+    let file: StoredFile =
         serde_json::from_str(&content).context("failed to parse group key file")?;
 
+    match file {
+        StoredFile::Current(stored) => Ok(stored),
+        StoredFile::Legacy(legacy) => Ok(StoredKeys {
+            keys: vec![RotationEntry {
+                rotation: 0,
+                group_key: legacy.group_key,
+            }],
+        }),
+    }
+}
+
+fn save_stored(did: &str, rkey: &str, stored: &StoredKeys) -> anyhow::Result<()> {
+    let dir = keyrings_dir(did);
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create keyrings dir: {}", dir.display()))?;
+    }
+
+    let json = serde_json::to_string_pretty(stored).context("failed to serialize group key")?;
+    let path = key_path(did, rkey);
+    std::fs::write(&path, json)
+        .with_context(|| format!("failed to write group key: {}", path.display()))
+}
+
+pub fn save_group_key(
+    did: &str,
+    rkey: &str,
+    rotation: u64,
+    group_key: &ContentKey,
+) -> anyhow::Result<()> {
+    // Load existing entries (or start fresh) and upsert
+    let mut stored = load_stored(did, rkey).unwrap_or(StoredKeys { keys: Vec::new() });
+
+    let encoded = BASE64.encode(group_key.0);
+    if let Some(entry) = stored.keys.iter_mut().find(|e| e.rotation == rotation) {
+        entry.group_key = encoded;
+    } else {
+        stored.keys.push(RotationEntry {
+            rotation,
+            group_key: encoded,
+        });
+    }
+
+    save_stored(did, rkey, &stored)
+}
+
+pub fn load_group_key(did: &str, rkey: &str, rotation: u64) -> anyhow::Result<ContentKey> {
+    let stored = load_stored(did, rkey)?;
+
+    let entry = stored
+        .keys
+        .iter()
+        .find(|e| e.rotation == rotation)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no local group key for rotation {rotation} of keyring {rkey} — \
+                 you may need to re-join as a keyring member"
+            )
+        })?;
+
     let bytes = BASE64
-        .decode(&stored.group_key)
+        .decode(&entry.group_key)
         .context("invalid base64 in group key file")?;
 
     let key: [u8; 32] = bytes
@@ -94,10 +161,48 @@ mod tests {
             let did = "did:plc:test";
             setup_account(did);
             let group_key = generate_content_key(&mut OsRng);
-            save_group_key(did, "tid123", &group_key).unwrap();
+            save_group_key(did, "tid123", 0, &group_key).unwrap();
 
-            let loaded = load_group_key(did, "tid123").unwrap();
+            let loaded = load_group_key(did, "tid123", 0).unwrap();
             assert_eq!(loaded.0, group_key.0);
+        });
+    }
+
+    #[test]
+    fn multiple_rotations_stored() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let key0 = generate_content_key(&mut OsRng);
+            let key1 = generate_content_key(&mut OsRng);
+            let key2 = generate_content_key(&mut OsRng);
+
+            save_group_key(did, "tid1", 0, &key0).unwrap();
+            save_group_key(did, "tid1", 1, &key1).unwrap();
+            save_group_key(did, "tid1", 2, &key2).unwrap();
+
+            assert_eq!(load_group_key(did, "tid1", 0).unwrap().0, key0.0);
+            assert_eq!(load_group_key(did, "tid1", 1).unwrap().0, key1.0);
+            assert_eq!(load_group_key(did, "tid1", 2).unwrap().0, key2.0);
+        });
+    }
+
+    #[test]
+    fn upsert_does_not_clobber_other_rotations() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let key0 = generate_content_key(&mut OsRng);
+            let key1_v1 = generate_content_key(&mut OsRng);
+            let key1_v2 = generate_content_key(&mut OsRng);
+
+            save_group_key(did, "tid1", 0, &key0).unwrap();
+            save_group_key(did, "tid1", 1, &key1_v1).unwrap();
+            // Overwrite rotation 1 — rotation 0 must survive
+            save_group_key(did, "tid1", 1, &key1_v2).unwrap();
+
+            assert_eq!(load_group_key(did, "tid1", 0).unwrap().0, key0.0);
+            assert_eq!(load_group_key(did, "tid1", 1).unwrap().0, key1_v2.0);
         });
     }
 
@@ -106,8 +211,21 @@ mod tests {
         with_test_dir(|_| {
             let did = "did:plc:test";
             setup_account(did);
-            let err = load_group_key(did, "nonexistent").unwrap_err();
+            let err = load_group_key(did, "nonexistent", 0).unwrap_err();
             assert!(err.to_string().contains("no local group key"), "got: {err}");
+        });
+    }
+
+    #[test]
+    fn load_missing_rotation_errors() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let key = generate_content_key(&mut OsRng);
+            save_group_key(did, "tid1", 0, &key).unwrap();
+
+            let err = load_group_key(did, "tid1", 99).unwrap_err();
+            assert!(err.to_string().contains("rotation 99"), "got: {err}");
         });
     }
 
@@ -119,7 +237,7 @@ mod tests {
             let dir = keyrings_dir(did);
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("bad.json"), "not json {{{").unwrap();
-            assert!(load_group_key(did, "bad").is_err());
+            assert!(load_group_key(did, "bad", 0).is_err());
         });
     }
 
@@ -130,32 +248,50 @@ mod tests {
             setup_account(did);
             let dir = keyrings_dir(did);
             std::fs::create_dir_all(&dir).unwrap();
-            let stored = StoredGroupKey {
-                group_key: BASE64.encode([0u8; 16]),
+            let stored = StoredKeys {
+                keys: vec![RotationEntry {
+                    rotation: 0,
+                    group_key: BASE64.encode([0u8; 16]),
+                }],
             };
             std::fs::write(
                 dir.join("short.json"),
                 serde_json::to_string(&stored).unwrap(),
             )
             .unwrap();
-            let err = load_group_key(did, "short").unwrap_err();
+            let err = load_group_key(did, "short", 0).unwrap_err();
             assert!(err.to_string().contains("16 bytes"), "got: {err}");
         });
     }
 
     #[test]
-    fn overwrite_existing_key() {
+    fn legacy_format_migration() {
         with_test_dir(|_| {
             let did = "did:plc:test";
             setup_account(did);
+            let dir = keyrings_dir(did);
+            std::fs::create_dir_all(&dir).unwrap();
+
+            // Write old format: { "group_key": "..." }
+            let key = generate_content_key(&mut OsRng);
+            let legacy = serde_json::json!({ "group_key": BASE64.encode(key.0) });
+            std::fs::write(
+                dir.join("legacy.json"),
+                serde_json::to_string(&legacy).unwrap(),
+            )
+            .unwrap();
+
+            // Should load as rotation 0
+            let loaded = load_group_key(did, "legacy", 0).unwrap();
+            assert_eq!(loaded.0, key.0);
+
+            // Saving a new rotation upgrades the file format
             let key1 = generate_content_key(&mut OsRng);
-            let key2 = generate_content_key(&mut OsRng);
+            save_group_key(did, "legacy", 1, &key1).unwrap();
 
-            save_group_key(did, "tid1", &key1).unwrap();
-            save_group_key(did, "tid1", &key2).unwrap();
-
-            let loaded = load_group_key(did, "tid1").unwrap();
-            assert_eq!(loaded.0, key2.0);
+            // Both rotations accessible
+            assert_eq!(load_group_key(did, "legacy", 0).unwrap().0, key.0);
+            assert_eq!(load_group_key(did, "legacy", 1).unwrap().0, key1.0);
         });
     }
 }

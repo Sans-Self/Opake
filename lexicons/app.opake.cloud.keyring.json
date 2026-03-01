@@ -2,6 +2,23 @@
   "lexicon": 1,
   "id": "app.opake.cloud.keyring",
   "defs": {
+    "keyHistoryEntry": {
+      "type": "object",
+      "description": "A snapshot of the members array at a previous rotation. Preserved so remaining members can still decrypt documents uploaded under older group keys.",
+      "required": ["rotation", "members"],
+      "properties": {
+        "rotation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "members": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "app.opake.cloud.defs#wrappedKey" },
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
     "main": {
       "type": "record",
       "description": "A named keyring for group-based access control. Contains a group symmetric key wrapped to each member's DID public key. Analogous to git-crypt's named keys — documents encrypted under this keyring are accessible to all members without per-document key management.",
@@ -41,6 +58,12 @@
             "type": "integer",
             "description": "Key rotation counter. Increment when the group key is rotated (e.g. after revoking a member). Documents should reference the rotation they were encrypted under.",
             "minimum": 0
+          },
+          "keyHistory": {
+            "type": "array",
+            "description": "Previous rotation snapshots. Each entry preserves the members array from before a rotation so remaining members can still unwrap group keys for pre-rotation documents.",
+            "items": { "type": "ref", "ref": "#keyHistoryEntry" },
+            "maxLength": 1000
           },
           "createdAt": {
             "type": "string",

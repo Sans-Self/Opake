@@ -500,15 +500,17 @@ sequenceDiagram
     CLI->>Crypto: create_group_key() → new GK'
     Crypto-->>CLI: GK' + wrappedKeys for [Alice, Carol]
 
-    CLI->>PDS: putRecord (keyring: members=[Alice, Carol], rotation++)
+    CLI->>PDS: putRecord (keyring: members=[Alice, Carol], rotation++, keyHistory appended)
     PDS-->>CLI: 200 OK
 
-    CLI->>Disk: Save new GK' (overwrites old GK)
+    CLI->>Disk: Save new GK' alongside old GK (keyed by rotation)
 
     CLI->>User: removed bob from family-photos (key rotated)
 ```
 
-Existing documents encrypted under the old group key stay as-is. New uploads use the new group key. This is the same tradeoff as git-crypt: removed members who cached the old key can still read old content.
+Before replacing the group key, the old rotation's remaining member entries are archived into the keyring's `keyHistory` array. This lets remaining members still decrypt documents uploaded under previous rotations — even on a new device, the old wrapped group keys are preserved in the record.
+
+Existing documents encrypted under the old group key stay as-is. New uploads use the new group key. Removed members' wrapped keys are excluded from history, so they cannot recover old group keys from the record.
 
 ### Upload with Keyring
 
@@ -568,9 +570,9 @@ sequenceDiagram
     CLI->>PDS: com.atproto.repo.getRecord (document)
     PDS-->>CLI: Document record (keyringEncryption variant)
 
-    CLI->>CLI: Detect keyring encryption, extract keyring rkey
+    CLI->>CLI: Detect keyring encryption, extract keyring rkey + rotation
 
-    CLI->>Disk: Load group key GK for this keyring
+    CLI->>Disk: Load group key GK for this keyring at document's rotation
     Disk-->>CLI: GK
 
     CLI->>Crypto: unwrap_content_key_from_keyring(wrappedContentKey, GK)

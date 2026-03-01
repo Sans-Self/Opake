@@ -233,6 +233,14 @@ impl Grant {
 // app.opake.cloud.keyring
 // ---------------------------------------------------------------------------
 
+/// A snapshot of a keyring's members at a given rotation, preserved so that
+/// remaining members can still decrypt documents uploaded under older group keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyHistoryEntry {
+    pub rotation: u64,
+    pub members: Vec<WrappedKey>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Keyring {
@@ -245,6 +253,8 @@ pub struct Keyring {
     pub members: Vec<WrappedKey>,
     #[serde(default)]
     pub rotation: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_history: Vec<KeyHistoryEntry>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
@@ -261,6 +271,7 @@ impl Keyring {
             algo: "aes-256-gcm".into(),
             members,
             rotation: 0,
+            key_history: Vec::new(),
             created_at,
             modified_at: None,
         }
@@ -320,5 +331,47 @@ mod tests {
         let json = serde_json::to_value(&record).unwrap();
         // atproto $bytes convention: { "$bytes": "<base64>" }
         assert!(json["publicKey"]["$bytes"].is_string());
+    }
+
+    #[test]
+    fn keyring_without_key_history_deserializes() {
+        // Records created before key_history existed won't have the field.
+        // Verify they deserialize to an empty vec.
+        let json = serde_json::json!({
+            "version": 1,
+            "name": "old-keyring",
+            "algo": "aes-256-gcm",
+            "members": [{
+                "did": "did:plc:test",
+                "ciphertext": { "$bytes": "AAAA" },
+                "algo": "x25519-hkdf-a256kw",
+            }],
+            "rotation": 0,
+            "createdAt": "2026-03-01T00:00:00Z",
+        });
+
+        let keyring: Keyring = serde_json::from_value(json).unwrap();
+        assert!(keyring.key_history.is_empty());
+    }
+
+    #[test]
+    fn keyring_key_history_omitted_when_empty() {
+        let keyring = Keyring::new(
+            "fresh".into(),
+            vec![WrappedKey {
+                did: "did:plc:test".into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                algo: "x25519-hkdf-a256kw".into(),
+            }],
+            "2026-03-01T00:00:00Z".into(),
+        );
+
+        let json = serde_json::to_value(&keyring).unwrap();
+        assert!(
+            json.get("keyHistory").is_none(),
+            "empty key_history should be omitted from serialization"
+        );
     }
 }

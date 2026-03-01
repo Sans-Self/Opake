@@ -4,7 +4,7 @@ use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
 use crate::error::Error;
-use crate::records::{self, Keyring};
+use crate::records::{self, KeyHistoryEntry, Keyring};
 
 use super::KEYRING_COLLECTION;
 
@@ -17,7 +17,12 @@ pub struct MemberKey<'a> {
 /// Remove a member from a keyring, rotate the group key, and re-wrap to
 /// remaining members.
 ///
-/// Returns the new group key — the caller must store it locally.
+/// Returns `(new_group_key, new_rotation)` — the caller must store the key
+/// against the rotation number locally.
+///
+/// The old rotation's member entries (minus the removed member) are archived
+/// into `key_history` so remaining members can still decrypt pre-rotation
+/// documents.
 ///
 /// `remaining_keys` must contain the public key for every member that will
 /// remain *after* removal (including the owner). This is required because
@@ -30,7 +35,7 @@ pub async fn remove_member(
     remaining_keys: &[MemberKey<'_>],
     modified_at: &str,
     rng: &mut (impl CryptoRng + RngCore),
-) -> Result<ContentKey, Error> {
+) -> Result<(ContentKey, u64), Error> {
     let at_uri = atproto::parse_at_uri(keyring_uri)?;
 
     debug!("fetching keyring record {}", keyring_uri);
@@ -50,6 +55,14 @@ pub async fn remove_member(
         )));
     }
 
+    // Archive the current rotation's remaining member entries before replacing
+    // them. The removed member is already gone (via retain above), so the
+    // history only contains keys that remaining members can use.
+    keyring.key_history.push(KeyHistoryEntry {
+        rotation: keyring.rotation,
+        members: keyring.members.clone(),
+    });
+
     debug!(
         "rotating group key, re-wrapping to {} remaining members",
         remaining_keys.len()
@@ -64,12 +77,14 @@ pub async fn remove_member(
     keyring.rotation += 1;
     keyring.modified_at = Some(modified_at.to_string());
 
-    debug!("updating keyring record (rotation {})", keyring.rotation);
+    let new_rotation = keyring.rotation;
+
+    debug!("updating keyring record (rotation {})", new_rotation);
     client
         .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
         .await?;
 
-    Ok(new_group_key)
+    Ok((new_group_key, new_rotation))
 }
 
 #[cfg(test)]
@@ -77,7 +92,7 @@ mod tests {
     use super::*;
     use crate::client::{HttpResponse, RequestBody, Session, XrpcClient};
     use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-    use crate::records::{AtBytes, Keyring, WrappedKey, SCHEMA_VERSION};
+    use crate::records::{AtBytes, Keyring, WrappedKey};
     use crate::test_utils::MockTransport;
 
     const TEST_DID: &str = "did:plc:owner";
@@ -100,12 +115,9 @@ mod tests {
     }
 
     fn two_member_keyring() -> Keyring {
-        Keyring {
-            version: SCHEMA_VERSION,
-            name: "test-keyring".into(),
-            description: None,
-            algo: "aes-256-gcm".into(),
-            members: vec![
+        Keyring::new(
+            "test-keyring".into(),
+            vec![
                 WrappedKey {
                     did: TEST_DID.into(),
                     ciphertext: AtBytes {
@@ -121,10 +133,8 @@ mod tests {
                     algo: "x25519-hkdf-a256kw".into(),
                 },
             ],
-            rotation: 0,
-            created_at: "2026-03-01T00:00:00Z".into(),
-            modified_at: None,
-        }
+            "2026-03-01T00:00:00Z".into(),
+        )
     }
 
     fn get_record_response(keyring: &Keyring) -> HttpResponse {
@@ -165,7 +175,7 @@ mod tests {
         }];
 
         let mut client = mock_client(mock.clone());
-        let new_group_key = remove_member(
+        let (new_group_key, new_rotation) = remove_member(
             &mut client,
             KEYRING_URI,
             "did:plc:bob",
@@ -175,6 +185,8 @@ mod tests {
         )
         .await
         .unwrap();
+
+        assert_eq!(new_rotation, 1);
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 2);
@@ -186,6 +198,14 @@ mod tests {
                 assert_eq!(updated.members[0].did, TEST_DID);
                 assert_eq!(updated.rotation, 1);
                 assert!(updated.modified_at.is_some());
+
+                // key_history should contain one entry for rotation 0
+                assert_eq!(updated.key_history.len(), 1);
+                assert_eq!(updated.key_history[0].rotation, 0);
+                // The removed member (bob) should NOT be in history —
+                // only the remaining owner's wrapped key is preserved
+                assert_eq!(updated.key_history[0].members.len(), 1);
+                assert_eq!(updated.key_history[0].members[0].did, TEST_DID);
 
                 // Owner can unwrap the new group key
                 let unwrapped = crypto::unwrap_key(&updated.members[0], &owner_privkey).unwrap();

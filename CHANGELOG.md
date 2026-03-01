@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add keyring rotation history to preserve member access to pre-rotation documents (#87)
 - Add cross-PDS download for keyring members (#84)
 - Add keyring-based group sharing (#16)
 - Add keyring-based group sharing for multi-user access control (#75)
@@ -34,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Update docs to reflect keyring rotation history (#89)
 - Add keyring member management (add-member, remove-member) (#79)
 - Add CLI keyring commands and local group key store (#78)
 - Add keyrings core module with create and list operations (#77)

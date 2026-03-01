@@ -14,14 +14,15 @@ use super::DOCUMENT_COLLECTION;
 
 /// Result of downloading a keyring-encrypted document as a member.
 ///
-/// Includes the unwrapped group key and keyring rkey so the caller can cache
-/// them for subsequent downloads under the same keyring.
+/// Includes the unwrapped group key, its rotation number, and keyring rkey so
+/// the caller can cache them for subsequent downloads under the same keyring.
 #[derive(Debug)]
 pub struct KeyringDownloadResult {
     pub filename: String,
     pub plaintext: Vec<u8>,
     pub group_key: ContentKey,
     pub keyring_rkey: String,
+    pub rotation: u64,
 }
 
 /// Download and decrypt a keyring-encrypted document as a member.
@@ -96,17 +97,25 @@ pub async fn download_from_keyring_member(
     let keyring: Keyring = serde_json::from_value(kr_entry.value)?;
     records::check_version(keyring.version)?;
 
-    // Find the member's wrapped group key
-    let member_wrapped = keyring
-        .members
-        .iter()
-        .find(|m| m.did == member_did)
-        .ok_or_else(|| {
-            Error::InvalidRecord(format!(
-                "DID ({member_did}) is not a member of keyring {:?}",
-                keyring.name,
-            ))
-        })?;
+    // Find the member's wrapped group key — check the current rotation first,
+    // then fall back to key_history if the document was encrypted under an
+    // older rotation.
+    let doc_rotation = kr_enc.keyring_ref.rotation;
+    let member_wrapped = if doc_rotation == keyring.rotation {
+        keyring.members.iter().find(|m| m.did == member_did)
+    } else {
+        keyring
+            .key_history
+            .iter()
+            .find(|h| h.rotation == doc_rotation)
+            .and_then(|h| h.members.iter().find(|m| m.did == member_did))
+    }
+    .ok_or_else(|| {
+        Error::InvalidRecord(format!(
+            "DID ({member_did}) is not a member of keyring {:?} at rotation {doc_rotation}",
+            keyring.name,
+        ))
+    })?;
 
     // Asymmetric unwrap: member's private key → group key
     debug!("unwrapping group key for {}", member_did);
@@ -135,6 +144,7 @@ pub async fn download_from_keyring_member(
         plaintext,
         group_key,
         keyring_rkey: kr_at.rkey,
+        rotation: keyring.rotation,
     })
 }
 
@@ -229,7 +239,7 @@ mod tests {
         }
     }
 
-    fn keyring_document(fixture: &KeyringFixture) -> Document {
+    fn keyring_document_at_rotation(fixture: &KeyringFixture, rotation: u64) -> Document {
         Document {
             mime_type: Some("text/plain".into()),
             size: Some(42),
@@ -249,7 +259,7 @@ mod tests {
                         wrapped_content_key: AtBytes {
                             encoded: BASE64.encode(&fixture.wrapped_content_key_bytes),
                         },
-                        rotation: 1,
+                        rotation,
                     },
                     algo: "aes-256-gcm".into(),
                     nonce: AtBytes {
@@ -259,6 +269,10 @@ mod tests {
                 "2026-03-01T00:00:00Z".into(),
             )
         }
+    }
+
+    fn keyring_document(fixture: &KeyringFixture) -> Document {
+        keyring_document_at_rotation(fixture, 0)
     }
 
     fn keyring_record(fixture: &KeyringFixture) -> Keyring {
@@ -450,5 +464,82 @@ mod tests {
         )
         .unwrap();
         assert_eq!(re_decrypted, plaintext);
+    }
+
+    #[tokio::test]
+    async fn download_from_previous_rotation_via_history() {
+        let (owner_pub, _) = owner_keypair();
+        let (member_pub, member_priv) = member_keypair();
+
+        let plaintext = b"pre-rotation content";
+        let fixture = create_keyring_fixture(plaintext, &owner_pub, &member_pub);
+
+        // Document was uploaded at rotation 0
+        let doc = keyring_document_at_rotation(&fixture, 0);
+
+        // Keyring has since rotated to 1 — rotation 0 members are in key_history
+        let mut keyring = Keyring {
+            rotation: 1,
+            members: vec![fixture.owner_wrapped_gk.clone()],
+            key_history: vec![records::KeyHistoryEntry {
+                rotation: 0,
+                members: vec![
+                    fixture.owner_wrapped_gk.clone(),
+                    fixture.member_wrapped_gk.clone(),
+                ],
+            }],
+            ..keyring_record(&fixture)
+        };
+        // Suppress the members from new() since we overwrote them
+        let _ = &mut keyring;
+
+        let mock = MockTransport::new();
+        mock.enqueue(did_document_response());
+        mock.enqueue(record_response(DOC_URI, &doc));
+        mock.enqueue(record_response(KR_URI, &keyring));
+        mock.enqueue(blob_response(&fixture.ciphertext));
+
+        let result = download_from_keyring_member(&mock, MEMBER_DID, &member_priv, DOC_URI)
+            .await
+            .unwrap();
+
+        assert_eq!(result.plaintext, plaintext);
+        assert_eq!(result.rotation, 1); // returns current keyring rotation for caching
+    }
+
+    #[tokio::test]
+    async fn rejects_member_not_present_at_historical_rotation() {
+        let (owner_pub, _) = owner_keypair();
+        let (member_pub, _) = member_keypair();
+        let (_, outsider_priv) = member_keypair();
+
+        let fixture = create_keyring_fixture(b"data", &owner_pub, &member_pub);
+
+        // Document encrypted at rotation 0
+        let doc = keyring_document_at_rotation(&fixture, 0);
+
+        // Keyring is at rotation 1, history has rotation 0 with only owner
+        let keyring = Keyring {
+            rotation: 1,
+            members: vec![fixture.owner_wrapped_gk.clone()],
+            key_history: vec![records::KeyHistoryEntry {
+                rotation: 0,
+                members: vec![fixture.owner_wrapped_gk.clone()],
+            }],
+            ..keyring_record(&fixture)
+        };
+
+        let mock = MockTransport::new();
+        mock.enqueue(did_document_response());
+        mock.enqueue(record_response(DOC_URI, &doc));
+        mock.enqueue(record_response(KR_URI, &keyring));
+
+        let err = download_from_keyring_member(&mock, "did:plc:outsider", &outsider_priv, DOC_URI)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not a member"),
+            "expected member error, got: {err}"
+        );
     }
 }

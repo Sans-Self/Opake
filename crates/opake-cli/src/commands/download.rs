@@ -72,7 +72,7 @@ impl Execute for DownloadCommand {
 
             // Cache the group key so subsequent downloads use the local path
             let kr_rkey = &result.keyring_rkey;
-            keyring_store::save_group_key(&ctx.did, kr_rkey, &result.group_key)?;
+            keyring_store::save_group_key(&ctx.did, kr_rkey, result.rotation, &result.group_key)?;
 
             (result.filename, result.plaintext, None)
         } else {
@@ -96,7 +96,12 @@ impl Execute for DownloadCommand {
                 opake_core::records::Encryption::Keyring(kr_enc) => {
                     let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
                     Some(
-                        keyring_store::load_group_key(&ctx.did, &kr_uri.rkey).context(
+                        keyring_store::load_group_key(
+                            &ctx.did,
+                            &kr_uri.rkey,
+                            kr_enc.keyring_ref.rotation,
+                        )
+                        .context(
                             "if you're a keyring member (not the creator), use: \
                                   opake download --keyring-member <document-uri>",
                         )?,

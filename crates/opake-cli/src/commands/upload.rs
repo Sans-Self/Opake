@@ -53,7 +53,7 @@ impl Execute for UploadCommand {
         let uri = if let Some(keyring_name) = &self.keyring {
             let entry = keyrings::resolve_keyring_uri(&mut client, keyring_name).await?;
             let at_uri = atproto::parse_at_uri(&entry.uri)?;
-            let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey)?;
+            let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey, entry.rotation)?;
 
             let params = KeyringUploadParams {
                 plaintext: &plaintext,

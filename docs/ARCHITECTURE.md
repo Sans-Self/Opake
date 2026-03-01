@@ -156,6 +156,7 @@ erDiagram
         string name
         wrappedKey[] members "group key wrapped to each member"
         int rotation
+        keyHistoryEntry[] keyHistory "previous rotation snapshots"
     }
 
     PUBLICKEY {
@@ -198,9 +199,9 @@ Storage layout:
       session.json       JWT tokens
       identity.json      X25519 keypair (plaintext for MVP)
       keyrings/
-        <rkey>.json      Group key for each keyring (base64)
+        <rkey>.json      Group keys for each keyring (per-rotation)
 ```
 
-Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring's group key is saved by its record key (`rkey`) after creation, and updated on key rotation (member removal).
+Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring file holds an array of `{ rotation, group_key }` entries so that keys from previous rotations remain available for decrypting older documents. Legacy files (single `group_key` without rotation) are auto-migrated to rotation 0 on read.
 
 The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.

@@ -91,6 +91,7 @@ mod tests {
                 algo: "x25519-hkdf-a256kw".into(),
             }],
             rotation: 0,
+            key_history: Vec::new(),
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }

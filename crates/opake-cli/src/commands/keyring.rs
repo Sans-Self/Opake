@@ -90,7 +90,7 @@ async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session
     let (uri, group_key) = keyrings::create_keyring(&mut client, &params, &mut OsRng).await?;
 
     let at_uri = atproto::parse_at_uri(&uri)?;
-    keyring_store::save_group_key(&ctx.did, &at_uri.rkey, &group_key)?;
+    keyring_store::save_group_key(&ctx.did, &at_uri.rkey, 0, &group_key)?;
 
     println!("{} → {}", args.name, uri);
     Ok(session::refreshed_session(&client))
@@ -126,7 +126,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
     let entry = keyrings::resolve_keyring_uri(&mut client, &args.keyring).await?;
     let at_uri = atproto::parse_at_uri(&entry.uri)?;
 
-    let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey)?;
+    let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey, entry.rotation)?;
 
     let transport = ReqwestTransport::new();
     let resolved = resolve::resolve_identity(&transport, &ctx.pds_url, &args.member).await?;
@@ -219,7 +219,7 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
         });
     }
 
-    let new_group_key = keyrings::remove_member(
+    let (new_group_key, new_rotation) = keyrings::remove_member(
         &mut client,
         &entry.uri,
         &resolved.did,
@@ -229,7 +229,7 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     )
     .await?;
 
-    keyring_store::save_group_key(&ctx.did, &at_uri.rkey, &new_group_key)?;
+    keyring_store::save_group_key(&ctx.did, &at_uri.rkey, new_rotation, &new_group_key)?;
 
     println!("removed {} from {} (key rotated)", display, args.keyring);
     Ok(session::refreshed_session(&client))
