@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add filename resolution for rm command (#42)
+- Add filename resolution for download command (#41)
 - Add MockTransport test infrastructure with FIFO response queue
 - Add download command tests with full crypto roundtrip verification
 - Update login command to read password from stdin (#23)

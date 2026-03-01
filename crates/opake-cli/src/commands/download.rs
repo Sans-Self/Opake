@@ -12,8 +12,8 @@ use crate::session;
 #[derive(Args)]
 /// Download and decrypt a file
 pub struct DownloadCommand {
-    /// AT URI of the document record
-    uri: String,
+    /// AT URI or filename of the document
+    reference: String,
 
     /// Output path (defaults to the original filename)
     #[arg(short, long)]
@@ -45,8 +45,10 @@ impl Execute for DownloadCommand {
         let id = identity::load_identity().context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
+        let uri = documents::resolve_uri(&client, &self.reference).await?;
+
         let (name, plaintext) =
-            documents::download_and_decrypt(&client, &id.did, &private_key, &self.uri).await?;
+            documents::download_and_decrypt(&client, &id.did, &private_key, &uri).await?;
 
         let output_path = resolve_output_path(self.output, &name);
         write_output(&output_path, &plaintext)?;

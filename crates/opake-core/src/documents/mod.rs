@@ -8,11 +8,13 @@
 mod delete;
 mod download;
 mod list;
+mod resolve;
 mod upload;
 
 pub use delete::delete_document;
 pub use download::download_and_decrypt;
 pub use list::{list_documents, DocumentEntry};
+pub use resolve::resolve_uri;
 pub use upload::{encrypt_and_upload, UploadParams};
 
 const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";

@@ -20,6 +20,13 @@ pub enum Error {
     #[error("record not found: {0}")]
     NotFound(String),
 
+    #[error("{count} documents named {name:?} — specify an AT URI instead: {}", uris.join(", "))]
+    AmbiguousName {
+        name: String,
+        count: usize,
+        uris: Vec<String>,
+    },
+
     #[error("invalid record: {0}")]
     InvalidRecord(String),
 

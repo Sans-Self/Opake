@@ -8,8 +8,8 @@ use crate::session;
 #[derive(Args)]
 /// Delete a document
 pub struct RmCommand {
-    /// AT URI of the document record
-    uri: String,
+    /// AT URI or filename of the document
+    reference: String,
 
     /// Skip confirmation prompt
     #[arg(short, long)]
@@ -19,9 +19,10 @@ pub struct RmCommand {
 impl Execute for RmCommand {
     async fn execute(self) -> Result<()> {
         let client = session::load_client()?;
+        let uri = documents::resolve_uri(&client, &self.reference).await?;
 
         if !self.yes {
-            eprint!("delete {}? [y/N] ", self.uri);
+            eprint!("delete {}? [y/N] ", uri);
             let mut answer = String::new();
             std::io::stdin()
                 .read_line(&mut answer)
@@ -32,8 +33,8 @@ impl Execute for RmCommand {
             }
         }
 
-        documents::delete_document(&client, &self.uri).await?;
-        println!("deleted {}", self.uri);
+        documents::delete_document(&client, &uri).await?;
+        println!("deleted {}", uri);
 
         Ok(())
     }
