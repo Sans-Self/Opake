@@ -330,6 +330,39 @@ impl<T: Transport> XrpcClient<T> {
         Ok(serde_json::from_slice(&response.body)?)
     }
 
+    /// Upsert a record with an explicit rkey via `com.atproto.repo.putRecord`.
+    ///
+    /// Idempotent — creates or overwrites the record at `collection/rkey`.
+    /// Used for singleton records like `app.opake.cloud.publicKey/self`.
+    pub async fn put_record<R: Serialize>(
+        &mut self,
+        collection: &str,
+        rkey: &str,
+        record: &R,
+    ) -> Result<RecordRef, Error> {
+        debug!("putting record {}/{}", collection, rkey);
+        let auth = self.auth_header()?;
+        let did = self.did()?;
+
+        let body = serde_json::json!({
+            "repo": did,
+            "collection": collection,
+            "rkey": rkey,
+            "record": record,
+        });
+
+        let response = self
+            .send_checked(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.repo.putRecord", self.base_url),
+                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
+                body: Some(RequestBody::Json(body)),
+            })
+            .await?;
+
+        Ok(serde_json::from_slice(&response.body)?)
+    }
+
     /// Fetch a single record via `com.atproto.repo.getRecord`.
     pub async fn get_record(
         &mut self,
@@ -688,5 +721,42 @@ mod tests {
     fn is_expired_token_rejects_no_json() {
         let r = response(400, "not json");
         assert!(!XrpcClient::<MockTransport>::is_expired_token(&r));
+    }
+
+    #[tokio::test]
+    async fn put_record_sends_rkey_and_returns_ref() {
+        let mock = MockTransport::new();
+        let body = serde_json::json!({
+            "uri": "at://did:plc:test/app.opake.cloud.publicKey/self",
+            "cid": "bafyputrecord",
+        });
+        mock.enqueue(success_response(&body.to_string()));
+
+        let mut client = mock_client(mock.clone());
+
+        let record = serde_json::json!({ "hello": "world" });
+        let result = client
+            .put_record("app.opake.cloud.publicKey", "self", &record)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.uri,
+            "at://did:plc:test/app.opake.cloud.publicKey/self"
+        );
+        assert_eq!(result.cid, "bafyputrecord");
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].url.contains("putRecord"));
+
+        // Verify the body includes rkey
+        let sent_body = match &reqs[0].body {
+            Some(RequestBody::Json(v)) => v.clone(),
+            _ => panic!("expected JSON body"),
+        };
+        assert_eq!(sent_body["rkey"], "self");
+        assert_eq!(sent_body["collection"], "app.opake.cloud.publicKey");
+        assert_eq!(sent_body["repo"], "did:plc:test");
     }
 }

@@ -51,10 +51,35 @@ pub fn parse_at_uri(uri: &str) -> Result<AtUri, Error> {
 // ---------------------------------------------------------------------------
 
 /// Binary data in atproto JSON: `{ "$bytes": "<base64>" }`.
+///
+/// The PDS stores bytes as CBOR internally and re-encodes to *unpadded*
+/// base64 on JSON read, even if we uploaded *padded* base64. Use
+/// [`AtBytes::decode`] to handle both forms.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AtBytes {
     #[serde(rename = "$bytes")]
     pub encoded: String,
+}
+
+impl AtBytes {
+    /// Decode the base64 payload, accepting both padded and unpadded input.
+    ///
+    /// The PDS strips padding from `$bytes` fields during CBOR→JSON
+    /// re-serialization, so we must be tolerant on decode.
+    pub fn decode(&self) -> Result<Vec<u8>, Error> {
+        use base64::engine::general_purpose::{GeneralPurpose, PAD};
+        use base64::engine::DecodePaddingMode;
+        use base64::{alphabet, Engine};
+
+        const INDIFFERENT: GeneralPurpose = GeneralPurpose::new(
+            &alphabet::STANDARD,
+            PAD.with_decode_padding_mode(DecodePaddingMode::Indifferent),
+        );
+
+        INDIFFERENT
+            .decode(&self.encoded)
+            .map_err(|e| Error::InvalidRecord(format!("invalid base64 in $bytes: {e}")))
+    }
 }
 
 /// CID link reference: `{ "$link": "<cid>" }`.

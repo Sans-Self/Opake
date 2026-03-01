@@ -7,12 +7,14 @@
 
 mod delete;
 mod download;
+mod download_grant;
 mod list;
 mod resolve;
 mod upload;
 
 pub use delete::delete_document;
-pub use download::{download_and_decrypt, fetch_content_key};
+pub use download::{download, fetch_content_key};
+pub use download_grant::download_from_grant;
 pub use list::{list_documents, DocumentEntry};
 pub use resolve::resolve_uri;
 pub use upload::{encrypt_and_upload, UploadParams};

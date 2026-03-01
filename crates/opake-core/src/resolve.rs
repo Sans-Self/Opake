@@ -4,11 +4,11 @@
 // call that takes a handle or DID string and returns everything needed to
 // encrypt data for that user.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::debug;
 
 use crate::client::{
     get_record_public, pds_from_did_document, resolve_did_document, resolve_handle, Transport,
+    XrpcClient,
 };
 use crate::crypto::X25519PublicKey;
 use crate::error::Error;
@@ -72,9 +72,10 @@ pub async fn resolve_identity(
     records::check_version(record.version)?;
 
     // Step 6: Decode and validate public key bytes
-    let key_bytes = BASE64
-        .decode(&record.public_key.encoded)
-        .map_err(|e| Error::InvalidRecord(format!("invalid base64 in public key: {e}")))?;
+    let key_bytes = record
+        .public_key
+        .decode()
+        .map_err(|e| Error::InvalidRecord(format!("invalid public key: {e}")))?;
 
     let public_key: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
         Error::InvalidRecord(format!("public key is {} bytes, expected 32", v.len()))
@@ -87,6 +88,22 @@ pub async fn resolve_identity(
         public_key,
         algo: record.algo,
     })
+}
+
+/// Publish (upsert) the user's X25519 encryption public key to their PDS.
+///
+/// Called on every login — `putRecord` is idempotent, so this is always
+/// one request regardless of whether the record already exists.
+pub async fn publish_public_key(
+    client: &mut XrpcClient<impl Transport>,
+    public_key: &X25519PublicKey,
+    created_at: &str,
+) -> Result<String, Error> {
+    let record = PublicKeyRecord::new(public_key, created_at);
+    let result = client
+        .put_record(PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY, &record)
+        .await?;
+    Ok(result.uri)
 }
 
 #[cfg(test)]
@@ -224,6 +241,36 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schema version"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn publish_public_key_puts_record_and_returns_uri() {
+        let mock = MockTransport::new();
+        let pubkey = [55u8; 32];
+
+        let put_response = serde_json::json!({
+            "uri": "at://did:plc:test/app.opake.cloud.publicKey/self",
+            "cid": "bafypublished",
+        });
+        mock.enqueue(success(&put_response.to_string()));
+
+        let session = crate::client::Session {
+            did: "did:plc:test".into(),
+            handle: "test.handle".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        };
+        let mut client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
+
+        let uri = publish_public_key(&mut client, &pubkey, "2026-03-01T12:00:00Z")
+            .await
+            .unwrap();
+
+        assert_eq!(uri, "at://did:plc:test/app.opake.cloud.publicKey/self");
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].url.contains("putRecord"));
     }
 
     #[tokio::test]

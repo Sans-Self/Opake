@@ -96,6 +96,34 @@ pub async fn get_record_public(
     Ok(serde_json::from_slice(&response.body)?)
 }
 
+/// Fetch a blob from any PDS by DID + CID. Unauthenticated.
+pub async fn get_blob_public(
+    transport: &impl Transport,
+    pds_url: &str,
+    did: &str,
+    cid: &str,
+) -> Result<Vec<u8>, Error> {
+    debug!(
+        "fetching public blob did={} cid={} from {}",
+        did, cid, pds_url
+    );
+
+    let response = transport
+        .send(HttpRequest {
+            method: HttpMethod::Get,
+            url: format!(
+                "{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}",
+                pds_url, did, cid,
+            ),
+            headers: vec![],
+            body: None,
+        })
+        .await?;
+
+    check_response(&response)?;
+    Ok(response.body)
+}
+
 const PLC_DIRECTORY: &str = "https://plc.directory";
 
 /// Fetch a DID document from the PLC directory (did:plc) or .well-known (did:web).
@@ -220,6 +248,45 @@ mod tests {
         ));
 
         let err = get_record_public(&mock, "https://pds.other", "did:plc:abc", "col", "rkey")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)));
+    }
+
+    // -- get_blob_public --
+
+    #[tokio::test]
+    async fn get_blob_public_happy_path() {
+        let mock = MockTransport::new();
+        let blob_data = b"encrypted-blob-bytes";
+        mock.enqueue(HttpResponse {
+            status: 200,
+            body: blob_data.to_vec(),
+        });
+
+        let data = get_blob_public(&mock, "https://pds.owner", "did:plc:owner", "bafyblob123")
+            .await
+            .unwrap();
+        assert_eq!(data, blob_data);
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].url.starts_with("https://pds.owner"));
+        assert!(reqs[0].url.contains("getBlob"));
+        assert!(reqs[0].url.contains("did=did:plc:owner"));
+        assert!(reqs[0].url.contains("cid=bafyblob123"));
+        assert!(reqs[0].headers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_blob_public_404() {
+        let mock = MockTransport::new();
+        mock.enqueue(response(
+            404,
+            r#"{"error":"BlobNotFound","message":"not found"}"#,
+        ));
+
+        let err = get_blob_public(&mock, "https://pds.owner", "did:plc:abc", "bafymissing")
             .await
             .unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));

@@ -161,8 +161,9 @@ pub fn unwrap_key(
     wrapped: &WrappedKey,
     private_key: &X25519PrivateKey,
 ) -> Result<ContentKey, Error> {
-    let ciphertext = BASE64
-        .decode(&wrapped.ciphertext.encoded)
+    let ciphertext = wrapped
+        .ciphertext
+        .decode()
         .map_err(|e| Error::Decryption(format!("base64 decode: {e}")))?;
 
     if ciphertext.len() != CIPHERTEXT_LEN {

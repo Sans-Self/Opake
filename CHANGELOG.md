@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add MermaidJS flow diagrams and restructure documentation (#72)
+- Improve naming consistency and split documents/download.rs (#71)
+- Black-box test the full sharing workflow across accounts (#68)
+- Add grant-based cross-PDS download for shared files (#69)
+- Auto-publish encryption public key on login (#66)
 - Add resolve command for DID resolution and public key discovery (#11)
 - Add share command to grant document access to another DID (#12)
 - Add revoke command to delete grant records (#13)
@@ -20,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin (#23)
 
 ### Fixed
+- Fix base64 padding mismatch when decoding PDS $bytes fields (#67)
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed

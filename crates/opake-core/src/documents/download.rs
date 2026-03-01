@@ -1,11 +1,41 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::debug;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, X25519PrivateKey};
 use crate::error::Error;
-use crate::records::{self, Document, Encryption};
+use crate::records::{self, Document, Encryption, EncryptionEnvelope};
+
+/// Decode the nonce from an encryption envelope and decrypt the ciphertext.
+///
+/// Shared by both the own-PDS and cross-PDS download paths.
+pub(super) fn decrypt_with_envelope(
+    content_key: &ContentKey,
+    envelope: &EncryptionEnvelope,
+    ciphertext: Vec<u8>,
+) -> Result<Vec<u8>, Error> {
+    let nonce_bytes = envelope
+        .nonce
+        .decode()
+        .map_err(|e| Error::InvalidRecord(format!("invalid nonce: {e}")))?;
+    let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|v: Vec<u8>| {
+        Error::InvalidRecord(format!("nonce is {} bytes, expected 12", v.len()))
+    })?;
+
+    debug!("decrypting {} bytes", ciphertext.len());
+    crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })
+}
+
+/// Extract the direct-encryption envelope from a document, or error on keyring.
+// TODO: inline this once keyring encryption lands — it'll become a proper match
+pub(super) fn direct_envelope(doc: &Document) -> Result<&EncryptionEnvelope, Error> {
+    match &doc.encryption {
+        Encryption::Direct(direct) => Ok(&direct.envelope),
+        Encryption::Keyring(_) => Err(Error::InvalidRecord(
+            "keyring-encrypted documents not yet supported".into(),
+        )),
+    }
+}
 
 /// Fetch a document record and extract the content key without downloading the blob.
 ///
@@ -22,8 +52,8 @@ pub async fn fetch_content_key(
 }
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
-/// Returns both the key and the document (needed by download_and_decrypt for
-/// the nonce, blob ref, and filename).
+/// Returns both the key and the document (needed by download for the blob ref
+/// and filename).
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
@@ -40,14 +70,7 @@ async fn fetch_document_and_key(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.version)?;
 
-    let envelope = match &doc.encryption {
-        Encryption::Direct(direct) => &direct.envelope,
-        Encryption::Keyring(_) => {
-            return Err(Error::InvalidRecord(
-                "keyring-encrypted documents not yet supported".into(),
-            ));
-        }
-    };
+    let envelope = direct_envelope(&doc)?;
 
     let wrapped_key = envelope.keys.iter().find(|k| k.did == did).ok_or_else(|| {
         Error::InvalidRecord(format!(
@@ -63,7 +86,7 @@ async fn fetch_document_and_key(
 
 /// Fetch a document record and its encrypted blob, then decrypt.
 /// Returns `(filename, plaintext_bytes)`.
-pub async fn download_and_decrypt(
+pub async fn download(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_key: &X25519PrivateKey,
@@ -71,18 +94,7 @@ pub async fn download_and_decrypt(
 ) -> Result<(String, Vec<u8>), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
     let (content_key, doc) = fetch_document_and_key(client, did, private_key, uri).await?;
-
-    let envelope = match &doc.encryption {
-        Encryption::Direct(direct) => &direct.envelope,
-        Encryption::Keyring(_) => unreachable!("checked in fetch_document_and_key"),
-    };
-
-    let nonce_bytes = BASE64
-        .decode(&envelope.nonce.encoded)
-        .map_err(|e| Error::InvalidRecord(format!("invalid base64 in encryption nonce: {e}")))?;
-    let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|v: Vec<u8>| {
-        Error::InvalidRecord(format!("nonce is {} bytes, expected 12", v.len()))
-    })?;
+    let envelope = direct_envelope(&doc)?;
 
     debug!(
         "fetching blob did={} cid={}",
@@ -92,12 +104,7 @@ pub async fn download_and_decrypt(
         .get_blob(&at_uri.authority, &doc.blob.reference.cid)
         .await?;
 
-    debug!("decrypting {} bytes", ciphertext.len());
-    let plaintext = crypto::decrypt_blob(
-        &content_key,
-        &crypto::EncryptedPayload { ciphertext, nonce },
-    )?;
-
+    let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext)?;
     Ok((doc.name, plaintext))
 }
 
@@ -108,6 +115,7 @@ mod tests {
     use crate::crypto::{OsRng, X25519PrivateKey, X25519PublicKey};
     use crate::records::{self, AtBytes, BlobRef, CidLink, DirectEncryption, EncryptionEnvelope};
     use crate::test_utils::MockTransport;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
     use super::super::tests::{mock_client, TEST_DID, TEST_URI};
 
@@ -193,7 +201,7 @@ mod tests {
         mock.enqueue(blob_response(&fixture.ciphertext));
 
         let mut client = mock_client(mock.clone());
-        let (name, decrypted) = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let (name, decrypted) = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap();
 
@@ -217,7 +225,7 @@ mod tests {
         mock.enqueue(blob_response(&fixture.ciphertext));
 
         let mut client = mock_client(mock);
-        let (_, decrypted) = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let (_, decrypted) = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap();
         assert!(decrypted.is_empty());
@@ -233,7 +241,7 @@ mod tests {
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, "did:plc:wrong", &private_key, TEST_URI)
+        let err = download(&mut client, "did:plc:wrong", &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(
@@ -278,7 +286,7 @@ mod tests {
 
         let (_, private_key) = test_keypair();
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("keyring"), "got: {err}");
@@ -294,7 +302,7 @@ mod tests {
 
         let (_, private_key) = test_keypair();
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
@@ -314,7 +322,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
@@ -331,7 +339,7 @@ mod tests {
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schema version"), "got: {err}");
@@ -342,7 +350,7 @@ mod tests {
         let (_, private_key) = test_keypair();
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, "not-a-uri")
+        let err = download(&mut client, TEST_DID, &private_key, "not-a-uri")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("AT-URI"), "got: {err}");
@@ -359,7 +367,7 @@ mod tests {
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download_and_decrypt(&mut client, TEST_DID, &wrong_private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &wrong_private_key, TEST_URI)
             .await
             .unwrap_err();
         // Wrong key produces either a KeyWrap or Decryption error depending

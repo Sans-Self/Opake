@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Utc;
 use clap::Args;
 use log::debug;
 use opake_core::client::{Session, XrpcClient};
@@ -54,7 +55,10 @@ impl LoginCommand {
         let transport = ReqwestTransport::new();
         let mut client = XrpcClient::new(transport, self.pds.clone());
 
-        let session = client.login(self.identifier.trim(), &password).await?;
+        let session = client
+            .login(self.identifier.trim(), &password)
+            .await?
+            .clone();
 
         // Register this account in the config. Merge into existing accounts
         // if present, set as default if it's the first one.
@@ -77,16 +81,25 @@ impl LoginCommand {
 
         config::save_config(&cfg)?;
 
-        let (_, generated) =
+        let (identity, generated) =
             identity::ensure_identity(&session.did, &mut opake_core::crypto::OsRng)?;
 
         if generated {
             println!("Generated new encryption keypair");
         }
 
+        let public_key_bytes = identity.public_key_bytes()?;
+        opake_core::resolve::publish_public_key(
+            &mut client,
+            &public_key_bytes,
+            &Utc::now().to_rfc3339(),
+        )
+        .await?;
+        println!("Published encryption public key");
+
         println!("Logged in as {}", session.handle);
 
-        Ok(Some(session.clone()))
+        Ok(Some(session))
     }
 }
 

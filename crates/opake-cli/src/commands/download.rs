@@ -10,16 +10,21 @@ use opake_core::client::Session;
 use crate::commands::Execute;
 use crate::identity;
 use crate::session::{self, CommandContext};
+use crate::transport::ReqwestTransport;
 
 #[derive(Args)]
 /// Download and decrypt a file
 pub struct DownloadCommand {
-    /// AT URI or filename of the document
-    reference: String,
+    /// AT URI or filename of the document (not needed with --grant)
+    reference: Option<String>,
 
     /// Output path (defaults to the original filename)
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Grant URI for downloading a shared file from another user's PDS
+    #[arg(long)]
+    grant: Option<String>,
 }
 
 /// Determine where to write the downloaded file. Uses the explicit output path
@@ -43,14 +48,27 @@ fn write_output(path: &Path, content: &[u8]) -> Result<()> {
 
 impl Execute for DownloadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
         let id = identity::load_identity(&ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
-        let uri = documents::resolve_uri(&mut client, &self.reference).await?;
-
-        let (name, plaintext) =
-            documents::download_and_decrypt(&mut client, &id.did, &private_key, &uri).await?;
+        let (name, plaintext, refreshed) = if let Some(grant_uri) = &self.grant {
+            // Cross-PDS shared download: use unauthenticated public endpoints
+            let transport = ReqwestTransport::new();
+            let (name, plaintext) =
+                documents::download_from_grant(&transport, &private_key, grant_uri).await?;
+            (name, plaintext, None)
+        } else {
+            // Own-PDS download: use authenticated client
+            let reference = self
+                .reference
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
+            let mut client = session::load_client(&ctx.did)?;
+            let uri = documents::resolve_uri(&mut client, reference).await?;
+            let (name, plaintext) =
+                documents::download(&mut client, &id.did, &private_key, &uri).await?;
+            (name, plaintext, session::refreshed_session(&client))
+        };
 
         let output_path = resolve_output_path(self.output, &name);
         write_output(&output_path, &plaintext)?;
@@ -62,7 +80,7 @@ impl Execute for DownloadCommand {
             plaintext.len()
         );
 
-        Ok(session::refreshed_session(&client))
+        Ok(refreshed)
     }
 }
 
