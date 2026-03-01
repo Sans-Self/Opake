@@ -36,20 +36,38 @@ The CLI talks directly to PDS instances over XRPC. No middleware, no AppView, no
 crates/
   opake-core/          Platform-agnostic library (compiles to WASM)
     src/
-      crypto.rs        AES-256-GCM encryption, X25519 key wrapping
-      records.rs       Serde types for all app.opake.cloud.* lexicons
       atproto.rs       AT-URI parsing, shared AT Protocol primitives
       resolve.rs       Handle/DID → PDS → public key resolution pipeline
       error.rs         Typed error hierarchy (thiserror)
+      test_utils.rs    MockTransport + response queue (behind test-utils feature)
+      crypto/
+        mod.rs         Type defs, constants, re-exports
+        content.rs     AES-256-GCM: generate_content_key(), encrypt_blob(), decrypt_blob()
+        key_wrapping.rs  X25519-HKDF-A256KW: wrap_key(), unwrap_key(), create_group_key()
+        keyring_wrapping.rs  Symmetric AES-KW: wrap/unwrap content key under group key
+      records/
+        mod.rs         SCHEMA_VERSION, Versioned trait, check_version(), re-exports
+        defs.rs        WrappedKey, EncryptionEnvelope, KeyringRef
+        document.rs    DirectEncryption, KeyringEncryption, Encryption, Document
+        public_key.rs  PublicKeyRecord, collection/rkey constants
+        grant.rs       Grant
+        keyring.rs     KeyHistoryEntry, Keyring
       client/
-        mod.rs         XrpcClient, Session, re-exports
+        mod.rs         Re-exports
         transport.rs   Transport trait (HTTP abstraction for WASM compat)
-        xrpc.rs        Authenticated XRPC methods (CRUD, blob ops, token refresh)
         did.rs         Unauthenticated DID resolution and cross-PDS queries
+        list.rs        Generic paginated collection fetcher
+        xrpc/
+          mod.rs       XrpcClient struct, Session, response types, check_response()
+          auth.rs      login(), refresh_session()
+          blobs.rs     upload_blob(), get_blob()
+          repo.rs      create_record(), put_record(), get_record(), list_records(), delete_record()
       documents/
         mod.rs         Re-exports, shared test fixtures
         upload.rs      encrypt_and_upload()
-        download.rs    download_and_decrypt(), download_shared(), fetch_content_key()
+        download.rs    download_and_decrypt() — direct-encrypted documents
+        download_grant.rs  download_shared() — cross-PDS via grant URI
+        download_keyring.rs  download_keyring_document() — keyring-encrypted documents
         list.rs        list_documents()
         delete.rs      delete_document()
         resolve.rs     Filename → AT-URI resolution
@@ -62,6 +80,7 @@ crates/
       sharing/
         mod.rs         Re-exports
         create.rs      create_grant()
+        list.rs        list_grants()
         revoke.rs      revoke_grant()
 
   opake-cli/           CLI binary wrapping opake-core

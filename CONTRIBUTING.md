@@ -39,7 +39,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structur
 
 ## Testing
 
-- Tests live in `#[cfg(test)]` modules alongside the code they test
+- Small test suites live inline in `#[cfg(test)]` modules. Larger test suites are extracted to sibling `*_tests.rs` files using `#[cfg(test)] #[path = "..._tests.rs"] mod tests;` — keeps implementation files focused
 - Test contracts, not implementations — assert on inputs and outputs
 - Name regression tests after the bug: `bug__float_not_rounding_correctly`
 - Use `MockTransport` (from `opake-core/src/test_utils.rs`) for XRPC tests — enqueue responses, assert on captured requests

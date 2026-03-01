@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Update docs to reflect module directory restructuring (#95)
 - Add verbose flags for CLI debug output (#92)
 - Add keyring rotation history to preserve member access to pre-rotation documents (#87)
 - Add cross-PDS download for keyring members (#84)
