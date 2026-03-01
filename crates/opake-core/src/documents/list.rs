@@ -21,7 +21,7 @@ pub struct DocumentEntry {
 /// Silently skips records that can't be parsed or have an unsupported
 /// schema version — these are expected when upgrading clients.
 pub async fn list_documents(
-    client: &XrpcClient<impl Transport>,
+    client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<DocumentEntry>, Error> {
     let mut entries = Vec::new();
     let mut cursor: Option<String> = None;
@@ -83,8 +83,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[("abc", doc)], None));
 
-        let client = mock_client(mock.clone());
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock.clone());
+        let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "notes.txt");
@@ -113,8 +113,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&docs, None));
 
-        let client = mock_client(mock);
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock);
+        let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].name, "photo.jpg");
@@ -135,8 +135,8 @@ mod tests {
             None,
         ));
 
-        let client = mock_client(mock.clone());
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock.clone());
+        let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "file1.txt");
@@ -152,8 +152,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[], None));
 
-        let client = mock_client(mock);
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock);
+        let entries = list_documents(&mut client).await.unwrap();
         assert!(entries.is_empty());
     }
 
@@ -180,8 +180,8 @@ mod tests {
             body: serde_json::to_vec(&body).unwrap(),
         });
 
-        let client = mock_client(mock);
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock);
+        let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "good.txt");
@@ -195,8 +195,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[("f1", doc)], None));
 
-        let client = mock_client(mock);
-        let entries = list_documents(&client).await.unwrap();
+        let mut client = mock_client(mock);
+        let entries = list_documents(&mut client).await.unwrap();
         assert!(entries.is_empty());
     }
 
@@ -208,8 +208,8 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"something broke"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
-        let err = list_documents(&client).await.unwrap_err();
+        let mut client = mock_client(mock);
+        let err = list_documents(&mut client).await.unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
     }
 }

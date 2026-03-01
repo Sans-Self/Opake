@@ -10,7 +10,7 @@ use crate::records::{self, Document, Encryption};
 /// Fetch a document record and its encrypted blob, then decrypt.
 /// Returns `(filename, plaintext_bytes)`.
 pub async fn download_and_decrypt(
-    client: &XrpcClient<impl Transport>,
+    client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_key: &[u8; 32],
     uri: &str,
@@ -158,8 +158,8 @@ mod tests {
         mock.enqueue(record_response(&doc));
         mock.enqueue(blob_response(&fixture.ciphertext));
 
-        let client = mock_client(mock.clone());
-        let (name, decrypted) = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock.clone());
+        let (name, decrypted) = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap();
 
@@ -182,8 +182,8 @@ mod tests {
         mock.enqueue(record_response(&doc));
         mock.enqueue(blob_response(&fixture.ciphertext));
 
-        let client = mock_client(mock);
-        let (_, decrypted) = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let (_, decrypted) = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap();
         assert!(decrypted.is_empty());
@@ -198,8 +198,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));
 
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, "did:plc:wrong", &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, "did:plc:wrong", &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(
@@ -243,8 +243,8 @@ mod tests {
         });
 
         let (_, private_key) = test_keypair();
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("keyring"), "got: {err}");
@@ -259,8 +259,8 @@ mod tests {
         });
 
         let (_, private_key) = test_keypair();
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
@@ -279,8 +279,8 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"blob storage error"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
@@ -296,8 +296,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));
 
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schema version"), "got: {err}");
@@ -307,8 +307,8 @@ mod tests {
     async fn rejects_invalid_uri() {
         let (_, private_key) = test_keypair();
         let mock = MockTransport::new();
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &private_key, "not-a-uri")
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &private_key, "not-a-uri")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("AT-URI"), "got: {err}");
@@ -324,8 +324,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));
 
-        let client = mock_client(mock);
-        let err = download_and_decrypt(&client, TEST_DID, &wrong_private_key, TEST_URI)
+        let mut client = mock_client(mock);
+        let err = download_and_decrypt(&mut client, TEST_DID, &wrong_private_key, TEST_URI)
             .await
             .unwrap_err();
         // Wrong key produces either a KeyWrap or Decryption error depending

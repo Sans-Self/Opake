@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Args;
+use opake_core::client::Session;
 use opake_core::documents;
 
 use crate::commands::Execute;
@@ -17,9 +18,9 @@ pub struct RmCommand {
 }
 
 impl Execute for RmCommand {
-    async fn execute(self) -> Result<()> {
-        let client = session::load_client()?;
-        let uri = documents::resolve_uri(&client, &self.reference).await?;
+    async fn execute(self) -> Result<Option<Session>> {
+        let mut client = session::load_client()?;
+        let uri = documents::resolve_uri(&mut client, &self.reference).await?;
 
         if !self.yes {
             eprint!("delete {}? [y/N] ", uri);
@@ -29,13 +30,13 @@ impl Execute for RmCommand {
                 .context("failed to read confirmation")?;
             if !answer.trim().eq_ignore_ascii_case("y") {
                 println!("aborted");
-                return Ok(());
+                return Ok(session::refreshed_session(&client));
             }
         }
 
-        documents::delete_document(&client, &uri).await?;
+        documents::delete_document(&mut client, &uri).await?;
         println!("deleted {}", uri);
 
-        Ok(())
+        Ok(session::refreshed_session(&client))
     }
 }

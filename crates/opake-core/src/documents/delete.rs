@@ -10,7 +10,10 @@ use super::DOCUMENT_COLLECTION;
 /// `app.opake.cloud.document` to prevent accidental deletion of other
 /// record types. The blob becomes orphaned and will eventually be
 /// garbage-collected by the PDS.
-pub async fn delete_document(client: &XrpcClient<impl Transport>, uri: &str) -> Result<(), Error> {
+pub async fn delete_document(
+    client: &mut XrpcClient<impl Transport>,
+    uri: &str,
+) -> Result<(), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
 
     if at_uri.collection != DOCUMENT_COLLECTION {
@@ -44,9 +47,9 @@ mod tests {
             body: b"{}".to_vec(),
         });
 
-        let client = mock_client(mock.clone());
+        let mut client = mock_client(mock.clone());
         let uri = format!("at://{}/app.opake.cloud.document/abc123", TEST_DID);
-        delete_document(&client, &uri).await.unwrap();
+        delete_document(&mut client, &uri).await.unwrap();
 
         let requests = mock.requests();
         assert_eq!(requests.len(), 1);
@@ -65,9 +68,9 @@ mod tests {
     #[tokio::test]
     async fn rejects_grant_uri() {
         let mock = MockTransport::new();
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let uri = format!("at://{}/app.opake.cloud.grant/abc123", TEST_DID);
-        let err = delete_document(&client, &uri).await.unwrap_err();
+        let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(
             err.to_string().contains("expected a document URI"),
             "got: {err}"
@@ -77,9 +80,9 @@ mod tests {
     #[tokio::test]
     async fn rejects_arbitrary_collection() {
         let mock = MockTransport::new();
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let uri = format!("at://{}/app.bsky.feed.post/abc123", TEST_DID);
-        let err = delete_document(&client, &uri).await.unwrap_err();
+        let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(
             err.to_string().contains("expected a document URI"),
             "got: {err}"
@@ -89,8 +92,8 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_uri() {
         let mock = MockTransport::new();
-        let client = mock_client(mock);
-        let err = delete_document(&client, "not-a-uri").await.unwrap_err();
+        let mut client = mock_client(mock);
+        let err = delete_document(&mut client, "not-a-uri").await.unwrap_err();
         assert!(err.to_string().contains("AT-URI"), "got: {err}");
     }
 
@@ -102,9 +105,9 @@ mod tests {
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let uri = format!("at://{}/app.opake.cloud.document/gone", TEST_DID);
-        let err = delete_document(&client, &uri).await.unwrap_err();
+        let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
     }
 
@@ -116,9 +119,9 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"storage error"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let uri = format!("at://{}/app.opake.cloud.document/abc", TEST_DID);
-        let err = delete_document(&client, &uri).await.unwrap_err();
+        let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
     }
 }

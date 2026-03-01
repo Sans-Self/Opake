@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Args;
 use opake_core::documents::{self, DocumentEntry};
 
+use opake_core::client::Session;
+
 use crate::commands::Execute;
 use crate::session;
 
@@ -70,9 +72,9 @@ fn format_long(entries: &[DocumentEntry]) -> String {
 }
 
 impl Execute for LsCommand {
-    async fn execute(self) -> Result<()> {
-        let client = session::load_client()?;
-        let mut entries = documents::list_documents(&client).await?;
+    async fn execute(self) -> Result<Option<Session>> {
+        let mut client = session::load_client()?;
+        let mut entries = documents::list_documents(&mut client).await?;
 
         if let Some(ref tag) = self.tag {
             filter_by_tag(&mut entries, tag);
@@ -84,7 +86,7 @@ impl Execute for LsCommand {
             } else {
                 println!("no documents");
             }
-            return Ok(());
+            return Ok(session::refreshed_session(&client));
         }
 
         if self.long {
@@ -95,7 +97,7 @@ impl Execute for LsCommand {
 
         println!("\n{} document(s)", entries.len());
 
-        Ok(())
+        Ok(session::refreshed_session(&client))
     }
 }
 

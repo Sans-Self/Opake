@@ -1,20 +1,10 @@
 use log::info;
 use opake_core::client::{Session, XrpcClient};
 
-use crate::config::{self, Config};
+use crate::config;
 use crate::transport::ReqwestTransport;
 
 const FILENAME: &str = "session.json";
-
-/// Save the session and PDS URL to disk after successful login.
-pub fn save_session(session: &Session, pds_url: &str) -> anyhow::Result<()> {
-    config::save_json(FILENAME, session)?;
-    config::save_config(&Config {
-        pds_url: pds_url.to_string(),
-    })?;
-    info!("session saved");
-    Ok(())
-}
 
 fn load_session() -> anyhow::Result<Session> {
     config::load_json(FILENAME)
@@ -26,6 +16,23 @@ pub fn load_client() -> anyhow::Result<XrpcClient<ReqwestTransport>> {
     let session = load_session()?;
     let transport = ReqwestTransport::new();
     Ok(XrpcClient::with_session(transport, config.pds_url, session))
+}
+
+/// Extract the session if it was refreshed during this client's lifetime.
+/// Commands return this to the dispatch layer for persistence.
+pub fn refreshed_session(client: &XrpcClient<ReqwestTransport>) -> Option<Session> {
+    if client.session_refreshed() {
+        client.session().cloned()
+    } else {
+        None
+    }
+}
+
+/// Persist a refreshed session to disk. Called once from the dispatch layer.
+pub fn persist_session(session: &Session) -> anyhow::Result<()> {
+    config::save_json(FILENAME, session)?;
+    info!("persisted refreshed session tokens");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -48,13 +55,10 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_session_roundtrip() {
+    fn persist_and_load_session_roundtrip() {
         with_test_dir(|_| {
             let session = fake_session();
-            save_session(&session, "https://pds.test").unwrap();
-
-            let config = config::load_config().unwrap();
-            assert_eq!(config.pds_url, "https://pds.test");
+            persist_session(&session).unwrap();
 
             let loaded = load_session().unwrap();
             assert_eq!(loaded.did, session.did);

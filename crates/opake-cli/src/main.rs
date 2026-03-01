@@ -5,7 +5,6 @@ mod session;
 mod transport;
 pub mod utils;
 
-use anyhow::Context;
 use clap::{Parser, Subcommand};
 use commands::Execute;
 use log::info;
@@ -32,11 +31,17 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting Opake CLI. Hello!");
     let cli = Cli::parse();
 
-    match cli.command {
-        Command::Login(cmd) => cmd.execute().await.context("Failed to log into your PDS"),
-        Command::Upload(cmd) => cmd.execute().await,
-        Command::Download(cmd) => cmd.execute().await,
-        Command::Ls(cmd) => cmd.execute().await,
-        Command::Rm(cmd) => cmd.execute().await,
+    let refreshed = match cli.command {
+        Command::Login(cmd) => cmd.execute().await?,
+        Command::Upload(cmd) => cmd.execute().await?,
+        Command::Download(cmd) => cmd.execute().await?,
+        Command::Ls(cmd) => cmd.execute().await?,
+        Command::Rm(cmd) => cmd.execute().await?,
+    };
+
+    if let Some(ref s) = refreshed {
+        session::persist_session(s)?;
     }
+
+    Ok(())
 }

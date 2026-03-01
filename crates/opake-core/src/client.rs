@@ -89,6 +89,7 @@ pub struct XrpcClient<T: Transport> {
     transport: T,
     base_url: String,
     session: Option<Session>,
+    session_refreshed: bool,
 }
 
 impl<T: Transport> XrpcClient<T> {
@@ -97,6 +98,7 @@ impl<T: Transport> XrpcClient<T> {
             transport,
             base_url,
             session: None,
+            session_refreshed: false,
         }
     }
 
@@ -105,11 +107,18 @@ impl<T: Transport> XrpcClient<T> {
             transport,
             base_url,
             session: Some(session),
+            session_refreshed: false,
         }
     }
 
     pub fn session(&self) -> Option<&Session> {
         self.session.as_ref()
+    }
+
+    /// Whether the session was refreshed during this client's lifetime.
+    /// The CLI uses this to persist updated tokens to disk.
+    pub fn session_refreshed(&self) -> bool {
+        self.session_refreshed
     }
 
     /// Authenticate via `com.atproto.server.createSession`.
@@ -163,10 +172,82 @@ impl<T: Transport> XrpcClient<T> {
             .ok_or_else(|| Error::Auth("not logged in".into()))
     }
 
+    /// Replace the Authorization header in a request with the current access token.
+    fn replace_auth_header(&self, mut request: HttpRequest) -> Result<HttpRequest, Error> {
+        let (key, value) = self.auth_header()?;
+        if let Some(h) = request.headers.iter_mut().find(|(k, _)| k == &key) {
+            h.1 = value;
+        }
+        Ok(request)
+    }
+
+    /// Check whether a PDS response is an expired-token error.
+    fn is_expired_token(response: &HttpResponse) -> bool {
+        if response.status != 400 {
+            return false;
+        }
+
+        #[derive(Deserialize)]
+        struct Body {
+            error: Option<String>,
+        }
+
+        serde_json::from_slice::<Body>(&response.body)
+            .ok()
+            .and_then(|b| b.error)
+            .is_some_and(|e| e == "ExpiredToken")
+    }
+
+    /// Refresh the session using the stored refresh_jwt.
+    async fn refresh_session(&mut self) -> Result<(), Error> {
+        let refresh_jwt = self
+            .session
+            .as_ref()
+            .map(|s| s.refresh_jwt.clone())
+            .ok_or_else(|| Error::Auth("not logged in".into()))?;
+
+        info!("access token expired, refreshing session");
+
+        let response = self
+            .transport
+            .send(HttpRequest {
+                method: HttpMethod::Post,
+                url: format!("{}/xrpc/com.atproto.server.refreshSession", self.base_url),
+                headers: vec![("Authorization".into(), format!("Bearer {}", refresh_jwt))],
+                body: None,
+            })
+            .await?;
+
+        if response.status != 200 {
+            warn!("session refresh failed with HTTP {}", response.status);
+            return Err(Error::Auth(format!(
+                "session refresh failed (HTTP {}) — run `opake login` again",
+                response.status
+            )));
+        }
+
+        let new_session: Session = serde_json::from_slice(&response.body)?;
+        info!("session refreshed for {}", new_session.handle);
+        self.session = Some(new_session);
+        self.session_refreshed = true;
+
+        Ok(())
+    }
+
     /// Send a request and check the response status. Every XRPC method except
     /// `login` (which has custom error handling) goes through here.
-    async fn send_checked(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
-        let response = self.transport.send(request).await?;
+    ///
+    /// If the PDS returns `ExpiredToken`, the session is automatically refreshed
+    /// and the request is retried once with the new access token.
+    async fn send_checked(&mut self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let mut response = self.transport.send(request.clone()).await?;
+
+        if Self::is_expired_token(&response) {
+            self.refresh_session().await?;
+            let retried = self.replace_auth_header(request)?;
+            response = self.transport.send(retried).await?;
+        }
+
         Self::check_response(&response)?;
         Ok(response)
     }
@@ -206,7 +287,7 @@ impl<T: Transport> XrpcClient<T> {
     }
 
     /// Upload raw bytes as a blob via `com.atproto.repo.uploadBlob`.
-    pub async fn upload_blob(&self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
+    pub async fn upload_blob(&mut self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
         debug!("uploading blob ({} bytes, {})", data.len(), mime_type);
         let auth = self.auth_header()?;
 
@@ -232,7 +313,7 @@ impl<T: Transport> XrpcClient<T> {
     }
 
     /// Fetch a blob by DID + CID via `com.atproto.sync.getBlob`.
-    pub async fn get_blob(&self, did: &str, cid: &str) -> Result<Vec<u8>, Error> {
+    pub async fn get_blob(&mut self, did: &str, cid: &str) -> Result<Vec<u8>, Error> {
         debug!("fetching blob did={} cid={}", did, cid);
         let auth = self.auth_header()?;
         let url = format!(
@@ -254,7 +335,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Create a record via `com.atproto.repo.createRecord`.
     pub async fn create_record<R: Serialize>(
-        &self,
+        &mut self,
         collection: &str,
         record: &R,
     ) -> Result<RecordRef, Error> {
@@ -282,7 +363,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// Fetch a single record via `com.atproto.repo.getRecord`.
     pub async fn get_record(
-        &self,
+        &mut self,
         did: &str,
         collection: &str,
         rkey: &str,
@@ -308,7 +389,7 @@ impl<T: Transport> XrpcClient<T> {
 
     /// List records in a collection via `com.atproto.repo.listRecords`.
     pub async fn list_records(
-        &self,
+        &mut self,
         collection: &str,
         limit: Option<u32>,
         cursor: Option<&str>,
@@ -341,7 +422,7 @@ impl<T: Transport> XrpcClient<T> {
     }
 
     /// Delete a record via `com.atproto.repo.deleteRecord`.
-    pub async fn delete_record(&self, collection: &str, rkey: &str) -> Result<(), Error> {
+    pub async fn delete_record(&mut self, collection: &str, rkey: &str) -> Result<(), Error> {
         debug!("deleting record {}/{}", collection, rkey);
         let auth = self.auth_header()?;
         let did = self.did()?;
@@ -367,6 +448,7 @@ impl<T: Transport> XrpcClient<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::MockTransport;
 
     // Test check_response directly — it's pure logic over HttpResponse,
     // no transport needed.
@@ -382,17 +464,17 @@ mod tests {
 
     #[test]
     fn ok_200_passes() {
-        assert!(XrpcClient::<DummyTransport>::check_response(&response(200, "")).is_ok());
+        assert!(XrpcClient::<MockTransport>::check_response(&response(200, "")).is_ok());
     }
 
     #[test]
     fn created_201_passes() {
-        assert!(XrpcClient::<DummyTransport>::check_response(&response(201, "")).is_ok());
+        assert!(XrpcClient::<MockTransport>::check_response(&response(201, "")).is_ok());
     }
 
     #[test]
     fn no_content_204_passes() {
-        assert!(XrpcClient::<DummyTransport>::check_response(&response(204, "")).is_ok());
+        assert!(XrpcClient::<MockTransport>::check_response(&response(204, "")).is_ok());
     }
 
     // -- XRPC error bodies --
@@ -403,7 +485,7 @@ mod tests {
             500,
             r#"{"error":"InternalServerError","message":"Internal Server Error"}"#,
         );
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -417,7 +499,7 @@ mod tests {
     #[test]
     fn error_400_with_error_code_only() {
         let r = response(400, r#"{"error":"InvalidRequest"}"#);
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 400);
@@ -430,7 +512,7 @@ mod tests {
     #[test]
     fn error_403_with_message_only() {
         let r = response(403, r#"{"message":"not authorized"}"#);
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 403);
@@ -448,7 +530,7 @@ mod tests {
             404,
             r#"{"error":"RecordNotFound","message":"no such record"}"#,
         );
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
     }
 
@@ -457,7 +539,7 @@ mod tests {
     #[test]
     fn error_502_with_html_body() {
         let r = response(502, "<html><body>Bad Gateway</body></html>");
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 502);
@@ -470,7 +552,7 @@ mod tests {
     #[test]
     fn error_500_with_empty_body() {
         let r = response(500, "");
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -483,7 +565,7 @@ mod tests {
     #[test]
     fn error_500_with_empty_json_object() {
         let r = response(500, "{}");
-        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -497,16 +579,148 @@ mod tests {
 
     #[test]
     fn redirect_300_is_error() {
-        assert!(XrpcClient::<DummyTransport>::check_response(&response(300, "")).is_err());
+        assert!(XrpcClient::<MockTransport>::check_response(&response(300, "")).is_err());
     }
 
-    // -- Dummy transport for type parameter (never called) --
+    // -- Token refresh tests --
 
-    struct DummyTransport;
-
-    impl Transport for DummyTransport {
-        async fn send(&self, _request: HttpRequest) -> Result<HttpResponse, Error> {
-            unreachable!("check_response tests don't use transport")
+    fn expired_token_response() -> HttpResponse {
+        HttpResponse {
+            status: 400,
+            body: br#"{"error":"ExpiredToken","message":"Token has expired"}"#.to_vec(),
         }
+    }
+
+    fn refresh_session_response() -> HttpResponse {
+        let body = serde_json::json!({
+            "did": "did:plc:test",
+            "handle": "test.handle",
+            "accessJwt": "fresh-access-jwt",
+            "refreshJwt": "fresh-refresh-jwt",
+        });
+        HttpResponse {
+            status: 200,
+            body: serde_json::to_vec(&body).unwrap(),
+        }
+    }
+
+    fn success_response(body: &str) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
+        let session = Session {
+            did: "did:plc:test".into(),
+            handle: "test.handle".into(),
+            access_jwt: "stale-access-jwt".into(),
+            refresh_jwt: "valid-refresh-jwt".into(),
+        };
+        XrpcClient::with_session(mock, "https://pds.test".into(), session)
+    }
+
+    #[tokio::test]
+    async fn refresh_on_expired_token_then_retry() {
+        let mock = MockTransport::new();
+        // First request: expired token
+        mock.enqueue(expired_token_response());
+        // Refresh succeeds
+        mock.enqueue(refresh_session_response());
+        // Retry succeeds
+        mock.enqueue(success_response(r#"{"records":[]}"#));
+
+        let mut client = mock_client(mock.clone());
+        let page = client
+            .list_records("app.opake.cloud.document", Some(100), None)
+            .await
+            .unwrap();
+
+        assert!(page.records.is_empty());
+        assert!(client.session_refreshed());
+
+        let session = client.session().unwrap();
+        assert_eq!(session.access_jwt, "fresh-access-jwt");
+        assert_eq!(session.refresh_jwt, "fresh-refresh-jwt");
+
+        // Verify: 3 requests — original, refresh, retry
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[0].url.contains("listRecords"));
+        assert!(reqs[1].url.contains("refreshSession"));
+        assert!(reqs[2].url.contains("listRecords"));
+
+        // Retry used the new token
+        let retry_auth = reqs[2]
+            .headers
+            .iter()
+            .find(|(k, _)| k == "Authorization")
+            .unwrap();
+        assert_eq!(retry_auth.1, "Bearer fresh-access-jwt");
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_propagates_error() {
+        let mock = MockTransport::new();
+        mock.enqueue(expired_token_response());
+        // Refresh fails
+        mock.enqueue(HttpResponse {
+            status: 401,
+            body: br#"{"error":"InvalidToken","message":"bad refresh token"}"#.to_vec(),
+        });
+
+        let mut client = mock_client(mock);
+        let err = client
+            .list_records("app.opake.cloud.document", Some(100), None)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("session refresh failed"));
+        assert!(err.to_string().contains("opake login"));
+        assert!(!client.session_refreshed());
+    }
+
+    #[tokio::test]
+    async fn non_expired_error_passes_through() {
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status: 500,
+            body: br#"{"error":"InternalServerError","message":"oops"}"#.to_vec(),
+        });
+
+        let mut client = mock_client(mock);
+        let err = client
+            .list_records("app.opake.cloud.document", Some(100), None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::Xrpc { status: 500, .. }));
+        assert!(!client.session_refreshed());
+    }
+
+    #[test]
+    fn is_expired_token_detects_correctly() {
+        assert!(XrpcClient::<MockTransport>::is_expired_token(
+            &expired_token_response()
+        ));
+    }
+
+    #[test]
+    fn is_expired_token_rejects_other_400() {
+        let r = response(400, r#"{"error":"InvalidRequest"}"#);
+        assert!(!XrpcClient::<MockTransport>::is_expired_token(&r));
+    }
+
+    #[test]
+    fn is_expired_token_rejects_500() {
+        let r = response(500, r#"{"error":"ExpiredToken"}"#);
+        assert!(!XrpcClient::<MockTransport>::is_expired_token(&r));
+    }
+
+    #[test]
+    fn is_expired_token_rejects_no_json() {
+        let r = response(400, "not json");
+        assert!(!XrpcClient::<MockTransport>::is_expired_token(&r));
     }
 }

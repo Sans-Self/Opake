@@ -7,6 +7,8 @@ use clap::Args;
 use opake_core::crypto::OsRng;
 use opake_core::documents::{self, UploadParams};
 
+use opake_core::client::Session;
+
 use crate::commands::Execute;
 use crate::identity;
 use crate::session;
@@ -27,12 +29,12 @@ pub struct UploadCommand {
 }
 
 impl Execute for UploadCommand {
-    async fn execute(self) -> Result<()> {
+    async fn execute(self) -> Result<Option<Session>> {
         if self.keyring.is_some() {
             anyhow::bail!("--keyring not yet supported (tracking: chainlink #21)");
         }
 
-        let client = session::load_client()?;
+        let mut client = session::load_client()?;
         let id = identity::load_identity()?;
         let owner_pubkey = id.public_key_bytes()?;
 
@@ -59,10 +61,10 @@ impl Execute for UploadCommand {
             created_at: &Utc::now().to_rfc3339(),
         };
 
-        let uri = documents::encrypt_and_upload(&client, &params, &mut OsRng).await?;
+        let uri = documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?;
 
         println!("{} → {}", filename, uri);
-        Ok(())
+        Ok(session::refreshed_session(&client))
     }
 }
 

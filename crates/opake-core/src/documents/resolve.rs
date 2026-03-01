@@ -10,7 +10,7 @@ use super::list::{list_documents, DocumentEntry};
 /// matching entry. Exactly one match is required — zero or multiple matches
 /// are errors.
 pub async fn resolve_uri(
-    client: &XrpcClient<impl Transport>,
+    client: &mut XrpcClient<impl Transport>,
     reference: &str,
 ) -> Result<String, Error> {
     if reference.starts_with("at://") {
@@ -47,11 +47,14 @@ mod tests {
     #[tokio::test]
     async fn passthrough_at_uri() {
         let mock = MockTransport::new();
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
 
-        let uri = resolve_uri(&client, "at://did:plc:test/app.opake.cloud.document/abc")
-            .await
-            .unwrap();
+        let uri = resolve_uri(
+            &mut client,
+            "at://did:plc:test/app.opake.cloud.document/abc",
+        )
+        .await
+        .unwrap();
         assert_eq!(uri, "at://did:plc:test/app.opake.cloud.document/abc");
     }
 
@@ -66,8 +69,8 @@ mod tests {
             None,
         ));
 
-        let client = mock_client(mock);
-        let uri = resolve_uri(&client, "photo.jpg").await.unwrap();
+        let mut client = mock_client(mock);
+        let uri = resolve_uri(&mut client, "photo.jpg").await.unwrap();
         assert!(uri.contains("a2"));
     }
 
@@ -79,8 +82,8 @@ mod tests {
             None,
         ));
 
-        let client = mock_client(mock);
-        let err = resolve_uri(&client, "missing.pdf").await.unwrap_err();
+        let mut client = mock_client(mock);
+        let err = resolve_uri(&mut client, "missing.pdf").await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("no document named"), "got: {msg}");
         assert!(msg.contains("opake ls"), "should suggest ls, got: {msg}");
@@ -97,8 +100,8 @@ mod tests {
             None,
         ));
 
-        let client = mock_client(mock);
-        let err = resolve_uri(&client, "report.pdf").await.unwrap_err();
+        let mut client = mock_client(mock);
+        let err = resolve_uri(&mut client, "report.pdf").await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("report.pdf"), "got: {msg}");
         assert!(msg.contains("2"), "should mention count, got: {msg}");
@@ -109,8 +112,8 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[], None));
 
-        let client = mock_client(mock);
-        let err = resolve_uri(&client, "anything.txt").await.unwrap_err();
+        let mut client = mock_client(mock);
+        let err = resolve_uri(&mut client, "anything.txt").await.unwrap_err();
         assert!(err.to_string().contains("no document named"));
     }
 }

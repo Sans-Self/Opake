@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use clap::Args;
 use opake_core::documents;
 
+use opake_core::client::Session;
+
 use crate::commands::Execute;
 use crate::identity;
 use crate::session;
@@ -40,15 +42,15 @@ fn write_output(path: &Path, content: &[u8]) -> Result<()> {
 }
 
 impl Execute for DownloadCommand {
-    async fn execute(self) -> Result<()> {
-        let client = session::load_client()?;
+    async fn execute(self) -> Result<Option<Session>> {
+        let mut client = session::load_client()?;
         let id = identity::load_identity().context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
-        let uri = documents::resolve_uri(&client, &self.reference).await?;
+        let uri = documents::resolve_uri(&mut client, &self.reference).await?;
 
         let (name, plaintext) =
-            documents::download_and_decrypt(&client, &id.did, &private_key, &uri).await?;
+            documents::download_and_decrypt(&mut client, &id.did, &private_key, &uri).await?;
 
         let output_path = resolve_output_path(self.output, &name);
         write_output(&output_path, &plaintext)?;
@@ -60,7 +62,7 @@ impl Execute for DownloadCommand {
             plaintext.len()
         );
 
-        Ok(())
+        Ok(session::refreshed_session(&client))
     }
 }
 

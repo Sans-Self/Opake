@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Args;
 use log::debug;
-use opake_core::client::XrpcClient;
+use opake_core::client::{Session, XrpcClient};
 
 use crate::commands::Execute;
+use crate::config;
 use crate::identity;
-use crate::session;
 use crate::transport::ReqwestTransport;
 use crate::utils::prefixed_get_env;
 
@@ -43,7 +43,7 @@ pub struct LoginCommand {
 }
 
 impl Execute for LoginCommand {
-    async fn execute(self) -> Result<()> {
+    async fn execute(self) -> Result<Option<Session>> {
         debug!("Starting login command");
 
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {
@@ -55,7 +55,11 @@ impl Execute for LoginCommand {
 
         let session = client.login(self.identifier.trim(), &password).await?;
 
-        session::save_session(session, &self.pds)?;
+        // PDS URL is login-specific config — write it here, session
+        // persistence is handled by the dispatch layer.
+        config::save_config(&config::Config {
+            pds_url: self.pds.clone(),
+        })?;
 
         let (_, generated) =
             identity::ensure_identity(&session.did, &mut opake_core::crypto::OsRng)?;
@@ -66,7 +70,7 @@ impl Execute for LoginCommand {
 
         println!("Logged in as {}", session.handle);
 
-        Ok(())
+        Ok(Some(session.clone()))
     }
 }
 

@@ -30,7 +30,7 @@ pub struct UploadParams<'a> {
 /// The caller is responsible for reading the file from disk, detecting the MIME
 /// type, and extracting the filename — this function is platform-agnostic.
 pub async fn encrypt_and_upload(
-    client: &XrpcClient<impl Transport>,
+    client: &mut XrpcClient<impl Transport>,
     params: &UploadParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<String, Error> {
@@ -157,14 +157,14 @@ mod tests {
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
 
-        let client = mock_client(mock.clone());
+        let mut client = mock_client(mock.clone());
         let params = test_params(
             b"hello world",
             "hello.txt",
             &public_key,
             vec!["test".into()],
         );
-        let uri = encrypt_and_upload(&client, &params, &mut OsRng)
+        let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
 
@@ -202,11 +202,11 @@ mod tests {
     async fn rejects_oversized_blob() {
         let (public_key, _) = test_keypair();
         let mock = MockTransport::new();
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
 
         let oversized = vec![0u8; MAX_BLOB_SIZE + 1];
         let params = test_params(&oversized, "big.bin", &public_key, vec![]);
-        let err = encrypt_and_upload(&client, &params, &mut OsRng)
+        let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
 
@@ -220,9 +220,9 @@ mod tests {
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
 
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let params = test_params(b"", "empty.txt", &public_key, vec![]);
-        let uri = encrypt_and_upload(&client, &params, &mut OsRng)
+        let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
 
@@ -238,9 +238,9 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"blob storage down"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let params = test_params(b"data", "file.bin", &public_key, vec![]);
-        let err = encrypt_and_upload(&client, &params, &mut OsRng)
+        let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
 
@@ -257,9 +257,9 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"record write failed"}"#.to_vec(),
         });
 
-        let client = mock_client(mock);
+        let mut client = mock_client(mock);
         let params = test_params(b"data", "file.bin", &public_key, vec![]);
-        let err = encrypt_and_upload(&client, &params, &mut OsRng)
+        let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
 
@@ -275,9 +275,9 @@ mod tests {
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
 
-        let client = mock_client(mock.clone());
+        let mut client = mock_client(mock.clone());
         let params = test_params(plaintext, "roundtrip.txt", &public_key, vec![]);
-        encrypt_and_upload(&client, &params, &mut OsRng)
+        encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
 
