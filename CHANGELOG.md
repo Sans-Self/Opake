@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add shared command to list outgoing grants (#14)
 - Add MermaidJS flow diagrams and restructure documentation (#72)
 - Improve naming consistency and split documents/download.rs (#71)
 - Black-box test the full sharing workflow across accounts (#68)

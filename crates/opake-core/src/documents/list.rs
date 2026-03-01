@@ -1,8 +1,6 @@
-use log::debug;
-
-use crate::client::{RecordPage, Transport, XrpcClient};
+use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{self, Document};
+use crate::records::Document;
 
 use super::DOCUMENT_COLLECTION;
 
@@ -23,49 +21,17 @@ pub struct DocumentEntry {
 pub async fn list_documents(
     client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<DocumentEntry>, Error> {
-    let mut entries = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    loop {
-        debug!("listing records, cursor={:?}", cursor);
-        let page: RecordPage = client
-            .list_records(DOCUMENT_COLLECTION, Some(100), cursor.as_deref())
-            .await?;
-
-        for record in &page.records {
-            let doc: Document = match serde_json::from_value(record.value.clone()) {
-                Ok(d) => d,
-                Err(e) => {
-                    debug!("skipping unparseable record {}: {}", record.uri, e);
-                    continue;
-                }
-            };
-
-            if records::check_version(doc.version).is_err() {
-                debug!(
-                    "skipping record {} with unsupported version {}",
-                    record.uri, doc.version
-                );
-                continue;
-            }
-
-            entries.push(DocumentEntry {
-                uri: record.uri.clone(),
-                name: doc.name,
-                size: doc.size,
-                mime_type: doc.mime_type,
-                tags: doc.tags,
-                created_at: doc.created_at,
-            });
+    list_collection(client, DOCUMENT_COLLECTION, |uri, doc: Document| {
+        DocumentEntry {
+            uri: uri.to_owned(),
+            name: doc.name,
+            size: doc.size,
+            mime_type: doc.mime_type,
+            tags: doc.tags,
+            created_at: doc.created_at,
         }
-
-        match page.cursor {
-            Some(c) => cursor = Some(c),
-            None => break,
-        }
-    }
-
-    Ok(entries)
+    })
+    .await
 }
 
 #[cfg(test)]

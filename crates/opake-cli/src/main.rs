@@ -32,6 +32,7 @@ enum Command {
     Rm(commands::rm::RmCommand),
     Resolve(commands::resolve::ResolveCommand),
     Share(commands::share::ShareCommand),
+    Shared(commands::shared::SharedCommand),
     Revoke(commands::revoke::RevokeCommand),
 }
 
@@ -70,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Rm(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Resolve(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Share(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Shared(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Revoke(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
     }
 

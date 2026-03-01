@@ -18,6 +18,19 @@ pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 /// Records with version <= this are compatible; higher versions must be rejected.
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Record types that carry a schema version number.
+pub trait Versioned {
+    fn version(&self) -> u32;
+}
+
+macro_rules! impl_versioned {
+    ($($ty:ty),+ $(,)?) => {
+        $(impl Versioned for $ty {
+            fn version(&self) -> u32 { self.version }
+        })+
+    };
+}
+
 fn default_version() -> u32 {
     SCHEMA_VERSION
 }
@@ -236,6 +249,8 @@ pub struct Keyring {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
 }
+
+impl_versioned!(Document, PublicKeyRecord, Grant, Keyring);
 
 #[cfg(test)]
 mod tests {

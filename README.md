@@ -73,6 +73,10 @@ opake resolve alice.example.com
 # share a file with another user
 opake share photo.jpg alice.example.com
 
+# list grants you've shared
+opake shared
+opake shared --long
+
 # revoke a share grant
 opake revoke at://did:plc:abc/app.opake.cloud.grant/tid123
 
@@ -82,7 +86,7 @@ opake logout bob.other.com
 
 Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
 
-The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`) and accepts a handle or DID.
+The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`, `shared`, `revoke`) and accepts a handle or DID.
 
 ## Architecture
 
@@ -99,7 +103,8 @@ Two crates: `opake-core` (platform-agnostic library, compiles to WASM) and `opak
 - [x] DID resolution and public key extraction
 - [x] Direct file sharing between DIDs
 - [x] Cross-PDS shared file download (via --grant flag)
-- [ ] Grant discovery (shared/inbox commands)
+- [x] Grant listing (shared command)
+- [ ] Grant discovery (inbox command)
 - [ ] Keyring-based group sharing
 - [ ] Folder hierarchy
 - [ ] Web UI (Rust/Axum AppView + SPA)

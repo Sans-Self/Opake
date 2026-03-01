@@ -8,6 +8,7 @@ pub mod revoke;
 pub mod rm;
 pub mod set_default;
 pub mod share;
+pub mod shared;
 pub mod upload;
 
 use anyhow::Result;
