@@ -1,5 +1,7 @@
 use super::*;
 use aes_gcm::aead::rand_core::OsRng;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use x25519_dalek::{PublicKey, StaticSecret};
 
 // -- Content encryption tests (AES-256-GCM) --
 
