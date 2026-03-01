@@ -17,6 +17,10 @@ struct Cli {
     #[arg(long, global = true)]
     r#as: Option<String>,
 
+    /// Increase output verbosity (-v info, -vv debug, -vvv trace)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -49,12 +53,24 @@ async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::R
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
-    info!("Starting Opake CLI. Hello!");
     let Cli {
         r#as: as_flag,
+        verbose,
         command,
     } = Cli::parse();
+
+    let log_level = match verbose {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    env_logger::Builder::new()
+        .filter_level(log_level)
+        .parse_default_env()
+        .init();
+
+    info!("Starting Opake CLI. Hello!");
 
     match command {
         Command::Login(cmd) => {
