@@ -9,7 +9,7 @@ use opake_core::client::Session;
 
 use crate::commands::Execute;
 use crate::identity;
-use crate::session;
+use crate::session::{self, CommandContext};
 
 #[derive(Args)]
 /// Download and decrypt a file
@@ -42,9 +42,9 @@ fn write_output(path: &Path, content: &[u8]) -> Result<()> {
 }
 
 impl Execute for DownloadCommand {
-    async fn execute(self) -> Result<Option<Session>> {
-        let mut client = session::load_client_default()?;
-        let id = identity::load_identity_default().context("run `opake login` first")?;
+    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
+        let mut client = session::load_client(&ctx.did)?;
+        let id = identity::load_identity(&ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
         let uri = documents::resolve_uri(&mut client, &self.reference).await?;

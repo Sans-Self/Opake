@@ -12,6 +12,10 @@ use log::info;
 #[derive(Parser)]
 #[command(name = "opake", about = "Encrypted personal cloud on AT Protocol")]
 struct Cli {
+    /// Act as a specific account (handle or DID)
+    #[arg(long, global = true)]
+    r#as: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -19,28 +23,48 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Login(commands::login::LoginCommand),
+    Logout(commands::logout::LogoutCommand),
+    Accounts(commands::accounts::AccountsCommand),
+    SetDefault(commands::set_default::SetDefaultCommand),
     Upload(commands::upload::UploadCommand),
     Download(commands::download::DownloadCommand),
     Ls(commands::ls::LsCommand),
     Rm(commands::rm::RmCommand),
 }
 
+async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::Result<()> {
+    let ctx = session::resolve_context(as_flag)?;
+    let refreshed = cmd.execute(&ctx).await?;
+    if let Some(ref s) = refreshed {
+        session::persist_session(&s.did, s)?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     info!("Starting Opake CLI. Hello!");
-    let cli = Cli::parse();
+    let Cli {
+        r#as: as_flag,
+        command,
+    } = Cli::parse();
 
-    let refreshed = match cli.command {
-        Command::Login(cmd) => cmd.execute().await?,
-        Command::Upload(cmd) => cmd.execute().await?,
-        Command::Download(cmd) => cmd.execute().await?,
-        Command::Ls(cmd) => cmd.execute().await?,
-        Command::Rm(cmd) => cmd.execute().await?,
-    };
+    match command {
+        Command::Login(cmd) => {
+            let session = cmd.execute().await?;
+            if let Some(ref s) = session {
+                session::persist_session(&s.did, s)?;
+            }
+        }
+        Command::Logout(cmd) => cmd.run()?,
+        Command::Accounts(cmd) => cmd.run()?,
+        Command::SetDefault(cmd) => cmd.run()?,
 
-    if let Some(ref s) = refreshed {
-        session::persist_session(&s.did, s)?;
+        Command::Upload(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Download(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Ls(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Rm(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
     }
 
     Ok(())

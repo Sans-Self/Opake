@@ -11,7 +11,7 @@ use opake_core::client::Session;
 
 use crate::commands::Execute;
 use crate::identity;
-use crate::session;
+use crate::session::{self, CommandContext};
 
 #[derive(Args)]
 /// Upload and encrypt a file
@@ -29,13 +29,13 @@ pub struct UploadCommand {
 }
 
 impl Execute for UploadCommand {
-    async fn execute(self) -> Result<Option<Session>> {
+    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         if self.keyring.is_some() {
             anyhow::bail!("--keyring not yet supported (tracking: chainlink #21)");
         }
 
-        let mut client = session::load_client_default()?;
-        let id = identity::load_identity_default()?;
+        let mut client = session::load_client(&ctx.did)?;
+        let id = identity::load_identity(&ctx.did)?;
         let owner_pubkey = id.public_key_bytes()?;
 
         let plaintext =
@@ -80,7 +80,11 @@ mod tests {
             keyring: None,
             tags: vec![],
         };
-        let result = rt.block_on(cmd.execute());
+        let ctx = CommandContext {
+            did: "did:plc:test".into(),
+            pds_url: "https://pds.test".into(),
+        };
+        let result = rt.block_on(cmd.execute(&ctx));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

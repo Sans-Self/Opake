@@ -5,7 +5,7 @@ use opake_core::documents::{self, DocumentEntry};
 use opake_core::client::Session;
 
 use crate::commands::Execute;
-use crate::session;
+use crate::session::{self, CommandContext};
 
 #[derive(Args)]
 /// List your documents
@@ -72,8 +72,8 @@ fn format_long(entries: &[DocumentEntry]) -> String {
 }
 
 impl Execute for LsCommand {
-    async fn execute(self) -> Result<Option<Session>> {
-        let mut client = session::load_client_default()?;
+    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
+        let mut client = session::load_client(&ctx.did)?;
         let mut entries = documents::list_documents(&mut client).await?;
 
         if let Some(ref tag) = self.tag {

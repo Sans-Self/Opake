@@ -47,15 +47,6 @@ pub fn load_identity(did: &str) -> anyhow::Result<Identity> {
     config::load_account_json(did, "identity.json")
 }
 
-/// Load identity for the default account.
-pub fn load_identity_default() -> anyhow::Result<Identity> {
-    let config = config::load_config()?;
-    let did = config
-        .default_did
-        .ok_or_else(|| anyhow::anyhow!("no default account: run `opake login` first"))?;
-    load_identity(&did)
-}
-
 /// Return the existing identity if present, otherwise generate a new
 /// X25519 keypair, save it, and return it. The boolean indicates whether
 /// a new keypair was generated.
@@ -155,17 +146,6 @@ mod tests {
             assert!(!generated);
             assert_eq!(first.public_key, second.public_key);
             assert_eq!(first.private_key, second.private_key);
-        });
-    }
-
-    #[test]
-    fn load_identity_default_works() {
-        with_test_dir(|_| {
-            let did = "did:plc:default";
-            setup_account(did);
-            let (_, _) = ensure_identity(did, &mut OsRng).unwrap();
-            let loaded = load_identity_default().unwrap();
-            assert_eq!(loaded.did, did);
         });
     }
 

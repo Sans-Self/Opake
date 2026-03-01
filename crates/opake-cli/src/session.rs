@@ -6,9 +6,9 @@ use crate::transport::ReqwestTransport;
 
 /// Resolved account context passed to every command.
 #[derive(Debug)]
-#[allow(dead_code)] // pds_url used once commands migrate to CommandContext (#52)
 pub struct CommandContext {
     pub did: String,
+    #[allow(dead_code)] // will be used when load_client takes context directly
     pub pds_url: String,
 }
 
@@ -17,13 +17,7 @@ pub fn resolve_context(as_flag: Option<&str>) -> anyhow::Result<CommandContext> 
     let config = config::load_config()?;
 
     let did = match as_flag {
-        Some(value) if value.starts_with("did:") => value.to_string(),
-        Some(handle) => config
-            .accounts
-            .iter()
-            .find(|(_, acc)| acc.handle == handle)
-            .map(|(did, _)| did.clone())
-            .ok_or_else(|| anyhow::anyhow!("no account with handle {handle}"))?,
+        Some(input) => config::resolve_handle_or_did(&config, input)?,
         None => config
             .default_did
             .ok_or_else(|| anyhow::anyhow!("no default account: run `opake login` first"))?,
@@ -54,13 +48,6 @@ pub fn load_client(did: &str) -> anyhow::Result<XrpcClient<ReqwestTransport>> {
         account.pds_url.clone(),
         session,
     ))
-}
-
-/// Load a client for the default account. Convenience for commands
-/// that haven't been migrated to CommandContext yet.
-pub fn load_client_default() -> anyhow::Result<XrpcClient<ReqwestTransport>> {
-    let ctx = resolve_context(None)?;
-    load_client(&ctx.did)
 }
 
 /// Extract the session if it was refreshed during this client's lifetime.
@@ -132,13 +119,6 @@ mod tests {
     fn load_client_without_session_errors() {
         with_test_dir(|_| {
             assert!(load_client("did:plc:nobody").is_err());
-        });
-    }
-
-    #[test]
-    fn load_client_default_without_config_errors() {
-        with_test_dir(|_| {
-            assert!(load_client_default().is_err());
         });
     }
 

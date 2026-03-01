@@ -3,7 +3,6 @@ use clap::Args;
 use log::debug;
 use opake_core::client::{Session, XrpcClient};
 
-use crate::commands::Execute;
 use crate::config::{self, AccountConfig};
 use crate::identity;
 use crate::transport::ReqwestTransport;
@@ -44,8 +43,8 @@ pub struct LoginCommand {
     identifier: String,
 }
 
-impl Execute for LoginCommand {
-    async fn execute(self) -> Result<Option<Session>> {
+impl LoginCommand {
+    pub async fn execute(self) -> Result<Option<Session>> {
         debug!("Starting login command");
 
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {

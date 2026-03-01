@@ -1,12 +1,20 @@
+pub mod accounts;
 pub mod download;
 pub mod login;
+pub mod logout;
 pub mod ls;
 pub mod rm;
+pub mod set_default;
 pub mod upload;
 
 use anyhow::Result;
 use opake_core::client::Session;
 
+use crate::session::CommandContext;
+
 pub trait Execute {
-    fn execute(self) -> impl std::future::Future<Output = Result<Option<Session>>>;
+    fn execute(
+        self,
+        ctx: &CommandContext,
+    ) -> impl std::future::Future<Output = Result<Option<Session>>>;
 }

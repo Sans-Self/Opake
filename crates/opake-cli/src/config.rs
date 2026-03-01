@@ -83,6 +83,42 @@ pub fn save_account_json<T: Serialize>(did: &str, filename: &str, value: &T) -> 
         .with_context(|| format!("failed to write {filename} for {did}"))
 }
 
+/// Resolve a handle or DID string to a DID. If the input starts with `did:`,
+/// it's returned as-is. Otherwise, it's looked up as a handle in the config.
+pub fn resolve_handle_or_did(config: &Config, input: &str) -> anyhow::Result<String> {
+    if input.starts_with("did:") {
+        return Ok(input.to_string());
+    }
+    config
+        .accounts
+        .iter()
+        .find(|(_, acc)| acc.handle == input)
+        .map(|(did, _)| did.clone())
+        .ok_or_else(|| anyhow::anyhow!("no account with handle {input}"))
+}
+
+/// Remove an account: delete from config.accounts, clear default_did if it
+/// matched, remove the account's data directory, and save the updated config.
+pub fn remove_account(did: &str) -> anyhow::Result<()> {
+    let mut config = load_config()?;
+
+    anyhow::ensure!(config.accounts.contains_key(did), "no account for {did}");
+
+    config.accounts.remove(did);
+
+    if config.default_did.as_deref() == Some(did) {
+        config.default_did = config.accounts.keys().next().cloned();
+    }
+
+    let dir = account_dir(did);
+    if dir.exists() {
+        fs::remove_dir_all(&dir)
+            .with_context(|| format!("failed to remove account directory: {}", dir.display()))?;
+    }
+
+    save_config(&config)
+}
+
 /// Deserialize a value from a JSON file inside an account's directory.
 pub fn load_account_json<T: DeserializeOwned>(did: &str, filename: &str) -> anyhow::Result<T> {
     let path = account_dir(did).join(filename);
@@ -268,6 +304,107 @@ mod tests {
             fs::write(data_dir().join("config.toml"), vec![0xFF, 0xFE, 0x00, 0x01]).unwrap();
             let result = load_config();
             assert!(result.is_err());
+        });
+    }
+
+    // -- resolve_handle_or_did --
+
+    #[test]
+    fn resolve_handle_or_did_passes_did_through() {
+        let config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        let result = resolve_handle_or_did(&config, "did:plc:someone").unwrap();
+        assert_eq!(result, "did:plc:someone");
+    }
+
+    #[test]
+    fn resolve_handle_or_did_looks_up_handle() {
+        let config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        let result = resolve_handle_or_did(&config, "alice.test").unwrap();
+        assert_eq!(result, "did:plc:alice");
+    }
+
+    #[test]
+    fn resolve_handle_or_did_unknown_handle_errors() {
+        let config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        let err = resolve_handle_or_did(&config, "nobody.test").unwrap_err();
+        assert!(err.to_string().contains("nobody.test"));
+    }
+
+    // -- remove_account --
+
+    #[test]
+    fn remove_account_deletes_dir_and_config_entry() {
+        with_test_dir(|_| {
+            let did = "did:plc:alice";
+            let config = test_config(did, "https://pds.alice", "alice.test");
+            save_config(&config).unwrap();
+            ensure_account_dir(did).unwrap();
+            assert!(account_dir(did).exists());
+
+            remove_account(did).unwrap();
+
+            let loaded = load_config().unwrap();
+            assert!(!loaded.accounts.contains_key(did));
+            assert!(loaded.default_did.is_none());
+            assert!(!account_dir(did).exists());
+        });
+    }
+
+    #[test]
+    fn remove_account_promotes_next_default() {
+        with_test_dir(|_| {
+            let mut accounts = BTreeMap::new();
+            accounts.insert(
+                "did:plc:alice".into(),
+                AccountConfig {
+                    pds_url: "https://pds.alice".into(),
+                    handle: "alice.test".into(),
+                },
+            );
+            accounts.insert(
+                "did:plc:bob".into(),
+                AccountConfig {
+                    pds_url: "https://pds.bob".into(),
+                    handle: "bob.test".into(),
+                },
+            );
+            save_config(&Config {
+                default_did: Some("did:plc:alice".into()),
+                accounts,
+            })
+            .unwrap();
+
+            remove_account("did:plc:alice").unwrap();
+
+            let loaded = load_config().unwrap();
+            assert_eq!(loaded.default_did.as_deref(), Some("did:plc:bob"));
+            assert_eq!(loaded.accounts.len(), 1);
+        });
+    }
+
+    #[test]
+    fn remove_account_unknown_did_errors() {
+        with_test_dir(|_| {
+            let config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+            save_config(&config).unwrap();
+
+            let err = remove_account("did:plc:nobody").unwrap_err();
+            assert!(err.to_string().contains("did:plc:nobody"));
+        });
+    }
+
+    #[test]
+    fn remove_account_without_dir_still_works() {
+        with_test_dir(|_| {
+            let did = "did:plc:alice";
+            let config = test_config(did, "https://pds.test", "alice.test");
+            save_config(&config).unwrap();
+            // don't create account dir — should still succeed
+
+            remove_account(did).unwrap();
+
+            let loaded = load_config().unwrap();
+            assert!(!loaded.accounts.contains_key(did));
         });
     }
 }

@@ -4,7 +4,7 @@ use opake_core::client::Session;
 use opake_core::documents;
 
 use crate::commands::Execute;
-use crate::session;
+use crate::session::{self, CommandContext};
 
 #[derive(Args)]
 /// Delete a document
@@ -18,8 +18,8 @@ pub struct RmCommand {
 }
 
 impl Execute for RmCommand {
-    async fn execute(self) -> Result<Option<Session>> {
-        let mut client = session::load_client_default()?;
+    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
+        let mut client = session::load_client(&ctx.did)?;
         let uri = documents::resolve_uri(&mut client, &self.reference).await?;
 
         if !self.yes {
