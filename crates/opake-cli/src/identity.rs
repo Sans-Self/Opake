@@ -30,7 +30,6 @@ impl Identity {
         Ok(key)
     }
 
-    #[allow(dead_code)] // used by download (#6)
     pub fn private_key_bytes(&self) -> anyhow::Result<X25519PrivateKey> {
         let bytes = BASE64
             .decode(&self.private_key)

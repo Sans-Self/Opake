@@ -8,7 +8,11 @@
 // a reqwest-based implementation, the SPA provides one using browser fetch.
 // Crypto is synchronous and pure. Records are just types.
 
+pub mod atproto;
 pub mod client;
 pub mod crypto;
 pub mod error;
 pub mod records;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

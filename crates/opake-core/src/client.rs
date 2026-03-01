@@ -7,8 +7,8 @@
 
 use log::{debug, info, warn};
 
+use crate::atproto::BlobRef;
 use crate::error::Error;
-use crate::records::BlobRef;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -163,14 +163,55 @@ impl<T: Transport> XrpcClient<T> {
             .ok_or_else(|| Error::Auth("not logged in".into()))
     }
 
+    /// Send a request and check the response status. Every XRPC method except
+    /// `login` (which has custom error handling) goes through here.
+    async fn send_checked(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let response = self.transport.send(request).await?;
+        Self::check_response(&response)?;
+        Ok(response)
+    }
+
+    /// Check an XRPC response for errors. Non-2xx responses are parsed as
+    /// XRPC error bodies (`{"error":"...", "message":"..."}`) when possible,
+    /// falling back to the raw status code.
+    fn check_response(response: &HttpResponse) -> Result<(), Error> {
+        if (200..300).contains(&response.status) {
+            return Ok(());
+        }
+
+        #[derive(Deserialize)]
+        struct XrpcError {
+            error: Option<String>,
+            message: Option<String>,
+        }
+
+        let message = serde_json::from_slice::<XrpcError>(&response.body)
+            .ok()
+            .and_then(|e| match (e.error, e.message) {
+                (Some(code), Some(msg)) => Some(format!("{code}: {msg}")),
+                (Some(code), None) => Some(code),
+                (None, Some(msg)) => Some(msg),
+                (None, None) => None,
+            })
+            .unwrap_or_else(|| format!("HTTP {}", response.status));
+
+        if response.status == 404 {
+            Err(Error::NotFound(message))
+        } else {
+            Err(Error::Xrpc {
+                status: response.status,
+                message,
+            })
+        }
+    }
+
     /// Upload raw bytes as a blob via `com.atproto.repo.uploadBlob`.
     pub async fn upload_blob(&self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
         debug!("uploading blob ({} bytes, {})", data.len(), mime_type);
         let auth = self.auth_header()?;
 
         let response = self
-            .transport
-            .send(HttpRequest {
+            .send_checked(HttpRequest {
                 method: HttpMethod::Post,
                 url: format!("{}/xrpc/com.atproto.repo.uploadBlob", self.base_url),
                 headers: vec![auth, ("Content-Type".into(), mime_type.into())],
@@ -185,6 +226,7 @@ impl<T: Transport> XrpcClient<T> {
         struct UploadResponse {
             blob: BlobRef,
         }
+
         let parsed: UploadResponse = serde_json::from_slice(&response.body)?;
         Ok(parsed.blob)
     }
@@ -199,8 +241,7 @@ impl<T: Transport> XrpcClient<T> {
         );
 
         let response = self
-            .transport
-            .send(HttpRequest {
+            .send_checked(HttpRequest {
                 method: HttpMethod::Get,
                 url,
                 headers: vec![auth],
@@ -228,8 +269,7 @@ impl<T: Transport> XrpcClient<T> {
         });
 
         let response = self
-            .transport
-            .send(HttpRequest {
+            .send_checked(HttpRequest {
                 method: HttpMethod::Post,
                 url: format!("{}/xrpc/com.atproto.repo.createRecord", self.base_url),
                 headers: vec![auth, ("Content-Type".into(), "application/json".into())],
@@ -255,8 +295,7 @@ impl<T: Transport> XrpcClient<T> {
         );
 
         let response = self
-            .transport
-            .send(HttpRequest {
+            .send_checked(HttpRequest {
                 method: HttpMethod::Get,
                 url,
                 headers: vec![auth],
@@ -290,8 +329,7 @@ impl<T: Transport> XrpcClient<T> {
         }
 
         let response = self
-            .transport
-            .send(HttpRequest {
+            .send_checked(HttpRequest {
                 method: HttpMethod::Get,
                 url,
                 headers: vec![auth],
@@ -314,15 +352,161 @@ impl<T: Transport> XrpcClient<T> {
             "rkey": rkey,
         });
 
-        self.transport
-            .send(HttpRequest {
-                method: HttpMethod::Post,
-                url: format!("{}/xrpc/com.atproto.repo.deleteRecord", self.base_url),
-                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
-                body: Some(RequestBody::Json(body)),
-            })
-            .await?;
+        self.send_checked(HttpRequest {
+            method: HttpMethod::Post,
+            url: format!("{}/xrpc/com.atproto.repo.deleteRecord", self.base_url),
+            headers: vec![auth, ("Content-Type".into(), "application/json".into())],
+            body: Some(RequestBody::Json(body)),
+        })
+        .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test check_response directly — it's pure logic over HttpResponse,
+    // no transport needed.
+
+    fn response(status: u16, body: &str) -> HttpResponse {
+        HttpResponse {
+            status,
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    // -- 2xx success range --
+
+    #[test]
+    fn ok_200_passes() {
+        assert!(XrpcClient::<DummyTransport>::check_response(&response(200, "")).is_ok());
+    }
+
+    #[test]
+    fn created_201_passes() {
+        assert!(XrpcClient::<DummyTransport>::check_response(&response(201, "")).is_ok());
+    }
+
+    #[test]
+    fn no_content_204_passes() {
+        assert!(XrpcClient::<DummyTransport>::check_response(&response(204, "")).is_ok());
+    }
+
+    // -- XRPC error bodies --
+
+    #[test]
+    fn error_500_with_xrpc_body() {
+        let r = response(
+            500,
+            r#"{"error":"InternalServerError","message":"Internal Server Error"}"#,
+        );
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 500);
+                assert!(message.contains("InternalServerError"));
+                assert!(message.contains("Internal Server Error"));
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn error_400_with_error_code_only() {
+        let r = response(400, r#"{"error":"InvalidRequest"}"#);
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 400);
+                assert_eq!(message, "InvalidRequest");
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn error_403_with_message_only() {
+        let r = response(403, r#"{"message":"not authorized"}"#);
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 403);
+                assert_eq!(message, "not authorized");
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    // -- 404 maps to NotFound --
+
+    #[test]
+    fn error_404_returns_not_found() {
+        let r = response(
+            404,
+            r#"{"error":"RecordNotFound","message":"no such record"}"#,
+        );
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)));
+    }
+
+    // -- Non-JSON error bodies --
+
+    #[test]
+    fn error_502_with_html_body() {
+        let r = response(502, "<html><body>Bad Gateway</body></html>");
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 502);
+                assert_eq!(message, "HTTP 502");
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn error_500_with_empty_body() {
+        let r = response(500, "");
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 500);
+                assert_eq!(message, "HTTP 500");
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn error_500_with_empty_json_object() {
+        let r = response(500, "{}");
+        let err = XrpcClient::<DummyTransport>::check_response(&r).unwrap_err();
+        match err {
+            Error::Xrpc { status, message } => {
+                assert_eq!(status, 500);
+                assert_eq!(message, "HTTP 500");
+            }
+            other => panic!("expected Xrpc error, got: {other}"),
+        }
+    }
+
+    // -- Edge: 3xx is not success --
+
+    #[test]
+    fn redirect_300_is_error() {
+        assert!(XrpcClient::<DummyTransport>::check_response(&response(300, "")).is_err());
+    }
+
+    // -- Dummy transport for type parameter (never called) --
+
+    struct DummyTransport;
+
+    impl Transport for DummyTransport {
+        async fn send(&self, _request: HttpRequest) -> Result<HttpResponse, Error> {
+            unreachable!("check_response tests don't use transport")
+        }
     }
 }

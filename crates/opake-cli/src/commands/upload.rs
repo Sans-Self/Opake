@@ -126,9 +126,11 @@ mod tests {
         let result = rt.block_on(cmd.execute());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        // Fails at either session loading or file reading depending on env
+        // Fails at config/session loading or file reading depending on env
         assert!(
-            err.contains("failed to read") || err.contains("run `opake login` first"),
+            err.contains("failed to read")
+                || err.contains("run `opake login` first")
+                || err.contains("config.toml"),
             "unexpected error: {err}"
         );
     }

@@ -19,8 +19,9 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
+use crate::atproto::AtBytes;
 use crate::error::Error;
-use crate::records::{AtBytes, WrappedKey, SCHEMA_VERSION};
+use crate::records::{WrappedKey, SCHEMA_VERSION};
 
 /// Re-export so callers don't need direct rand_core / x25519_dalek dependencies.
 pub use aes_gcm::aead::rand_core::{CryptoRng, OsRng, RngCore};

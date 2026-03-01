@@ -7,11 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add MockTransport test infrastructure with FIFO response queue
+- Add download command tests with full crypto roundtrip verification
 - Update login command to read password from stdin (#23)
 
 ### Fixed
+- Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Extract AT Protocol primitives into dedicated atproto module
+- Consolidate XRPC response checking into send_checked method
+- Add file download with client-side decryption (#6)
 - Update outdated dependencies (reqwest 0.13, toml) (#29)
 - Test upload command against real PDS (#28)
 - Add file upload with client-side encryption (#5)

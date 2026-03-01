@@ -2,10 +2,17 @@
 //
 // These mirror the lexicon JSON schemas and handle atproto's serialization
 // conventions ($type discriminators, $bytes for binary data, $link for CIDs).
+//
+// AT Protocol primitives (AtUri, AtBytes, CidLink, BlobRef) live in the
+// `atproto` module. The ones used as record fields are re-exported here.
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
+
+// Re-export atproto types that appear in record struct fields so that
+// downstream code using `records::AtBytes` etc. keeps working.
+pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 /// The current app.opake.cloud.* schema version this client understands.
 /// Records with version <= this are compatible; higher versions must be rejected.
@@ -23,36 +30,6 @@ pub fn check_version(record_version: u32) -> Result<(), Error> {
         )));
     }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// AT Protocol primitives
-// ---------------------------------------------------------------------------
-
-/// Binary data in atproto JSON: `{ "$bytes": "<base64>" }`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AtBytes {
-    #[serde(rename = "$bytes")]
-    pub encoded: String,
-}
-
-/// CID link reference: `{ "$link": "<cid>" }`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CidLink {
-    #[serde(rename = "$link")]
-    pub cid: String,
-}
-
-/// Blob reference as returned by `com.atproto.repo.uploadBlob`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BlobRef {
-    #[serde(rename = "$type")]
-    pub blob_type: String,
-    #[serde(rename = "ref")]
-    pub reference: CidLink,
-    pub mime_type: String,
-    pub size: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,4 +182,30 @@ pub struct Keyring {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_version_accepts_current() {
+        assert!(check_version(SCHEMA_VERSION).is_ok());
+    }
+
+    #[test]
+    fn check_version_accepts_v1() {
+        assert!(check_version(1).is_ok());
+    }
+
+    #[test]
+    fn check_version_rejects_one_above() {
+        let err = check_version(SCHEMA_VERSION + 1).unwrap_err();
+        assert!(matches!(err, Error::InvalidRecord(_)));
+    }
+
+    #[test]
+    fn check_version_rejects_max() {
+        assert!(check_version(u32::MAX).is_err());
+    }
 }
