@@ -1,57 +1,18 @@
 // XRPC client for talking to a PDS.
 //
-// Transport is injected via trait — the CLI provides a reqwest-based
-// implementation, the SPA (opake-web) provides one backed by browser fetch.
-// Core owns the XRPC protocol logic (endpoints, auth, response parsing)
-// but never touches the network directly.
+// Protocol logic for authenticated XRPC calls, generic over transport.
+// Handles session management, token refresh, and the standard atproto
+// repo operations (create/get/list/delete records, upload/get blobs).
 
 use log::{debug, info, warn};
-
-use crate::atproto::BlobRef;
-use crate::error::Error;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Transport trait — the injectable I/O boundary
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub enum HttpMethod {
-    Get,
-    Post,
-}
-
-#[derive(Debug, Clone)]
-pub enum RequestBody {
-    Json(serde_json::Value),
-    Bytes { data: Vec<u8>, content_type: String },
-}
-
-#[derive(Debug, Clone)]
-pub struct HttpRequest {
-    pub method: HttpMethod,
-    pub url: String,
-    pub headers: Vec<(String, String)>,
-    pub body: Option<RequestBody>,
-}
-
-#[derive(Debug, Clone)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: Vec<u8>,
-}
-
-/// The only thing a platform needs to provide: send an HTTP request, get bytes back.
-/// CLI implements this with reqwest, the SPA with browser fetch via web_sys.
-pub trait Transport {
-    fn send(
-        &self,
-        request: HttpRequest,
-    ) -> impl std::future::Future<Output = Result<HttpResponse, Error>>;
-}
+use super::transport::*;
+use crate::atproto::BlobRef;
+use crate::error::Error;
 
 // ---------------------------------------------------------------------------
-// XRPC client — protocol logic, generic over transport
+// Types
 // ---------------------------------------------------------------------------
 
 /// An authenticated session with a PDS.
@@ -84,6 +45,48 @@ pub struct RecordEntry {
     pub cid: String,
     pub value: serde_json::Value,
 }
+
+// ---------------------------------------------------------------------------
+// Response checking — used by both XrpcClient and the DID/public functions
+// ---------------------------------------------------------------------------
+
+/// Check an XRPC response for errors. Non-2xx responses are parsed as
+/// XRPC error bodies (`{"error":"...", "message":"..."}`) when possible,
+/// falling back to the raw status code.
+pub fn check_response(response: &HttpResponse) -> Result<(), Error> {
+    if (200..300).contains(&response.status) {
+        return Ok(());
+    }
+
+    #[derive(Deserialize)]
+    struct XrpcError {
+        error: Option<String>,
+        message: Option<String>,
+    }
+
+    let message = serde_json::from_slice::<XrpcError>(&response.body)
+        .ok()
+        .and_then(|e| match (e.error, e.message) {
+            (Some(code), Some(msg)) => Some(format!("{code}: {msg}")),
+            (Some(code), None) => Some(code),
+            (None, Some(msg)) => Some(msg),
+            (None, None) => None,
+        })
+        .unwrap_or_else(|| format!("HTTP {}", response.status));
+
+    if response.status == 404 {
+        Err(Error::NotFound(message))
+    } else {
+        Err(Error::Xrpc {
+            status: response.status,
+            message,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// XrpcClient
+// ---------------------------------------------------------------------------
 
 pub struct XrpcClient<T: Transport> {
     transport: T,
@@ -248,42 +251,8 @@ impl<T: Transport> XrpcClient<T> {
             response = self.transport.send(retried).await?;
         }
 
-        Self::check_response(&response)?;
+        check_response(&response)?;
         Ok(response)
-    }
-
-    /// Check an XRPC response for errors. Non-2xx responses are parsed as
-    /// XRPC error bodies (`{"error":"...", "message":"..."}`) when possible,
-    /// falling back to the raw status code.
-    fn check_response(response: &HttpResponse) -> Result<(), Error> {
-        if (200..300).contains(&response.status) {
-            return Ok(());
-        }
-
-        #[derive(Deserialize)]
-        struct XrpcError {
-            error: Option<String>,
-            message: Option<String>,
-        }
-
-        let message = serde_json::from_slice::<XrpcError>(&response.body)
-            .ok()
-            .and_then(|e| match (e.error, e.message) {
-                (Some(code), Some(msg)) => Some(format!("{code}: {msg}")),
-                (Some(code), None) => Some(code),
-                (None, Some(msg)) => Some(msg),
-                (None, None) => None,
-            })
-            .unwrap_or_else(|| format!("HTTP {}", response.status));
-
-        if response.status == 404 {
-            Err(Error::NotFound(message))
-        } else {
-            Err(Error::Xrpc {
-                status: response.status,
-                message,
-            })
-        }
     }
 
     /// Upload raw bytes as a blob via `com.atproto.repo.uploadBlob`.
@@ -450,9 +419,6 @@ mod tests {
     use super::*;
     use crate::test_utils::MockTransport;
 
-    // Test check_response directly — it's pure logic over HttpResponse,
-    // no transport needed.
-
     fn response(status: u16, body: &str) -> HttpResponse {
         HttpResponse {
             status,
@@ -464,17 +430,17 @@ mod tests {
 
     #[test]
     fn ok_200_passes() {
-        assert!(XrpcClient::<MockTransport>::check_response(&response(200, "")).is_ok());
+        assert!(check_response(&response(200, "")).is_ok());
     }
 
     #[test]
     fn created_201_passes() {
-        assert!(XrpcClient::<MockTransport>::check_response(&response(201, "")).is_ok());
+        assert!(check_response(&response(201, "")).is_ok());
     }
 
     #[test]
     fn no_content_204_passes() {
-        assert!(XrpcClient::<MockTransport>::check_response(&response(204, "")).is_ok());
+        assert!(check_response(&response(204, "")).is_ok());
     }
 
     // -- XRPC error bodies --
@@ -485,7 +451,7 @@ mod tests {
             500,
             r#"{"error":"InternalServerError","message":"Internal Server Error"}"#,
         );
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -499,7 +465,7 @@ mod tests {
     #[test]
     fn error_400_with_error_code_only() {
         let r = response(400, r#"{"error":"InvalidRequest"}"#);
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 400);
@@ -512,7 +478,7 @@ mod tests {
     #[test]
     fn error_403_with_message_only() {
         let r = response(403, r#"{"message":"not authorized"}"#);
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 403);
@@ -530,7 +496,7 @@ mod tests {
             404,
             r#"{"error":"RecordNotFound","message":"no such record"}"#,
         );
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
     }
 
@@ -539,7 +505,7 @@ mod tests {
     #[test]
     fn error_502_with_html_body() {
         let r = response(502, "<html><body>Bad Gateway</body></html>");
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 502);
@@ -552,7 +518,7 @@ mod tests {
     #[test]
     fn error_500_with_empty_body() {
         let r = response(500, "");
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -565,7 +531,7 @@ mod tests {
     #[test]
     fn error_500_with_empty_json_object() {
         let r = response(500, "{}");
-        let err = XrpcClient::<MockTransport>::check_response(&r).unwrap_err();
+        let err = check_response(&r).unwrap_err();
         match err {
             Error::Xrpc { status, message } => {
                 assert_eq!(status, 500);
@@ -579,7 +545,7 @@ mod tests {
 
     #[test]
     fn redirect_300_is_error() {
-        assert!(XrpcClient::<MockTransport>::check_response(&response(300, "")).is_err());
+        assert!(check_response(&response(300, "")).is_err());
     }
 
     // -- Token refresh tests --

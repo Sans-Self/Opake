@@ -64,13 +64,22 @@ opake download photo.jpg -o ~/Downloads/copy.jpg
 # delete
 opake rm photo.jpg
 
+# resolve a handle or DID to see their public key
+opake resolve alice.example.com
+
+# share a file with another user
+opake share photo.jpg alice.example.com
+
+# revoke a share grant
+opake revoke at://did:plc:abc/app.opake.cloud.grant/tid123
+
 # remove an account
 opake logout bob.other.com
 ```
 
 Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
 
-The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`) and accepts a handle or DID.
+The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`) and accepts a handle or DID.
 
 ## Project Structure
 
@@ -100,8 +109,8 @@ Revoking access means deleting the grant record. True forward secrecy requires r
 - [x] Automatic token refresh
 - [x] Multi-account support (--as flag, logout, set-default, accounts)
 - [x] Public key discovery (app.opake.cloud.publicKey record)
-- [ ] DID resolution and public key extraction
-- [ ] Direct file sharing between DIDs
+- [x] DID resolution and public key extraction
+- [x] Direct file sharing between DIDs
 - [ ] Keyring-based group sharing
 - [ ] Folder hierarchy
 - [ ] Web UI (Rust/Axum AppView + SPA)

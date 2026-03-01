@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add resolve command for DID resolution and public key discovery (#11)
+- Add share command to grant document access to another DID (#12)
+- Add revoke command to delete grant records (#13)
 - Add account management commands and --as flag (#60)
 - Improve README with pronunciation guide and formatting polish (#48)
 - Add automatic token refresh using refresh_jwt on expired sessions (#34)
@@ -20,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Replace raw [u8; 32] with X25519PublicKey/X25519PrivateKey type aliases (#63)
+- Split client.rs into module directory for transport, xrpc, and DID resolution (#64)
+- Remove --permissions flag from share command (#62)
 - Add per-account session and identity persistence (#51)
 - Add multi-account config struct and per-account storage layout (#50)
 - Add publicKey lexicon and PublicKeyRecord struct (#55)

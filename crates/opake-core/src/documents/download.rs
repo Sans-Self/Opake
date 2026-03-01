@@ -3,18 +3,33 @@ use log::debug;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto;
+use crate::crypto::{self, ContentKey, X25519PrivateKey};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption};
 
-/// Fetch a document record and its encrypted blob, then decrypt.
-/// Returns `(filename, plaintext_bytes)`.
-pub async fn download_and_decrypt(
+/// Fetch a document record and extract the content key without downloading the blob.
+///
+/// Useful when you need the key (e.g. to re-wrap it for sharing) but don't
+/// want to download the entire encrypted blob.
+pub async fn fetch_content_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &[u8; 32],
+    private_key: &X25519PrivateKey,
     uri: &str,
-) -> Result<(String, Vec<u8>), Error> {
+) -> Result<ContentKey, Error> {
+    let (content_key, _doc) = fetch_document_and_key(client, did, private_key, uri).await?;
+    Ok(content_key)
+}
+
+/// Internal: fetch a document record, validate it, and unwrap the content key.
+/// Returns both the key and the document (needed by download_and_decrypt for
+/// the nonce, blob ref, and filename).
+async fn fetch_document_and_key(
+    client: &mut XrpcClient<impl Transport>,
+    did: &str,
+    private_key: &X25519PrivateKey,
+    uri: &str,
+) -> Result<(ContentKey, Document), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
 
     debug!("fetching record {}", uri);
@@ -42,6 +57,25 @@ pub async fn download_and_decrypt(
 
     debug!("unwrapping content key");
     let content_key = crypto::unwrap_key(wrapped_key, private_key)?;
+
+    Ok((content_key, doc))
+}
+
+/// Fetch a document record and its encrypted blob, then decrypt.
+/// Returns `(filename, plaintext_bytes)`.
+pub async fn download_and_decrypt(
+    client: &mut XrpcClient<impl Transport>,
+    did: &str,
+    private_key: &X25519PrivateKey,
+    uri: &str,
+) -> Result<(String, Vec<u8>), Error> {
+    let at_uri = atproto::parse_at_uri(uri)?;
+    let (content_key, doc) = fetch_document_and_key(client, did, private_key, uri).await?;
+
+    let envelope = match &doc.encryption {
+        Encryption::Direct(direct) => &direct.envelope,
+        Encryption::Keyring(_) => unreachable!("checked in fetch_document_and_key"),
+    };
 
     let nonce_bytes = BASE64
         .decode(&envelope.nonce.encoded)
@@ -71,13 +105,13 @@ pub async fn download_and_decrypt(
 mod tests {
     use super::*;
     use crate::client::HttpResponse;
-    use crate::crypto::OsRng;
+    use crate::crypto::{OsRng, X25519PrivateKey, X25519PublicKey};
     use crate::records::{self, AtBytes, BlobRef, CidLink, DirectEncryption, EncryptionEnvelope};
     use crate::test_utils::MockTransport;
 
     use super::super::tests::{mock_client, TEST_DID, TEST_URI};
 
-    fn test_keypair() -> ([u8; 32], [u8; 32]) {
+    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
         let public = crypto::X25519DalekPublicKey::from(&secret);
         (public.to_bytes(), secret.to_bytes())
@@ -89,7 +123,7 @@ mod tests {
         wrapped_key: records::WrappedKey,
     }
 
-    fn encrypt_for_download(plaintext: &[u8], public_key: &[u8; 32]) -> EncryptedFixture {
+    fn encrypt_for_download(plaintext: &[u8], public_key: &X25519PublicKey) -> EncryptedFixture {
         let rng = &mut OsRng;
         let content_key = crypto::generate_content_key(rng);
         let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();

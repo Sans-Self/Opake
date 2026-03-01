@@ -30,6 +30,9 @@ enum Command {
     Download(commands::download::DownloadCommand),
     Ls(commands::ls::LsCommand),
     Rm(commands::rm::RmCommand),
+    Resolve(commands::resolve::ResolveCommand),
+    Share(commands::share::ShareCommand),
+    Revoke(commands::revoke::RevokeCommand),
 }
 
 async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::Result<()> {
@@ -65,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Download(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Ls(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Rm(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Resolve(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Share(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Revoke(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
     }
 
     Ok(())

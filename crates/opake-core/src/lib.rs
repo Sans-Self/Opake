@@ -14,6 +14,8 @@ pub mod crypto;
 pub mod documents;
 pub mod error;
 pub mod records;
+pub mod resolve;
+pub mod sharing;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

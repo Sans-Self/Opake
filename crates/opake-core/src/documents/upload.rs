@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::debug;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, CryptoRng, RngCore};
+use crate::crypto::{self, CryptoRng, RngCore, X25519PublicKey};
 use crate::error::Error;
 use crate::records::{AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope};
 
@@ -18,7 +18,7 @@ pub struct UploadParams<'a> {
     pub filename: &'a str,
     pub mime_type: &'a str,
     pub owner_did: &'a str,
-    pub owner_pubkey: &'a [u8; 32],
+    pub owner_pubkey: &'a X25519PublicKey,
     pub tags: Vec<String>,
     pub created_at: &'a str,
 }
@@ -93,13 +93,13 @@ pub async fn encrypt_and_upload(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, RequestBody};
-    use crate::crypto::OsRng;
+    use crate::crypto::{OsRng, X25519PrivateKey, X25519PublicKey};
     use crate::records::Document;
     use crate::test_utils::MockTransport;
 
     use super::super::tests::{mock_client, TEST_DID};
 
-    fn test_keypair() -> ([u8; 32], [u8; 32]) {
+    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
         let public = crypto::X25519DalekPublicKey::from(&secret);
         (public.to_bytes(), secret.to_bytes())
@@ -136,7 +136,7 @@ mod tests {
     fn test_params<'a>(
         plaintext: &'a [u8],
         filename: &'a str,
-        public_key: &'a [u8; 32],
+        public_key: &'a X25519PublicKey,
         tags: Vec<String>,
     ) -> UploadParams<'a> {
         UploadParams {

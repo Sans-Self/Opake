@@ -196,6 +196,26 @@ pub struct Grant {
     pub created_at: String,
 }
 
+impl Grant {
+    pub fn new(
+        document: String,
+        recipient: String,
+        wrapped_key: WrappedKey,
+        created_at: String,
+    ) -> Self {
+        Self {
+            version: SCHEMA_VERSION,
+            document,
+            recipient,
+            wrapped_key,
+            permissions: None,
+            expires_at: None,
+            note: None,
+            created_at,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // app.opake.cloud.keyring
 // ---------------------------------------------------------------------------

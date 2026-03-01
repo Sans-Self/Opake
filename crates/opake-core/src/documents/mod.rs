@@ -12,7 +12,7 @@ mod resolve;
 mod upload;
 
 pub use delete::delete_document;
-pub use download::download_and_decrypt;
+pub use download::{download_and_decrypt, fetch_content_key};
 pub use list::{list_documents, DocumentEntry};
 pub use resolve::resolve_uri;
 pub use upload::{encrypt_and_upload, UploadParams};
