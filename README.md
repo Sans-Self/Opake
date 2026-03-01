@@ -65,10 +65,12 @@ opake download photo.jpg -o ~/Downloads/copy.jpg
 opake rm photo.jpg
 
 # remove an account
-opake logout --did did:plc:bob456
+opake logout bob.other.com
 ```
 
-Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI. The `--as` flag accepts a handle or DID and works with any command.
+Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
+
+The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`) and accepts a handle or DID.
 
 ## Project Structure
 
