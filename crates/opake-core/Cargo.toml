@@ -3,6 +3,7 @@ name = "opake-core"
 description = "Encryption, records, and XRPC client for Opake — platform-agnostic, WASM-compatible"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [features]
 test-utils = []

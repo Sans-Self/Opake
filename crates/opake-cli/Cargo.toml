@@ -3,6 +3,7 @@ name = "opake-cli"
 description = "CLI for Opake encrypted personal cloud"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "opake"
