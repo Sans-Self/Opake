@@ -25,10 +25,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin (#23)
 
 ### Fixed
+- Fix bugs found during black-box integration testing of sharing workflow (#65)
 - Fix base64 padding mismatch when decoding PDS $bytes fields (#67)
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Add automatic public key publishing on login (#58)
 - Replace raw [u8; 32] with X25519PublicKey/X25519PrivateKey type aliases (#63)
 - Split client.rs into module directory for transport, xrpc, and DID resolution (#64)
 - Remove --permissions flag from share command (#62)

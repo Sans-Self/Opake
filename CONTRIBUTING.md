@@ -35,6 +35,8 @@ opake-cli     thin CLI wrapper
 
 `opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O happens at the CLI layer.
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structure and encryption model, and [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
+
 ## Testing
 
 - Tests live in `#[cfg(test)]` modules alongside the code they test

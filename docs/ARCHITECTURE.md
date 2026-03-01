@@ -1,0 +1,193 @@
+# Opake — Architecture
+
+## System Overview
+
+```mermaid
+graph TB
+    subgraph Client ["Client (your machine)"]
+        CLI["opake CLI"]
+        Core["opake-core library"]
+        Crypto["Client-side crypto<br/>(AES-256-GCM, X25519)"]
+    end
+
+    subgraph Network ["AT Protocol Network"]
+        OwnPDS["Your PDS"]
+        OtherPDS["Other user's PDS"]
+        PLC["PLC Directory"]
+    end
+
+    CLI --> Core
+    Core --> Crypto
+    Core -->|XRPC / HTTPS| OwnPDS
+    Core -->|unauthenticated| OtherPDS
+    Core -->|DID resolution| PLC
+
+    OwnPDS -.->|federation / sync| OtherPDS
+
+    style Client fill:#1a1a2e,color:#eee
+    style Network fill:#16213e,color:#eee
+```
+
+The CLI talks directly to PDS instances over XRPC. No middleware, no AppView, no PDS modifications. All encryption and decryption happens on your machine.
+
+## Crate Structure
+
+```
+crates/
+  opake-core/          Platform-agnostic library (compiles to WASM)
+    src/
+      crypto.rs        AES-256-GCM encryption, X25519 key wrapping
+      records.rs       Serde types for all app.opake.cloud.* lexicons
+      atproto.rs       AT-URI parsing, shared AT Protocol primitives
+      resolve.rs       Handle/DID → PDS → public key resolution pipeline
+      error.rs         Typed error hierarchy (thiserror)
+      client/
+        mod.rs         XrpcClient, Session, re-exports
+        transport.rs   Transport trait (HTTP abstraction for WASM compat)
+        xrpc.rs        Authenticated XRPC methods (CRUD, blob ops, token refresh)
+        did.rs         Unauthenticated DID resolution and cross-PDS queries
+      documents/
+        mod.rs         Re-exports, shared test fixtures
+        upload.rs      encrypt_and_upload()
+        download.rs    download_and_decrypt(), download_shared(), fetch_content_key()
+        list.rs        list_documents()
+        delete.rs      delete_document()
+        resolve.rs     Filename → AT-URI resolution
+      sharing/
+        mod.rs         Re-exports
+        create.rs      create_grant()
+        revoke.rs      revoke_grant()
+
+  opake-cli/           CLI binary wrapping opake-core
+    src/
+      main.rs          Clap app, command dispatch
+      config.rs        Multi-account config (default DID, account map)
+      session.rs       Per-account session persistence (JWT tokens)
+      identity.rs      Per-account X25519 keypair persistence
+      transport.rs     reqwest-based Transport implementation
+      utils.rs         Test harness, env helpers
+      commands/
+        login.rs       Auth + key publish
+        upload.rs      File → encrypt → upload
+        download.rs    Download + decrypt (own and shared)
+        ls.rs          List documents
+        rm.rs          Delete with confirmation prompt
+        resolve.rs     Identity resolution display
+        share.rs       Grant creation
+        revoke.rs      Grant deletion
+        accounts.rs    List accounts
+        logout.rs      Remove account
+        set_default.rs Switch default account
+```
+
+The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens in `opake-cli`. This keeps `opake-core` compilable to WASM for the future web UI.
+
+## Encryption Model
+
+Every file is encrypted before it leaves your machine. The PDS stores opaque ciphertext.
+
+### Hybrid Encryption
+
+Same pattern as git-crypt: symmetric content encryption + asymmetric key wrapping.
+
+```
+plaintext file
+  → AES-256-GCM with random content key K → ciphertext blob
+  → X25519-HKDF-A256KW wraps K to owner's public key → wrappedKey in document record
+```
+
+**Content encryption** (AES-256-GCM) — fast, handles arbitrary-size data. A random 256-bit key and 96-bit nonce are generated per file.
+
+**Key wrapping** (x25519-hkdf-a256kw) — wraps the 256-bit content key to a recipient's X25519 public key. Uses ephemeral ECDH + HKDF-SHA256 + AES-256-KW. The wrapped key ciphertext is `[32-byte ephemeral pubkey ‖ 40-byte AES-KW output]`.
+
+The algorithm name `x25519-hkdf-a256kw` is intentionally distinct from JWE's `ECDH-ES+A256KW` — we use HKDF-SHA256, not JWE's Concat KDF. The HKDF info string includes the schema version for domain separation: `opake-v1-x25519-hkdf-a256kw-{did}`.
+
+### Two Sharing Modes
+
+**Direct encryption** — the content key is wrapped individually to each authorized DID. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
+
+**Keyring encryption** (planned) — a named group has a shared group key (GK), wrapped to each member's public key. Documents have their content key wrapped under GK instead of individual public keys. Adding a member to the keyring gives them access to all its documents without per-document changes. Removing a member rotates GK and re-wraps to the remaining members.
+
+### Revocation
+
+Deleting a grant record removes the recipient's wrapped key from the network. However, if they previously cached the key or the decrypted content, that access can't be revoked retroactively. True forward secrecy requires re-encrypting the blob with a new content key and deleting the old blob. The schema supports this workflow.
+
+### Public Key Discovery
+
+AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes X25519 encryption public keys as `app.opake.cloud.publicKey/self` singleton records on each user's PDS. Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key.
+
+The key is published automatically on every `opake login` via an idempotent `putRecord`.
+
+## Data Model
+
+All records live under the `app.opake.cloud.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
+
+```mermaid
+erDiagram
+    DOCUMENT ||--o{ GRANT : "shared via"
+    DOCUMENT }o--o| KEYRING : "encrypted under"
+    PUBLICKEY ||--|| ACCOUNT : "one per"
+
+    DOCUMENT {
+        string name
+        blob encrypted_content
+        union encryption "direct or keyring"
+        string[] tags
+        string visibility
+    }
+
+    GRANT {
+        at-uri document
+        did recipient
+        wrappedKey key "content key wrapped to recipient"
+        string permissions
+    }
+
+    KEYRING {
+        string name
+        wrappedKey[] members "group key wrapped to each member"
+        int rotation
+    }
+
+    PUBLICKEY {
+        bytes public_key "X25519"
+        string algo
+    }
+```
+
+### Plaintext Metadata Tradeoff
+
+File names, tags, MIME types, and descriptions are stored unencrypted in the document record. This allows a personal AppView to index and search files server-side without access to encryption keys.
+
+For full opacity, set these fields to generic values and embed real metadata inside the encrypted blob. The schema supports both approaches.
+
+## Cross-PDS Access
+
+When you share a file, the data stays on your PDS. The recipient's client fetches everything directly from the source:
+
+1. Grant record (contains wrapped content key)
+2. Document record (contains blob reference and nonce)
+3. Blob (encrypted file content)
+
+All three are unauthenticated reads — AT Protocol records and blobs are public by design. The encryption is the access control, not the transport.
+
+## Multi-Account Support
+
+The CLI supports multiple authenticated accounts. Each account has its own:
+
+- Session tokens (access + refresh JWT)
+- X25519 keypair
+- PDS URL and handle
+
+Storage layout:
+
+```
+~/.config/opake/
+  config.toml            Global config (default DID, account map)
+  accounts/
+    <did>/
+      session.json       JWT tokens
+      identity.json      X25519 keypair (plaintext for MVP)
+```
+
+The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.

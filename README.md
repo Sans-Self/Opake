@@ -57,9 +57,12 @@ opake ls --tag vacation
 opake ls --as alice.example.com
 opake upload doc.pdf --as did:plc:alice123
 
-# download and decrypt
+# download and decrypt (your own files)
 opake download photo.jpg
 opake download photo.jpg -o ~/Downloads/copy.jpg
+
+# download a shared file from another user (via grant URI)
+opake download --grant at://did:plc:abc/app.opake.cloud.grant/tid123
 
 # delete
 opake rm photo.jpg
@@ -81,25 +84,9 @@ Commands accept either a filename or an `at://` URI. If a filename matches multi
 
 The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`) and accepts a handle or DID.
 
-## Project Structure
+## Architecture
 
-```
-crates/
-  opake-core/    # encryption, records, XRPC client (WASM-compatible)
-  opake-cli/     # CLI binary wrapping opake-core
-lexicons/        # AT Protocol lexicon schemas (app.opake.cloud.*)
-```
-
-`opake-core` is platform-agnostic and compiles to WASM — it will power both the CLI and a future web UI.
-
-## Encryption Model
-
-Every file gets a random AES-256-GCM content key. That key is wrapped (asymmetrically encrypted) to authorized DIDs using x25519-hkdf-a256kw. Two sharing modes:
-
-- **Direct encryption** — content key wrapped individually to each recipient's DID public key
-- **Keyring encryption** — a named group shares a group key; documents are wrapped under the group key; adding a member to the keyring grants access to all its documents
-
-Revoking access means deleting the grant record. True forward secrecy requires re-encrypting the blob with a new content key (supported by the schema, not enforced).
+Two crates: `opake-core` (platform-agnostic library, compiles to WASM) and `opake-cli` (thin CLI wrapper). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 
 ## Roadmap
 
@@ -108,9 +95,11 @@ Revoking access means deleting the grant record. True forward secrecy requires r
 - [x] Asymmetric key wrapping (x25519-hkdf-a256kw)
 - [x] Automatic token refresh
 - [x] Multi-account support (--as flag, logout, set-default, accounts)
-- [x] Public key discovery (app.opake.cloud.publicKey record)
+- [x] Public key auto-publish on login (app.opake.cloud.publicKey record)
 - [x] DID resolution and public key extraction
 - [x] Direct file sharing between DIDs
+- [x] Cross-PDS shared file download (via --grant flag)
+- [ ] Grant discovery (shared/inbox commands)
 - [ ] Keyring-based group sharing
 - [ ] Folder hierarchy
 - [ ] Web UI (Rust/Axum AppView + SPA)

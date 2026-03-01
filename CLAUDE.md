@@ -121,9 +121,11 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 
 ### Phase 2: Sharing
 - [x] `app.opake.cloud.publicKey` singleton record for encryption key discovery
-- [ ] `resolve <handle-or-did>` — resolve a DID, fetch DID document, extract public key from `app.opake.cloud.publicKey/self`
-- [ ] `share <at-uri> <did>` — wrap content key to recipient's pubkey, create grant record
-- [ ] `revoke <grant-at-uri>` — delete grant record
+- [x] Auto-publish encryption public key on login via `putRecord` (idempotent)
+- [x] `resolve <handle-or-did>` — resolve a DID, fetch DID document, extract public key from `app.opake.cloud.publicKey/self`
+- [x] `share <at-uri> <did>` — wrap content key to recipient's pubkey, create grant record
+- [x] `revoke <grant-at-uri>` — delete grant record
+- [x] `download --grant <grant-uri>` — cross-PDS shared file download via grant URI (temporary; will be replaced by auto-discovery)
 - [ ] `shared` — list grants you've created
 - [ ] `inbox` — list grants where you are the recipient (queries your own PDS for grants pointing to your DID... or requires an AppView for cross-PDS discovery)
 
