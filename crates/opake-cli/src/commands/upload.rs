@@ -34,8 +34,8 @@ impl Execute for UploadCommand {
             anyhow::bail!("--keyring not yet supported (tracking: chainlink #21)");
         }
 
-        let mut client = session::load_client()?;
-        let id = identity::load_identity()?;
+        let mut client = session::load_client_default()?;
+        let id = identity::load_identity_default()?;
         let owner_pubkey = id.public_key_bytes()?;
 
         let plaintext =

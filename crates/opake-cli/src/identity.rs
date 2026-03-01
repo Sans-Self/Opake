@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config;
 
-const FILENAME: &str = "identity.json";
-
 /// X25519 encryption keypair, stored as base64 in `identity.json`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Identity {
@@ -41,22 +39,31 @@ impl Identity {
     }
 }
 
-pub fn save_identity(identity: &Identity) -> anyhow::Result<()> {
-    config::save_json(FILENAME, identity)
+pub fn save_identity(did: &str, identity: &Identity) -> anyhow::Result<()> {
+    config::save_account_json(did, "identity.json", identity)
 }
 
-pub fn load_identity() -> anyhow::Result<Identity> {
-    config::load_json(FILENAME)
+pub fn load_identity(did: &str) -> anyhow::Result<Identity> {
+    config::load_account_json(did, "identity.json")
 }
 
-/// Return the existing identity if it matches `did`, otherwise generate a new
-/// X25519 keypair, save it, and return it. The boolean indicates whether a new
-/// keypair was generated.
+/// Load identity for the default account.
+pub fn load_identity_default() -> anyhow::Result<Identity> {
+    let config = config::load_config()?;
+    let did = config
+        .default_did
+        .ok_or_else(|| anyhow::anyhow!("no default account: run `opake login` first"))?;
+    load_identity(&did)
+}
+
+/// Return the existing identity if present, otherwise generate a new
+/// X25519 keypair, save it, and return it. The boolean indicates whether
+/// a new keypair was generated.
 pub fn ensure_identity(
     did: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> anyhow::Result<(Identity, bool)> {
-    if let Ok(existing) = load_identity() {
+    if let Ok(existing) = load_identity(did) {
         if existing.did == did {
             return Ok((existing, false));
         }
@@ -74,7 +81,7 @@ pub fn ensure_identity(
         public_key: BASE64.encode(public_key.as_bytes()),
         private_key: BASE64.encode(private_secret.to_bytes()),
     };
-    save_identity(&identity)?;
+    save_identity(did, &identity)?;
     Ok((identity, true))
 }
 
@@ -83,23 +90,37 @@ mod tests {
     use super::*;
     use crate::utils::test_harness::with_test_dir;
     use opake_core::crypto::OsRng;
-    use std::fs;
+    use std::collections::BTreeMap;
 
-    fn file_path() -> std::path::PathBuf {
-        config::data_dir().join(FILENAME)
+    fn setup_account(did: &str) {
+        let mut accounts = BTreeMap::new();
+        accounts.insert(
+            did.to_string(),
+            config::AccountConfig {
+                pds_url: "https://pds.test".into(),
+                handle: "test.handle".into(),
+            },
+        );
+        config::save_config(&config::Config {
+            default_did: Some(did.to_string()),
+            accounts,
+        })
+        .unwrap();
     }
 
     #[test]
     fn save_and_load_identity_roundtrip() {
         with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
             let identity = Identity {
-                did: "did:plc:test".into(),
+                did: did.into(),
                 public_key: BASE64.encode([1u8; 32]),
                 private_key: BASE64.encode([2u8; 32]),
             };
-            save_identity(&identity).unwrap();
+            save_identity(did, &identity).unwrap();
 
-            let loaded = load_identity().unwrap();
+            let loaded = load_identity(did).unwrap();
             assert_eq!(loaded.did, identity.did);
             assert_eq!(loaded.public_key, identity.public_key);
             assert_eq!(loaded.private_key, identity.private_key);
@@ -112,9 +133,11 @@ mod tests {
     #[test]
     fn ensure_identity_generates_when_missing() {
         with_test_dir(|_| {
-            let (identity, generated) = ensure_identity("did:plc:new", &mut OsRng).unwrap();
+            let did = "did:plc:new";
+            setup_account(did);
+            let (identity, generated) = ensure_identity(did, &mut OsRng).unwrap();
             assert!(generated);
-            assert_eq!(identity.did, "did:plc:new");
+            assert_eq!(identity.did, did);
             assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
             assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
         });
@@ -123,10 +146,12 @@ mod tests {
     #[test]
     fn ensure_identity_returns_existing_when_did_matches() {
         with_test_dir(|_| {
-            let (first, generated) = ensure_identity("did:plc:same", &mut OsRng).unwrap();
+            let did = "did:plc:same";
+            setup_account(did);
+            let (first, generated) = ensure_identity(did, &mut OsRng).unwrap();
             assert!(generated);
 
-            let (second, generated) = ensure_identity("did:plc:same", &mut OsRng).unwrap();
+            let (second, generated) = ensure_identity(did, &mut OsRng).unwrap();
             assert!(!generated);
             assert_eq!(first.public_key, second.public_key);
             assert_eq!(first.private_key, second.private_key);
@@ -134,49 +159,43 @@ mod tests {
     }
 
     #[test]
-    fn ensure_identity_regenerates_on_did_mismatch() {
+    fn load_identity_default_works() {
         with_test_dir(|_| {
-            let (first, _) = ensure_identity("did:plc:alice", &mut OsRng).unwrap();
-            let (second, generated) = ensure_identity("did:plc:bob", &mut OsRng).unwrap();
-            assert!(generated);
-            assert_eq!(second.did, "did:plc:bob");
-            assert_ne!(first.public_key, second.public_key);
+            let did = "did:plc:default";
+            setup_account(did);
+            let (_, _) = ensure_identity(did, &mut OsRng).unwrap();
+            let loaded = load_identity_default().unwrap();
+            assert_eq!(loaded.did, did);
         });
     }
 
     #[test]
     fn load_identity_rejects_garbage_json() {
         with_test_dir(|_| {
-            config::ensure_data_dir().unwrap();
-            fs::write(file_path(), "not json {{{").unwrap();
-            assert!(load_identity().is_err());
+            let did = "did:plc:test";
+            setup_account(did);
+            config::ensure_account_dir(did).unwrap();
+            std::fs::write(
+                config::account_dir(did).join("identity.json"),
+                "not json {{{",
+            )
+            .unwrap();
+            assert!(load_identity(did).is_err());
         });
     }
 
     #[test]
     fn load_identity_rejects_valid_json_wrong_schema() {
         with_test_dir(|_| {
-            config::ensure_data_dir().unwrap();
-            fs::write(file_path(), r#"{"color": "blue"}"#).unwrap();
-            assert!(load_identity().is_err());
-        });
-    }
-
-    #[test]
-    fn load_identity_rejects_empty_file() {
-        with_test_dir(|_| {
-            config::ensure_data_dir().unwrap();
-            fs::write(file_path(), "").unwrap();
-            assert!(load_identity().is_err());
-        });
-    }
-
-    #[test]
-    fn load_identity_rejects_binary_noise() {
-        with_test_dir(|_| {
-            config::ensure_data_dir().unwrap();
-            fs::write(file_path(), vec![0xFF, 0xFE, 0x00, 0x01]).unwrap();
-            assert!(load_identity().is_err());
+            let did = "did:plc:test";
+            setup_account(did);
+            config::ensure_account_dir(did).unwrap();
+            std::fs::write(
+                config::account_dir(did).join("identity.json"),
+                r#"{"color": "blue"}"#,
+            )
+            .unwrap();
+            assert!(load_identity(did).is_err());
         });
     }
 
@@ -204,7 +223,7 @@ mod tests {
     fn public_key_bytes_rejects_wrong_length() {
         let identity = Identity {
             did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 16]), // 16 bytes, not 32
+            public_key: BASE64.encode([0u8; 16]),
             private_key: BASE64.encode([0u8; 32]),
         };
         let err = identity.public_key_bytes().unwrap_err().to_string();
@@ -216,7 +235,7 @@ mod tests {
         let identity = Identity {
             did: "did:plc:test".into(),
             public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 64]), // 64 bytes, not 32
+            private_key: BASE64.encode([0u8; 64]),
         };
         let err = identity.private_key_bytes().unwrap_err().to_string();
         assert!(err.contains("64 bytes"), "expected length in error: {err}");

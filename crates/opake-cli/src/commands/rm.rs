@@ -19,7 +19,7 @@ pub struct RmCommand {
 
 impl Execute for RmCommand {
     async fn execute(self) -> Result<Option<Session>> {
-        let mut client = session::load_client()?;
+        let mut client = session::load_client_default()?;
         let uri = documents::resolve_uri(&mut client, &self.reference).await?;
 
         if !self.yes {

@@ -43,8 +43,8 @@ fn write_output(path: &Path, content: &[u8]) -> Result<()> {
 
 impl Execute for DownloadCommand {
     async fn execute(self) -> Result<Option<Session>> {
-        let mut client = session::load_client()?;
-        let id = identity::load_identity().context("run `opake login` first")?;
+        let mut client = session::load_client_default()?;
+        let id = identity::load_identity_default().context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
         let uri = documents::resolve_uri(&mut client, &self.reference).await?;

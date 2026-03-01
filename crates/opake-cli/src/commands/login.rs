@@ -4,10 +4,12 @@ use log::debug;
 use opake_core::client::{Session, XrpcClient};
 
 use crate::commands::Execute;
-use crate::config;
+use crate::config::{self, AccountConfig};
 use crate::identity;
 use crate::transport::ReqwestTransport;
 use crate::utils::prefixed_get_env;
+
+use std::collections::BTreeMap;
 
 /// Resolve password from env var or a fallback function (e.g. stdin prompt).
 pub fn resolve_password(
@@ -55,11 +57,26 @@ impl Execute for LoginCommand {
 
         let session = client.login(self.identifier.trim(), &password).await?;
 
-        // PDS URL is login-specific config — write it here, session
-        // persistence is handled by the dispatch layer.
-        config::save_config(&config::Config {
-            pds_url: self.pds.clone(),
-        })?;
+        // Register this account in the config. Merge into existing accounts
+        // if present, set as default if it's the first one.
+        let mut cfg = config::load_config().unwrap_or(config::Config {
+            default_did: None,
+            accounts: BTreeMap::new(),
+        });
+
+        cfg.accounts.insert(
+            session.did.clone(),
+            AccountConfig {
+                pds_url: self.pds.clone(),
+                handle: session.handle.clone(),
+            },
+        );
+
+        if cfg.default_did.is_none() {
+            cfg.default_did = Some(session.did.clone());
+        }
+
+        config::save_config(&cfg)?;
 
         let (_, generated) =
             identity::ensure_identity(&session.did, &mut opake_core::crypto::OsRng)?;

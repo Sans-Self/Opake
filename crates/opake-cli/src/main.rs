@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Some(ref s) = refreshed {
-        session::persist_session(s)?;
+        session::persist_session(&s.did, s)?;
     }
 
     Ok(())
