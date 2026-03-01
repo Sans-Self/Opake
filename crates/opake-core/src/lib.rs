@@ -11,6 +11,7 @@
 pub mod atproto;
 pub mod client;
 pub mod crypto;
+pub mod documents;
 pub mod error;
 pub mod records;
 

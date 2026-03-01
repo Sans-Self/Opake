@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Add document deletion via com.atproto.repo.deleteRecord (#8)
+- Add document listing via com.atproto.repo.listRecords (#7)
 - Extract AT Protocol primitives into dedicated atproto module
 - Consolidate XRPC response checking into send_checked method
 - Add file download with client-side decryption (#6)

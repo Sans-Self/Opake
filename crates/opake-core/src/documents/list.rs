@@ -1,0 +1,215 @@
+use log::debug;
+
+use crate::client::{RecordPage, Transport, XrpcClient};
+use crate::error::Error;
+use crate::records::{self, Document};
+
+use super::DOCUMENT_COLLECTION;
+
+/// A document listing entry with its AT-URI and parsed metadata.
+#[derive(Debug)]
+pub struct DocumentEntry {
+    pub uri: String,
+    pub name: String,
+    pub size: Option<u64>,
+    pub mime_type: Option<String>,
+    pub tags: Vec<String>,
+    pub created_at: String,
+}
+
+/// Fetch all document records, paginating through the full collection.
+/// Silently skips records that can't be parsed or have an unsupported
+/// schema version — these are expected when upgrading clients.
+pub async fn list_documents(
+    client: &XrpcClient<impl Transport>,
+) -> Result<Vec<DocumentEntry>, Error> {
+    let mut entries = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    loop {
+        debug!("listing records, cursor={:?}", cursor);
+        let page: RecordPage = client
+            .list_records(DOCUMENT_COLLECTION, Some(100), cursor.as_deref())
+            .await?;
+
+        for record in &page.records {
+            let doc: Document = match serde_json::from_value(record.value.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    debug!("skipping unparseable record {}: {}", record.uri, e);
+                    continue;
+                }
+            };
+
+            if records::check_version(doc.version).is_err() {
+                debug!(
+                    "skipping record {} with unsupported version {}",
+                    record.uri, doc.version
+                );
+                continue;
+            }
+
+            entries.push(DocumentEntry {
+                uri: record.uri.clone(),
+                name: doc.name,
+                size: doc.size,
+                mime_type: doc.mime_type,
+                tags: doc.tags,
+                created_at: doc.created_at,
+            });
+        }
+
+        match page.cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+
+    Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::HttpResponse;
+    use crate::records;
+    use crate::test_utils::MockTransport;
+
+    use super::super::tests::{dummy_document, list_records_response, mock_client};
+
+    #[tokio::test]
+    async fn single_document() {
+        let doc = dummy_document("notes.txt", 1024, vec![]);
+        let mock = MockTransport::new();
+        mock.enqueue(list_records_response(&[("abc", doc)], None));
+
+        let client = mock_client(mock.clone());
+        let entries = list_documents(&client).await.unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "notes.txt");
+        assert_eq!(entries[0].size, Some(1024));
+        assert!(entries[0].uri.contains("abc"));
+
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.contains("listRecords"));
+        assert!(requests[0].url.contains("app.opake.cloud.document"));
+    }
+
+    #[tokio::test]
+    async fn multiple_documents() {
+        let docs = vec![
+            (
+                "a1",
+                dummy_document("photo.jpg", 2_000_000, vec!["photos".into()]),
+            ),
+            ("a2", dummy_document("resume.pdf", 50_000, vec![])),
+            (
+                "a3",
+                dummy_document("secret.key", 256, vec!["crypto".into(), "keys".into()]),
+            ),
+        ];
+        let mock = MockTransport::new();
+        mock.enqueue(list_records_response(&docs, None));
+
+        let client = mock_client(mock);
+        let entries = list_documents(&client).await.unwrap();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "photo.jpg");
+        assert_eq!(entries[1].name, "resume.pdf");
+        assert_eq!(entries[2].name, "secret.key");
+        assert_eq!(entries[2].tags, vec!["crypto", "keys"]);
+    }
+
+    #[tokio::test]
+    async fn paginates_through_multiple_pages() {
+        let mock = MockTransport::new();
+        mock.enqueue(list_records_response(
+            &[("a1", dummy_document("file1.txt", 100, vec![]))],
+            Some("cursor-abc"),
+        ));
+        mock.enqueue(list_records_response(
+            &[("a2", dummy_document("file2.txt", 200, vec![]))],
+            None,
+        ));
+
+        let client = mock_client(mock.clone());
+        let entries = list_documents(&client).await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "file1.txt");
+        assert_eq!(entries[1].name, "file2.txt");
+
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].url.contains("cursor=cursor-abc"));
+    }
+
+    #[tokio::test]
+    async fn empty_collection() {
+        let mock = MockTransport::new();
+        mock.enqueue(list_records_response(&[], None));
+
+        let client = mock_client(mock);
+        let entries = list_documents(&client).await.unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn skips_unparseable_records() {
+        let body = serde_json::json!({
+            "records": [
+                {
+                    "uri": "at://did:plc:test/app.opake.cloud.document/bad1",
+                    "cid": "bafybad",
+                    "value": { "this": "is not a document" },
+                },
+                {
+                    "uri": "at://did:plc:test/app.opake.cloud.document/good1",
+                    "cid": "bafygood",
+                    "value": dummy_document("good.txt", 42, vec![]),
+                },
+            ]
+        });
+
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status: 200,
+            body: serde_json::to_vec(&body).unwrap(),
+        });
+
+        let client = mock_client(mock);
+        let entries = list_documents(&client).await.unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "good.txt");
+    }
+
+    #[tokio::test]
+    async fn skips_future_schema_version() {
+        let mut doc = dummy_document("future.txt", 100, vec![]);
+        doc.version = records::SCHEMA_VERSION + 1;
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_records_response(&[("f1", doc)], None));
+
+        let client = mock_client(mock);
+        let entries = list_documents(&client).await.unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pds_error_propagates() {
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status: 500,
+            body: br#"{"error":"InternalServerError","message":"something broke"}"#.to_vec(),
+        });
+
+        let client = mock_client(mock);
+        let err = list_documents(&client).await.unwrap_err();
+        assert!(matches!(err, Error::Xrpc { .. }));
+    }
+}
