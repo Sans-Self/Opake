@@ -1,12 +1,14 @@
-# opake
+# Opake
+
+**/oʊˈpɑːk/** — like "opaque," but Dutch-flavored.
 
 An encrypted personal cloud built on the [AT Protocol](https://atproto.com).
 
 Opake uses your existing PDS as a storage and identity layer. Files are encrypted client-side with AES-256-GCM before upload — the PDS only ever sees ciphertext. Custom lexicons under `app.opake.cloud.*` give structure to documents, encryption metadata, and sharing grants.
 
-The name comes from the Dutch-flavored spelling of "opaque" — because that's exactly what your data is to everyone without the key.
+Your data is opaque to everyone without the key. That's the point.
 
-## How it works
+## How It Works
 
 ```
 plaintext file
@@ -18,7 +20,7 @@ plaintext file
 
 No middleware, no AppView, no modifications to the PDS. All crypto happens on your machine.
 
-## Build from source
+## Build From Source
 
 Requires Rust 1.75+.
 
@@ -54,7 +56,7 @@ opake rm photo.jpg
 
 Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
 
-## Project structure
+## Project Structure
 
 ```
 crates/
@@ -65,7 +67,7 @@ lexicons/        # AT Protocol lexicon schemas (app.opake.cloud.*)
 
 `opake-core` is platform-agnostic and compiles to WASM — it will power both the CLI and a future web UI.
 
-## Encryption model
+## Encryption Model
 
 Every file gets a random AES-256-GCM content key. That key is wrapped (asymmetrically encrypted) to authorized DIDs using x25519-hkdf-a256kw. Two sharing modes:
 

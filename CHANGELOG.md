@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Improve README with pronunciation guide and formatting polish (#48)
 - Add automatic token refresh using refresh_jwt on expired sessions (#34)
 - Add filename resolution for rm command (#42)
 - Add filename resolution for download command (#41)
