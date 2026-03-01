@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Add per-account session and identity persistence (#51)
+- Add multi-account config struct and per-account storage layout (#50)
+- Add publicKey lexicon and PublicKeyRecord struct (#55)
 - Add document deletion via com.atproto.repo.deleteRecord (#8)
 - Add document listing via com.atproto.repo.listRecords (#7)
 - Extract AT Protocol primitives into dedicated atproto module

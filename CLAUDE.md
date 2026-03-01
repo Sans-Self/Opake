@@ -109,16 +109,19 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 ## Implementation Plan
 
 ### Phase 1: CLI Foundation
-- [ ] Project scaffold: Rust binary with clap, config file for PDS URL + credentials
-- [ ] Auth: create session via `com.atproto.server.createSession`, manage tokens
-- [ ] `upload <file>` — generate AES-256-GCM key, encrypt file, upload blob via `com.atproto.repo.uploadBlob`, create `app.opake.cloud.document` record
-- [ ] `download <at-uri>` — fetch document record, fetch blob via `com.atproto.sync.getBlob`, decrypt, write to disk
-- [ ] `ls` — list document records via `com.atproto.repo.listRecords`
-- [ ] `rm <at-uri>` — delete document record (and blob becomes orphaned/GC'd)
-- [ ] Local keystore for the user's own wrapped keys (so you can decrypt your own files)
+- [x] Project scaffold: Rust binary with clap, config file for PDS URL + credentials
+- [x] Auth: create session via `com.atproto.server.createSession`, manage tokens
+- [x] `upload <file>` — generate AES-256-GCM key, encrypt file, upload blob via `com.atproto.repo.uploadBlob`, create `app.opake.cloud.document` record
+- [x] `download <at-uri>` — fetch document record, fetch blob via `com.atproto.sync.getBlob`, decrypt, write to disk
+- [x] `ls` — list document records via `com.atproto.repo.listRecords`
+- [x] `rm <at-uri>` — delete document record (and blob becomes orphaned/GC'd)
+- [x] Local keystore for the user's own wrapped keys (so you can decrypt your own files)
+- [x] Multi-account support (`--as` flag, `logout`, `set-default`, `accounts` commands)
+- [x] Automatic token refresh via `com.atproto.server.refreshSession`
 
 ### Phase 2: Sharing
-- [ ] `resolve <handle-or-did>` — resolve a DID, fetch DID document, extract public key
+- [x] `app.opake.cloud.publicKey` singleton record for encryption key discovery
+- [ ] `resolve <handle-or-did>` — resolve a DID, fetch DID document, extract public key from `app.opake.cloud.publicKey/self`
 - [ ] `share <at-uri> <did>` — wrap content key to recipient's pubkey, create grant record
 - [ ] `revoke <grant-at-uri>` — delete grant record
 - [ ] `shared` — list grants you've created
@@ -164,12 +167,9 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 
 6. **50MB blob limit is fine for now.** Covers documents, photos, and short media. Large file support (video, archives) can come later via a sidecar service similar to how Tangled uses "knots" alongside the PDS.
 
-7. **Multi-device key management: TBD.** The user's encryption keypair must be available on every device that needs to decrypt files. Three options under consideration — choice affects UX significantly:
-   - **(A) Key export/import** — User manually transfers an encrypted private key between devices. Simple to implement (git-crypt model), worst UX. Requires `opake export-key` / `opake import-key` commands.
-   - **(B) Multi-device keys** — Each device generates its own keypair and registers its public key in the DID document. Content keys get re-wrapped to all device keys. No key material leaves a device (most secure), but requires re-wrapping on device addition.
-   - **(C) Recovery seed** — Derive the keypair deterministically from a BIP-39-style mnemonic. Same seed on any device produces the same key. Best UX, but a leaked seed compromises everything.
+7. **Multi-device key management: seed phrase (option C).** The keypair will be derived deterministically from a BIP-39-style mnemonic. Same seed on any device produces the same key. Best UX, but a leaked seed compromises everything. Key export/import as an escape hatch. For MVP: plaintext keypair at `~/.config/opake/accounts/<did>/identity.json`, seed derivation is future work.
 
-   Decision deferred until #9 (local keystore) is closer to implementation. UX matters here — this is the first thing a user hits after install.
+8. **Public keys as PDS records.** Since atproto DID documents only contain signing keys (secp256k1/P-256), not encryption keys, Opake publishes X25519 encryption public keys as `app.opake.cloud.publicKey/self` singleton records on each user's PDS. This makes key discovery a simple unauthenticated `getRecord` call.
 
 ## File Structure
 
@@ -179,6 +179,7 @@ lexicons/
 ├── EXAMPLES.md                        # Concrete example records with annotations
 ├── app.opake.cloud.defs.json          # Shared type definitions
 ├── app.opake.cloud.document.json      # File/document record
+├── app.opake.cloud.publicKey.json     # Encryption public key (singleton)
 ├── app.opake.cloud.keyring.json       # Group access keyring
 └── app.opake.cloud.grant.json         # Ad-hoc share grant
 ```

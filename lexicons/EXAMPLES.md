@@ -1,10 +1,27 @@
 # Example Records
 
+## 0. Public key record (published on login)
+
+Every Opake user publishes their X25519 encryption public key as a singleton record. This is how other users discover your key when sharing files with you.
+
+```json
+{
+  "$type": "app.opake.cloud.publicKey",
+  "version": 1,
+  "publicKey": { "$bytes": "base64-encoded-32-byte-x25519-public-key" },
+  "algo": "x25519",
+  "createdAt": "2026-03-01T10:00:00.000Z"
+}
+```
+
+This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only one per account. The key is published automatically on `opake login`.
+
 ## 1. Alice creates a private encrypted document
 
 ```json
 {
   "$type": "app.opake.cloud.document",
+  "version": 1,
   "name": "tax-return-2025.pdf",
   "mimeType": "application/pdf",
   "size": 284619,
@@ -23,7 +40,7 @@
         {
           "did": "did:plc:alice123",
           "ciphertext": { "$bytes": "base64-wrapped-content-key-for-alice" },
-          "algo": "ECDH-ES+A256KW"
+          "algo": "x25519-hkdf-a256kw"
         }
       ]
     }
@@ -44,12 +61,13 @@ can decrypt.
 ```json
 {
   "$type": "app.opake.cloud.grant",
+  "version": 1,
   "document": "at://did:plc:alice123/app.opake.cloud.document/3k...",
   "recipient": "did:plc:bob456",
   "wrappedKey": {
     "did": "did:plc:bob456",
     "ciphertext": { "$bytes": "base64-wrapped-content-key-for-bob" },
-    "algo": "ECDH-ES+A256KW"
+    "algo": "x25519-hkdf-a256kw"
   },
   "permissions": "read",
   "note": "Here's the tax doc you asked about",
@@ -76,6 +94,7 @@ the document with a fresh content key.
 ```json
 {
   "$type": "app.opake.cloud.keyring",
+  "version": 1,
   "name": "family-photos",
   "description": "Shared photo collection for the family",
   "algo": "aes-256-gcm",
@@ -83,17 +102,17 @@ the document with a fresh content key.
     {
       "did": "did:plc:alice123",
       "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
-      "algo": "ECDH-ES+A256KW"
+      "algo": "x25519-hkdf-a256kw"
     },
     {
       "did": "did:plc:bob456",
       "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
-      "algo": "ECDH-ES+A256KW"
+      "algo": "x25519-hkdf-a256kw"
     },
     {
       "did": "did:plc:carol789",
       "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
-      "algo": "ECDH-ES+A256KW"
+      "algo": "x25519-hkdf-a256kw"
     }
   ],
   "rotation": 0,
@@ -106,6 +125,7 @@ the document with a fresh content key.
 ```json
 {
   "$type": "app.opake.cloud.document",
+  "version": 1,
   "name": "beach-sunset.jpg",
   "mimeType": "image/jpeg",
   "size": 3841029,

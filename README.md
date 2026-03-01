@@ -38,6 +38,13 @@ The binary lands at `target/release/opake`.
 # authenticate with your PDS
 opake login --pds https://pds.example.com --identifier alice.example.com
 
+# log in to a second account
+opake login --pds https://other-pds.example.com --identifier bob.other.com
+
+# list accounts and switch default
+opake accounts
+opake set-default bob.other.com
+
 # upload a file (encrypts + uploads)
 opake upload photo.jpg --tags vacation,beach
 
@@ -46,15 +53,22 @@ opake ls
 opake ls --long
 opake ls --tag vacation
 
+# use a specific account for any command
+opake ls --as alice.example.com
+opake upload doc.pdf --as did:plc:alice123
+
 # download and decrypt
 opake download photo.jpg
 opake download photo.jpg -o ~/Downloads/copy.jpg
 
 # delete
 opake rm photo.jpg
+
+# remove an account
+opake logout --did did:plc:bob456
 ```
 
-Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
+Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI. The `--as` flag accepts a handle or DID and works with any command.
 
 ## Project Structure
 
@@ -82,6 +96,8 @@ Revoking access means deleting the grant record. True forward secrecy requires r
 - [x] Client-side AES-256-GCM encryption
 - [x] Asymmetric key wrapping (x25519-hkdf-a256kw)
 - [x] Automatic token refresh
+- [x] Multi-account support (--as flag, logout, set-default, accounts)
+- [x] Public key discovery (app.opake.cloud.publicKey record)
 - [ ] DID resolution and public key extraction
 - [ ] Direct file sharing between DIDs
 - [ ] Keyring-based group sharing

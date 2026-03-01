@@ -16,6 +16,7 @@ The encryption model follows the same hybrid pattern as git-crypt:
 |------|------|---------|
 | `app.opake.cloud.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
 | `app.opake.cloud.document` | record | An encrypted file/document with metadata |
+| `app.opake.cloud.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.cloud.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
 | `app.opake.cloud.grant` | record | A share grant — gives a DID access to a specific document's key |
 
@@ -28,7 +29,7 @@ The encryption model follows the same hybrid pattern as git-crypt:
    - Wraps K to her own DID pubkey → stores in document record
 
 2. Alice shares with Bob (did:plc:bob):
-   - Resolves did:plc:bob → gets public key from DID document
+   - Resolves did:plc:bob → fetches app.opake.cloud.publicKey/self from Bob's PDS
    - Wraps K to Bob's pubkey
    - Creates a grant record pointing to the document, containing Bob's wrapped key
 
