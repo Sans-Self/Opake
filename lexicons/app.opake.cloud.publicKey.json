@@ -1,0 +1,37 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.publicKey",
+  "description": "X25519 encryption public key for an Opake user. Singleton record (rkey: 'self') published on the user's PDS to enable key discovery for sharing.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["version", "publicKey", "algo", "createdAt"],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Schema version for forward compatibility."
+          },
+          "publicKey": {
+            "type": "bytes",
+            "maxLength": 32,
+            "description": "Raw X25519 public key bytes."
+          },
+          "algo": {
+            "type": "string",
+            "knownValues": ["x25519"],
+            "description": "Key algorithm identifier."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When the key was created."
+          }
+        }
+      }
+    }
+  }
+}

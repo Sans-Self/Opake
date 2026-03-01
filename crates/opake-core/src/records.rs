@@ -143,6 +143,39 @@ impl Document {
 }
 
 // ---------------------------------------------------------------------------
+// app.opake.cloud.publicKey
+// ---------------------------------------------------------------------------
+
+pub const PUBLIC_KEY_COLLECTION: &str = "app.opake.cloud.publicKey";
+pub const PUBLIC_KEY_RKEY: &str = "self";
+
+/// Singleton public key record published on the user's PDS.
+/// Uses rkey "self" (like app.bsky.actor.profile).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicKeyRecord {
+    #[serde(default = "default_version")]
+    pub version: u32,
+    pub public_key: AtBytes,
+    pub algo: String,
+    pub created_at: String,
+}
+
+impl PublicKeyRecord {
+    pub fn new(public_key_bytes: &[u8], created_at: &str) -> Self {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        Self {
+            version: SCHEMA_VERSION,
+            public_key: AtBytes {
+                encoded: BASE64.encode(public_key_bytes),
+            },
+            algo: "x25519".into(),
+            created_at: created_at.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // app.opake.cloud.grant
 // ---------------------------------------------------------------------------
 
@@ -207,5 +240,33 @@ mod tests {
     #[test]
     fn check_version_rejects_max() {
         assert!(check_version(u32::MAX).is_err());
+    }
+
+    #[test]
+    fn public_key_record_new_sets_defaults() {
+        let record = PublicKeyRecord::new(&[42u8; 32], "2026-03-01T00:00:00Z");
+        assert_eq!(record.version, SCHEMA_VERSION);
+        assert_eq!(record.algo, "x25519");
+        assert_eq!(record.created_at, "2026-03-01T00:00:00Z");
+    }
+
+    #[test]
+    fn public_key_record_roundtrips_through_json() {
+        let record = PublicKeyRecord::new(&[7u8; 32], "2026-03-01T12:00:00Z");
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: PublicKeyRecord = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.version, record.version);
+        assert_eq!(parsed.public_key.encoded, record.public_key.encoded);
+        assert_eq!(parsed.algo, "x25519");
+        assert_eq!(parsed.created_at, "2026-03-01T12:00:00Z");
+    }
+
+    #[test]
+    fn public_key_record_uses_atbytes_wire_format() {
+        let record = PublicKeyRecord::new(&[1u8; 32], "2026-03-01T00:00:00Z");
+        let json = serde_json::to_value(&record).unwrap();
+        // atproto $bytes convention: { "$bytes": "<base64>" }
+        assert!(json["publicKey"]["$bytes"].is_string());
     }
 }
