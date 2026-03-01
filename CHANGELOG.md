@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add cross-PDS download for keyring members (#84)
+- Add keyring-based group sharing (#16)
+- Add keyring-based group sharing for multi-user access control (#75)
 - Add shared command to list outgoing grants (#14)
 - Add MermaidJS flow diagrams and restructure documentation (#72)
 - Improve naming consistency and split documents/download.rs (#71)
@@ -31,6 +34,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client (#31)
 
 ### Changed
+- Add keyring member management (add-member, remove-member) (#79)
+- Add CLI keyring commands and local group key store (#78)
+- Add keyrings core module with create and list operations (#77)
+- Implement symmetric key wrapping primitives in crypto.rs (#76)
 - Add automatic public key publishing on login (#58)
 - Replace raw [u8; 32] with X25519PublicKey/X25519PrivateKey type aliases (#63)
 - Split client.rs into module directory for transport, xrpc, and DID resolution (#64)

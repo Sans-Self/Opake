@@ -125,9 +125,9 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 - [x] `resolve <handle-or-did>` — resolve a DID, fetch DID document, extract public key from `app.opake.cloud.publicKey/self`
 - [x] `share <at-uri> <did>` — wrap content key to recipient's pubkey, create grant record
 - [x] `revoke <grant-at-uri>` — delete grant record
-- [x] `download --grant <grant-uri>` — cross-PDS shared file download via grant URI (temporary; will be replaced by auto-discovery)
+- [x] `download --grant <grant-uri>` — cross-PDS shared file download via grant URI (permanent zero-trust mode; explicit grant selection without relying on discovery)
 - [x] `shared` — list grants you've created
-- [ ] `inbox` — list grants where you are the recipient (queries your own PDS for grants pointing to your DID... or requires an AppView for cross-PDS discovery)
+- [ ] `inbox` — list grants where you are the recipient (requires AppView — grants live on the owner's PDS, not the recipient's; blocked on Phase 4 minimal AppView)
 
 ### Phase 3: Keyrings
 - [ ] `keyring create <name>` — generate group key, wrap to self, create keyring record
@@ -136,8 +136,10 @@ The CLI talks directly to the PDS over XRPC. No middleware, no AppView needed fo
 - [ ] `keyring ls` — list keyrings
 - [ ] `upload <file> --keyring <name>` — encrypt under a keyring instead of direct keys
 
-### Phase 4: Web UI (future)
-- [ ] Rust/Axum JSON API server (the AppView) that indexes document/grant/keyring records
+### Phase 4: AppView + Web UI
+- [ ] Minimal Axum AppView: subscribe to PDS event streams, index grants + keyring membership by recipient DID
+- [ ] `inbox` command queries AppView for incoming grants
+- [ ] Local grant cache: `download --grant` caches grant metadata for offline/zero-trust inbox view
 - [ ] SPA frontend (TypeScript or Yew) with client-side crypto via Web Crypto API
 - [ ] File browser, search, upload/download, grant management UI
 

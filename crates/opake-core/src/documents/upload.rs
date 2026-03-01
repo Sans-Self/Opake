@@ -2,9 +2,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::debug;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
 use crate::error::Error;
-use crate::records::{AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope};
+use crate::records::{
+    AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope, KeyringEncryption,
+    KeyringRef,
+};
 
 use super::DOCUMENT_COLLECTION;
 
@@ -78,6 +81,84 @@ pub async fn encrypt_and_upload(
                         encoded: BASE64.encode(payload.nonce),
                     },
                     keys: vec![wrapped_key],
+                },
+            }),
+            params.created_at.into(),
+        )
+    };
+
+    let record_ref = client.create_record(DOCUMENT_COLLECTION, &document).await?;
+
+    Ok(record_ref.uri)
+}
+
+/// Parameters for keyring-based upload.
+pub struct KeyringUploadParams<'a> {
+    pub plaintext: &'a [u8],
+    pub filename: &'a str,
+    pub mime_type: &'a str,
+    pub keyring_uri: &'a str,
+    pub group_key: &'a ContentKey,
+    pub rotation: u64,
+    pub tags: Vec<String>,
+    pub created_at: &'a str,
+}
+
+/// Encrypt plaintext, upload the blob, wrap the content key under the keyring's
+/// group key, and create the document record. Returns the AT-URI.
+pub async fn encrypt_and_upload_keyring(
+    client: &mut XrpcClient<impl Transport>,
+    params: &KeyringUploadParams<'_>,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<String, Error> {
+    if params.plaintext.len() > MAX_BLOB_SIZE {
+        return Err(Error::InvalidRecord(format!(
+            "file is {} bytes — PDS blob limit is {} bytes (50 MB)",
+            params.plaintext.len(),
+            MAX_BLOB_SIZE,
+        )));
+    }
+
+    debug!(
+        "encrypting {} ({} bytes, {}) under keyring",
+        params.filename,
+        params.plaintext.len(),
+        params.mime_type
+    );
+
+    let content_key = crypto::generate_content_key(rng);
+    let payload = crypto::encrypt_blob(&content_key, params.plaintext, rng)?;
+
+    debug!(
+        "uploading encrypted blob ({} bytes)",
+        payload.ciphertext.len()
+    );
+
+    let blob_ref = client
+        .upload_blob(payload.ciphertext, "application/octet-stream")
+        .await?;
+
+    let wrapped_content_key = crypto::wrap_content_key_for_keyring(&content_key, params.group_key)?;
+
+    let document = Document {
+        mime_type: Some(params.mime_type.into()),
+        size: Some(params.plaintext.len() as u64),
+        tags: params.tags.clone(),
+        visibility: Some("private".into()),
+        ..Document::new(
+            params.filename.into(),
+            blob_ref,
+            Encryption::Keyring(KeyringEncryption {
+                keyring_ref: KeyringRef {
+                    keyring: params.keyring_uri.into(),
+                    wrapped_content_key: AtBytes {
+                        encoded: BASE64.encode(&wrapped_content_key),
+                    },
+                    rotation: params.rotation,
+                },
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: BASE64.encode(payload.nonce),
                 },
             }),
             params.created_at.into(),

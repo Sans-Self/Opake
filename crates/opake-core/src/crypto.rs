@@ -38,6 +38,7 @@ const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
 const CIPHERTEXT_LEN: usize = X25519_KEY_LEN + WRAPPED_KEY_LEN;
 
 /// A 256-bit AES content encryption key.
+#[derive(Debug)]
 pub struct ContentKey(pub [u8; CONTENT_KEY_LEN]);
 
 /// An X25519 public key: 32 raw bytes.
@@ -212,20 +213,38 @@ pub fn create_group_key(
     Ok((group_key, wrapped_keys?))
 }
 
-/// Wrap a per-document content key under a keyring's group key (symmetric wrapping).
+/// Wrap a per-document content key under a keyring's group key (symmetric AES-KW).
+///
+/// Returns 40 bytes: the 32-byte content key + 8-byte AES-KW integrity tag.
 pub fn wrap_content_key_for_keyring(
-    _content_key: &ContentKey,
-    _group_key: &ContentKey,
+    content_key: &ContentKey,
+    group_key: &ContentKey,
 ) -> Result<Vec<u8>, Error> {
-    unimplemented!("keyring wrapping — tracked in #16")
+    let kek = KekAes256::new((&group_key.0).into());
+    kek.wrap_vec(&content_key.0)
+        .map_err(|_| Error::KeyWrap("AES key wrap under group key failed".into()))
 }
 
 /// Unwrap a per-document content key using the keyring's group key.
 pub fn unwrap_content_key_from_keyring(
-    _wrapped: &[u8],
-    _group_key: &ContentKey,
+    wrapped: &[u8],
+    group_key: &ContentKey,
 ) -> Result<ContentKey, Error> {
-    unimplemented!("keyring unwrapping — tracked in #16")
+    if wrapped.len() != WRAPPED_KEY_LEN {
+        return Err(Error::Decryption(format!(
+            "keyring-wrapped key is {} bytes, expected {WRAPPED_KEY_LEN}",
+            wrapped.len()
+        )));
+    }
+
+    let kek = KekAes256::new((&group_key.0).into());
+    let unwrapped = kek
+        .unwrap_vec(wrapped)
+        .map_err(|_| Error::Decryption("AES key unwrap under group key failed".into()))?;
+
+    let mut key = [0u8; CONTENT_KEY_LEN];
+    key.copy_from_slice(&unwrapped);
+    Ok(ContentKey(key))
 }
 
 #[cfg(test)]
@@ -399,15 +418,39 @@ mod tests {
         assert_eq!(group_key.0, unwrapped_b.0);
     }
 
-    // -- Keyring wrapping (red tests — #16) --
+    // -- Keyring wrapping (symmetric AES-KW) --
 
     #[test]
-    #[should_panic(expected = "not implemented")]
-    fn test_keyring_content_key_roundtrips() {
+    fn keyring_content_key_roundtrips() {
         let group_key = generate_content_key(&mut OsRng);
         let content_key = generate_content_key(&mut OsRng);
         let wrapped = wrap_content_key_for_keyring(&content_key, &group_key).unwrap();
         let unwrapped = unwrap_content_key_from_keyring(&wrapped, &group_key).unwrap();
         assert_eq!(content_key.0, unwrapped.0);
+    }
+
+    #[test]
+    fn keyring_wrapped_key_is_expected_length() {
+        let group_key = generate_content_key(&mut OsRng);
+        let content_key = generate_content_key(&mut OsRng);
+        let wrapped = wrap_content_key_for_keyring(&content_key, &group_key).unwrap();
+        assert_eq!(wrapped.len(), WRAPPED_KEY_LEN);
+    }
+
+    #[test]
+    fn keyring_wrong_group_key_fails() {
+        let group_key = generate_content_key(&mut OsRng);
+        let wrong_key = generate_content_key(&mut OsRng);
+        let content_key = generate_content_key(&mut OsRng);
+        let wrapped = wrap_content_key_for_keyring(&content_key, &group_key).unwrap();
+        assert!(unwrap_content_key_from_keyring(&wrapped, &wrong_key).is_err());
+    }
+
+    #[test]
+    fn keyring_wrong_length_input_fails() {
+        let group_key = generate_content_key(&mut OsRng);
+        assert!(unwrap_content_key_from_keyring(&[0u8; 10], &group_key).is_err());
+        assert!(unwrap_content_key_from_keyring(&[0u8; 64], &group_key).is_err());
+        assert!(unwrap_content_key_from_keyring(&[], &group_key).is_err());
     }
 }

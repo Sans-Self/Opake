@@ -1,21 +1,20 @@
 use log::debug;
 
-use crate::atproto;
+use crate::atproto::{self, AtBytes};
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, X25519PrivateKey};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption, EncryptionEnvelope};
 
-/// Decode the nonce from an encryption envelope and decrypt the ciphertext.
+/// Decode an AtBytes nonce and decrypt ciphertext with a content key.
 ///
-/// Shared by both the own-PDS and cross-PDS download paths.
-pub(super) fn decrypt_with_envelope(
+/// Shared by direct, keyring, and cross-PDS download paths.
+pub(super) fn decrypt_with_nonce(
     content_key: &ContentKey,
-    envelope: &EncryptionEnvelope,
+    nonce_field: &AtBytes,
     ciphertext: Vec<u8>,
 ) -> Result<Vec<u8>, Error> {
-    let nonce_bytes = envelope
-        .nonce
+    let nonce_bytes = nonce_field
         .decode()
         .map_err(|e| Error::InvalidRecord(format!("invalid nonce: {e}")))?;
     let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|v: Vec<u8>| {
@@ -26,38 +25,84 @@ pub(super) fn decrypt_with_envelope(
     crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })
 }
 
-/// Extract the direct-encryption envelope from a document, or error on keyring.
-// TODO: inline this once keyring encryption lands — it'll become a proper match
-pub(super) fn direct_envelope(doc: &Document) -> Result<&EncryptionEnvelope, Error> {
+/// Backwards-compat wrapper used by download_grant.
+pub(super) fn decrypt_with_envelope(
+    content_key: &ContentKey,
+    envelope: &EncryptionEnvelope,
+    ciphertext: Vec<u8>,
+) -> Result<Vec<u8>, Error> {
+    decrypt_with_nonce(content_key, &envelope.nonce, ciphertext)
+}
+
+/// Unwrap a content key from a document's encryption metadata.
+///
+/// For direct encryption: unwrap using the caller's X25519 private key.
+/// For keyring encryption: unwrap using the group key (caller must provide it
+/// via `group_key`). Pass `None` for direct-only documents.
+fn unwrap_document_key(
+    doc: &Document,
+    did: &str,
+    private_key: &X25519PrivateKey,
+    group_key: Option<&ContentKey>,
+) -> Result<ContentKey, Error> {
     match &doc.encryption {
-        Encryption::Direct(direct) => Ok(&direct.envelope),
-        Encryption::Keyring(_) => Err(Error::InvalidRecord(
-            "keyring-encrypted documents not yet supported".into(),
-        )),
+        Encryption::Direct(direct) => {
+            let wrapped = direct
+                .envelope
+                .keys
+                .iter()
+                .find(|k| k.did == did)
+                .ok_or_else(|| {
+                    Error::InvalidRecord(format!(
+                        "no wrapped key for DID ({did}) — you may not have access"
+                    ))
+                })?;
+            crypto::unwrap_key(wrapped, private_key)
+        }
+        Encryption::Keyring(kr_enc) => {
+            let gk = group_key.ok_or_else(|| {
+                Error::InvalidRecord(
+                    "document uses keyring encryption but no group key provided".into(),
+                )
+            })?;
+            let wrapped_bytes = kr_enc
+                .keyring_ref
+                .wrapped_content_key
+                .decode()
+                .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
+            crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk)
+        }
+    }
+}
+
+/// Get the nonce AtBytes from either encryption variant.
+fn encryption_nonce(doc: &Document) -> Result<&AtBytes, Error> {
+    match &doc.encryption {
+        Encryption::Direct(direct) => Ok(&direct.envelope.nonce),
+        Encryption::Keyring(kr_enc) => Ok(&kr_enc.nonce),
     }
 }
 
 /// Fetch a document record and extract the content key without downloading the blob.
 ///
-/// Useful when you need the key (e.g. to re-wrap it for sharing) but don't
-/// want to download the entire encrypted blob.
+/// For direct-encrypted documents only. Use `fetch_content_key_keyring` for
+/// keyring-encrypted documents.
 pub async fn fetch_content_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_key: &X25519PrivateKey,
     uri: &str,
 ) -> Result<ContentKey, Error> {
-    let (content_key, _doc) = fetch_document_and_key(client, did, private_key, uri).await?;
+    let (content_key, _doc) = fetch_document_and_key(client, did, private_key, None, uri).await?;
     Ok(content_key)
 }
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
-/// Returns both the key and the document (needed by download for the blob ref
-/// and filename).
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_key: &X25519PrivateKey,
+    group_key: Option<&ContentKey>,
     uri: &str,
 ) -> Result<(ContentKey, Document), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
@@ -70,31 +115,38 @@ async fn fetch_document_and_key(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.version)?;
 
-    let envelope = direct_envelope(&doc)?;
-
-    let wrapped_key = envelope.keys.iter().find(|k| k.did == did).ok_or_else(|| {
-        Error::InvalidRecord(format!(
-            "no wrapped key for DID ({did}) — you may not have access"
-        ))
-    })?;
-
     debug!("unwrapping content key");
-    let content_key = crypto::unwrap_key(wrapped_key, private_key)?;
+    let content_key = unwrap_document_key(&doc, did, private_key, group_key)?;
 
     Ok((content_key, doc))
 }
 
 /// Fetch a document record and its encrypted blob, then decrypt.
 /// Returns `(filename, plaintext_bytes)`.
+///
+/// For keyring-encrypted documents, pass the group key. For direct-encrypted
+/// documents, pass `None`.
 pub async fn download(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_key: &X25519PrivateKey,
     uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
+    download_with_group_key(client, did, private_key, None, uri).await
+}
+
+/// Download with an optional group key for keyring-encrypted documents.
+pub async fn download_with_group_key(
+    client: &mut XrpcClient<impl Transport>,
+    did: &str,
+    private_key: &X25519PrivateKey,
+    group_key: Option<&ContentKey>,
+    uri: &str,
+) -> Result<(String, Vec<u8>), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
-    let (content_key, doc) = fetch_document_and_key(client, did, private_key, uri).await?;
-    let envelope = direct_envelope(&doc)?;
+    let (content_key, doc) =
+        fetch_document_and_key(client, did, private_key, group_key, uri).await?;
+    let nonce = encryption_nonce(&doc)?;
 
     debug!(
         "fetching blob did={} cid={}",
@@ -104,7 +156,7 @@ pub async fn download(
         .get_blob(&at_uri.authority, &doc.blob.reference.cid)
         .await?;
 
-    let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext)?;
+    let plaintext = decrypt_with_nonce(&content_key, nonce, ciphertext)?;
     Ok((doc.name, plaintext))
 }
 

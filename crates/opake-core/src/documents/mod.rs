@@ -8,16 +8,20 @@
 mod delete;
 mod download;
 mod download_grant;
+mod download_keyring;
 mod list;
 mod resolve;
 mod upload;
 
 pub use delete::delete_document;
-pub use download::{download, fetch_content_key};
+pub use download::{download, download_with_group_key, fetch_content_key};
 pub use download_grant::download_from_grant;
+pub use download_keyring::{download_from_keyring_member, KeyringDownloadResult};
 pub use list::{list_documents, DocumentEntry};
 pub use resolve::resolve_uri;
-pub use upload::{encrypt_and_upload, UploadParams};
+pub use upload::{
+    encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
+};
 
 const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";
 

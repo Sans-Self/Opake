@@ -4,13 +4,16 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Args;
+use opake_core::atproto;
 use opake_core::crypto::OsRng;
-use opake_core::documents::{self, UploadParams};
+use opake_core::documents::{self, KeyringUploadParams, UploadParams};
+use opake_core::keyrings;
 
 use opake_core::client::Session;
 
 use crate::commands::Execute;
 use crate::identity;
+use crate::keyring_store;
 use crate::session::{self, CommandContext};
 
 #[derive(Args)]
@@ -30,13 +33,7 @@ pub struct UploadCommand {
 
 impl Execute for UploadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        if self.keyring.is_some() {
-            anyhow::bail!("--keyring not yet supported (tracking: chainlink #21)");
-        }
-
         let mut client = session::load_client(&ctx.did)?;
-        let id = identity::load_identity(&ctx.did)?;
-        let owner_pubkey = id.public_key_bytes()?;
 
         let plaintext =
             fs::read(&self.path).context(format!("failed to read {}", self.path.display()))?;
@@ -51,17 +48,41 @@ impl Execute for UploadCommand {
             .first_raw()
             .unwrap_or("application/octet-stream");
 
-        let params = UploadParams {
-            plaintext: &plaintext,
-            filename: &filename,
-            mime_type,
-            owner_did: &id.did,
-            owner_pubkey: &owner_pubkey,
-            tags: self.tags,
-            created_at: &Utc::now().to_rfc3339(),
-        };
+        let now = Utc::now().to_rfc3339();
 
-        let uri = documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?;
+        let uri = if let Some(keyring_name) = &self.keyring {
+            let entry = keyrings::resolve_keyring_uri(&mut client, keyring_name).await?;
+            let at_uri = atproto::parse_at_uri(&entry.uri)?;
+            let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey)?;
+
+            let params = KeyringUploadParams {
+                plaintext: &plaintext,
+                filename: &filename,
+                mime_type,
+                keyring_uri: &entry.uri,
+                group_key: &group_key,
+                rotation: entry.rotation,
+                tags: self.tags,
+                created_at: &now,
+            };
+
+            documents::encrypt_and_upload_keyring(&mut client, &params, &mut OsRng).await?
+        } else {
+            let id = identity::load_identity(&ctx.did)?;
+            let owner_pubkey = id.public_key_bytes()?;
+
+            let params = UploadParams {
+                plaintext: &plaintext,
+                filename: &filename,
+                mime_type,
+                owner_did: &id.did,
+                owner_pubkey: &owner_pubkey,
+                tags: self.tags,
+                created_at: &now,
+            };
+
+            documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?
+        };
 
         println!("{} → {}", filename, uri);
         Ok(session::refreshed_session(&client))

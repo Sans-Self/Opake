@@ -13,6 +13,7 @@ pub mod client;
 pub mod crypto;
 pub mod documents;
 pub mod error;
+pub mod keyrings;
 pub mod records;
 pub mod resolve;
 pub mod sharing;

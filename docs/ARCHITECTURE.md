@@ -53,6 +53,12 @@ crates/
         list.rs        list_documents()
         delete.rs      delete_document()
         resolve.rs     Filename → AT-URI resolution
+      keyrings/
+        mod.rs         Re-exports, resolve_keyring_uri()
+        create.rs      create_keyring() → group key + record
+        list.rs        list_keyrings()
+        add_member.rs  add_member() — wrap GK to new member
+        remove_member.rs remove_member() — rotate GK, re-wrap to remaining
       sharing/
         mod.rs         Re-exports
         create.rs      create_grant()
@@ -64,17 +70,20 @@ crates/
       config.rs        Multi-account config (default DID, account map)
       session.rs       Per-account session persistence (JWT tokens)
       identity.rs      Per-account X25519 keypair persistence
+      keyring_store.rs Local group key persistence (per-keyring)
       transport.rs     reqwest-based Transport implementation
       utils.rs         Test harness, env helpers
       commands/
         login.rs       Auth + key publish
-        upload.rs      File → encrypt → upload
-        download.rs    Download + decrypt (own and shared)
+        upload.rs      File → encrypt → upload (direct or --keyring)
+        download.rs    Download + decrypt (direct, keyring, or --grant)
         ls.rs          List documents
         rm.rs          Delete with confirmation prompt
         resolve.rs     Identity resolution display
         share.rs       Grant creation
         revoke.rs      Grant deletion
+        shared.rs      List created grants
+        keyring.rs     Keyring CRUD (create, ls, add-member, remove-member)
         accounts.rs    List accounts
         logout.rs      Remove account
         set_default.rs Switch default account
@@ -106,7 +115,7 @@ The algorithm name `x25519-hkdf-a256kw` is intentionally distinct from JWE's `EC
 
 **Direct encryption** — the content key is wrapped individually to each authorized DID. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
 
-**Keyring encryption** (planned) — a named group has a shared group key (GK), wrapped to each member's public key. Documents have their content key wrapped under GK instead of individual public keys. Adding a member to the keyring gives them access to all its documents without per-document changes. Removing a member rotates GK and re-wraps to the remaining members.
+**Keyring encryption** — a named group has a shared group key (GK), wrapped to each member's X25519 public key. Documents have their content key wrapped under GK (AES-256-KW) instead of individual public keys. Adding a member to the keyring gives them access to all its documents without per-document changes. Removing a member rotates GK and re-wraps to the remaining members.
 
 ### Revocation
 
@@ -188,6 +197,10 @@ Storage layout:
     <did>/
       session.json       JWT tokens
       identity.json      X25519 keypair (plaintext for MVP)
+      keyrings/
+        <rkey>.json      Group key for each keyring (base64)
 ```
+
+Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring's group key is saved by its record key (`rkey`) after creation, and updated on key rotation (member removal).
 
 The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.

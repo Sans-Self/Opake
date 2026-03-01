@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod download;
+pub mod keyring;
 pub mod login;
 pub mod logout;
 pub mod ls;

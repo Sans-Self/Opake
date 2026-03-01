@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::records::{self, Document, Grant};
 use crate::sharing::GRANT_COLLECTION;
 
-use super::download::{decrypt_with_envelope, direct_envelope};
+use super::download::decrypt_with_envelope;
 
 /// Download and decrypt a file using a grant URI.
 ///
@@ -69,7 +69,19 @@ pub async fn download_from_grant(
 
     let doc: Document = serde_json::from_value(doc_entry.value)?;
     records::check_version(doc.version)?;
-    let envelope = direct_envelope(&doc)?;
+
+    // Grants always wrap the content key directly — the document's own
+    // encryption type doesn't matter for the grant path, we just need the nonce.
+    let envelope = match &doc.encryption {
+        records::Encryption::Direct(d) => &d.envelope,
+        records::Encryption::Keyring(_) => {
+            return Err(Error::InvalidRecord(
+                "grant-based download of keyring-encrypted documents is not supported — \
+                 use keyring membership instead"
+                    .into(),
+            ));
+        }
+    };
 
     // Fetch the blob
     debug!(

@@ -250,6 +250,23 @@ pub struct Keyring {
     pub modified_at: Option<String>,
 }
 
+impl Keyring {
+    /// New keyring with current schema version and defaults.
+    /// Set description/modified_at via struct update syntax.
+    pub fn new(name: String, members: Vec<WrappedKey>, created_at: String) -> Self {
+        Self {
+            version: SCHEMA_VERSION,
+            name,
+            description: None,
+            algo: "aes-256-gcm".into(),
+            members,
+            rotation: 0,
+            created_at,
+            modified_at: None,
+        }
+    }
+}
+
 impl_versioned!(Document, PublicKeyRecord, Grant, Keyring);
 
 #[cfg(test)]

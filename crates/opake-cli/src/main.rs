@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod identity;
+mod keyring_store;
 mod session;
 mod transport;
 pub mod utils;
@@ -34,6 +35,7 @@ enum Command {
     Share(commands::share::ShareCommand),
     Shared(commands::shared::SharedCommand),
     Revoke(commands::revoke::RevokeCommand),
+    Keyring(commands::keyring::KeyringCommand),
 }
 
 async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::Result<()> {
@@ -73,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Share(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Shared(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Revoke(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Keyring(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
     }
 
     Ok(())

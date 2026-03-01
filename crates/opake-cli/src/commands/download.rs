@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Args;
+use opake_core::atproto;
 use opake_core::documents;
 
 use opake_core::client::Session;
 
 use crate::commands::Execute;
 use crate::identity;
+use crate::keyring_store;
 use crate::session::{self, CommandContext};
 use crate::transport::ReqwestTransport;
 
@@ -23,8 +25,12 @@ pub struct DownloadCommand {
     output: Option<PathBuf>,
 
     /// Grant URI for downloading a shared file from another user's PDS
-    #[arg(long)]
+    #[arg(long, conflicts_with = "keyring_member")]
     grant: Option<String>,
+
+    /// Download a keyring-encrypted document as a member (cross-PDS)
+    #[arg(long, conflicts_with = "grant")]
+    keyring_member: Option<String>,
 }
 
 /// Determine where to write the downloaded file. Uses the explicit output path
@@ -52,11 +58,23 @@ impl Execute for DownloadCommand {
         let private_key = id.private_key_bytes()?;
 
         let (name, plaintext, refreshed) = if let Some(grant_uri) = &self.grant {
-            // Cross-PDS shared download: use unauthenticated public endpoints
+            // Cross-PDS shared download via grant
             let transport = ReqwestTransport::new();
             let (name, plaintext) =
                 documents::download_from_grant(&transport, &private_key, grant_uri).await?;
             (name, plaintext, None)
+        } else if let Some(doc_uri) = &self.keyring_member {
+            // Cross-PDS keyring member download
+            let transport = ReqwestTransport::new();
+            let result =
+                documents::download_from_keyring_member(&transport, &id.did, &private_key, doc_uri)
+                    .await?;
+
+            // Cache the group key so subsequent downloads use the local path
+            let kr_rkey = &result.keyring_rkey;
+            keyring_store::save_group_key(&ctx.did, kr_rkey, &result.group_key)?;
+
+            (result.filename, result.plaintext, None)
         } else {
             // Own-PDS download: use authenticated client
             let reference = self
@@ -65,8 +83,36 @@ impl Execute for DownloadCommand {
                 .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
             let mut client = session::load_client(&ctx.did)?;
             let uri = documents::resolve_uri(&mut client, reference).await?;
-            let (name, plaintext) =
-                documents::download(&mut client, &id.did, &private_key, &uri).await?;
+
+            // Peek at the document to check if it uses keyring encryption.
+            // If so, load the local group key before attempting decryption.
+            let at_uri = atproto::parse_at_uri(&uri)?;
+            let entry = client
+                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+                .await?;
+            let doc: opake_core::records::Document = serde_json::from_value(entry.value)?;
+
+            let group_key = match &doc.encryption {
+                opake_core::records::Encryption::Keyring(kr_enc) => {
+                    let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
+                    Some(
+                        keyring_store::load_group_key(&ctx.did, &kr_uri.rkey).context(
+                            "if you're a keyring member (not the creator), use: \
+                                  opake download --keyring-member <document-uri>",
+                        )?,
+                    )
+                }
+                opake_core::records::Encryption::Direct(_) => None,
+            };
+
+            let (name, plaintext) = documents::download_with_group_key(
+                &mut client,
+                &id.did,
+                &private_key,
+                group_key.as_ref(),
+                &uri,
+            )
+            .await?;
             (name, plaintext, session::refreshed_session(&client))
         };
 
