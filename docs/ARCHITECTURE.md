@@ -151,6 +151,10 @@ crates/
         index.rs       Indexer only
         serve.rs       API only
         status.rs      Print cursor + stats
+
+  opake-derive/        Proc-macro crate (RedactedDebug derive)
+    src/
+      lib.rs           #[derive(RedactedDebug)] + #[redact] attribute
 ```
 
 The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates. This keeps `opake-core` compilable to WASM for the future web UI.
@@ -267,7 +271,7 @@ Storage layout:
   accounts/
     <did>/
       session.json       JWT tokens
-      identity.json      X25519 + Ed25519 keypairs (plaintext for MVP)
+      identity.json      X25519 + Ed25519 keypairs (0600, checked on load)
       keyrings/
         <rkey>.json      Group keys for each keyring (per-rotation)
 ```
@@ -275,3 +279,10 @@ Storage layout:
 Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring file holds an array of `{ rotation, group_key }` entries so that keys from previous rotations remain available for decrypting older documents. Legacy files (single `group_key` without rotation) are auto-migrated to rotation 0 on read.
 
 The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.
+
+## File Permissions
+
+All sensitive files (identity, session, config, keyring keys) are written with
+0600 permissions. Directories are created with 0700. Loading `identity.json`
+checks permissions and bails with a `chmod 600` hint if the file is
+group- or world-readable, matching SSH's `StrictModes` behavior.

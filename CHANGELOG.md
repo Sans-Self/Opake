@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView (#109)
 
 ### Added
+- Update docs for security hardening and opake-derive crate (#131)
 - Add inbox CLI command for discovering shared grants via appview (#128)
 - Add inbox CLI command for discovering shared grants via appview (#128)
 - Audit workspace dependencies for consolidation and upgrades (#110)

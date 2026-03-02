@@ -96,11 +96,12 @@ See [docs/appview.md](docs/appview.md) for configuration, authentication, API en
 
 ## Architecture
 
-Three crates:
+Four crates:
 
 - **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations.
 - **`opake-cli`** — thin CLI wrapper. Config, session, identity persistence.
 - **`opake-appview`** — Axum-based indexer and REST API. Jetstream firehose consumer, SQLite storage, DID-scoped Ed25519 auth.
+- **`opake-derive`** — Proc-macro crate. `RedactedDebug` derive macro for secret-safe Debug output.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 

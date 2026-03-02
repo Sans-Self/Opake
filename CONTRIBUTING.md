@@ -38,6 +38,11 @@ opake-appview   indexer + REST API for grant/keyring discovery
                 - SQLite storage (WAL mode)
                 - Axum API with DID-scoped Ed25519 auth
                 - rate limiting via tower_governor
+
+opake-derive    proc-macro crate
+                - #[derive(RedactedDebug)] with #[redact] field attribute
+                - generates Debug impls showing byte length instead of content
+                - used by opake-core (ContentKey, Session) and opake-cli (Identity)
 ```
 
 `opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates.
