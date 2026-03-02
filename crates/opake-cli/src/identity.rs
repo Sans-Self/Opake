@@ -1,3 +1,6 @@
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::info;
@@ -16,13 +19,15 @@ pub type Ed25519VerifyKey = [u8; 32];
 
 /// Encryption + signing keypairs, stored as base64 in `identity.json`.
 /// The signing fields are optional for backward compat with old identity files.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(opake_core::RedactedDebug, Serialize, Deserialize)]
 pub struct Identity {
     pub did: String,
     pub public_key: String,
+    #[redact]
     pub private_key: String,
     /// Ed25519 signing secret key (base64).
     #[serde(default)]
+    #[redact]
     pub signing_key: Option<String>,
     /// Ed25519 signing public/verify key (base64).
     #[serde(default)]
@@ -90,7 +95,27 @@ pub fn save_identity(did: &str, identity: &Identity) -> anyhow::Result<()> {
     config::save_account_json(did, "identity.json", identity)
 }
 
+/// Bail if identity.json is readable by group or others (like `ssh -o StrictModes`).
+fn check_identity_permissions(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mode = path.metadata()?.permissions().mode();
+    if mode & 0o077 != 0 {
+        anyhow::bail!(
+            "permissions {:#o} for '{}' are too open — private key material must not be \
+             accessible by other users. Run: chmod 600 {}",
+            mode & 0o777,
+            path.display(),
+            path.display(),
+        );
+    }
+    Ok(())
+}
+
 pub fn load_identity(did: &str) -> anyhow::Result<Identity> {
+    let path = config::account_dir(did).join("identity.json");
+    check_identity_permissions(&path)?;
     config::load_account_json(did, "identity.json")
 }
 
@@ -153,6 +178,7 @@ mod tests {
     use crate::utils::test_harness::with_test_dir;
     use opake_core::crypto::OsRng;
     use std::collections::BTreeMap;
+    use std::os::unix::fs::PermissionsExt;
 
     fn setup_account(did: &str) {
         let mut accounts = BTreeMap::new();
@@ -237,15 +263,15 @@ mod tests {
             let did = "did:plc:legacy";
             setup_account(did);
 
-            // Write an old-format identity (no signing keys)
+            // Write an old-format identity (no signing keys) with correct permissions
             let old_identity = serde_json::json!({
                 "did": did,
                 "public_key": BASE64.encode([1u8; 32]),
                 "private_key": BASE64.encode([2u8; 32]),
             });
             config::ensure_account_dir(did).unwrap();
-            std::fs::write(
-                config::account_dir(did).join("identity.json"),
+            config::write_sensitive_file(
+                &config::account_dir(did).join("identity.json"),
                 serde_json::to_string_pretty(&old_identity).unwrap(),
             )
             .unwrap();
@@ -270,8 +296,8 @@ mod tests {
             let did = "did:plc:test";
             setup_account(did);
             config::ensure_account_dir(did).unwrap();
-            std::fs::write(
-                config::account_dir(did).join("identity.json"),
+            config::write_sensitive_file(
+                &config::account_dir(did).join("identity.json"),
                 "not json {{{",
             )
             .unwrap();
@@ -285,8 +311,8 @@ mod tests {
             let did = "did:plc:test";
             setup_account(did);
             config::ensure_account_dir(did).unwrap();
-            std::fs::write(
-                config::account_dir(did).join("identity.json"),
+            config::write_sensitive_file(
+                &config::account_dir(did).join("identity.json"),
                 r#"{"color": "blue"}"#,
             )
             .unwrap();
@@ -367,6 +393,37 @@ mod tests {
         };
         let err = identity.verify_key_bytes().unwrap_err().to_string();
         assert!(err.contains("16 bytes"), "expected length in error: {err}");
+    }
+
+    #[test]
+    fn load_identity_rejects_world_readable() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let (identity, _) = ensure_identity(did, &mut OsRng).unwrap();
+            assert_eq!(identity.did, did);
+
+            // Loosen permissions to simulate a bad umask
+            let path = config::account_dir(did).join("identity.json");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+            let err = load_identity(did).unwrap_err().to_string();
+            assert!(err.contains("too open"), "expected 'too open': {err}");
+            assert!(err.contains("chmod 600"), "expected chmod hint: {err}");
+        });
+    }
+
+    #[test]
+    fn load_identity_accepts_0600() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let (_, _) = ensure_identity(did, &mut OsRng).unwrap();
+
+            // save_identity goes through write_sensitive_file, so already 0600
+            let loaded = load_identity(did).unwrap();
+            assert_eq!(loaded.did, did);
+        });
     }
 
     #[test]

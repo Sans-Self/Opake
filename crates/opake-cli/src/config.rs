@@ -1,11 +1,15 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use anyhow::Context;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+const SENSITIVE_FILE_MODE: u32 = 0o600;
+const SENSITIVE_DIR_MODE: u32 = 0o700;
 
 static DATA_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
@@ -33,6 +37,22 @@ pub struct AccountConfig {
     pub handle: String,
 }
 
+/// Write a file and set its permissions to 0600 (owner read/write only).
+pub fn write_sensitive_file(path: &Path, content: impl AsRef<[u8]>) -> anyhow::Result<()> {
+    fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(SENSITIVE_FILE_MODE))
+        .with_context(|| format!("failed to set permissions on {}", path.display()))
+}
+
+/// Create a directory (and parents) with 0700 permissions.
+/// Always sets permissions, even on existing dirs, to fix upgrades.
+pub fn ensure_sensitive_dir(path: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(path)
+        .with_context(|| format!("failed to create directory: {}", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(SENSITIVE_DIR_MODE))
+        .with_context(|| format!("failed to set permissions on {}", path.display()))
+}
+
 /// The resolved data directory. Must call `init_data_dir()` before use.
 pub fn data_dir() -> PathBuf {
     DATA_DIR
@@ -42,20 +62,15 @@ pub fn data_dir() -> PathBuf {
         .expect("data_dir not initialized: call init_data_dir() first")
 }
 
-/// Create the data directory if it doesn't exist.
+/// Create the data directory if it doesn't exist, with 0700 permissions.
 pub fn ensure_data_dir() -> anyhow::Result<()> {
-    let dir = data_dir();
-    if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create data directory: {}", dir.display()))?;
-    }
-    Ok(())
+    ensure_sensitive_dir(&data_dir())
 }
 
 pub fn save_config(config: &Config) -> anyhow::Result<()> {
     ensure_data_dir()?;
     let content = toml::to_string_pretty(config).context("failed to serialize config")?;
-    fs::write(data_dir().join("config.toml"), content).context("failed to write config.toml")
+    write_sensitive_file(&data_dir().join("config.toml"), content)
 }
 
 pub fn load_config() -> anyhow::Result<Config> {
@@ -75,14 +90,9 @@ pub fn account_dir(did: &str) -> PathBuf {
     data_dir().join("accounts").join(sanitize_did(did))
 }
 
-/// Create the account directory (and parents) if it doesn't exist.
+/// Create the account directory (and parents) with 0700 permissions.
 pub fn ensure_account_dir(did: &str) -> anyhow::Result<()> {
-    let dir = account_dir(did);
-    if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create account directory: {}", dir.display()))?;
-    }
-    Ok(())
+    ensure_sensitive_dir(&account_dir(did))
 }
 
 /// Serialize a value to a JSON file inside an account's directory.
@@ -90,7 +100,7 @@ pub fn save_account_json<T: Serialize>(did: &str, filename: &str, value: &T) -> 
     ensure_account_dir(did)?;
     let json = serde_json::to_string_pretty(value)
         .with_context(|| format!("failed to serialize {filename}"))?;
-    fs::write(account_dir(did).join(filename), json)
+    write_sensitive_file(&account_dir(did).join(filename), json)
         .with_context(|| format!("failed to write {filename} for {did}"))
 }
 

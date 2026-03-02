@@ -72,16 +72,15 @@ fn load_stored(did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
 }
 
 fn save_stored(did: &str, rkey: &str, stored: &StoredKeys) -> anyhow::Result<()> {
-    let dir = keyrings_dir(did);
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create keyrings dir: {}", dir.display()))?;
-    }
+    config::ensure_sensitive_dir(&keyrings_dir(did))?;
 
     let json = serde_json::to_string_pretty(stored).context("failed to serialize group key")?;
-    let path = key_path(did, rkey);
-    std::fs::write(&path, json)
-        .with_context(|| format!("failed to write group key: {}", path.display()))
+    config::write_sensitive_file(&key_path(did, rkey), &json).with_context(|| {
+        format!(
+            "failed to write group key: {}",
+            key_path(did, rkey).display()
+        )
+    })
 }
 
 pub fn save_group_key(
@@ -138,6 +137,7 @@ mod tests {
     use crate::utils::test_harness::with_test_dir;
     use opake_core::crypto::{generate_content_key, OsRng};
     use std::collections::BTreeMap;
+    use std::os::unix::fs::PermissionsExt;
 
     fn setup_account(did: &str) {
         let mut accounts = BTreeMap::new();
@@ -262,6 +262,27 @@ mod tests {
             .unwrap();
             let err = load_group_key(did, "short", 0).unwrap_err();
             assert!(err.to_string().contains("16 bytes"), "got: {err}");
+        });
+    }
+
+    #[test]
+    fn save_group_key_sets_permissions() {
+        with_test_dir(|_| {
+            let did = "did:plc:test";
+            setup_account(did);
+            let group_key = generate_content_key(&mut OsRng);
+            save_group_key(did, "tid123", 0, &group_key).unwrap();
+
+            let dir_mode = keyrings_dir(did).metadata().unwrap().permissions().mode() & 0o777;
+            assert_eq!(dir_mode, 0o700, "expected dir 0700, got {dir_mode:#o}");
+
+            let file_mode = key_path(did, "tid123")
+                .metadata()
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(file_mode, 0o600, "expected file 0600, got {file_mode:#o}");
         });
     }
 

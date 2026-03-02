@@ -38,9 +38,40 @@ const AES_KW_OVERHEAD: usize = 8;
 const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
 const CIPHERTEXT_LEN: usize = X25519_KEY_LEN + WRAPPED_KEY_LEN;
 
+/// Wrapper that prints byte length instead of content in Debug output.
+/// Used by the `RedactedDebug` derive macro for `#[redact]` fields.
+pub struct Redacted<'a, T: ?Sized>(pub &'a T);
+
+impl std::fmt::Debug for Redacted<'_, String> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} bytes]", self.0.len())
+    }
+}
+
+impl std::fmt::Debug for Redacted<'_, Option<String>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(s) => write!(f, "Some([{} bytes])", s.len()),
+            None => write!(f, "None"),
+        }
+    }
+}
+
+impl std::fmt::Debug for Redacted<'_, Vec<u8>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} bytes]", self.0.len())
+    }
+}
+
+impl<const N: usize> std::fmt::Debug for Redacted<'_, [u8; N]> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{N} bytes]")
+    }
+}
+
 /// A 256-bit AES content encryption key.
-#[derive(Debug)]
-pub struct ContentKey(pub [u8; CONTENT_KEY_LEN]);
+#[derive(crate::RedactedDebug)]
+pub struct ContentKey(#[redact] pub [u8; CONTENT_KEY_LEN]);
 
 /// An X25519 public key: 32 raw bytes.
 pub type X25519PublicKey = [u8; X25519_KEY_LEN];
@@ -52,8 +83,11 @@ pub type X25519PrivateKey = [u8; X25519_KEY_LEN];
 pub type DidPublicKey<'a> = (&'a str, &'a X25519PublicKey);
 
 /// The result of encrypting plaintext content.
+#[derive(crate::RedactedDebug)]
 pub struct EncryptedPayload {
+    #[redact]
     pub ciphertext: Vec<u8>,
+    #[redact]
     pub nonce: [u8; AES_GCM_NONCE_LEN],
 }
 

@@ -1,0 +1,14 @@
+[package]
+name = "opake-derive"
+description = "Derive macros for Opake — RedactedDebug"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["derive"] }
+quote = "1"
+proc-macro2 = "1"

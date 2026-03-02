@@ -9,6 +9,7 @@ license.workspace = true
 test-utils = []
 
 [dependencies]
+opake-derive = { path = "../opake-derive" }
 base64.workspace = true
 ed25519-dalek.workspace = true
 log.workspace = true

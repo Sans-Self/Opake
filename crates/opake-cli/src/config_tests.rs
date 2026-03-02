@@ -331,3 +331,74 @@ fn resolve_appview_url_missing_gives_clear_error() {
         );
     });
 }
+
+// -- permission hardening --
+
+use std::os::unix::fs::PermissionsExt;
+
+#[test]
+fn write_sensitive_file_sets_0600() {
+    with_test_dir(|_| {
+        ensure_data_dir().unwrap();
+        let path = data_dir().join("secret.txt");
+        write_sensitive_file(&path, "hunter2").unwrap();
+        let mode = path.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "expected 0600, got {mode:#o}");
+    });
+}
+
+#[test]
+fn ensure_sensitive_dir_sets_0700() {
+    with_test_dir(|dir| {
+        let target = dir.path().join("secure");
+        ensure_sensitive_dir(&target).unwrap();
+        let mode = target.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "expected 0700, got {mode:#o}");
+    });
+}
+
+#[test]
+fn ensure_sensitive_dir_tightens_existing() {
+    with_test_dir(|dir| {
+        let target = dir.path().join("loose");
+        fs::create_dir_all(&target).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+
+        ensure_sensitive_dir(&target).unwrap();
+        let mode = target.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "expected 0700, got {mode:#o}");
+    });
+}
+
+#[test]
+fn save_config_sets_0600() {
+    with_test_dir(|_| {
+        let config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        save_config(&config).unwrap();
+        let mode = data_dir()
+            .join("config.toml")
+            .metadata()
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "expected 0600, got {mode:#o}");
+    });
+}
+
+#[test]
+fn save_account_json_sets_0600() {
+    with_test_dir(|_| {
+        let did = "did:plc:test";
+        let data = serde_json::json!({"key": "value"});
+        save_account_json(did, "secret.json", &data).unwrap();
+        let mode = account_dir(did)
+            .join("secret.json")
+            .metadata()
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "expected 0600, got {mode:#o}");
+    });
+}

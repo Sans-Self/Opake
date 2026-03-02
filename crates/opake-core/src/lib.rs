@@ -8,6 +8,12 @@
 // a reqwest-based implementation, the SPA provides one using browser fetch.
 // Crypto is synchronous and pure. Records are just types.
 
+// Allows `::opake_core::crypto::Redacted` to resolve inside this crate,
+// matching the path the RedactedDebug derive macro generates.
+extern crate self as opake_core;
+
+pub use opake_derive::RedactedDebug;
+
 pub mod atproto;
 pub mod client;
 pub mod crypto;
@@ -21,3 +27,6 @@ pub mod sharing;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+
+#[cfg(test)]
+mod redacted_debug_tests;

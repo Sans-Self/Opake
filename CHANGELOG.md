@@ -7,9 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- Fix ContentKey Debug impl to redact secret bytes (#86)
+- Add file permission hardening for sensitive config and key files (#127)
 - Remove bearer token authentication fallback from AppView (#109)
 
 ### Added
+- Add inbox CLI command for discovering shared grants via appview (#128)
 - Add inbox CLI command for discovering shared grants via appview (#128)
 - Audit workspace dependencies for consolidation and upgrades (#110)
 - Add AppView production readiness: clap, DID auth, XDG, health, docs (#101)

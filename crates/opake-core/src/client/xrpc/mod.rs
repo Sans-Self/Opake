@@ -18,12 +18,14 @@ use crate::error::Error;
 // ---------------------------------------------------------------------------
 
 /// An authenticated session with a PDS.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub did: String,
     pub handle: String,
+    #[redact]
     pub access_jwt: String,
+    #[redact]
     pub refresh_jwt: String,
 }
 
