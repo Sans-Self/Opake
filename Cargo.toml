@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/opake-core", "crates/opake-cli"]
+members = ["crates/opake-core", "crates/opake-cli", "crates/opake-appview"]
 resolver = "2"
 
 [workspace.package]
@@ -8,9 +8,17 @@ version = "0.1.0"
 license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
+anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+env_logger = "0.11"
 log = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "1"

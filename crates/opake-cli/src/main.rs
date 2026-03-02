@@ -17,6 +17,10 @@ struct Cli {
     #[arg(long, global = true)]
     r#as: Option<String>,
 
+    /// Override config directory
+    #[arg(long, global = true)]
+    config_dir: Option<String>,
+
     /// Increase output verbosity (-v info, -vv debug, -vvv trace)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
@@ -55,9 +59,12 @@ async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::R
 async fn main() -> anyhow::Result<()> {
     let Cli {
         r#as: as_flag,
+        config_dir,
         verbose,
         command,
     } = Cli::parse();
+
+    config::init_data_dir(config_dir.map(Into::into));
 
     let log_level = match verbose {
         0 => log::LevelFilter::Warn,

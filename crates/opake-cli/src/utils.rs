@@ -8,21 +8,20 @@ pub fn prefixed_get_env(key: &str) -> Option<String> {
     std::env::var(format_env_key(key)).ok()
 }
 
-/// Test helpers for modules that need to override `OPAKE_DATA_DIR`.
-/// A global mutex prevents parallel tests from stomping each other's env var.
+/// Test helpers for modules that need an isolated data directory.
+/// A global mutex prevents parallel tests from stomping each other's state.
 #[cfg(test)]
 pub mod test_harness {
     use std::sync::Mutex;
     use tempfile::TempDir;
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     pub fn with_test_dir(f: impl FnOnce(&TempDir)) {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap();
         let dir = TempDir::new().unwrap();
-        unsafe { std::env::set_var("OPAKE_DATA_DIR", dir.path()) };
+        crate::config::init_data_dir(Some(dir.path().to_path_buf()));
         f(&dir);
-        unsafe { std::env::remove_var("OPAKE_DATA_DIR") };
     }
 }
 

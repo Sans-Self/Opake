@@ -14,6 +14,9 @@ use crate::crypto::X25519PublicKey;
 use crate::error::Error;
 use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
+/// Ed25519 signing public key: 32 raw bytes.
+pub type Ed25519PublicKeyBytes = [u8; 32];
+
 /// Everything we learn about a remote user during resolution.
 #[derive(Debug)]
 pub struct ResolvedIdentity {
@@ -22,6 +25,8 @@ pub struct ResolvedIdentity {
     pub pds_url: String,
     pub public_key: X25519PublicKey,
     pub algo: String,
+    /// Ed25519 signing key — present if the user has published one.
+    pub signing_key: Option<Ed25519PublicKeyBytes>,
 }
 
 /// Full resolution: input → DID → PDS → public key.
@@ -81,25 +86,44 @@ pub async fn resolve_identity(
         Error::InvalidRecord(format!("public key is {} bytes, expected 32", v.len()))
     })?;
 
+    // Step 7: Decode optional signing key
+    let signing_key = match record.signing_key {
+        Some(ref sk) => {
+            let sk_bytes = sk
+                .decode()
+                .map_err(|e| Error::InvalidRecord(format!("invalid signing key: {e}")))?;
+            let key: [u8; 32] = sk_bytes.try_into().map_err(|v: Vec<u8>| {
+                Error::InvalidRecord(format!("signing key is {} bytes, expected 32", v.len()))
+            })?;
+            Some(key)
+        }
+        None => None,
+    };
+
     Ok(ResolvedIdentity {
         did,
         handle,
         pds_url,
         public_key,
         algo: record.algo,
+        signing_key,
     })
 }
 
-/// Publish (upsert) the user's X25519 encryption public key to their PDS.
+/// Publish (upsert) the user's encryption + signing public keys to their PDS.
 ///
 /// Called on every login — `putRecord` is idempotent, so this is always
 /// one request regardless of whether the record already exists.
 pub async fn publish_public_key(
     client: &mut XrpcClient<impl Transport>,
     public_key: &X25519PublicKey,
+    signing_key: Option<&Ed25519PublicKeyBytes>,
     created_at: &str,
 ) -> Result<String, Error> {
-    let record = PublicKeyRecord::new(public_key, created_at);
+    let record = match signing_key {
+        Some(sk) => PublicKeyRecord::with_signing_key(public_key, sk, created_at),
+        None => PublicKeyRecord::new(public_key, created_at),
+    };
     let result = client
         .put_record(PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY, &record)
         .await?;
@@ -262,9 +286,15 @@ mod tests {
         };
         let mut client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
 
-        let uri = publish_public_key(&mut client, &pubkey, "2026-03-01T12:00:00Z")
-            .await
-            .unwrap();
+        let signing_key = [88u8; 32];
+        let uri = publish_public_key(
+            &mut client,
+            &pubkey,
+            Some(&signing_key),
+            "2026-03-01T12:00:00Z",
+        )
+        .await
+        .unwrap();
 
         assert_eq!(uri, "at://did:plc:test/app.opake.cloud.publicKey/self");
 

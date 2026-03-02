@@ -15,8 +15,12 @@ mod keyring_wrapping;
 
 use crate::records::SCHEMA_VERSION;
 
-/// Re-export so callers don't need direct rand_core / x25519_dalek dependencies.
+/// Re-export so callers don't need direct rand_core / x25519_dalek / ed25519_dalek dependencies.
 pub use aes_gcm::aead::rand_core::{CryptoRng, OsRng, RngCore};
+pub use ed25519_dalek::{
+    Signature as Ed25519Signature, SigningKey as Ed25519SigningKey,
+    VerifyingKey as Ed25519VerifyingKey,
+};
 pub use x25519_dalek::{
     PublicKey as X25519DalekPublicKey, StaticSecret as X25519DalekStaticSecret,
 };

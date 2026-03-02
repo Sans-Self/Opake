@@ -9,6 +9,8 @@ license.workspace = true
 test-utils = []
 
 [dependencies]
+base64.workspace = true
+ed25519-dalek.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -19,10 +21,9 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 aes-kw = { version = "0.2", features = ["alloc"] }
 hkdf = "0.12"                   # HKDF key derivation (RFC 5869)
 sha2 = "0.10"                   # SHA-256 hash — used by HKDF internally
-base64 = "0.22"                 # atproto $bytes encoding
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 # aes-gcm pulls in getrandom transitively. On wasm32, getrandom needs the
 # "js" feature to use crypto.getRandomValues() instead of OS-level randomness.

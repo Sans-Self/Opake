@@ -89,9 +89,11 @@ impl LoginCommand {
         }
 
         let public_key_bytes = identity.public_key_bytes()?;
+        let verify_key_bytes = identity.verify_key_bytes()?;
         opake_core::resolve::publish_public_key(
             &mut client,
             &public_key_bytes,
+            verify_key_bytes.as_ref(),
             &Utc::now().to_rfc3339(),
         )
         .await?;

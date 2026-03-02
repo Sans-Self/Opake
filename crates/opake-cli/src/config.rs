@@ -1,10 +1,20 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 use anyhow::Context;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+static DATA_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// Resolve and store the data directory. Call once at startup.
+/// Priority: override > OPAKE_DATA_DIR env > XDG_CONFIG_HOME/opake > ~/.config/opake
+pub fn init_data_dir(override_dir: Option<PathBuf>) {
+    let dir = opake_core::paths::resolve_data_dir(override_dir);
+    *DATA_DIR.write().unwrap() = Some(dir);
+}
 
 /// Persistent CLI configuration — tracks all logged-in accounts.
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,14 +31,13 @@ pub struct AccountConfig {
     pub handle: String,
 }
 
-/// Where Opake stores its state on disk. Overridable via `OPAKE_DATA_DIR`
-/// for testing — production code never sets this.
+/// The resolved data directory. Must call `init_data_dir()` before use.
 pub fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("OPAKE_DATA_DIR") {
-        return PathBuf::from(dir);
-    }
-    let home = std::env::var("HOME").expect("HOME not set");
-    PathBuf::from(home).join(".config").join("opake")
+    DATA_DIR
+        .read()
+        .unwrap()
+        .clone()
+        .expect("data_dir not initialized: call init_data_dir() first")
 }
 
 /// Create the data directory if it doesn't exist.

@@ -126,7 +126,7 @@ fn load_config_without_file_errors() {
 fn ensure_data_dir_creates_directory() {
     with_test_dir(|dir| {
         let target = dir.path().join("nested");
-        std::env::set_var("OPAKE_DATA_DIR", &target);
+        init_data_dir(Some(target.clone()));
         assert!(!target.exists());
         ensure_data_dir().unwrap();
         assert!(target.exists());

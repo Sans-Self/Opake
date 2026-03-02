@@ -25,6 +25,16 @@
             "knownValues": ["x25519"],
             "description": "Key algorithm identifier."
           },
+          "signingKey": {
+            "type": "bytes",
+            "maxLength": 32,
+            "description": "Raw Ed25519 signing public key bytes. Used for DID-scoped authentication with the AppView."
+          },
+          "signingAlgo": {
+            "type": "string",
+            "knownValues": ["ed25519"],
+            "description": "Signing key algorithm identifier."
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime",
