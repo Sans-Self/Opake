@@ -151,6 +151,7 @@ mod tests {
         config::save_config(&config::Config {
             default_did: Some(did.to_string()),
             accounts,
+            appview_url: None,
         })
         .unwrap();
     }

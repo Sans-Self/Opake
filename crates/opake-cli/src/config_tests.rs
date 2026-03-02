@@ -13,6 +13,7 @@ fn test_config(did: &str, pds_url: &str, handle: &str) -> Config {
     Config {
         default_did: Some(did.to_string()),
         accounts,
+        appview_url: None,
     }
 }
 
@@ -51,6 +52,7 @@ fn config_with_multiple_accounts_roundtrips() {
         let config = Config {
             default_did: Some("did:plc:alice".into()),
             accounts,
+            appview_url: None,
         };
         save_config(&config).unwrap();
 
@@ -240,6 +242,7 @@ fn remove_account_promotes_next_default() {
         save_config(&Config {
             default_did: Some("did:plc:alice".into()),
             accounts,
+            appview_url: None,
         })
         .unwrap();
 
@@ -274,5 +277,57 @@ fn remove_account_without_dir_still_works() {
 
         let loaded = load_config().unwrap();
         assert!(!loaded.accounts.contains_key(did));
+    });
+}
+
+// -- resolve_appview_url --
+
+#[test]
+fn resolve_appview_url_explicit_flag_wins() {
+    with_test_dir(|_| {
+        std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
+        let result = resolve_appview_url(Some("https://flag.test")).unwrap();
+        assert_eq!(result, "https://flag.test");
+        std::env::remove_var("OPAKE_APPVIEW_URL");
+    });
+}
+
+#[test]
+fn resolve_appview_url_env_over_config() {
+    with_test_dir(|_| {
+        let mut config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        config.appview_url = Some("https://config.test".into());
+        save_config(&config).unwrap();
+
+        std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
+        let result = resolve_appview_url(None).unwrap();
+        assert_eq!(result, "https://env.test");
+        std::env::remove_var("OPAKE_APPVIEW_URL");
+    });
+}
+
+#[test]
+fn resolve_appview_url_config_fallback() {
+    with_test_dir(|_| {
+        std::env::remove_var("OPAKE_APPVIEW_URL");
+        let mut config = test_config("did:plc:alice", "https://pds.test", "alice.test");
+        config.appview_url = Some("https://config.test".into());
+        save_config(&config).unwrap();
+
+        let result = resolve_appview_url(None).unwrap();
+        assert_eq!(result, "https://config.test");
+    });
+}
+
+#[test]
+fn resolve_appview_url_missing_gives_clear_error() {
+    with_test_dir(|_| {
+        std::env::remove_var("OPAKE_APPVIEW_URL");
+        let err = resolve_appview_url(None).unwrap_err().to_string();
+        assert!(err.contains("--appview"), "expected usage hint: {err}");
+        assert!(
+            err.contains("OPAKE_APPVIEW_URL"),
+            "expected env hint: {err}"
+        );
     });
 }

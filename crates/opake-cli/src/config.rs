@@ -22,6 +22,8 @@ pub struct Config {
     pub default_did: Option<String>,
     #[serde(default)]
     pub accounts: BTreeMap<String, AccountConfig>,
+    #[serde(default)]
+    pub appview_url: Option<String>,
 }
 
 /// Per-account configuration stored in the global config.toml.
@@ -134,6 +136,35 @@ pub fn load_account_json<T: DeserializeOwned>(did: &str, filename: &str) -> anyh
     let content = fs::read_to_string(&path)
         .with_context(|| format!("no {filename} for {did}: run `opake login` first"))?;
     serde_json::from_str(&content).with_context(|| format!("failed to parse {filename} for {did}"))
+}
+
+/// Resolve the appview URL from (in priority order):
+/// 1. Explicit flag value (`--appview`)
+/// 2. `OPAKE_APPVIEW_URL` environment variable
+/// 3. `appview_url` field in config.toml
+///
+/// Returns a clear error if none are set.
+pub fn resolve_appview_url(explicit: Option<&str>) -> anyhow::Result<String> {
+    if let Some(url) = explicit {
+        return Ok(url.to_string());
+    }
+
+    if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
+        if !url.is_empty() {
+            return Ok(url);
+        }
+    }
+
+    if let Ok(config) = load_config() {
+        if let Some(url) = config.appview_url {
+            return Ok(url);
+        }
+    }
+
+    anyhow::bail!(
+        "no appview URL configured — pass --appview <url>, \
+         set OPAKE_APPVIEW_URL, or add appview_url to config.toml"
+    )
 }
 
 #[cfg(test)]

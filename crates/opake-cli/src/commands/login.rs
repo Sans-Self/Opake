@@ -65,6 +65,7 @@ impl LoginCommand {
         let mut cfg = config::load_config().unwrap_or(config::Config {
             default_did: None,
             accounts: BTreeMap::new(),
+            appview_url: None,
         });
 
         cfg.accounts.insert(

@@ -53,6 +53,7 @@ mod tests {
             config::save_config(&Config {
                 default_did: None,
                 accounts: BTreeMap::new(),
+                appview_url: None,
             })
             .unwrap();
 
@@ -75,6 +76,7 @@ mod tests {
             config::save_config(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
+                appview_url: None,
             })
             .unwrap();
 
