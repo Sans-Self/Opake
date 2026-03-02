@@ -2,6 +2,9 @@ use rusqlite::{params, Connection};
 
 use crate::error::Result;
 
+/// Jetstream cursors are unix microsecond timestamps.
+pub const MICROS_PER_SECOND: i64 = 1_000_000;
+
 /// Save the Jetstream cursor (unix microseconds timestamp).
 /// Uses upsert into the singleton row (id = 1).
 pub fn save_cursor(conn: &Connection, time_us: i64) -> Result<()> {

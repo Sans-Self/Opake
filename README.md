@@ -18,7 +18,7 @@ plaintext file
   → store metadata as app.opake.cloud.document record
 ```
 
-No middleware, no AppView, no modifications to the PDS. All crypto happens on your machine.
+No modifications to the PDS. All crypto happens on your machine.
 
 ## Build From Source
 
@@ -30,7 +30,7 @@ cd opake.dev
 cargo build --release
 ```
 
-The binary lands at `target/release/opake`.
+Produces two binaries: `target/release/opake` (CLI) and `target/release/opake-appview` (indexer/API server).
 
 ## Usage
 
@@ -88,9 +88,21 @@ Commands accept either a filename or an `at://` URI. If a filename matches multi
 
 The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`, `shared`, `revoke`) and accepts a handle or DID.
 
+## AppView
+
+The AppView is a separate binary (`opake-appview`) that indexes grants and keyrings from the AT Protocol firehose and serves them via a REST API. It enables grant discovery — "what's been shared with me?" — without scanning every PDS in the network.
+
+See [docs/appview.md](docs/appview.md) for configuration, authentication, API endpoints, and deployment.
+
 ## Architecture
 
-Two crates: `opake-core` (platform-agnostic library, compiles to WASM) and `opake-cli` (thin CLI wrapper). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
+Three crates:
+
+- **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations.
+- **`opake-cli`** — thin CLI wrapper. Config, session, identity persistence.
+- **`opake-appview`** — Axum-based indexer and REST API. Jetstream firehose consumer, SQLite storage, DID-scoped Ed25519 auth.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 
 ## Roadmap
 
@@ -104,10 +116,12 @@ Two crates: `opake-core` (platform-agnostic library, compiles to WASM) and `opak
 - [x] Direct file sharing between DIDs
 - [x] Cross-PDS shared file download (via --grant flag)
 - [x] Grant listing (shared command)
-- [ ] Grant discovery (inbox command)
+- [x] AppView indexer (grants + keyrings from firehose)
+- [x] AppView REST API with DID-scoped Ed25519 auth
+- [ ] Grant discovery (inbox command — queries AppView)
 - [ ] Keyring-based group sharing
 - [ ] Folder hierarchy
-- [ ] Web UI (Rust/Axum AppView + SPA)
+- [ ] Web UI (SPA frontend)
 
 ## Development
 

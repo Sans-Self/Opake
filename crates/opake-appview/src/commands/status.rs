@@ -2,6 +2,7 @@ use clap::Args;
 
 use crate::config::Config;
 use crate::db;
+use crate::db::cursor::MICROS_PER_SECOND;
 
 use super::build_state;
 
@@ -23,7 +24,7 @@ impl StatusCommand {
 
         match cursor_us {
             Some(us) => {
-                let cursor_secs = us / 1_000_000;
+                let cursor_secs = us / MICROS_PER_SECOND;
                 let now_secs = chrono::Utc::now().timestamp();
                 let lag_secs = now_secs - cursor_secs;
 

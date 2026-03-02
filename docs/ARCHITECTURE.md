@@ -10,10 +10,16 @@ graph TB
         Crypto["Client-side crypto<br/>(AES-256-GCM, X25519)"]
     end
 
+    subgraph Server ["AppView (self-hosted)"]
+        AppView["opake-appview"]
+        SQLite["SQLite"]
+    end
+
     subgraph Network ["AT Protocol Network"]
         OwnPDS["Your PDS"]
         OtherPDS["Other user's PDS"]
         PLC["PLC Directory"]
+        Jetstream["Jetstream firehose"]
     end
 
     CLI --> Core
@@ -21,14 +27,21 @@ graph TB
     Core -->|XRPC / HTTPS| OwnPDS
     Core -->|unauthenticated| OtherPDS
     Core -->|DID resolution| PLC
+    CLI -->|inbox query| AppView
+
+    AppView -->|subscribe| Jetstream
+    AppView --> SQLite
+    Jetstream -.->|events from| OwnPDS
+    Jetstream -.->|events from| OtherPDS
 
     OwnPDS -.->|federation / sync| OtherPDS
 
     style Client fill:#1a1a2e,color:#eee
+    style Server fill:#0f3460,color:#eee
     style Network fill:#16213e,color:#eee
 ```
 
-The CLI talks directly to PDS instances over XRPC. No middleware, no AppView, no PDS modifications. All encryption and decryption happens on your machine.
+The CLI talks directly to PDS instances over XRPC. No PDS modifications needed. All encryption and decryption happens on your machine. The AppView is an optional component that indexes grants and keyrings from the firehose for discovery.
 
 ## Crate Structure
 
@@ -88,7 +101,7 @@ crates/
       main.rs          Clap app, command dispatch
       config.rs        Multi-account config (default DID, account map)
       session.rs       Per-account session persistence (JWT tokens)
-      identity.rs      Per-account X25519 keypair persistence
+      identity.rs      Per-account X25519 + Ed25519 keypair persistence
       keyring_store.rs Local group key persistence (per-keyring)
       transport.rs     reqwest-based Transport implementation
       utils.rs         Test harness, env helpers
@@ -106,9 +119,41 @@ crates/
         accounts.rs    List accounts
         logout.rs      Remove account
         set_default.rs Switch default account
+
+  opake-appview/       Indexer + REST API for grant/keyring discovery
+    src/
+      main.rs          Clap app (run/index/serve/status subcommands)
+      config.rs        AppView config (appview.toml)
+      state.rs         AppState (Database, indexer status, key cache)
+      error.rs         Typed error hierarchy (thiserror)
+      indexer.rs       Event loop: firehose → parse → store
+      api/
+        mod.rs         Axum router (public + protected routes, rate limiting)
+        auth.rs        DID-scoped Ed25519 auth middleware
+        key_cache.rs   Signing key cache with TTL
+        health.rs      GET /api/health (unauthenticated)
+        inbox.rs       GET /api/inbox (grants by recipient DID)
+        keyrings.rs    GET /api/keyrings (memberships by DID)
+        types.rs       API response types
+      db/
+        mod.rs         Database wrapper (SQLite, WAL mode)
+        schema.rs      Table definitions
+        cursor.rs      Firehose cursor persistence
+        grants.rs      Grant upsert/query/delete
+        keyrings.rs    Keyring member upsert/query/delete
+      firehose/
+        mod.rs         Re-exports
+        subscribe.rs   WebSocket connection to Jetstream
+        events.rs      Event parsing → IndexableEvent
+      commands/
+        mod.rs         Shared helpers (build_state, serve_http)
+        run.rs         Indexer + API (default)
+        index.rs       Indexer only
+        serve.rs       API only
+        status.rs      Print cursor + stats
 ```
 
-The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens in `opake-cli`. This keeps `opake-core` compilable to WASM for the future web UI.
+The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates. This keeps `opake-core` compilable to WASM for the future web UI.
 
 ## Encryption Model
 
@@ -142,9 +187,12 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 
 ### Public Key Discovery
 
-AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes X25519 encryption public keys as `app.opake.cloud.publicKey/self` singleton records on each user's PDS. Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key.
+AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.cloud.publicKey/self` singleton records on each user's PDS containing:
 
-The key is published automatically on every `opake login` via an idempotent `putRecord`.
+- **X25519 encryption public key** — used for key wrapping (sharing)
+- **Ed25519 signing public key** — used for AppView authentication
+
+Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. Both keys are published automatically on every `opake login` via an idempotent `putRecord`.
 
 ## Data Model
 
@@ -208,15 +256,18 @@ The CLI supports multiple authenticated accounts. Each account has its own:
 - X25519 keypair
 - PDS URL and handle
 
+Both binaries resolve their config directory through the same chain: `--config-dir` flag → `OPAKE_DATA_DIR` env → `XDG_CONFIG_HOME/opake` → `~/.config/opake`. Resolution logic lives in `opake-core/src/paths.rs`.
+
 Storage layout:
 
 ```
 ~/.config/opake/
-  config.toml            Global config (default DID, account map)
+  config.toml            CLI config (default DID, account map)
+  appview.toml           AppView config (jetstream URL, listen addr, db path)
   accounts/
     <did>/
       session.json       JWT tokens
-      identity.json      X25519 keypair (plaintext for MVP)
+      identity.json      X25519 + Ed25519 keypairs (plaintext for MVP)
       keyrings/
         <rkey>.json      Group keys for each keyring (per-rotation)
 ```

@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::response::{IntoResponse, Json};
 use serde::Serialize;
 
-use crate::db::cursor;
+use crate::db::cursor::{self, MICROS_PER_SECOND};
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -23,7 +23,7 @@ pub async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoRespo
 
     let (cursor_time, cursor_age_secs) = match cursor_us {
         Some(us) => {
-            let secs = us / 1_000_000;
+            let secs = us / MICROS_PER_SECOND;
             let now = chrono::Utc::now().timestamp();
             let time = chrono::DateTime::from_timestamp(secs, 0).map(|dt| dt.to_rfc3339());
             (time, Some(now - secs))

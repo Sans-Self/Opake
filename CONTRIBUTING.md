@@ -14,26 +14,33 @@ Contributions welcome — from humans and AI agents alike.
 - `cargo fmt` before every commit (enforced by CI and pre-commit hook)
 - `cargo clippy -- -D warnings` must pass
 - No `unwrap()` in library code — use `?` and proper error types
-- `opake-core` uses `thiserror` for typed errors; `opake-cli` uses `anyhow` for application errors
+- `opake-core` uses `thiserror` for typed errors; `opake-cli` and `opake-appview` use `anyhow` for application errors
 - Prefer `&str` parameters, `String` for owned data
 - Avoid `.clone()` unless necessary
 
 ## Architecture
 
 ```
-opake-core    platform-agnostic library (compiles to WASM)
-              - encryption/decryption (AES-256-GCM, x25519 key wrapping)
-              - XRPC client with automatic token refresh
-              - document operations (upload, download, list, delete, resolve)
-              - AT Protocol record types and lexicon constants
+opake-core      platform-agnostic library (compiles to WASM)
+                - encryption/decryption (AES-256-GCM, x25519 key wrapping)
+                - XRPC client with automatic token refresh
+                - document operations (upload, download, list, delete, resolve)
+                - AT Protocol record types and lexicon constants
+                - shared config path resolution (paths.rs)
 
-opake-cli     thin CLI wrapper
-              - clap command definitions
-              - config/session/identity persistence
-              - user interaction (prompts, formatting)
+opake-cli       thin CLI wrapper
+                - clap command definitions
+                - config/session/identity persistence
+                - user interaction (prompts, formatting)
+
+opake-appview   indexer + REST API for grant/keyring discovery
+                - Jetstream firehose consumer
+                - SQLite storage (WAL mode)
+                - Axum API with DID-scoped Ed25519 auth
+                - rate limiting via tower_governor
 ```
 
-`opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O happens at the CLI layer.
+`opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structure and encryption model, and [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 
@@ -50,6 +57,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structur
 cargo test                          # all tests
 cargo test -p opake-core            # core only
 cargo test -p opake-cli             # CLI only
+cargo test -p opake-appview         # appview only
 cargo test -- --test-output         # show println output
 ```
 
