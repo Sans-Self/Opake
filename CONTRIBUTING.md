@@ -88,4 +88,8 @@ AI-assisted contributions are welcome. No special rules beyond:
 
 ## Project management
 
-This project uses [chainlink](https://github.com/dollspace-gay/chainlink).
+This project uses [crosslink](https://github.com/forecast-bio/crosslink) for
+issue tracking and AI agent workflow. After cloning, run `crosslink init` to
+set up hooks and the local issue database. The rule files in
+`.crosslink/rules/` have been trimmed from crosslink's defaults — Rust-specific
+rules are deferred to `cargo clippy` and the project's `CLAUDE.md`.
