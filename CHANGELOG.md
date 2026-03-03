@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Add path-aware rm with recursive directory deletion [#156](https://issues.opake.app/issues/156.html)
 - Update docs to reflect keyring rotation history [#46](https://issues.opake.app/issues/46.html)
 - Add keyring member management (add-member, remove-member) [#56](https://issues.opake.app/issues/56.html)
 - Add CLI keyring commands and local group key store [#57](https://issues.opake.app/issues/57.html)

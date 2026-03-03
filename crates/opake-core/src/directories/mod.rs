@@ -9,12 +9,16 @@ mod delete;
 mod entries;
 mod get_or_create_root;
 mod list;
+mod remove;
+mod tree;
 
 pub use create::create_directory;
 pub use delete::delete_directory;
 pub use entries::{add_entry, remove_entry};
 pub use get_or_create_root::get_or_create_root;
 pub use list::{list_directories, DirectoryEntry};
+pub use remove::{remove, RemoveResult};
+pub use tree::{DirectoryTree, EntryKind, ResolvedPath};
 
 pub const DIRECTORY_COLLECTION: &str = "app.opake.cloud.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";

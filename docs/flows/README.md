@@ -6,6 +6,7 @@ Sequence diagrams for every CLI operation. All crypto happens client-side — th
 |------|-------|
 | [authentication.md](authentication.md) | Login, token refresh |
 | [documents.md](documents.md) | Upload, download, list, delete |
+| [directories.md](directories.md) | Create, delete, recursive delete, path resolution |
 | [sharing.md](sharing.md) | Resolve, share, revoke |
 | [crypto.md](crypto.md) | Key wrapping, content encryption primitives |
 | [keyrings.md](keyrings.md) | Create, list, add/remove member, keyring upload/download |

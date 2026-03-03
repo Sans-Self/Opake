@@ -75,6 +75,15 @@ crates/
           auth.rs      login(), refresh_session()
           blobs.rs     upload_blob(), get_blob()
           repo.rs      create_record(), put_record(), get_record(), list_records(), delete_record()
+      directories/
+        mod.rs         Re-exports, collection constants, shared test fixtures
+        create.rs      create_directory()
+        delete.rs      delete_directory() — single empty directory
+        entries.rs     add_entry(), remove_entry() — fetch-modify-put on parent
+        get_or_create_root.rs  Root singleton (rkey "self") management
+        list.rs        list_directories()
+        tree.rs        DirectoryTree — in-memory snapshot for path resolution
+        remove.rs      remove() — path-aware deletion (recursive, with parent cleanup)
       documents/
         mod.rs         Re-exports, shared test fixtures
         upload.rs      encrypt_and_upload()
@@ -110,7 +119,8 @@ crates/
         upload.rs      File → encrypt → upload (direct or --keyring)
         download.rs    Download + decrypt (direct, keyring, or --grant)
         ls.rs          List documents
-        rm.rs          Delete with confirmation prompt
+        mkdir.rs       Create directory
+        rm.rs          Path-aware delete (documents, directories, recursive)
         resolve.rs     Identity resolution display
         share.rs       Grant creation
         revoke.rs      Grant deletion

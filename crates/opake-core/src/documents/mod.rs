@@ -23,7 +23,7 @@ pub use upload::{
     encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
 };
 
-const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";
+pub const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";
 
 #[cfg(test)]
 pub(crate) mod tests {

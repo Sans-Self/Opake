@@ -127,7 +127,9 @@ sequenceDiagram
 
 ## Delete
 
-Deletes a document record. The blob becomes orphaned and is eventually garbage-collected by the PDS.
+Deletes a document record. The blob becomes orphaned and is eventually garbage-collected by the PDS. If the document is tracked in a directory, the parent's entry list is updated.
+
+For path-based deletion (`Photos/beach.jpg`), recursive directory deletion, and directory-related flows, see [directories.md](directories.md).
 
 ```mermaid
 sequenceDiagram
@@ -137,12 +139,17 @@ sequenceDiagram
 
     User->>CLI: opake rm photo.jpg
 
-    CLI->>CLI: Resolve filename → AT-URI
-    CLI->>User: Delete photo.jpg? [y/N]
+    Note over CLI: Bare name → fast path (document-only resolution)
+    CLI->>PDS: listRecords (document collection, paginated)
+    PDS-->>CLI: match found → AT-URI
+
+    CLI->>User: delete photo.jpg? [y/N]
     User-->>CLI: y
 
     CLI->>PDS: com.atproto.repo.deleteRecord (collection, rkey)
     PDS-->>CLI: 200 OK
 
-    CLI->>User: Deleted
+    CLI->>User: deleted at://did/.../document/<rkey>
 ```
+
+The fast path resolves bare document names with a single paginated `listRecords` call, the same cost as the pre-directory implementation. AT-URIs skip resolution entirely. Only path references (`dir/file`) and directory targets trigger a full tree load — see [directories.md](directories.md#path-resolution) for details.
