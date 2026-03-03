@@ -8,6 +8,8 @@ Opake uses your existing PDS as a storage and identity layer. Files are encrypte
 
 Your data is opaque to everyone without the key. That's the point.
 
+[Issue Tracker](https://issues.opake.app) · [Architecture](docs/ARCHITECTURE.md) · [Lexicons](lexicons/README.md)
+
 ## How It Works
 
 ```
