@@ -78,6 +78,8 @@ crosslink comment <id> "Auth module refactored, 12 tests pass" --kind result
 
 Low priority issues don't need typed comments — the diff tells the story.
 
+Use markdown in comment content — comments are rendered as HTML in the issue tracker.
+
 ### Priority Guide
 - `critical`: Blocking other work, security issue, production down
 - `high`: User explicitly requested, core functionality

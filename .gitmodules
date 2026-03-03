@@ -1,0 +1,3 @@
+[submodule "tools/crosslink-issue-renderer"]
+	path = tools/crosslink-issue-renderer
+	url = git@knot.sans-self.org:sans-self.org/crosslink-issue-renderer
