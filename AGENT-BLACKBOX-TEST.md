@@ -152,18 +152,110 @@ A$ opake download empty.bin -o /tmp/empty-download.bin
 
 ---
 
-## 3. Delete
+## 3. Directories
+
+### 3.1 Create directories
 
 ```bash
-A$ opake rm test-direct.txt
-# prompts "delete at://...? [y/N]"
+A$ opake mkdir Photos
+# prints: Photos → at://did:plc:A/app.opake.cloud.directory/<rkey>
+
+A$ opake mkdir Archive
+```
+
+### 3.2 Upload into a directory
+
+```bash
+echo "beach photo" > /tmp/beach.jpg
+A$ opake upload /tmp/beach.jpg --dir Photos
+# prints: beach.jpg → at://... (in Photos)
+```
+
+### 3.3 View the tree
+
+```bash
+A$ opake tree
+# /
+# ├── Archive/
+# ├── Photos/
+# │   └── beach.jpg
+# └── test-direct.txt    (if still present from section 2)
+```
+
+**Verify:**
+- Directories appear with trailing `/`
+- Documents appear as leaves
+- Indentation and box-drawing characters are correct
+
+### 3.4 Cat a file (decrypt to stdout)
+
+```bash
+A$ opake cat beach.jpg
+# prints "beach photo" to stdout (no file created)
+
+# path-based cat:
+A$ opake cat Photos/beach.jpg
+# same output
+```
+
+**Verify:**
+- Output is the decrypted plaintext
+- No prompt, no "saved to" message — just raw content
+
+### 3.5 Move a file into a directory
+
+```bash
+echo "meeting notes" > /tmp/notes.txt
+A$ opake upload /tmp/notes.txt
+A$ opake mv notes.txt Archive/
+# prints: moved "notes.txt" → Archive/
+
+A$ opake tree
+# Archive/ now contains notes.txt
+```
+
+### 3.6 Rename a file
+
+```bash
+A$ opake mv notes.txt meeting-notes.txt
+# prints: renamed "notes.txt" → "meeting-notes.txt"
+```
+
+### 3.7 Move via path
+
+```bash
+A$ opake mv Archive/meeting-notes.txt Photos/
+# prints: moved "meeting-notes.txt" → Photos/
+```
+
+### 3.8 Rename a directory
+
+```bash
+A$ opake mv Archive Old
+# prints: renamed "Archive" → "Old"
+```
+
+### 3.9 Move into self is rejected
+
+```bash
+A$ opake mv Photos Photos/
+# should error: "cannot move a directory into itself"
+```
+
+---
+
+## 4. Delete
+
+```bash
+A$ opake rm beach.jpg
+# prompts "delete beach.jpg? [y/N]"
 # type y
 
 A$ opake ls
 # file is gone
 ```
 
-### 3.1 Delete with --yes
+### 4.1 Delete with --yes
 
 ```bash
 A$ opake upload /tmp/test-direct.txt
@@ -171,11 +263,48 @@ A$ opake rm test-direct.txt -y
 # no prompt, immediate delete
 ```
 
+### 4.2 Delete by path
+
+```bash
+echo "delete me" > /tmp/deleteme.txt
+A$ opake upload /tmp/deleteme.txt --dir Photos
+A$ opake rm Photos/deleteme.txt -y
+# deletes the document and removes it from Photos' entry list
+```
+
+### 4.3 Delete an empty directory
+
+```bash
+A$ opake rm Old -y
+# deletes the directory (must be empty)
+```
+
+### 4.4 Delete non-empty directory without -r fails
+
+```bash
+A$ opake rm Photos
+# should error: "directory is not empty (N documents, M subdirectories) — use -r to delete recursively"
+```
+
+### 4.5 Recursive delete
+
+```bash
+echo "sunset" > /tmp/sunset.jpg
+A$ opake upload /tmp/sunset.jpg --dir Photos
+A$ opake rm -r Photos
+# prompts: "delete Photos/? (1 documents, 0 subdirectories) [y/N]"
+# type y
+# prints: deleted at://... (1 documents, 1 directories)
+
+A$ opake tree
+# Photos is gone
+```
+
 ---
 
-## 4. Sharing (Grants)
+## 5. Sharing (Grants)
 
-### 4.1 Upload a file to share
+### 5.1 Upload a file to share
 
 ```bash
 echo "shared secret" > /tmp/shared-file.txt
@@ -184,7 +313,7 @@ A$ opake upload /tmp/shared-file.txt
 
 Save URI as `$SHARED_URI`.
 
-### 4.2 Share with B
+### 5.2 Share with B
 
 ```bash
 A$ opake share shared-file.txt <B-handle> --note "for your eyes only"
@@ -193,7 +322,7 @@ A$ opake share shared-file.txt <B-handle> --note "for your eyes only"
 
 Save grant URI as `$GRANT_URI`.
 
-### 4.3 List outgoing grants
+### 5.3 List outgoing grants
 
 ```bash
 A$ opake shared
@@ -207,7 +336,7 @@ A$ opake shared -l
 - Grant appears with B's DID as recipient
 - Note shows up in long format
 
-### 4.4 Download via grant (cross-PDS)
+### 5.4 Download via grant (cross-PDS)
 
 ```bash
 B$ opake download --grant $GRANT_URI -o /tmp/shared-download.txt
@@ -221,7 +350,7 @@ diff /tmp/shared-file.txt /tmp/shared-download.txt
 - Works even though the file lives on A's PDS
 - B never needs to be a "member" of anything
 
-### 4.5 Revoke
+### 5.5 Revoke
 
 ```bash
 A$ opake revoke $GRANT_URI
@@ -232,7 +361,7 @@ A$ opake shared
 # grant is gone
 ```
 
-### 4.6 Download after revoke fails
+### 5.6 Download after revoke fails
 
 ```bash
 B$ opake download --grant $GRANT_URI -o /tmp/should-fail.txt
@@ -241,16 +370,16 @@ B$ opake download --grant $GRANT_URI -o /tmp/should-fail.txt
 
 ---
 
-## 5. Keyrings
+## 6. Keyrings
 
-### 5.1 Create a keyring
+### 6.1 Create a keyring
 
 ```bash
 A$ opake keyring create family-photos
 # prints: family-photos → at://did:plc:A/app.opake.cloud.keyring/<kr-rkey>
 ```
 
-### 5.2 List keyrings
+### 6.2 List keyrings
 
 ```bash
 A$ opake keyring ls
@@ -260,7 +389,7 @@ A$ opake keyring ls -l
 # includes URI and rotation count (0)
 ```
 
-### 5.3 Upload under keyring
+### 6.3 Upload under keyring
 
 ```bash
 echo "family photo metadata" > /tmp/photo.txt
@@ -269,7 +398,7 @@ A$ opake upload /tmp/photo.txt --keyring family-photos
 
 Save URI as `$KR_DOC_URI`.
 
-### 5.4 Download own keyring-encrypted file
+### 6.4 Download own keyring-encrypted file
 
 ```bash
 A$ opake download photo.txt -o /tmp/photo-download.txt
@@ -277,7 +406,7 @@ diff /tmp/photo.txt /tmp/photo-download.txt
 # identical
 ```
 
-### 5.5 Add member
+### 6.5 Add member
 
 ```bash
 A$ opake keyring add-member family-photos <B-handle>
@@ -287,7 +416,7 @@ A$ opake keyring ls
 # family-photos  2 member(s)
 ```
 
-### 5.6 Member download (cross-PDS, new feature)
+### 6.6 Member download (cross-PDS)
 
 ```bash
 B$ opake download --keyring-member $KR_DOC_URI -o /tmp/kr-member-download.txt
@@ -301,7 +430,7 @@ diff /tmp/photo.txt /tmp/kr-member-download.txt
 - B fetched from A's PDS (unauthenticated)
 - Group key is now cached locally for B
 
-### 5.7 Subsequent downloads use cached key
+### 6.7 Subsequent downloads use cached key
 
 Upload a second file under the same keyring as A:
 
@@ -319,7 +448,7 @@ B$ opake download --keyring-member $KR_DOC2_URI -o /tmp/photo2-download.txt
 diff /tmp/photo2.txt /tmp/photo2-download.txt
 ```
 
-### 5.8 Non-member is rejected
+### 6.8 Non-member is rejected
 
 ```bash
 C$ opake download --keyring-member $KR_DOC_URI -o /tmp/should-fail.txt
@@ -328,7 +457,7 @@ C$ opake download --keyring-member $KR_DOC_URI -o /tmp/should-fail.txt
 
 If C is not available, skip this test.
 
-### 5.9 Remove member
+### 6.9 Remove member
 
 ```bash
 A$ opake keyring remove-member family-photos <B-handle>
@@ -342,7 +471,7 @@ A$ opake keyring ls -l
 # rotation count is now 1
 ```
 
-### 5.10 Removed member cannot download new uploads
+### 6.10 Removed member cannot download new uploads
 
 After removal, upload a new file under the rotated keyring:
 
@@ -361,23 +490,23 @@ B$ opake download --keyring-member <photo3-uri> -o /tmp/should-fail.txt
 
 ---
 
-## 6. Error Cases
+## 7. Error Cases
 
-### 6.1 Download nonexistent file
+### 7.1 Download nonexistent file
 
 ```bash
 A$ opake download nonexistent-file.txt
 # should error: not found
 ```
 
-### 6.2 Invalid AT-URI
+### 7.2 Invalid AT-URI
 
 ```bash
 A$ opake download "not-a-uri"
 # should error: AT-URI parse failure
 ```
 
-### 6.3 Wrong account downloads direct file
+### 7.3 Wrong account downloads direct file
 
 ```bash
 B$ opake download $DOC_URI -o /tmp/wrong-account.txt
@@ -386,14 +515,14 @@ B$ opake download $DOC_URI -o /tmp/wrong-account.txt
 
 (Only works if A still has a direct-encrypted file uploaded. Re-upload one if needed.)
 
-### 6.4 --grant and --keyring-member conflict
+### 7.4 --grant and --keyring-member conflict
 
 ```bash
 B$ opake download --grant at://x --keyring-member at://y
 # should error: clap conflict (cannot use both flags)
 ```
 
-### 6.5 --keyring-member on a direct-encrypted document
+### 7.5 --keyring-member on a direct-encrypted document
 
 ```bash
 B$ opake download --keyring-member $SHARED_URI -o /tmp/should-fail.txt
@@ -404,11 +533,11 @@ B$ opake download --keyring-member $SHARED_URI -o /tmp/should-fail.txt
 
 ---
 
-## 7. AppView
+## 8. AppView
 
 The AppView is a separate binary (`opake-appview`) that indexes grants and keyrings from the AT Protocol firehose. These tests require a running Jetstream instance or network access to the public Jetstream relays.
 
-### 7.1 Configuration
+### 8.1 Configuration
 
 Create a minimal config:
 
@@ -420,7 +549,7 @@ db_path = "/tmp/opake-appview-test/appview.db"
 EOF
 ```
 
-### 7.2 Status (cold start)
+### 8.2 Status (cold start)
 
 ```bash
 opake-appview --config-dir /tmp/opake-appview-test status
@@ -429,7 +558,7 @@ opake-appview --config-dir /tmp/opake-appview-test status
 # Keyrings: 0
 ```
 
-### 7.3 Start indexer + API
+### 8.3 Start indexer + API
 
 ```bash
 opake-appview --config-dir /tmp/opake-appview-test run -v &
@@ -441,7 +570,7 @@ sleep 3
 - Logs show "opake-appview listening on 127.0.0.1:6100"
 - Logs show Jetstream connection established
 
-### 7.4 Health endpoint
+### 8.4 Health endpoint
 
 ```bash
 curl -s http://127.0.0.1:6100/api/health | jq .
@@ -456,7 +585,7 @@ curl -s http://127.0.0.1:6100/api/health | jq .
 - `indexerConnected` is `true`
 - `cursorAgeSecs` is small (< 60)
 
-### 7.5 Inbox and keyrings require auth
+### 8.5 Inbox and keyrings require auth
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/api/inbox?did=did:plc:test
@@ -466,7 +595,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/api/keyrings?did=di
 # 401
 ```
 
-### 7.6 Share triggers indexing
+### 8.6 Share triggers indexing
 
 With the AppView still running, create a share grant using the CLI (from section 4.2):
 
@@ -481,7 +610,7 @@ opake-appview --config-dir /tmp/opake-appview-test status
 # Grants: should be ≥ 1
 ```
 
-### 7.7 Status (after indexing)
+### 8.7 Status (after indexing)
 
 ```bash
 opake-appview --config-dir /tmp/opake-appview-test status
@@ -491,7 +620,7 @@ opake-appview --config-dir /tmp/opake-appview-test status
 # Keyrings: <number>
 ```
 
-### 7.8 Config dir matches CLI
+### 8.8 Config dir matches CLI
 
 Both binaries should resolve the same config directory:
 
@@ -504,7 +633,7 @@ OPAKE_DATA_DIR=/tmp/opake-appview-test opake-appview status
 opake-appview --config-dir /tmp/opake-appview-test status
 ```
 
-### 7.9 Cleanup
+### 8.9 Cleanup
 
 ```bash
 kill $APPVIEW_PID 2>/dev/null
@@ -513,16 +642,16 @@ rm -rf /tmp/opake-appview-test
 
 ---
 
-## 8. Cleanup
+## 9. Cleanup
 
 ```bash
-# remove test files
-A$ opake rm photo.txt -y
-A$ opake rm photo2.txt -y
-A$ opake rm empty.bin -y
+# remove test files (some may already be deleted from section 4)
+A$ opake rm photo.txt -y 2>/dev/null
+A$ opake rm photo2.txt -y 2>/dev/null
+A$ opake rm empty.bin -y 2>/dev/null
 # etc.
 
-rm /tmp/test-direct*.txt /tmp/shared-*.txt /tmp/photo*.txt /tmp/empty* /tmp/kr-* /tmp/should-fail.txt 2>/dev/null
+rm /tmp/test-direct*.txt /tmp/shared-*.txt /tmp/photo*.txt /tmp/empty* /tmp/kr-* /tmp/should-fail.txt /tmp/beach.jpg /tmp/notes.txt /tmp/sunset.jpg /tmp/deleteme.txt 2>/dev/null
 
 # optionally logout test accounts
 opake logout <B-handle>

@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Update blackbox tests and docs for new commands [#159](https://issues.opake.app/issues/159.html)
 - Add path-aware mv command [#157](https://issues.opake.app/issues/157.html)
 - Add path-aware upload with directory placement [#158](https://issues.opake.app/issues/158.html)
 - Add path-aware rm with recursive directory deletion [#156](https://issues.opake.app/issues/156.html)

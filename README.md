@@ -50,6 +50,13 @@ opake set-default bob.other.com
 # upload a file (encrypts + uploads)
 opake upload photo.jpg --tags vacation,beach
 
+# upload into a directory
+opake upload photo.jpg --dir Photos
+
+# organize files into directories
+opake mkdir Photos
+opake tree
+
 # list your documents
 opake ls
 opake ls --long
@@ -63,11 +70,21 @@ opake upload doc.pdf --as did:plc:alice123
 opake download photo.jpg
 opake download photo.jpg -o ~/Downloads/copy.jpg
 
+# print a file to stdout (decrypt without saving)
+opake cat notes.txt
+opake cat Photos/notes.txt
+
 # download a shared file from another user (via grant URI)
 opake download --grant at://did:plc:abc/app.opake.cloud.grant/tid123
 
-# delete
+# delete (supports paths and recursive directory deletion)
 opake rm photo.jpg
+opake rm Photos/photo.jpg
+opake rm -r Photos
+
+# move and rename
+opake mv photo.jpg Photos/
+opake mv photo.jpg vacation-photo.jpg
 
 # resolve a handle or DID to see their public key
 opake resolve alice.example.com
@@ -86,9 +103,9 @@ opake revoke at://did:plc:abc/app.opake.cloud.grant/tid123
 opake logout bob.other.com
 ```
 
-Commands accept either a filename or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
+Commands accept a filename, a path (`Photos/beach.jpg`), or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
 
-The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `share`, `shared`, `revoke`) and accepts a handle or DID.
+The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `mv`, `cat`, `tree`, `share`, `shared`, `revoke`) and accepts a handle or DID.
 
 ## AppView
 
@@ -121,9 +138,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate
 - [x] Grant listing (shared command)
 - [x] AppView indexer (grants + keyrings from firehose)
 - [x] AppView REST API with DID-scoped Ed25519 auth
+- [x] Folder hierarchy (mkdir, tree, path-aware rm/mv/cat/upload)
 - [ ] Grant discovery (inbox command — queries AppView)
 - [ ] Keyring-based group sharing
-- [ ] Folder hierarchy
 - [ ] Web UI (SPA frontend)
 
 ## Development
