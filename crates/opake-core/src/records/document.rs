@@ -43,8 +43,6 @@ pub struct Document {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
@@ -55,8 +53,8 @@ pub struct Document {
 
 impl Document {
     /// Construct a new document with the current schema version and sensible
-    /// defaults for optional fields. Callers set tags/parent/description/etc.
-    /// via struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
+    /// defaults for optional fields. Callers set tags/description/etc. via
+    /// struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
     pub fn new(name: String, blob: BlobRef, encryption: Encryption, created_at: String) -> Self {
         Self {
             version: SCHEMA_VERSION,
@@ -66,7 +64,6 @@ impl Document {
             blob,
             encryption,
             tags: Vec::new(),
-            parent: None,
             description: None,
             visibility: None,
             created_at,

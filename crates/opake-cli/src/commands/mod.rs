@@ -5,6 +5,7 @@ pub mod keyring;
 pub mod login;
 pub mod logout;
 pub mod ls;
+pub mod mkdir;
 pub mod resolve;
 pub mod revoke;
 pub mod rm;

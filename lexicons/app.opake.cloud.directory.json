@@ -1,0 +1,35 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.directory",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A directory in the personal cloud. Contains an ordered list of AT-URIs referencing documents or other directories. The root directory is a singleton at rkey 'self'.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["version", "name", "createdAt"],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.cloud.* namespace.",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable directory name. '/' for root.",
+            "maxLength": 512
+          },
+          "entries": {
+            "type": "array",
+            "description": "Ordered list of AT-URIs of child documents or directories.",
+            "items": { "type": "string", "format": "at-uri" },
+            "maxLength": 10000
+          },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "modifiedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

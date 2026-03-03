@@ -7,6 +7,7 @@
 // `atproto` module. The ones used as record fields are re-exported here.
 
 mod defs;
+mod directory;
 mod document;
 mod grant;
 mod keyring;
@@ -20,6 +21,7 @@ pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 // Re-export all record types at the `records::` level.
 pub use defs::{EncryptionEnvelope, KeyringRef, WrappedKey};
+pub use directory::Directory;
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
 pub use grant::Grant;
 pub use keyring::{KeyHistoryEntry, Keyring};
@@ -42,7 +44,7 @@ macro_rules! impl_versioned {
     };
 }
 
-impl_versioned!(Document, PublicKeyRecord, Grant, Keyring);
+impl_versioned!(Directory, Document, PublicKeyRecord, Grant, Keyring);
 
 fn default_version() -> u32 {
     SCHEMA_VERSION
@@ -109,6 +111,47 @@ mod tests {
         let json = serde_json::to_value(&record).unwrap();
         // atproto $bytes convention: { "$bytes": "<base64>" }
         assert!(json["publicKey"]["$bytes"].is_string());
+    }
+
+    #[test]
+    fn directory_roundtrips_through_json() {
+        let directory = Directory::new("/".into(), "2026-03-01T00:00:00Z".into());
+        let json = serde_json::to_string(&directory).unwrap();
+        let parsed: Directory = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.version, SCHEMA_VERSION);
+        assert_eq!(parsed.name, "/");
+        assert!(parsed.entries.is_empty());
+        assert_eq!(parsed.created_at, "2026-03-01T00:00:00Z");
+        assert!(parsed.modified_at.is_none());
+    }
+
+    #[test]
+    fn directory_entries_omitted_when_empty() {
+        let directory = Directory::new("Photos".into(), "2026-03-01T00:00:00Z".into());
+        let json = serde_json::to_value(&directory).unwrap();
+        assert!(
+            json.get("entries").is_none(),
+            "empty entries should be omitted from serialization"
+        );
+    }
+
+    #[test]
+    fn directory_with_entries_roundtrips() {
+        let mut directory = Directory::new("Photos".into(), "2026-03-01T00:00:00Z".into());
+        directory.entries = vec![
+            "at://did:plc:test/app.opake.cloud.document/abc".into(),
+            "at://did:plc:test/app.opake.cloud.directory/def".into(),
+        ];
+        directory.modified_at = Some("2026-03-01T12:00:00Z".into());
+
+        let json = serde_json::to_string(&directory).unwrap();
+        let parsed: Directory = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.entries.len(), 2);
+        assert!(parsed.entries[0].contains("document"));
+        assert!(parsed.entries[1].contains("directory"));
+        assert_eq!(parsed.modified_at.unwrap(), "2026-03-01T12:00:00Z");
     }
 
     #[test]

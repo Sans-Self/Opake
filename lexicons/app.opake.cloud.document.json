@@ -50,11 +50,6 @@
             "items": { "type": "string", "maxLength": 128 },
             "maxLength": 32
           },
-          "parent": {
-            "type": "string",
-            "format": "at-uri",
-            "description": "Optional reference to a parent document (for folder-like hierarchy). Points to another app.opake.cloud.document record."
-          },
           "description": {
             "type": "string",
             "description": "Optional plaintext description or summary.",

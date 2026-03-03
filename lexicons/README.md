@@ -15,6 +15,7 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | NSID | Type | Purpose |
 |------|------|---------|
 | `app.opake.cloud.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
+| `app.opake.cloud.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
 | `app.opake.cloud.document` | record | An encrypted file/document with metadata |
 | `app.opake.cloud.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.cloud.keyring` | record | A named group with a shared symmetric key, wrapped to each member |

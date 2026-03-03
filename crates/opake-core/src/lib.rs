@@ -17,6 +17,7 @@ pub use opake_derive::RedactedDebug;
 pub mod atproto;
 pub mod client;
 pub mod crypto;
+pub mod directories;
 pub mod documents;
 pub mod error;
 pub mod keyrings;

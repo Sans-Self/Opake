@@ -16,7 +16,45 @@ Every Opake user publishes their X25519 encryption public key as a singleton rec
 
 This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only one per account. The key is published automatically on `opake login`.
 
-## 1. Alice creates a private encrypted document
+## 1. Root directory (created on first `opake mkdir`)
+
+The root directory is a singleton at rkey `self`. It's lazy-created the first time a user creates a directory.
+
+```json
+{
+  "$type": "app.opake.cloud.directory",
+  "version": 1,
+  "name": "/",
+  "entries": [
+    "at://did:plc:alice123/app.opake.cloud.directory/3k..."
+  ],
+  "createdAt": "2026-03-01T10:00:00.000Z",
+  "modifiedAt": "2026-03-01T10:00:00.000Z"
+}
+```
+
+Directories are purely organizational — no encryption, no crypto. The `entries` array is an ordered list of AT-URIs pointing to documents or other directories (children-on-parent model). You can derive the child type from the collection segment of the URI.
+
+## 2. A named directory
+
+```json
+{
+  "$type": "app.opake.cloud.directory",
+  "version": 1,
+  "name": "Photos",
+  "entries": [
+    "at://did:plc:alice123/app.opake.cloud.document/3kabcd",
+    "at://did:plc:alice123/app.opake.cloud.document/3kefgh",
+    "at://did:plc:alice123/app.opake.cloud.directory/3kijkl"
+  ],
+  "createdAt": "2026-03-01T10:05:00.000Z",
+  "modifiedAt": "2026-03-01T11:30:00.000Z"
+}
+```
+
+This directory contains two documents and a subdirectory. Non-root directories use TID rkeys (created via `createRecord`).
+
+## 3. Alice creates a private encrypted document
 
 ```json
 {
@@ -56,7 +94,7 @@ and an opaque blob. The `keys` array only contains Alice's wrapped key — only 
 can decrypt.
 
 
-## 2. Alice shares the document with Bob via a grant
+## 4. Alice shares the document with Bob via a grant
 
 ```json
 {
@@ -87,7 +125,7 @@ from the network (eventually). For true forward secrecy, Alice would also re-enc
 the document with a fresh content key.
 
 
-## 3. Keyring-based group sharing (family photos)
+## 5. Keyring-based group sharing (family photos)
 
 ### First, the keyring:
 
