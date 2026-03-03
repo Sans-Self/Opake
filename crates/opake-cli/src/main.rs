@@ -37,15 +37,18 @@ enum Command {
     SetDefault(commands::set_default::SetDefaultCommand),
     Upload(commands::upload::UploadCommand),
     Download(commands::download::DownloadCommand),
+    Cat(commands::cat::CatCommand),
     Inbox(commands::inbox::InboxCommand),
     Ls(commands::ls::LsCommand),
     Mkdir(commands::mkdir::MkdirCommand),
+    Mv(commands::mv::MvCommand),
     Rm(commands::rm::RmCommand),
     Resolve(commands::resolve::ResolveCommand),
     Share(commands::share::ShareCommand),
     Shared(commands::shared::SharedCommand),
     Revoke(commands::revoke::RevokeCommand),
     Keyring(commands::keyring::KeyringCommand),
+    Tree(commands::tree::TreeCommand),
 }
 
 async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::Result<()> {
@@ -94,15 +97,18 @@ async fn main() -> anyhow::Result<()> {
 
         Command::Upload(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Download(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Cat(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Inbox(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Ls(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Mkdir(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Mv(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Rm(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Resolve(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Share(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Shared(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Revoke(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
         Command::Keyring(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Tree(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
     }
 
     Ok(())

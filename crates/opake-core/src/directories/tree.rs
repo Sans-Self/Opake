@@ -18,7 +18,7 @@ use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
 use crate::records::{self, Directory, Document};
 
-use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
+use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -154,6 +154,124 @@ impl DirectoryTree {
         }
 
         self.resolve_bare_name(client, reference).await
+    }
+
+    /// Load the full directory hierarchy including document names.
+    ///
+    /// Makes two paginated API calls: one for all directories, one for all
+    /// documents. Returns a tree that can render without additional API calls.
+    pub async fn load_full(
+        client: &mut XrpcClient<impl Transport>,
+    ) -> Result<(Self, HashMap<String, String>), Error> {
+        let tree = Self::load(client).await?;
+
+        let doc_entries: Vec<(String, String)> =
+            list_collection(client, DOCUMENT_COLLECTION, |uri, doc: Document| {
+                (uri.to_owned(), doc.name)
+            })
+            .await?;
+
+        let documents: HashMap<String, String> = doc_entries.into_iter().collect();
+
+        debug!("loaded {} documents for full tree", documents.len());
+
+        Ok((tree, documents))
+    }
+
+    /// Build a tree-formatted string of the entire hierarchy.
+    ///
+    /// Requires the document name map from `load_full`. Entries within each
+    /// directory are sorted: directories first (alphabetical), then documents
+    /// (alphabetical).
+    pub fn render(&self, documents: &HashMap<String, String>) -> String {
+        let mut output = String::from(ROOT_DIRECTORY_NAME);
+
+        let root_uri = match &self.root_uri {
+            Some(uri) => uri,
+            None => return output,
+        };
+
+        let dir = match self.directories.get(root_uri) {
+            Some(d) => d,
+            None => return output,
+        };
+
+        let sorted = self.sort_entries(&dir.entries, documents);
+        self.render_entries(&sorted, documents, &mut output, "");
+
+        output
+    }
+
+    fn sort_entries(
+        &self,
+        entries: &[String],
+        documents: &HashMap<String, String>,
+    ) -> Vec<(String, EntryKind, String)> {
+        let mut dirs: Vec<(String, EntryKind, String)> = Vec::new();
+        let mut docs: Vec<(String, EntryKind, String)> = Vec::new();
+
+        for uri in entries {
+            match entry_kind_from_uri(uri) {
+                Some(EntryKind::Directory) => {
+                    let name = self
+                        .directories
+                        .get(uri.as_str())
+                        .map(|d| d.name.clone())
+                        .unwrap_or_else(|| "?".into());
+                    dirs.push((uri.clone(), EntryKind::Directory, name));
+                }
+                Some(EntryKind::Document) => {
+                    let name = documents
+                        .get(uri.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| "?".into());
+                    docs.push((uri.clone(), EntryKind::Document, name));
+                }
+                None => {}
+            }
+        }
+
+        dirs.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        docs.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        dirs.extend(docs);
+        dirs
+    }
+
+    fn render_entries(
+        &self,
+        entries: &[(String, EntryKind, String)],
+        documents: &HashMap<String, String>,
+        output: &mut String,
+        prefix: &str,
+    ) {
+        let count = entries.len();
+        for (i, (uri, kind, name)) in entries.iter().enumerate() {
+            let is_last = i == count - 1;
+            let connector = if is_last { "└── " } else { "├── " };
+            let suffix = if *kind == EntryKind::Directory {
+                "/"
+            } else {
+                ""
+            };
+
+            output.push('\n');
+            output.push_str(prefix);
+            output.push_str(connector);
+            output.push_str(name);
+            output.push_str(suffix);
+
+            if *kind == EntryKind::Directory {
+                if let Some(dir) = self.directories.get(uri.as_str()) {
+                    let child_prefix = if is_last {
+                        format!("{prefix}    ")
+                    } else {
+                        format!("{prefix}│   ")
+                    };
+                    let sorted = self.sort_entries(&dir.entries, documents);
+                    self.render_entries(&sorted, documents, output, &child_prefix);
+                }
+            }
+        }
     }
 
     /// Count descendant documents and directories under a directory URI.

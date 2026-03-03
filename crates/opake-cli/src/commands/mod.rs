@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod cat;
 pub mod download;
 pub mod inbox;
 pub mod keyring;
@@ -6,12 +7,14 @@ pub mod login;
 pub mod logout;
 pub mod ls;
 pub mod mkdir;
+pub mod mv;
 pub mod resolve;
 pub mod revoke;
 pub mod rm;
 pub mod set_default;
 pub mod share;
 pub mod shared;
+pub mod tree;
 pub mod upload;
 
 use anyhow::Result;

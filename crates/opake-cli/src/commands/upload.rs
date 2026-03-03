@@ -6,6 +6,7 @@ use chrono::Utc;
 use clap::Args;
 use opake_core::atproto;
 use opake_core::crypto::OsRng;
+use opake_core::directories::{self, DirectoryTree, EntryKind};
 use opake_core::documents::{self, KeyringUploadParams, UploadParams};
 use opake_core::keyrings;
 
@@ -29,6 +30,10 @@ pub struct UploadCommand {
     /// Comma-separated tags for categorization
     #[arg(long, value_delimiter = ',')]
     tags: Vec<String>,
+
+    /// Place the uploaded document into a directory
+    #[arg(long)]
+    dir: Option<String>,
 }
 
 impl Execute for UploadCommand {
@@ -84,7 +89,20 @@ impl Execute for UploadCommand {
             documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?
         };
 
-        println!("{} → {}", filename, uri);
+        if let Some(dir_path) = &self.dir {
+            let tree = DirectoryTree::load(&mut client).await?;
+            let resolved = tree.resolve(&mut client, dir_path).await?;
+
+            if resolved.kind != EntryKind::Directory {
+                anyhow::bail!("{dir_path:?} is not a directory");
+            }
+
+            directories::add_entry(&mut client, &resolved.uri, &uri, &now).await?;
+            println!("{} → {} (in {})", filename, uri, dir_path);
+        } else {
+            println!("{} → {}", filename, uri);
+        }
+
         Ok(session::refreshed_session(&client))
     }
 }
@@ -100,6 +118,7 @@ mod tests {
             path: PathBuf::from("/tmp/opake-test-nonexistent-file-abc123"),
             keyring: None,
             tags: vec![],
+            dir: None,
         };
         let ctx = CommandContext {
             did: "did:plc:test".into(),
