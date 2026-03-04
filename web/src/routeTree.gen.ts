@@ -9,18 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SharedRouteImport } from './routes/shared'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as CabinetRouteImport } from './routes/cabinet'
 import { Route as IndexRouteImport } from './routes/index'
 
-const SharedRoute = SharedRouteImport.update({
-  id: '/shared',
-  path: '/shared',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CabinetRoute = CabinetRouteImport.update({
+  id: '/cabinet',
+  path: '/cabinet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -31,48 +31,48 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/shared': typeof SharedRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/shared': typeof SharedRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/shared': typeof SharedRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/shared'
+  fullPaths: '/' | '/cabinet' | '/login'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/shared'
-  id: '__root__' | '/' | '/login' | '/shared'
+  to: '/' | '/cabinet' | '/login'
+  id: '__root__' | '/' | '/cabinet' | '/login'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CabinetRoute: typeof CabinetRoute
   LoginRoute: typeof LoginRoute
-  SharedRoute: typeof SharedRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/shared': {
-      id: '/shared'
-      path: '/shared'
-      fullPath: '/shared'
-      preLoaderRoute: typeof SharedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cabinet': {
+      id: '/cabinet'
+      path: '/cabinet'
+      fullPath: '/cabinet'
+      preLoaderRoute: typeof CabinetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -87,8 +87,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CabinetRoute: CabinetRoute,
   LoginRoute: LoginRoute,
-  SharedRoute: SharedRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

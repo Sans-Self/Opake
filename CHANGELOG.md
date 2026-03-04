@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Port Figma Make cabinet design into web frontend [#165](https://issues.opake.app/issues/165.html)
 - Amend web scaffold into WASM commit [#164](https://issues.opake.app/issues/164.html)
 - Update blackbox tests and docs for new commands [#159](https://issues.opake.app/issues/159.html)
 - Add path-aware mv command [#157](https://issues.opake.app/issues/157.html)

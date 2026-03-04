@@ -1,5 +1,78 @@
 @import "tailwindcss";
+@plugin "daisyui";
+
+/* ─── Opake theme ─────────────────────────────────────────────────────────── */
+
+@plugin "daisyui/theme" {
+  name: "opake";
+  default: true;
+
+  /* Surfaces */
+  --color-base-100: oklch(0.985 0.005 85);   /* #FDFAF5 — panel bg */
+  --color-base-200: oklch(0.957 0.012 85);   /* #F5F1E8 — sidebar bg */
+  --color-base-300: oklch(0.930 0.015 85);   /* #EDE8DC — page bg */
+  --color-base-content: oklch(0.155 0.035 70); /* #1C1408 — primary text */
+
+  /* Accent gold */
+  --color-primary: oklch(0.580 0.095 75);     /* #9A7840 */
+  --color-primary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Muted text / secondary */
+  --color-secondary: oklch(0.390 0.055 65);   /* #5C4A2E */
+  --color-secondary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Accent light bg */
+  --color-accent: oklch(0.940 0.035 85);      /* #F5E9D0 */
+  --color-accent-content: oklch(0.490 0.080 70); /* #7D6230 */
+
+  /* Dark UI */
+  --color-neutral: oklch(0.155 0.035 70);     /* #1C1408 */
+  --color-neutral-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Semantic */
+  --color-success: oklch(0.530 0.065 145);    /* #5C7A54 — shared/sage */
+  --color-success-content: oklch(0.976 0.008 85);
+  --color-warning: oklch(0.680 0.135 75);     /* #C4952A — gold star */
+  --color-warning-content: oklch(0.155 0.035 70);
+  --color-error: oklch(0.450 0.110 25);       /* #A04840 — destructive */
+  --color-error-content: oklch(0.976 0.008 85);
+  --color-info: oklch(0.580 0.095 75);
+  --color-info-content: oklch(0.976 0.008 85);
+
+  /* Shape */
+  --radius-selector: 0.625rem;
+  --radius-field: 0.5625rem;
+  --radius-box: 1rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ─── Design tokens ───────────────────────────────────────────────────────── */
 
 @theme {
-  /* Populated from Figma design tokens later */
+  --font-display: "Cormorant Garamond", serif;
+  --font-sans: "Inter", sans-serif;
+
+  --color-border-accent: oklch(0.790 0.060 80);   /* #D4BC96 */
+  --color-text-faint: oklch(0.760 0.035 75);       /* #C4B09A */
+  --color-text-muted: oklch(0.620 0.040 70);       /* #9A8768 */
+  --color-bg-hover: oklch(0.580 0.095 75 / 0.055); /* gold hover */
+  --color-bg-ghost-1: oklch(0.940 0.025 80);       /* #F5EDDB */
+  --color-bg-ghost-2: oklch(0.965 0.015 80);       /* #FAF5EC */
+  --color-bg-sage: oklch(0.940 0.020 140);         /* #EEF2E8 */
+  --color-bg-stone: oklch(0.950 0.010 80);         /* #F4F1EC */
+
+  --shadow-panel-sm: 0 1px 8px oklch(0.35 0.05 60 / 0.07);
+  --shadow-panel-md: 0 2px 16px oklch(0.35 0.05 60 / 0.09);
+  --shadow-panel-lg: 0 6px 32px oklch(0.35 0.05 60 / 0.12);
+}
+
+/* ─── Base styles ─────────────────────────────────────────────────────────── */
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
 }
