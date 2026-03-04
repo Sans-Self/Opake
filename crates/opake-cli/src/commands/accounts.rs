@@ -1,15 +1,15 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::config;
+use crate::config::FileStorage;
 
 #[derive(Args)]
 /// List all logged-in accounts
 pub struct AccountsCommand {}
 
 impl AccountsCommand {
-    pub fn run(self) -> Result<()> {
-        let config = config::load_config()?;
+    pub fn run(self, storage: &FileStorage) -> Result<()> {
+        let config = storage.load_config_anyhow()?;
 
         if config.accounts.is_empty() {
             println!("no accounts — run `opake login` to add one");
@@ -36,52 +36,51 @@ impl AccountsCommand {
 mod tests {
     use super::*;
     use crate::config::{AccountConfig, Config};
-    use crate::utils::test_harness::with_test_dir;
+    use crate::utils::test_harness::test_storage;
     use std::collections::BTreeMap;
 
     #[test]
     fn run_with_no_config_errors() {
-        with_test_dir(|_| {
-            let cmd = AccountsCommand {};
-            assert!(cmd.run().is_err());
-        });
+        let (_dir, storage) = test_storage();
+        let cmd = AccountsCommand {};
+        assert!(cmd.run(&storage).is_err());
     }
 
     #[test]
     fn run_with_empty_accounts_succeeds() {
-        with_test_dir(|_| {
-            config::save_config(&Config {
+        let (_dir, storage) = test_storage();
+        storage
+            .save_config_anyhow(&Config {
                 default_did: None,
                 accounts: BTreeMap::new(),
                 appview_url: None,
             })
             .unwrap();
 
-            let cmd = AccountsCommand {};
-            cmd.run().unwrap();
-        });
+        let cmd = AccountsCommand {};
+        cmd.run(&storage).unwrap();
     }
 
     #[test]
     fn run_with_accounts_succeeds() {
-        with_test_dir(|_| {
-            let mut accounts = BTreeMap::new();
-            accounts.insert(
-                "did:plc:alice".into(),
-                AccountConfig {
-                    pds_url: "https://pds.alice".into(),
-                    handle: "alice.test".into(),
-                },
-            );
-            config::save_config(&Config {
+        let (_dir, storage) = test_storage();
+        let mut accounts = BTreeMap::new();
+        accounts.insert(
+            "did:plc:alice".into(),
+            AccountConfig {
+                pds_url: "https://pds.alice".into(),
+                handle: "alice.test".into(),
+            },
+        );
+        storage
+            .save_config_anyhow(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
                 appview_url: None,
             })
             .unwrap();
 
-            let cmd = AccountsCommand {};
-            cmd.run().unwrap();
-        });
+        let cmd = AccountsCommand {};
+        cmd.run(&storage).unwrap();
     }
 }

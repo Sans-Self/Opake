@@ -9,19 +9,17 @@ pub fn prefixed_get_env(key: &str) -> Option<String> {
 }
 
 /// Test helpers for modules that need an isolated data directory.
-/// A global mutex prevents parallel tests from stomping each other's state.
 #[cfg(test)]
 pub mod test_harness {
-    use std::sync::Mutex;
+    use crate::config::FileStorage;
     use tempfile::TempDir;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    pub fn with_test_dir(f: impl FnOnce(&TempDir)) {
-        let _guard = TEST_LOCK.lock().unwrap();
+    /// Create a temporary directory and a FileStorage pointing at it.
+    /// Each test gets its own instance — no global mutex needed.
+    pub fn test_storage() -> (TempDir, FileStorage) {
         let dir = TempDir::new().unwrap();
-        crate::config::init_data_dir(Some(dir.path().to_path_buf()));
-        f(&dir);
+        let storage = FileStorage::new(dir.path().to_path_buf());
+        (dir, storage)
     }
 }
 

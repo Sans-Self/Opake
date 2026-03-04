@@ -16,7 +16,7 @@ pub struct MkdirCommand {
 
 impl Execute for MkdirCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let now = Utc::now().to_rfc3339();
 
         let root_uri = directories::get_or_create_root(&mut client, &ctx.did, &now).await?;

@@ -19,7 +19,7 @@ pub struct RevokeCommand {
 
 impl Execute for RevokeCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
         if !self.yes {
             eprint!("revoke {}? [y/N] ", self.grant);

@@ -4,12 +4,10 @@ use clap::Args;
 use log::debug;
 use opake_core::client::{Session, XrpcClient};
 
-use crate::config::{self, AccountConfig};
+use crate::config::{AccountConfig, FileStorage};
 use crate::identity;
 use crate::transport::ReqwestTransport;
 use crate::utils::prefixed_get_env;
-
-use std::collections::BTreeMap;
 
 /// Resolve password from env var or a fallback function (e.g. stdin prompt).
 pub fn resolve_password(
@@ -45,7 +43,7 @@ pub struct LoginCommand {
 }
 
 impl LoginCommand {
-    pub async fn execute(self) -> Result<Option<Session>> {
+    pub async fn execute(self, storage: &FileStorage) -> Result<Option<Session>> {
         debug!("Starting login command");
 
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {
@@ -60,15 +58,9 @@ impl LoginCommand {
             .await?
             .clone();
 
-        // Register this account in the config. Merge into existing accounts
-        // if present, set as default if it's the first one.
-        let mut cfg = config::load_config().unwrap_or(config::Config {
-            default_did: None,
-            accounts: BTreeMap::new(),
-            appview_url: None,
-        });
+        let mut cfg = storage.load_config_anyhow().unwrap_or_default();
 
-        cfg.accounts.insert(
+        cfg.add_account(
             session.did.clone(),
             AccountConfig {
                 pds_url: self.pds.clone(),
@@ -76,14 +68,10 @@ impl LoginCommand {
             },
         );
 
-        if cfg.default_did.is_none() {
-            cfg.default_did = Some(session.did.clone());
-        }
-
-        config::save_config(&cfg)?;
+        storage.save_config_anyhow(&cfg)?;
 
         let (identity, generated) =
-            identity::ensure_identity(&session.did, &mut opake_core::crypto::OsRng)?;
+            identity::ensure_identity(storage, &session.did, &mut opake_core::crypto::OsRng)?;
 
         if generated {
             println!("Generated new encryption keypair");

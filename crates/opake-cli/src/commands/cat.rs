@@ -21,9 +21,10 @@ pub struct CatCommand {
 
 impl Execute for CatCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let id = identity::load_identity(&ctx.did).context("run `opake login` first")?;
+        let id =
+            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
         // Resolve the reference to an AT-URI.
         let uri = if self.reference.starts_with("at://") {
@@ -50,6 +51,7 @@ impl Execute for CatCommand {
                 let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
                 Some(
                     keyring_store::load_group_key(
+                        &ctx.storage,
                         &ctx.did,
                         &kr_uri.rkey,
                         kr_enc.keyring_ref.rotation,

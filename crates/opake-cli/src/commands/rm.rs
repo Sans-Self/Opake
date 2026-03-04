@@ -77,7 +77,7 @@ async fn try_fast_resolve(
 
 impl Execute for RmCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let now = Utc::now().to_rfc3339();
 
         let resolution = try_fast_resolve(&mut client, &self.reference).await?;

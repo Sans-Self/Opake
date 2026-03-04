@@ -28,8 +28,9 @@ pub struct ShareCommand {
 
 impl Execute for ShareCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
-        let id = identity::load_identity(&ctx.did).context("run `opake login` first")?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+        let id =
+            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
         let uri = documents::resolve_uri(&mut client, &self.document).await?;

@@ -12,7 +12,7 @@ pub struct TreeCommand;
 
 impl Execute for TreeCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let (tree, documents) = DirectoryTree::load_full(&mut client).await?;
 
         println!("{}", tree.render(&documents));

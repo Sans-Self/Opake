@@ -1,132 +1,20 @@
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-
-use anyhow::Context;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::info;
-use opake_core::crypto::{
-    CryptoRng, Ed25519SigningKey, RngCore, X25519DalekPublicKey, X25519DalekStaticSecret,
-    X25519PrivateKey, X25519PublicKey,
-};
-use serde::{Deserialize, Serialize};
+use opake_core::crypto::{CryptoRng, RngCore};
 
-use crate::config;
+use crate::config::FileStorage;
 
-/// Ed25519 signing key: 32 raw bytes (the secret scalar).
-pub type Ed25519SecretKey = [u8; 32];
-/// Ed25519 verify key: 32 raw bytes (the public point).
-pub type Ed25519VerifyKey = [u8; 32];
+// Re-export Identity so `crate::identity::Identity` still works in commands.
+pub use opake_core::storage::Identity;
 
-/// Encryption + signing keypairs, stored as base64 in `identity.json`.
-/// The signing fields are optional for backward compat with old identity files.
-#[derive(opake_core::RedactedDebug, Serialize, Deserialize)]
-pub struct Identity {
-    pub did: String,
-    pub public_key: String,
-    #[redact]
-    pub private_key: String,
-    /// Ed25519 signing secret key (base64).
-    #[serde(default)]
-    #[redact]
-    pub signing_key: Option<String>,
-    /// Ed25519 signing public/verify key (base64).
-    #[serde(default)]
-    pub verify_key: Option<String>,
-}
-
-impl Identity {
-    pub fn public_key_bytes(&self) -> anyhow::Result<X25519PublicKey> {
-        let bytes = BASE64
-            .decode(&self.public_key)
-            .context("invalid base64 in identity public_key")?;
-        let key: X25519PublicKey = bytes.try_into().map_err(|v: Vec<u8>| {
-            anyhow::anyhow!("public key is {} bytes, expected 32", v.len())
-        })?;
-        Ok(key)
-    }
-
-    pub fn private_key_bytes(&self) -> anyhow::Result<X25519PrivateKey> {
-        let bytes = BASE64
-            .decode(&self.private_key)
-            .context("invalid base64 in identity private_key")?;
-        let key: X25519PrivateKey = bytes.try_into().map_err(|v: Vec<u8>| {
-            anyhow::anyhow!("private key is {} bytes, expected 32", v.len())
-        })?;
-        Ok(key)
-    }
-
-    pub fn signing_key_bytes(&self) -> anyhow::Result<Option<Ed25519SecretKey>> {
-        match &self.signing_key {
-            None => Ok(None),
-            Some(b64) => {
-                let bytes = BASE64
-                    .decode(b64)
-                    .context("invalid base64 in identity signing_key")?;
-                let key: Ed25519SecretKey = bytes.try_into().map_err(|v: Vec<u8>| {
-                    anyhow::anyhow!("signing key is {} bytes, expected 32", v.len())
-                })?;
-                Ok(Some(key))
-            }
-        }
-    }
-
-    pub fn verify_key_bytes(&self) -> anyhow::Result<Option<Ed25519VerifyKey>> {
-        match &self.verify_key {
-            None => Ok(None),
-            Some(b64) => {
-                let bytes = BASE64
-                    .decode(b64)
-                    .context("invalid base64 in identity verify_key")?;
-                let key: Ed25519VerifyKey = bytes.try_into().map_err(|v: Vec<u8>| {
-                    anyhow::anyhow!("verify key is {} bytes, expected 32", v.len())
-                })?;
-                Ok(Some(key))
-            }
-        }
-    }
-
-    /// Whether this identity has Ed25519 signing keys.
-    pub fn has_signing_keys(&self) -> bool {
-        self.signing_key.is_some() && self.verify_key.is_some()
-    }
-}
-
-pub fn save_identity(did: &str, identity: &Identity) -> anyhow::Result<()> {
-    config::save_account_json(did, "identity.json", identity)
+pub fn save_identity(storage: &FileStorage, did: &str, identity: &Identity) -> anyhow::Result<()> {
+    storage.save_account_json(did, "identity.json", identity)
 }
 
 /// Bail if identity.json is readable by group or others (like `ssh -o StrictModes`).
-fn check_identity_permissions(path: &Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let mode = path.metadata()?.permissions().mode();
-    if mode & 0o077 != 0 {
-        anyhow::bail!(
-            "permissions {:#o} for '{}' are too open — private key material must not be \
-             accessible by other users. Run: chmod 600 {}",
-            mode & 0o777,
-            path.display(),
-            path.display(),
-        );
-    }
-    Ok(())
-}
-
-pub fn load_identity(did: &str) -> anyhow::Result<Identity> {
-    let path = config::account_dir(did).join("identity.json");
-    check_identity_permissions(&path)?;
-    config::load_account_json(did, "identity.json")
-}
-
-/// Generate a fresh Ed25519 signing keypair, returning (secret_b64, verify_b64).
-fn generate_signing_keypair(rng: &mut (impl CryptoRng + RngCore)) -> (String, String) {
-    let signing_key = Ed25519SigningKey::generate(rng);
-    let verify_key = signing_key.verifying_key();
-    (
-        BASE64.encode(signing_key.to_bytes()),
-        BASE64.encode(verify_key.to_bytes()),
-    )
+pub fn load_identity(storage: &FileStorage, did: &str) -> anyhow::Result<Identity> {
+    let path = storage.account_dir(did).join("identity.json");
+    FileStorage::check_identity_permissions(&path)?;
+    storage.load_account_json(did, "identity.json")
 }
 
 /// Return the existing identity if present, otherwise generate a new
@@ -136,17 +24,15 @@ fn generate_signing_keypair(rng: &mut (impl CryptoRng + RngCore)) -> (String, St
 /// Migration: old identity files without signing keys get Ed25519 keys
 /// added transparently on load.
 pub fn ensure_identity(
+    storage: &FileStorage,
     did: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> anyhow::Result<(Identity, bool)> {
-    if let Ok(mut existing) = load_identity(did) {
+    if let Ok(mut existing) = load_identity(storage, did) {
         if existing.did == did {
-            if !existing.has_signing_keys() {
+            if existing.ensure_signing_keys(rng) {
                 info!("migrating identity: adding Ed25519 signing keypair");
-                let (sk, vk) = generate_signing_keypair(rng);
-                existing.signing_key = Some(sk);
-                existing.verify_key = Some(vk);
-                save_identity(did, &existing)?;
+                save_identity(storage, did, &existing)?;
                 return Ok((existing, true));
             }
             return Ok((existing, false));
@@ -157,290 +43,182 @@ pub fn ensure_identity(
         );
     }
 
-    let private_secret = X25519DalekStaticSecret::random_from_rng(&mut *rng);
-    let public_key = X25519DalekPublicKey::from(&private_secret);
-    let (signing_key, verify_key) = generate_signing_keypair(rng);
-
-    let identity = Identity {
-        did: did.to_string(),
-        public_key: BASE64.encode(public_key.as_bytes()),
-        private_key: BASE64.encode(private_secret.to_bytes()),
-        signing_key: Some(signing_key),
-        verify_key: Some(verify_key),
-    };
-    save_identity(did, &identity)?;
+    let identity = Identity::generate(did, rng);
+    save_identity(storage, did, &identity)?;
     Ok((identity, true))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_harness::with_test_dir;
+    use crate::config::{AccountConfig, Config};
+    use crate::utils::test_harness::test_storage;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use opake_core::crypto::OsRng;
     use std::collections::BTreeMap;
     use std::os::unix::fs::PermissionsExt;
 
-    fn setup_account(did: &str) {
+    fn setup_account(storage: &FileStorage, did: &str) {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             did.to_string(),
-            config::AccountConfig {
+            AccountConfig {
                 pds_url: "https://pds.test".into(),
                 handle: "test.handle".into(),
             },
         );
-        config::save_config(&config::Config {
-            default_did: Some(did.to_string()),
-            accounts,
-            appview_url: None,
-        })
-        .unwrap();
+        storage
+            .save_config_anyhow(&Config {
+                default_did: Some(did.to_string()),
+                accounts,
+                appview_url: None,
+            })
+            .unwrap();
     }
 
     #[test]
     fn save_and_load_identity_roundtrip() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let identity = Identity {
-                did: did.into(),
-                public_key: BASE64.encode([1u8; 32]),
-                private_key: BASE64.encode([2u8; 32]),
-                signing_key: Some(BASE64.encode([3u8; 32])),
-                verify_key: Some(BASE64.encode([4u8; 32])),
-            };
-            save_identity(did, &identity).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let identity = Identity {
+            did: did.into(),
+            public_key: BASE64.encode([1u8; 32]),
+            private_key: BASE64.encode([2u8; 32]),
+            signing_key: Some(BASE64.encode([3u8; 32])),
+            verify_key: Some(BASE64.encode([4u8; 32])),
+        };
+        save_identity(&storage, did, &identity).unwrap();
 
-            let loaded = load_identity(did).unwrap();
-            assert_eq!(loaded.did, identity.did);
-            assert_eq!(loaded.public_key, identity.public_key);
-            assert_eq!(loaded.private_key, identity.private_key);
-            assert_eq!(loaded.signing_key, identity.signing_key);
-            assert_eq!(loaded.verify_key, identity.verify_key);
+        let loaded = load_identity(&storage, did).unwrap();
+        assert_eq!(loaded.did, identity.did);
+        assert_eq!(loaded.public_key, identity.public_key);
+        assert_eq!(loaded.private_key, identity.private_key);
+        assert_eq!(loaded.signing_key, identity.signing_key);
+        assert_eq!(loaded.verify_key, identity.verify_key);
 
-            assert_eq!(loaded.public_key_bytes().unwrap(), [1u8; 32]);
-            assert_eq!(loaded.private_key_bytes().unwrap(), [2u8; 32]);
-            assert_eq!(loaded.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
-            assert_eq!(loaded.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
-        });
+        assert_eq!(loaded.public_key_bytes().unwrap(), [1u8; 32]);
+        assert_eq!(loaded.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(loaded.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
+        assert_eq!(loaded.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
     }
 
     #[test]
     fn ensure_identity_generates_when_missing() {
-        with_test_dir(|_| {
-            let did = "did:plc:new";
-            setup_account(did);
-            let (identity, generated) = ensure_identity(did, &mut OsRng).unwrap();
-            assert!(generated);
-            assert_eq!(identity.did, did);
-            assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
-            assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
-            assert!(identity.has_signing_keys());
-            assert!(identity.signing_key_bytes().unwrap().is_some());
-            assert!(identity.verify_key_bytes().unwrap().is_some());
-        });
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:new";
+        setup_account(&storage, did);
+        let (identity, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        assert!(generated);
+        assert_eq!(identity.did, did);
+        assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
+        assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
+        assert!(identity.has_signing_keys());
+        assert!(identity.signing_key_bytes().unwrap().is_some());
+        assert!(identity.verify_key_bytes().unwrap().is_some());
     }
 
     #[test]
     fn ensure_identity_returns_existing_when_did_matches() {
-        with_test_dir(|_| {
-            let did = "did:plc:same";
-            setup_account(did);
-            let (first, generated) = ensure_identity(did, &mut OsRng).unwrap();
-            assert!(generated);
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:same";
+        setup_account(&storage, did);
+        let (first, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        assert!(generated);
 
-            let (second, generated) = ensure_identity(did, &mut OsRng).unwrap();
-            assert!(!generated);
-            assert_eq!(first.public_key, second.public_key);
-            assert_eq!(first.private_key, second.private_key);
-            assert_eq!(first.signing_key, second.signing_key);
-        });
+        let (second, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        assert!(!generated);
+        assert_eq!(first.public_key, second.public_key);
+        assert_eq!(first.private_key, second.private_key);
+        assert_eq!(first.signing_key, second.signing_key);
     }
 
     #[test]
     fn ensure_identity_migrates_old_identity_without_signing_keys() {
-        with_test_dir(|_| {
-            let did = "did:plc:legacy";
-            setup_account(did);
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:legacy";
+        setup_account(&storage, did);
 
-            // Write an old-format identity (no signing keys) with correct permissions
-            let old_identity = serde_json::json!({
-                "did": did,
-                "public_key": BASE64.encode([1u8; 32]),
-                "private_key": BASE64.encode([2u8; 32]),
-            });
-            config::ensure_account_dir(did).unwrap();
-            config::write_sensitive_file(
-                &config::account_dir(did).join("identity.json"),
-                serde_json::to_string_pretty(&old_identity).unwrap(),
-            )
-            .unwrap();
-
-            let (identity, generated) = ensure_identity(did, &mut OsRng).unwrap();
-            assert!(generated, "migration should report as generated");
-            assert!(identity.has_signing_keys());
-            // X25519 keys should be preserved
-            assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
-            assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
-
-            // Re-load should have signing keys persisted
-            let reloaded = load_identity(did).unwrap();
-            assert!(reloaded.has_signing_keys());
-            assert_eq!(reloaded.signing_key, identity.signing_key);
+        // Write an old-format identity (no signing keys) with correct permissions
+        let old_identity = serde_json::json!({
+            "did": did,
+            "public_key": BASE64.encode([1u8; 32]),
+            "private_key": BASE64.encode([2u8; 32]),
         });
+        storage.ensure_account_dir(did).unwrap();
+        FileStorage::write_sensitive_file(
+            &storage.account_dir(did).join("identity.json"),
+            serde_json::to_string_pretty(&old_identity).unwrap(),
+        )
+        .unwrap();
+
+        let (identity, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        assert!(generated, "migration should report as generated");
+        assert!(identity.has_signing_keys());
+        // X25519 keys should be preserved
+        assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
+        assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
+
+        // Re-load should have signing keys persisted
+        let reloaded = load_identity(&storage, did).unwrap();
+        assert!(reloaded.has_signing_keys());
+        assert_eq!(reloaded.signing_key, identity.signing_key);
     }
 
     #[test]
     fn load_identity_rejects_garbage_json() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            config::ensure_account_dir(did).unwrap();
-            config::write_sensitive_file(
-                &config::account_dir(did).join("identity.json"),
-                "not json {{{",
-            )
-            .unwrap();
-            assert!(load_identity(did).is_err());
-        });
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        storage.ensure_account_dir(did).unwrap();
+        FileStorage::write_sensitive_file(
+            &storage.account_dir(did).join("identity.json"),
+            "not json {{{",
+        )
+        .unwrap();
+        assert!(load_identity(&storage, did).is_err());
     }
 
     #[test]
     fn load_identity_rejects_valid_json_wrong_schema() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            config::ensure_account_dir(did).unwrap();
-            config::write_sensitive_file(
-                &config::account_dir(did).join("identity.json"),
-                r#"{"color": "blue"}"#,
-            )
-            .unwrap();
-            assert!(load_identity(did).is_err());
-        });
-    }
-
-    #[test]
-    fn public_key_bytes_rejects_bad_base64() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: "not!valid!base64!!!".into(),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
-        assert!(identity.public_key_bytes().is_err());
-    }
-
-    #[test]
-    fn private_key_bytes_rejects_bad_base64() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: "~~~garbage~~~".into(),
-            signing_key: None,
-            verify_key: None,
-        };
-        assert!(identity.private_key_bytes().is_err());
-    }
-
-    #[test]
-    fn public_key_bytes_rejects_wrong_length() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 16]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
-        let err = identity.public_key_bytes().unwrap_err().to_string();
-        assert!(err.contains("16 bytes"), "expected length in error: {err}");
-    }
-
-    #[test]
-    fn private_key_bytes_rejects_wrong_length() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 64]),
-            signing_key: None,
-            verify_key: None,
-        };
-        let err = identity.private_key_bytes().unwrap_err().to_string();
-        assert!(err.contains("64 bytes"), "expected length in error: {err}");
-    }
-
-    #[test]
-    fn signing_key_bytes_rejects_bad_base64() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: Some("!!!bad!!!".into()),
-            verify_key: None,
-        };
-        assert!(identity.signing_key_bytes().is_err());
-    }
-
-    #[test]
-    fn verify_key_bytes_rejects_wrong_length() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: Some(BASE64.encode([0u8; 16])),
-        };
-        let err = identity.verify_key_bytes().unwrap_err().to_string();
-        assert!(err.contains("16 bytes"), "expected length in error: {err}");
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        storage.ensure_account_dir(did).unwrap();
+        FileStorage::write_sensitive_file(
+            &storage.account_dir(did).join("identity.json"),
+            r#"{"color": "blue"}"#,
+        )
+        .unwrap();
+        assert!(load_identity(&storage, did).is_err());
     }
 
     #[test]
     fn load_identity_rejects_world_readable() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let (identity, _) = ensure_identity(did, &mut OsRng).unwrap();
-            assert_eq!(identity.did, did);
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let (identity, _) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        assert_eq!(identity.did, did);
 
-            // Loosen permissions to simulate a bad umask
-            let path = config::account_dir(did).join("identity.json");
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        // Loosen permissions to simulate a bad umask
+        let path = storage.account_dir(did).join("identity.json");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-            let err = load_identity(did).unwrap_err().to_string();
-            assert!(err.contains("too open"), "expected 'too open': {err}");
-            assert!(err.contains("chmod 600"), "expected chmod hint: {err}");
-        });
+        let err = load_identity(&storage, did).unwrap_err().to_string();
+        assert!(err.contains("too open"), "expected 'too open': {err}");
+        assert!(err.contains("chmod 600"), "expected chmod hint: {err}");
     }
 
     #[test]
     fn load_identity_accepts_0600() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let (_, _) = ensure_identity(did, &mut OsRng).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let (_, _) = ensure_identity(&storage, did, &mut OsRng).unwrap();
 
-            // save_identity goes through write_sensitive_file, so already 0600
-            let loaded = load_identity(did).unwrap();
-            assert_eq!(loaded.did, did);
-        });
-    }
-
-    #[test]
-    fn has_signing_keys_requires_both() {
-        let mut identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
-        assert!(!identity.has_signing_keys());
-
-        identity.signing_key = Some(BASE64.encode([0u8; 32]));
-        assert!(!identity.has_signing_keys());
-
-        identity.verify_key = Some(BASE64.encode([0u8; 32]));
-        assert!(identity.has_signing_keys());
+        // save_identity goes through write_sensitive_file, so already 0600
+        let loaded = load_identity(&storage, did).unwrap();
+        assert_eq!(loaded.did, did);
     }
 }

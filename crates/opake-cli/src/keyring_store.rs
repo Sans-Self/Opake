@@ -7,14 +7,14 @@
 // The file stores an array of (rotation, group_key) pairs so that keys from
 // previous rotations remain available for decrypting older documents.
 //
-// Storage path: ~/.config/opake/accounts/<did>/keyrings/<rkey>.json
+// Storage path: <base_dir>/accounts/<did>/keyrings/<rkey>.json
 
 use anyhow::Context;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use opake_core::crypto::ContentKey;
 use serde::{Deserialize, Serialize};
 
-use crate::config;
+use crate::config::FileStorage;
 
 #[derive(Serialize, Deserialize)]
 struct RotationEntry {
@@ -41,16 +41,16 @@ enum StoredFile {
     Legacy(LegacyStoredGroupKey),
 }
 
-fn keyrings_dir(did: &str) -> std::path::PathBuf {
-    config::account_dir(did).join("keyrings")
+fn keyrings_dir(storage: &FileStorage, did: &str) -> std::path::PathBuf {
+    storage.account_dir(did).join("keyrings")
 }
 
-fn key_path(did: &str, rkey: &str) -> std::path::PathBuf {
-    keyrings_dir(did).join(format!("{rkey}.json"))
+fn key_path(storage: &FileStorage, did: &str, rkey: &str) -> std::path::PathBuf {
+    keyrings_dir(storage, did).join(format!("{rkey}.json"))
 }
 
-fn load_stored(did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
-    let path = key_path(did, rkey);
+fn load_stored(storage: &FileStorage, did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
+    let path = key_path(storage, did, rkey);
     let content = std::fs::read_to_string(&path).with_context(|| {
         format!(
             "no local group key for keyring {rkey} — you may not be a member, or the key was lost"
@@ -71,26 +71,32 @@ fn load_stored(did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
     }
 }
 
-fn save_stored(did: &str, rkey: &str, stored: &StoredKeys) -> anyhow::Result<()> {
-    config::ensure_sensitive_dir(&keyrings_dir(did))?;
+fn save_stored(
+    storage: &FileStorage,
+    did: &str,
+    rkey: &str,
+    stored: &StoredKeys,
+) -> anyhow::Result<()> {
+    FileStorage::ensure_sensitive_dir(&keyrings_dir(storage, did))?;
 
     let json = serde_json::to_string_pretty(stored).context("failed to serialize group key")?;
-    config::write_sensitive_file(&key_path(did, rkey), &json).with_context(|| {
+    FileStorage::write_sensitive_file(&key_path(storage, did, rkey), &json).with_context(|| {
         format!(
             "failed to write group key: {}",
-            key_path(did, rkey).display()
+            key_path(storage, did, rkey).display()
         )
     })
 }
 
 pub fn save_group_key(
+    storage: &FileStorage,
     did: &str,
     rkey: &str,
     rotation: u64,
     group_key: &ContentKey,
 ) -> anyhow::Result<()> {
     // Load existing entries (or start fresh) and upsert
-    let mut stored = load_stored(did, rkey).unwrap_or(StoredKeys { keys: Vec::new() });
+    let mut stored = load_stored(storage, did, rkey).unwrap_or(StoredKeys { keys: Vec::new() });
 
     let encoded = BASE64.encode(group_key.0);
     if let Some(entry) = stored.keys.iter_mut().find(|e| e.rotation == rotation) {
@@ -102,11 +108,16 @@ pub fn save_group_key(
         });
     }
 
-    save_stored(did, rkey, &stored)
+    save_stored(storage, did, rkey, &stored)
 }
 
-pub fn load_group_key(did: &str, rkey: &str, rotation: u64) -> anyhow::Result<ContentKey> {
-    let stored = load_stored(did, rkey)?;
+pub fn load_group_key(
+    storage: &FileStorage,
+    did: &str,
+    rkey: &str,
+    rotation: u64,
+) -> anyhow::Result<ContentKey> {
+    let stored = load_stored(storage, did, rkey)?;
 
     let entry = stored
         .keys
@@ -133,187 +144,190 @@ pub fn load_group_key(did: &str, rkey: &str, rotation: u64) -> anyhow::Result<Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config;
-    use crate::utils::test_harness::with_test_dir;
+    use crate::config::{AccountConfig, Config};
+    use crate::utils::test_harness::test_storage;
     use opake_core::crypto::{generate_content_key, OsRng};
     use std::collections::BTreeMap;
     use std::os::unix::fs::PermissionsExt;
 
-    fn setup_account(did: &str) {
+    fn setup_account(storage: &FileStorage, did: &str) {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             did.to_string(),
-            config::AccountConfig {
+            AccountConfig {
                 pds_url: "https://pds.test".into(),
                 handle: "test.handle".into(),
             },
         );
-        config::save_config(&config::Config {
-            default_did: Some(did.to_string()),
-            accounts,
-            appview_url: None,
-        })
-        .unwrap();
+        storage
+            .save_config_anyhow(&Config {
+                default_did: Some(did.to_string()),
+                accounts,
+                appview_url: None,
+            })
+            .unwrap();
     }
 
     #[test]
     fn save_and_load_roundtrips() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let group_key = generate_content_key(&mut OsRng);
-            save_group_key(did, "tid123", 0, &group_key).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let group_key = generate_content_key(&mut OsRng);
+        save_group_key(&storage, did, "tid123", 0, &group_key).unwrap();
 
-            let loaded = load_group_key(did, "tid123", 0).unwrap();
-            assert_eq!(loaded.0, group_key.0);
-        });
+        let loaded = load_group_key(&storage, did, "tid123", 0).unwrap();
+        assert_eq!(loaded.0, group_key.0);
     }
 
     #[test]
     fn multiple_rotations_stored() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let key0 = generate_content_key(&mut OsRng);
-            let key1 = generate_content_key(&mut OsRng);
-            let key2 = generate_content_key(&mut OsRng);
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let key0 = generate_content_key(&mut OsRng);
+        let key1 = generate_content_key(&mut OsRng);
+        let key2 = generate_content_key(&mut OsRng);
 
-            save_group_key(did, "tid1", 0, &key0).unwrap();
-            save_group_key(did, "tid1", 1, &key1).unwrap();
-            save_group_key(did, "tid1", 2, &key2).unwrap();
+        save_group_key(&storage, did, "tid1", 0, &key0).unwrap();
+        save_group_key(&storage, did, "tid1", 1, &key1).unwrap();
+        save_group_key(&storage, did, "tid1", 2, &key2).unwrap();
 
-            assert_eq!(load_group_key(did, "tid1", 0).unwrap().0, key0.0);
-            assert_eq!(load_group_key(did, "tid1", 1).unwrap().0, key1.0);
-            assert_eq!(load_group_key(did, "tid1", 2).unwrap().0, key2.0);
-        });
+        assert_eq!(load_group_key(&storage, did, "tid1", 0).unwrap().0, key0.0);
+        assert_eq!(load_group_key(&storage, did, "tid1", 1).unwrap().0, key1.0);
+        assert_eq!(load_group_key(&storage, did, "tid1", 2).unwrap().0, key2.0);
     }
 
     #[test]
     fn upsert_does_not_clobber_other_rotations() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let key0 = generate_content_key(&mut OsRng);
-            let key1_v1 = generate_content_key(&mut OsRng);
-            let key1_v2 = generate_content_key(&mut OsRng);
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let key0 = generate_content_key(&mut OsRng);
+        let key1_v1 = generate_content_key(&mut OsRng);
+        let key1_v2 = generate_content_key(&mut OsRng);
 
-            save_group_key(did, "tid1", 0, &key0).unwrap();
-            save_group_key(did, "tid1", 1, &key1_v1).unwrap();
-            // Overwrite rotation 1 — rotation 0 must survive
-            save_group_key(did, "tid1", 1, &key1_v2).unwrap();
+        save_group_key(&storage, did, "tid1", 0, &key0).unwrap();
+        save_group_key(&storage, did, "tid1", 1, &key1_v1).unwrap();
+        // Overwrite rotation 1 — rotation 0 must survive
+        save_group_key(&storage, did, "tid1", 1, &key1_v2).unwrap();
 
-            assert_eq!(load_group_key(did, "tid1", 0).unwrap().0, key0.0);
-            assert_eq!(load_group_key(did, "tid1", 1).unwrap().0, key1_v2.0);
-        });
+        assert_eq!(load_group_key(&storage, did, "tid1", 0).unwrap().0, key0.0);
+        assert_eq!(
+            load_group_key(&storage, did, "tid1", 1).unwrap().0,
+            key1_v2.0
+        );
     }
 
     #[test]
     fn load_missing_key_errors() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let err = load_group_key(did, "nonexistent", 0).unwrap_err();
-            assert!(err.to_string().contains("no local group key"), "got: {err}");
-        });
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let err = load_group_key(&storage, did, "nonexistent", 0).unwrap_err();
+        assert!(err.to_string().contains("no local group key"), "got: {err}");
     }
 
     #[test]
     fn load_missing_rotation_errors() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let key = generate_content_key(&mut OsRng);
-            save_group_key(did, "tid1", 0, &key).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let key = generate_content_key(&mut OsRng);
+        save_group_key(&storage, did, "tid1", 0, &key).unwrap();
 
-            let err = load_group_key(did, "tid1", 99).unwrap_err();
-            assert!(err.to_string().contains("rotation 99"), "got: {err}");
-        });
+        let err = load_group_key(&storage, did, "tid1", 99).unwrap_err();
+        assert!(err.to_string().contains("rotation 99"), "got: {err}");
     }
 
     #[test]
     fn load_garbage_json_errors() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let dir = keyrings_dir(did);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("bad.json"), "not json {{{").unwrap();
-            assert!(load_group_key(did, "bad", 0).is_err());
-        });
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let dir = keyrings_dir(&storage, did);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bad.json"), "not json {{{").unwrap();
+        assert!(load_group_key(&storage, did, "bad", 0).is_err());
     }
 
     #[test]
     fn load_wrong_length_key_errors() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let dir = keyrings_dir(did);
-            std::fs::create_dir_all(&dir).unwrap();
-            let stored = StoredKeys {
-                keys: vec![RotationEntry {
-                    rotation: 0,
-                    group_key: BASE64.encode([0u8; 16]),
-                }],
-            };
-            std::fs::write(
-                dir.join("short.json"),
-                serde_json::to_string(&stored).unwrap(),
-            )
-            .unwrap();
-            let err = load_group_key(did, "short", 0).unwrap_err();
-            assert!(err.to_string().contains("16 bytes"), "got: {err}");
-        });
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let dir = keyrings_dir(&storage, did);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stored = StoredKeys {
+            keys: vec![RotationEntry {
+                rotation: 0,
+                group_key: BASE64.encode([0u8; 16]),
+            }],
+        };
+        std::fs::write(
+            dir.join("short.json"),
+            serde_json::to_string(&stored).unwrap(),
+        )
+        .unwrap();
+        let err = load_group_key(&storage, did, "short", 0).unwrap_err();
+        assert!(err.to_string().contains("16 bytes"), "got: {err}");
     }
 
     #[test]
     fn save_group_key_sets_permissions() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let group_key = generate_content_key(&mut OsRng);
-            save_group_key(did, "tid123", 0, &group_key).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let group_key = generate_content_key(&mut OsRng);
+        save_group_key(&storage, did, "tid123", 0, &group_key).unwrap();
 
-            let dir_mode = keyrings_dir(did).metadata().unwrap().permissions().mode() & 0o777;
-            assert_eq!(dir_mode, 0o700, "expected dir 0700, got {dir_mode:#o}");
+        let dir_mode = keyrings_dir(&storage, did)
+            .metadata()
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700, "expected dir 0700, got {dir_mode:#o}");
 
-            let file_mode = key_path(did, "tid123")
-                .metadata()
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(file_mode, 0o600, "expected file 0600, got {file_mode:#o}");
-        });
+        let file_mode = key_path(&storage, did, "tid123")
+            .metadata()
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(file_mode, 0o600, "expected file 0600, got {file_mode:#o}");
     }
 
     #[test]
     fn legacy_format_migration() {
-        with_test_dir(|_| {
-            let did = "did:plc:test";
-            setup_account(did);
-            let dir = keyrings_dir(did);
-            std::fs::create_dir_all(&dir).unwrap();
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        setup_account(&storage, did);
+        let dir = keyrings_dir(&storage, did);
+        std::fs::create_dir_all(&dir).unwrap();
 
-            // Write old format: { "group_key": "..." }
-            let key = generate_content_key(&mut OsRng);
-            let legacy = serde_json::json!({ "group_key": BASE64.encode(key.0) });
-            std::fs::write(
-                dir.join("legacy.json"),
-                serde_json::to_string(&legacy).unwrap(),
-            )
-            .unwrap();
+        // Write old format: { "group_key": "..." }
+        let key = generate_content_key(&mut OsRng);
+        let legacy = serde_json::json!({ "group_key": BASE64.encode(key.0) });
+        std::fs::write(
+            dir.join("legacy.json"),
+            serde_json::to_string(&legacy).unwrap(),
+        )
+        .unwrap();
 
-            // Should load as rotation 0
-            let loaded = load_group_key(did, "legacy", 0).unwrap();
-            assert_eq!(loaded.0, key.0);
+        // Should load as rotation 0
+        let loaded = load_group_key(&storage, did, "legacy", 0).unwrap();
+        assert_eq!(loaded.0, key.0);
 
-            // Saving a new rotation upgrades the file format
-            let key1 = generate_content_key(&mut OsRng);
-            save_group_key(did, "legacy", 1, &key1).unwrap();
+        // Saving a new rotation upgrades the file format
+        let key1 = generate_content_key(&mut OsRng);
+        save_group_key(&storage, did, "legacy", 1, &key1).unwrap();
 
-            // Both rotations accessible
-            assert_eq!(load_group_key(did, "legacy", 0).unwrap().0, key.0);
-            assert_eq!(load_group_key(did, "legacy", 1).unwrap().0, key1.0);
-        });
+        // Both rotations accessible
+        assert_eq!(load_group_key(&storage, did, "legacy", 0).unwrap().0, key.0);
+        assert_eq!(
+            load_group_key(&storage, did, "legacy", 1).unwrap().0,
+            key1.0
+        );
     }
 }

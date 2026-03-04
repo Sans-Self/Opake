@@ -8,6 +8,7 @@ pub mod utils;
 
 use clap::{Parser, Subcommand};
 use commands::Execute;
+use config::FileStorage;
 use log::info;
 
 #[derive(Parser)]
@@ -51,11 +52,15 @@ enum Command {
     Tree(commands::tree::TreeCommand),
 }
 
-async fn run_with_context(as_flag: Option<&str>, cmd: impl Execute) -> anyhow::Result<()> {
-    let ctx = session::resolve_context(as_flag)?;
+async fn run_with_context(
+    storage: &FileStorage,
+    as_flag: Option<&str>,
+    cmd: impl Execute,
+) -> anyhow::Result<()> {
+    let ctx = session::resolve_context(storage, as_flag)?;
     let refreshed = cmd.execute(&ctx).await?;
     if let Some(ref s) = refreshed {
-        session::persist_session(&s.did, s)?;
+        session::persist_session(&ctx.storage, &s.did, s)?;
     }
     Ok(())
 }
@@ -69,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         command,
     } = Cli::parse();
 
-    config::init_data_dir(config_dir.map(Into::into));
+    let base_dir = opake_core::paths::resolve_data_dir(config_dir.map(Into::into));
 
     let log_level = match verbose {
         0 => log::LevelFilter::Warn,
@@ -84,31 +89,33 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting Opake CLI. Hello!");
 
+    let storage = FileStorage::new(base_dir);
+
     match command {
         Command::Login(cmd) => {
-            let session = cmd.execute().await?;
+            let session = cmd.execute(&storage).await?;
             if let Some(ref s) = session {
-                session::persist_session(&s.did, s)?;
+                session::persist_session(&storage, &s.did, s)?;
             }
         }
-        Command::Logout(cmd) => cmd.run()?,
-        Command::Accounts(cmd) => cmd.run()?,
-        Command::SetDefault(cmd) => cmd.run()?,
+        Command::Logout(cmd) => cmd.run(&storage)?,
+        Command::Accounts(cmd) => cmd.run(&storage)?,
+        Command::SetDefault(cmd) => cmd.run(&storage)?,
 
-        Command::Upload(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Download(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Cat(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Inbox(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Ls(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Mkdir(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Mv(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Rm(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Resolve(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Share(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Shared(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Revoke(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Keyring(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
-        Command::Tree(cmd) => run_with_context(as_flag.as_deref(), cmd).await?,
+        Command::Upload(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Download(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Cat(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Inbox(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Ls(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Mkdir(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Mv(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Rm(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Resolve(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Share(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Shared(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Revoke(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
     }
 
     Ok(())

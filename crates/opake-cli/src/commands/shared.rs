@@ -46,7 +46,7 @@ fn format_long(entries: &[GrantEntry]) -> String {
 
 impl Execute for SharedCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let entries = sharing::list_grants(&mut client).await?;
 
         if entries.is_empty() {

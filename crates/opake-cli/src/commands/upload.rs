@@ -38,7 +38,7 @@ pub struct UploadCommand {
 
 impl Execute for UploadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
         let plaintext =
             fs::read(&self.path).context(format!("failed to read {}", self.path.display()))?;
@@ -58,7 +58,12 @@ impl Execute for UploadCommand {
         let uri = if let Some(keyring_name) = &self.keyring {
             let entry = keyrings::resolve_keyring_uri(&mut client, keyring_name).await?;
             let at_uri = atproto::parse_at_uri(&entry.uri)?;
-            let group_key = keyring_store::load_group_key(&ctx.did, &at_uri.rkey, entry.rotation)?;
+            let group_key = keyring_store::load_group_key(
+                &ctx.storage,
+                &ctx.did,
+                &at_uri.rkey,
+                entry.rotation,
+            )?;
 
             let params = KeyringUploadParams {
                 plaintext: &plaintext,
@@ -73,7 +78,7 @@ impl Execute for UploadCommand {
 
             documents::encrypt_and_upload_keyring(&mut client, &params, &mut OsRng).await?
         } else {
-            let id = identity::load_identity(&ctx.did)?;
+            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
             let owner_pubkey = id.public_key_bytes()?;
 
             let params = UploadParams {
@@ -110,10 +115,13 @@ impl Execute for UploadCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::FileStorage;
+    use crate::utils::test_harness::test_storage;
 
     #[test]
     fn rejects_nonexistent_file() {
         let rt = tokio::runtime::Runtime::new().unwrap();
+        let (_dir, storage) = test_storage();
         let cmd = UploadCommand {
             path: PathBuf::from("/tmp/opake-test-nonexistent-file-abc123"),
             keyring: None,
@@ -123,6 +131,7 @@ mod tests {
         let ctx = CommandContext {
             did: "did:plc:test".into(),
             pds_url: "https://pds.test".into(),
+            storage: storage.clone(),
         };
         let result = rt.block_on(cmd.execute(&ctx));
         assert!(result.is_err());

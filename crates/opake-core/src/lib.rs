@@ -29,6 +29,7 @@ pub mod paths;
 pub mod records;
 pub mod resolve;
 pub mod sharing;
+pub mod storage;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

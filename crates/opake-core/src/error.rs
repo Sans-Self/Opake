@@ -35,4 +35,7 @@ pub enum Error {
 
     #[error("{0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("storage error: {0}")]
+    Storage(String),
 }

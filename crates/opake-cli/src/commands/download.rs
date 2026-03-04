@@ -54,7 +54,8 @@ fn write_output(path: &Path, content: &[u8]) -> Result<()> {
 
 impl Execute for DownloadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let id = identity::load_identity(&ctx.did).context("run `opake login` first")?;
+        let id =
+            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
         let (name, plaintext, refreshed) = if let Some(grant_uri) = &self.grant {
@@ -72,7 +73,13 @@ impl Execute for DownloadCommand {
 
             // Cache the group key so subsequent downloads use the local path
             let kr_rkey = &result.keyring_rkey;
-            keyring_store::save_group_key(&ctx.did, kr_rkey, result.rotation, &result.group_key)?;
+            keyring_store::save_group_key(
+                &ctx.storage,
+                &ctx.did,
+                kr_rkey,
+                result.rotation,
+                &result.group_key,
+            )?;
 
             (result.filename, result.plaintext, None)
         } else {
@@ -81,7 +88,7 @@ impl Execute for DownloadCommand {
                 .reference
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
-            let mut client = session::load_client(&ctx.did)?;
+            let mut client = session::load_client(&ctx.storage, &ctx.did)?;
             let uri = documents::resolve_uri(&mut client, reference).await?;
 
             // Peek at the document to check if it uses keyring encryption.
@@ -97,6 +104,7 @@ impl Execute for DownloadCommand {
                     let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
                     Some(
                         keyring_store::load_group_key(
+                            &ctx.storage,
                             &ctx.did,
                             &kr_uri.rkey,
                             kr_enc.keyring_ref.rotation,

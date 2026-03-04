@@ -73,7 +73,7 @@ fn format_long(entries: &[DocumentEntry]) -> String {
 
 impl Execute for LsCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.did)?;
+        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let mut entries = documents::list_documents(&mut client).await?;
 
         if let Some(ref tag) = self.tag {
