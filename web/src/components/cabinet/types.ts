@@ -23,9 +23,8 @@ export interface FileItem {
   starred: boolean;
 }
 
-export type PanelType =
+export type SectionType =
   | "root"
-  | "folder"
   | "shared"
   | "starred"
   | "encrypted"
@@ -33,9 +32,12 @@ export type PanelType =
   | "trash"
   | "settings";
 
-export interface Panel {
-  id: string;
-  type: PanelType;
-  title: string;
-  data?: FileItem;
+export type PanelType = SectionType | "folder";
+
+export type Panel =
+  | { type: "folder"; folderId: string; title: string; itemCount?: number }
+  | { type: SectionType; title: string };
+
+export function panelKey(panel: Panel): string {
+  return panel.type === "folder" ? panel.folderId : panel.type;
 }

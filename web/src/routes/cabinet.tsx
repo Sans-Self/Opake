@@ -1,31 +1,42 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Sidebar } from "@/components/cabinet/Sidebar";
 import { TopBar } from "@/components/cabinet/TopBar";
 import { PanelStack } from "@/components/cabinet/PanelStack";
-import type { FileItem, Panel, PanelType } from "@/components/cabinet/types";
+import { useAuthStore } from "@/stores/auth";
+import type {
+  FileItem,
+  Panel,
+  SectionType,
+} from "@/components/cabinet/types";
 
 function CabinetPage() {
   const [panels, setPanels] = useState<Panel[]>([
-    { id: "root", type: "root", title: "The Cabinet" },
+    { type: "root", title: "The Cabinet" },
   ]);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [searchQuery, setSearchQuery] = useState("");
-  const [starred, setStarred] = useState(
-    new Set(["fi-strategy", "fi-brief", "f-projects", "sh-2"]),
+  const [starredIds, setStarredIds] = useState(
+    new Set(["fi-strategy", "fi-brief", "f-projects", "sh-2", "d-thesis"]),
   );
+  const [loading, setLoading] = useState(false);
 
   const currentPanel = panels[panels.length - 1];
 
-  const openSection = (type: PanelType, title: string) => {
-    setPanels([{ id: type, type, title }]);
+  const openSection = (type: SectionType, title: string) => {
+    setPanels([{ type, title }]);
   };
 
   const openItem = (item: FileItem) => {
     if (item.kind === "folder") {
       setPanels((prev) => [
         ...prev,
-        { id: item.id, type: "folder", title: item.name, data: item },
+        {
+          type: "folder",
+          folderId: item.id,
+          title: item.name,
+          itemCount: item.items,
+        },
       ]);
     }
   };
@@ -38,13 +49,20 @@ function CabinetPage() {
     setPanels((prev) => prev.slice(0, -1));
   };
 
+  // TODO (#3): toggleStar and other callbacks are prop-drilled 4 levels deep
+  // (cabinet → PanelStack → PanelContent → FileListRow). Extract a
+  // CabinetContext to provide actions + starredIds via context instead.
   const toggleStar = (id: string) => {
-    setStarred((prev) => {
+    setStarredIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
+
+  // TODO (#4): toggleStar, openItem, goToPanel, closePanel are all redefined
+  // every render — wrap in useCallback so leaf components can be memoized
+  // with React.memo(). Alternatively, CabinetContext eliminates the issue.
 
   return (
     <div className="flex h-screen overflow-hidden bg-base-300 font-sans">
@@ -62,6 +80,8 @@ function CabinetPage() {
         <PanelStack
           panels={panels}
           viewMode={viewMode}
+          starredIds={starredIds}
+          loading={loading}
           onViewModeChange={setViewMode}
           onOpenItem={openItem}
           onGoToPanel={goToPanel}
@@ -74,5 +94,9 @@ function CabinetPage() {
 }
 
 export const Route = createFileRoute("/cabinet")({
+  beforeLoad: () => {
+    const { currentDid } = useAuthStore.getState();
+    if (!currentDid) throw redirect({ to: "/login" });
+  },
   component: CabinetPage,
 });

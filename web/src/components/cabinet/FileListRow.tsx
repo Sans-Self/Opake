@@ -11,12 +11,26 @@ interface FileListRowProps {
 
 export function FileListRow({ item, onClick, onStar }: FileListRowProps) {
   const { bg, text } = fileIconColors(item);
+  const isFolder = item.kind === "folder";
 
   return (
     <div
-      onClick={onClick}
-      className={`flex items-center gap-3 rounded-[10px] px-3 py-[9px] transition-colors hover:bg-bg-hover ${
-        item.kind === "folder" ? "cursor-pointer" : ""
+      onClick={isFolder ? onClick : undefined}
+      onKeyDown={
+        isFolder
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      role={isFolder ? "button" : "row"}
+      tabIndex={isFolder ? 0 : undefined}
+      aria-label={`${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`}
+      className={`flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors hover:bg-bg-hover ${
+        isFolder ? "cursor-pointer" : ""
       }`}
     >
       {/* Icon */}
@@ -28,10 +42,10 @@ export function FileListRow({ item, onClick, onStar }: FileListRowProps) {
 
       {/* Name + meta */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] text-base-content">
+        <div className="truncate text-ui text-base-content">
           {item.name}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-text-faint">
+        <div className="mt-0.5 flex items-center gap-1.5 text-caption text-text-faint">
           <span>{item.modified}</span>
           {item.size && (
             <>
@@ -56,6 +70,7 @@ export function FileListRow({ item, onClick, onStar }: FileListRowProps) {
             e.stopPropagation();
             onStar();
           }}
+          aria-label={item.starred ? "Unstar" : "Star"}
           className={`btn btn-ghost btn-xs p-0.5 ${
             item.starred ? "text-warning" : "text-text-faint"
           }`}
@@ -65,7 +80,7 @@ export function FileListRow({ item, onClick, onStar }: FileListRowProps) {
             weight={item.starred ? "fill" : "regular"}
           />
         </button>
-        {item.kind === "folder" && (
+        {isFolder && (
           <CaretRight size={13} className="text-text-faint" />
         )}
       </div>

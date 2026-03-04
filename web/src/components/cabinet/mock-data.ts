@@ -27,5 +27,3 @@ export const SHARED_ITEMS: FileItem[] = [
   { id: "sh-3", name: "Brand Assets", kind: "folder", encrypted: true, status: "shared", sharedWith: ["design.did"], items: 34, modified: "2 days ago", starred: false },
   { id: "sh-4", name: "Meeting Notes Q1.md", kind: "file", fileType: "note", encrypted: true, status: "shared", sharedWith: ["alice.did"], size: "22 KB", modified: "1 week ago", starred: false },
 ];
-
-export const STARRED_ITEMS = ROOT_ITEMS.filter((i) => i.starred);

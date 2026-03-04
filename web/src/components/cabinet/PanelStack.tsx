@@ -1,6 +1,4 @@
-import { useState, useRef, useEffect } from "react";
 import {
-  CaretRight,
   ListBullets,
   SquaresFour,
   Plus,
@@ -15,9 +13,11 @@ import {
   Lock,
 } from "@phosphor-icons/react";
 import { PanelContent } from "./PanelContent";
+import { PanelSkeleton } from "./PanelSkeleton";
 import { fileIconElement, fileIconColors } from "./file-icons";
-import { ROOT_ITEMS, SHARED_ITEMS, STARRED_ITEMS } from "./mock-data";
+import { ROOT_ITEMS, SHARED_ITEMS } from "./mock-data";
 import type { FileItem, Panel } from "./types";
+import { panelKey } from "./types";
 
 const FILE_BROWSER_TYPES = new Set([
   "root",
@@ -30,6 +30,8 @@ const FILE_BROWSER_TYPES = new Set([
 interface PanelStackProps {
   panels: Panel[];
   viewMode: "list" | "grid";
+  starredIds: ReadonlySet<string>;
+  loading: boolean;
   onViewModeChange: (mode: "list" | "grid") => void;
   onOpenItem: (item: FileItem) => void;
   onGoToPanel: (index: number) => void;
@@ -40,25 +42,14 @@ interface PanelStackProps {
 export function PanelStack({
   panels,
   viewMode,
+  starredIds,
+  loading,
   onViewModeChange,
   onOpenItem,
   onGoToPanel,
   onClosePanel,
   onStar,
 }: PanelStackProps) {
-  const [showNewMenu, setShowNewMenu] = useState(false);
-  const newMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) {
-        setShowNewMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const currentPanel = panels[panels.length - 1];
   const depth = panels.length;
   const isFileBrowser = FILE_BROWSER_TYPES.has(currentPanel.type);
@@ -70,11 +61,11 @@ export function PanelStack({
       case "shared":
         return `${SHARED_ITEMS.length} shared items · Encrypted`;
       case "starred":
-        return `${STARRED_ITEMS.length} starred items`;
+        return `${starredIds.size} starred items`;
       case "encrypted":
         return `${ROOT_ITEMS.filter((i) => i.status === "private").length} private items`;
       case "folder":
-        return `${currentPanel.data?.items ?? "–"} items · Encrypted`;
+        return `${currentPanel.itemCount ?? "–"} items · Encrypted`;
       case "docs":
         return "Documentation · Opake";
       case "settings":
@@ -99,10 +90,10 @@ export function PanelStack({
         {/* Panel header */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-base-300/50 bg-base-100/70 px-4 py-[11px]">
           {/* Breadcrumb */}
-          <div className="breadcrumbs min-w-0 flex-1 overflow-hidden text-[13px]">
+          <div className="breadcrumbs min-w-0 flex-1 overflow-hidden text-ui">
             <ul>
               {panels.map((panel, i) => (
-                <li key={panel.id}>
+                <li key={panelKey(panel)}>
                   <button
                     onClick={() => onGoToPanel(i)}
                     className={
@@ -147,40 +138,42 @@ export function PanelStack({
             )}
 
             {/* New button */}
-            <div className="relative" ref={newMenuRef}>
-              <button
-                onClick={() => setShowNewMenu((v) => !v)}
-                className="btn btn-neutral btn-sm gap-1.5 rounded-lg text-[12px]"
-              >
+            <details className="dropdown dropdown-end">
+              <summary className="btn btn-neutral btn-sm gap-1.5 rounded-lg text-xs">
                 <Plus size={13} />
                 New
-              </button>
-              {showNewMenu && (
-                <div className="menu dropdown-content absolute right-0 top-[calc(100%+6px)] z-50 w-[168px] rounded-xl border border-base-300/50 bg-base-100 p-1 shadow-panel-lg">
-                  {[
-                    { icon: UploadSimple, label: "Upload file" },
-                    { icon: Folder, label: "New folder" },
-                    { icon: FileText, label: "New document" },
-                    { icon: BookOpen, label: "New note" },
-                  ].map(({ icon: Icon, label }) => (
+              </summary>
+              <ul className="menu dropdown-content z-50 w-[168px] rounded-xl border border-base-300/50 bg-base-100 p-1 shadow-panel-lg">
+                {[
+                  { icon: UploadSimple, label: "Upload file" },
+                  { icon: Folder, label: "New folder" },
+                  { icon: FileText, label: "New document" },
+                  { icon: BookOpen, label: "New note" },
+                ].map(({ icon: Icon, label }) => (
+                  <li key={label}>
                     <button
-                      key={label}
-                      onClick={() => setShowNewMenu(false)}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] text-secondary hover:bg-bg-hover"
+                      onClick={(e) => {
+                        (
+                          e.currentTarget.closest(
+                            "details",
+                          ) as HTMLDetailsElement
+                        )?.removeAttribute("open");
+                      }}
+                      className="gap-2.5 text-xs text-secondary"
                     >
                       <Icon size={13} className="text-text-muted" />
                       {label}
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </li>
+                ))}
+              </ul>
+            </details>
 
             {/* Close panel */}
             {depth > 1 && (
               <button
                 onClick={onClosePanel}
-                className="btn btn-ghost btn-sm btn-square rounded-[7px]"
+                className="btn btn-ghost btn-sm btn-square rounded-md"
               >
                 <X size={14} className="text-text-muted" />
               </button>
@@ -195,7 +188,7 @@ export function PanelStack({
             <div className="px-4 pt-4">
               <div className="mb-3 flex items-center gap-[7px]">
                 <Clock size={12} className="text-text-faint" />
-                <span className="text-[10px] uppercase tracking-[0.1em] text-text-faint">
+                <span className="text-label uppercase tracking-[0.1em] text-text-faint">
                   Recent
                 </span>
               </div>
@@ -205,17 +198,17 @@ export function PanelStack({
                   return (
                     <div
                       key={`r-${item.id}`}
-                      className="w-[130px] shrink-0 cursor-pointer rounded-[10px] border border-base-300/50 bg-base-100 p-3"
+                      className="card card-bordered w-[130px] shrink-0 cursor-pointer border-base-300/50 bg-base-100 p-3"
                     >
                       <div
-                        className={`mb-2 flex size-[26px] items-center justify-center rounded-[7px] ${bg} ${text}`}
+                        className={`mb-2 flex size-[26px] items-center justify-center rounded-md ${bg} ${text}`}
                       >
                         {fileIconElement(item, 13)}
                       </div>
-                      <div className="truncate text-[11px] text-base-content">
+                      <div className="truncate text-caption text-base-content">
                         {item.name}
                       </div>
-                      <div className="mt-0.5 text-[10px] text-text-faint">
+                      <div className="mt-0.5 text-label text-text-faint">
                         {item.modified}
                       </div>
                     </div>
@@ -223,28 +216,27 @@ export function PanelStack({
                 })}
               </div>
               {/* Ornamental divider */}
-              <div className="mb-1 flex items-center gap-2.5">
-                <div className="h-px flex-1 bg-base-300/50" />
-                <span className="text-[9px] uppercase tracking-[0.12em] text-text-faint">
-                  All files
-                </span>
-                <div className="h-px flex-1 bg-base-300/50" />
+              <div className="divider mb-1 text-micro uppercase tracking-[0.12em] text-text-faint">
+                All files
               </div>
             </div>
           )}
 
           {/* Section notices */}
           {currentPanel.type === "shared" && (
-            <div className="mx-4 mt-4 flex items-start gap-2.5 rounded-[10px] border border-success/30 bg-bg-sage p-3">
+            <div
+              role="alert"
+              className="alert mx-4 mt-4 gap-2.5 rounded-xl border-success/30 bg-bg-sage p-3"
+            >
               <Users
                 size={13}
                 className="mt-0.5 shrink-0 text-success"
               />
               <div>
-                <div className="mb-0.5 text-[12px] font-medium text-success">
+                <div className="mb-0.5 text-xs font-medium text-success">
                   Shared via decentralised identity
                 </div>
-                <div className="text-[11px] leading-relaxed text-success/80">
+                <div className="text-caption leading-relaxed text-success/80">
                   Files shared via DID. Encrypted in transit and at rest — only
                   invited parties can decrypt.
                 </div>
@@ -252,37 +244,45 @@ export function PanelStack({
             </div>
           )}
           {currentPanel.type === "encrypted" && (
-            <div className="mx-4 mt-4 flex items-start gap-2.5 rounded-[10px] border border-border-accent bg-accent p-3">
+            <div
+              role="alert"
+              className="alert mx-4 mt-4 gap-2.5 rounded-xl border-border-accent bg-accent p-3"
+            >
               <Lock
                 size={13}
                 className="mt-0.5 shrink-0 text-primary"
               />
               <div>
-                <div className="mb-0.5 text-[12px] font-medium text-accent-content">
+                <div className="mb-0.5 text-xs font-medium text-accent-content">
                   Private encrypted files
                 </div>
-                <div className="text-[11px] leading-relaxed text-primary">
+                <div className="text-caption leading-relaxed text-primary">
                   Only you can decrypt these files. Not shared with anyone.
                 </div>
               </div>
             </div>
           )}
 
-          <PanelContent
-            panel={currentPanel}
-            viewMode={viewMode}
-            onOpen={onOpenItem}
-            onStar={onStar}
-          />
+          {loading ? (
+            <PanelSkeleton />
+          ) : (
+            <PanelContent
+              panel={currentPanel}
+              viewMode={viewMode}
+              starredIds={starredIds}
+              onOpen={onOpenItem}
+              onStar={onStar}
+            />
+          )}
         </div>
 
         {/* Panel footer */}
         <div className="flex shrink-0 items-center gap-2 border-t border-base-300/50 bg-base-100/60 px-4 py-[9px]">
           <ShieldCheck size={11} className="text-primary" />
-          <span className="text-[11px] text-text-faint">{footerText}</span>
+          <span className="text-caption text-text-faint">{footerText}</span>
           <div className="flex-1" />
           {depth > 1 && (
-            <span className="font-display text-[13px] italic text-text-faint">
+            <span className="font-display text-ui italic text-text-faint">
               {depth} panels open
             </span>
           )}

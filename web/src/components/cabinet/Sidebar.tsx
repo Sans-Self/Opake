@@ -10,7 +10,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { SidebarItem } from "./SidebarItem";
-import type { PanelType } from "./types";
+import type { PanelType, SectionType } from "./types";
 
 const MAIN_NAV = [
   { type: "root" as const, icon: Folder, label: "The Cabinet" },
@@ -33,7 +33,7 @@ const WORKSPACES = [
 interface SidebarProps {
   activePanelType: PanelType;
   panelDepth: number;
-  onOpenSection: (type: PanelType, title: string) => void;
+  onOpenSection: (type: SectionType, title: string) => void;
 }
 
 export function Sidebar({
@@ -52,7 +52,7 @@ export function Sidebar({
 
       {/* Storage */}
       <div className="mb-5 px-1">
-        <div className="mb-1.5 flex justify-between text-[11px] text-text-faint">
+        <div className="mb-1.5 flex justify-between text-caption text-text-faint">
           <span>Storage</span>
           <span>3.1 / 10 GB</span>
         </div>
@@ -79,19 +79,19 @@ export function Sidebar({
         ))}
 
         {/* Workspaces */}
-        <div className="mt-3.5 mb-1.5 ml-1 text-[10px] uppercase tracking-[0.1em] text-text-faint">
+        <div className="mt-3.5 mb-1.5 ml-1 text-label uppercase tracking-[0.1em] text-text-faint">
           Workspaces
         </div>
         {WORKSPACES.map((ws) => (
           <button
             key={ws.id}
-            className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[7px] text-left text-[13px] text-text-muted hover:bg-bg-hover"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-ui text-text-muted hover:bg-bg-hover"
           >
-            <div className="flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-accent text-[9px] font-semibold text-primary">
+            <div className="flex size-5 shrink-0 items-center justify-center rounded-md bg-accent text-micro font-semibold text-primary">
               {ws.name[0]}
             </div>
             <span className="flex-1">{ws.name}</span>
-            <span className="text-[10px] text-text-faint">{ws.count}</span>
+            <span className="text-label text-text-faint">{ws.count}</span>
           </button>
         ))}
       </nav>

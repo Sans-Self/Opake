@@ -15,11 +15,11 @@ interface IconStyle {
 const FOLDER_STYLE: IconStyle = { bg: "bg-accent", text: "text-primary" };
 
 const FILE_TYPE_STYLES: Record<string, IconStyle> = {
-  document: { bg: "bg-[#EEF0F8]", text: "text-[#6676A8]" },
-  spreadsheet: { bg: "bg-[#EEF4EE]", text: "text-[#5C8A5C]" },
-  pdf: { bg: "bg-[#F5EEEC]", text: "text-[#A05040]" },
-  note: { bg: "bg-accent", text: "text-[#8A6A30]" },
-  code: { bg: "bg-[#F0EEF5]", text: "text-[#7A6A98]" },
+  document: { bg: "bg-file-doc-bg", text: "text-file-doc" },
+  spreadsheet: { bg: "bg-file-sheet-bg", text: "text-file-sheet" },
+  pdf: { bg: "bg-file-pdf-bg", text: "text-file-pdf" },
+  note: { bg: "bg-accent", text: "text-file-note" },
+  code: { bg: "bg-file-code-bg", text: "text-file-code" },
   archive: { bg: "bg-bg-stone", text: "text-text-muted" },
 };
 

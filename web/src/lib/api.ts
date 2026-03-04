@@ -4,8 +4,8 @@ interface ApiConfig {
 }
 
 const defaultConfig: ApiConfig = {
-  pdsUrl: "https://pds.sans-self.org",
-  appviewUrl: "https://appview.opake.app",
+  pdsUrl: import.meta.env.VITE_PDS_URL ?? "https://pds.sans-self.org",
+  appviewUrl: import.meta.env.VITE_APPVIEW_URL ?? "https://appview.opake.app",
 };
 
 interface XrpcParams {

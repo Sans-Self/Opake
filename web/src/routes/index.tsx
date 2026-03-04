@@ -10,7 +10,7 @@ function LandingPage() {
         <OpakeLogo />
         <Link
           to="/cabinet"
-          className="btn btn-neutral btn-sm gap-2 text-[13px]"
+          className="btn btn-neutral btn-sm gap-2 text-ui"
         >
           Open the Cabinet
           <ArrowRight size={14} />
@@ -18,24 +18,20 @@ function LandingPage() {
       </nav>
 
       {/* Hero */}
-      <section className="flex min-h-screen flex-col items-center justify-center px-10 pt-[120px] pb-20">
+      <section className="flex min-h-screen flex-col items-center justify-center px-10 pt-30 pb-20">
         {/* Ornamental rule */}
-        <div className="mb-8 flex items-center gap-3">
-          <div className="h-px w-8 bg-border-accent" />
-          <span className="text-[11px] uppercase tracking-[0.18em] text-primary">
-            Built on the AT Protocol
-          </span>
-          <div className="h-px w-8 bg-border-accent" />
+        <div className="divider mb-8 w-80 self-center text-caption uppercase tracking-[0.18em] text-primary before:bg-border-accent after:bg-border-accent">
+          Built on the AT Protocol
         </div>
 
-        <h1 className="mb-7 max-w-[820px] text-center font-display text-[clamp(3.4rem,7.5vw,6.2rem)] leading-[1.04] tracking-tight font-normal text-base-content">
+        <h1 className="mb-7 max-w-205 text-center font-display text-[clamp(3.4rem,7.5vw,6.2rem)] leading-[1.04] tracking-tight font-normal text-base-content">
           Your data,{" "}
           <em className="text-primary">freely shared</em>,
           <br />
           privately kept.
         </h1>
 
-        <p className="mb-10 max-w-[520px] text-center text-[1.05rem] leading-[1.75] text-secondary">
+        <p className="mb-10 max-w-130 text-center text-[1.05rem] leading-[1.75] text-secondary">
           Opake exists because privacy and collaboration should not be a
           tradeoff. Your files — encrypted, owned, shared on your terms — through
           decentralised identity, with no central authority in between.

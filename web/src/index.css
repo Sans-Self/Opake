@@ -54,6 +54,13 @@
   --font-display: "Cormorant Garamond", serif;
   --font-sans: "Inter", sans-serif;
 
+  /* Text scale */
+  --text-ui: 0.8125rem;      /* 13px — primary UI text */
+  --text-caption: 0.6875rem;  /* 11px — meta/caption */
+  --text-label: 0.625rem;     /* 10px — small labels */
+  --text-micro: 0.5625rem;    /* 9px — tiny text */
+
+  /* Custom colours */
   --color-border-accent: oklch(0.790 0.060 80);   /* #D4BC96 */
   --color-text-faint: oklch(0.760 0.035 75);       /* #C4B09A */
   --color-text-muted: oklch(0.620 0.040 70);       /* #9A8768 */
@@ -63,9 +70,33 @@
   --color-bg-sage: oklch(0.940 0.020 140);         /* #EEF2E8 */
   --color-bg-stone: oklch(0.950 0.010 80);         /* #F4F1EC */
 
+  /* File-type icon colours */
+  --color-file-doc: #6676A8;
+  --color-file-doc-bg: #EEF0F8;
+  --color-file-sheet: #5C8A5C;
+  --color-file-sheet-bg: #EEF4EE;
+  --color-file-pdf: #A05040;
+  --color-file-pdf-bg: #F5EEEC;
+  --color-file-note: #8A6A30;
+  --color-file-code: #7A6A98;
+  --color-file-code-bg: #F0EEF5;
+
+  /* Elevation */
   --shadow-panel-sm: 0 1px 8px oklch(0.35 0.05 60 / 0.07);
   --shadow-panel-md: 0 2px 16px oklch(0.35 0.05 60 / 0.09);
   --shadow-panel-lg: 0 6px 32px oklch(0.35 0.05 60 / 0.12);
+}
+
+/* ─── Utilities ──────────────────────────────────────────────────────────── */
+
+@utility bg-encrypted-pattern {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 13px,
+    oklch(0.580 0.095 75 / 0.04) 13px,
+    oklch(0.580 0.095 75 / 0.04) 14px
+  );
 }
 
 /* ─── Base styles ─────────────────────────────────────────────────────────── */

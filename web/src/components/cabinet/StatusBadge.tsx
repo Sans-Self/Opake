@@ -28,7 +28,7 @@ export function StatusBadge({ status }: { status: EncStatus }) {
 
   return (
     <span
-      className={`badge badge-sm gap-1 border text-[10px] tracking-wide ${variant.className}`}
+      className={`badge badge-sm gap-1 border text-label tracking-wide ${variant.className}`}
     >
       <Icon size={8} weight="bold" />
       {variant.label}
