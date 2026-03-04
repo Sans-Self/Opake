@@ -4,8 +4,9 @@
 
 ```mermaid
 graph TB
-    subgraph Client ["Client (your machine)"]
+    subgraph Client ["Client (your machine / browser)"]
         CLI["opake CLI"]
+        Web["Web SPA"]
         Core["opake-core library"]
         Crypto["Client-side crypto<br/>(AES-256-GCM, X25519)"]
     end
@@ -23,11 +24,13 @@ graph TB
     end
 
     CLI --> Core
+    Web -->|WASM| Core
     Core --> Crypto
     Core -->|XRPC / HTTPS| OwnPDS
     Core -->|unauthenticated| OtherPDS
     Core -->|DID resolution| PLC
     CLI -->|inbox query| AppView
+    Web -->|inbox query| AppView
 
     AppView -->|subscribe| Jetstream
     AppView --> SQLite
@@ -41,7 +44,7 @@ graph TB
     style Network fill:#16213e,color:#eee
 ```
 
-The CLI talks directly to PDS instances over XRPC. No PDS modifications needed. All encryption and decryption happens on your machine. The AppView is an optional component that indexes grants and keyrings from the firehose for discovery.
+Both the CLI and the web frontend talk directly to PDS instances over XRPC. No PDS modifications needed. All encryption and decryption happens client-side — on your machine (CLI) or in the browser (Web via WASM). The AppView is an optional component that indexes grants and keyrings from the firehose for discovery.
 
 ## Crate Structure
 
@@ -51,6 +54,7 @@ crates/
     src/
       atproto.rs       AT-URI parsing, shared AT Protocol primitives
       resolve.rs       Handle/DID → PDS → public key resolution pipeline
+      storage.rs       Config, Identity types + Storage trait (cross-platform contract)
       error.rs         Typed error hierarchy (thiserror)
       test_utils.rs    MockTransport + response queue (behind test-utils feature)
       crypto/
@@ -108,9 +112,9 @@ crates/
   opake-cli/           CLI binary wrapping opake-core
     src/
       main.rs          Clap app, command dispatch
-      config.rs        Multi-account config (default DID, account map)
-      session.rs       Per-account session persistence (JWT tokens)
-      identity.rs      Per-account X25519 + Ed25519 keypair persistence
+      config.rs        FileStorage (impl Storage for filesystem), anyhow wrappers
+      session.rs       CommandContext resolution, session persistence
+      identity.rs      Keypair generation, migration, permission checks
       keyring_store.rs Local group key persistence (per-keyring)
       transport.rs     reqwest-based Transport implementation
       utils.rs         Test harness, env helpers
@@ -165,9 +169,39 @@ crates/
   opake-derive/        Proc-macro crate (RedactedDebug derive)
     src/
       lib.rs           #[derive(RedactedDebug)] + #[redact] attribute
+
+web/                   React SPA (Vite + TanStack Router + Tailwind + daisyUI)
+  src/
+    lib/
+      storage.ts       Storage interface (mirrors opake-core Storage trait)
+      storage-types.ts Config, Identity, Session types (mirrors opake-core)
+      indexeddb-storage.ts  IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
+      api.ts           API client helpers
+      crypto-types.ts  Crypto type definitions
+    stores/
+      auth.ts          Auth state (Zustand)
+    routes/
+      __root.tsx       Root layout with auth guard
+      index.tsx        Landing page
+      login.tsx        Login form
+      cabinet.tsx      File cabinet (main UI)
+    components/cabinet/
+      PanelStack.tsx   Stacked panel navigation
+      PanelContent.tsx File grid/list view
+      Sidebar.tsx      Navigation sidebar
+      TopBar.tsx       Header with account switcher
+      FileGridCard.tsx Grid card with file icon + metadata
+      FileListRow.tsx  List row variant
+      types.ts         Discriminated union types for cabinet state
+    wasm/opake-wasm/   WASM build of opake-core (via wasm-pack)
+    workers/
+      crypto.worker.ts Web Worker for off-main-thread crypto (Comlink)
+  tests/
+    lib/
+      indexeddb-storage.test.ts  Storage contract tests (fake-indexeddb)
 ```
 
-The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates. This keeps `opake-core` compilable to WASM for the future web UI.
+The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens through the `Storage` trait — `FileStorage` (CLI, filesystem) and `IndexedDbStorage` (web, IndexedDB) implement the same contract with platform-specific backends. This keeps `opake-core` compilable to WASM, which the web frontend uses via `wasm-pack`.
 
 ## Encryption Model
 
@@ -261,6 +295,21 @@ When you share a file, the data stays on your PDS. The recipient's client fetche
 3. Blob (encrypted file content)
 
 All three are unauthenticated reads — AT Protocol records and blobs are public by design. The encryption is the access control, not the transport.
+
+## Storage Abstraction
+
+Config, identity, and session types live in `opake-core/src/storage.rs` alongside the `Storage` trait. This lets both platforms share the same data model and mutation logic (e.g. `Config::add_account`, `Config::remove_account`, `Config::set_default`).
+
+| Method | Contract |
+|--------|----------|
+| `load_config` / `save_config` | Read/write the global config (accounts map, default DID) |
+| `load_identity` / `save_identity` | Read/write per-account encryption keypairs |
+| `load_session` / `save_session` | Read/write per-account JWT tokens |
+| `remove_account` | Full cleanup: mutate config + delete identity/session data + persist |
+
+**CLI (`FileStorage`)** — TOML config at `~/.config/opake/config.toml`, JSON files in per-account directories, unix permissions (0600/0700).
+
+**Web (`IndexedDbStorage`)** — Dexie.js over IndexedDB with three object stores (`configs`, `identities`, `sessions`). `removeAccount` runs config mutation + data deletion in a single transaction for atomicity.
 
 ## Multi-Account Support
 

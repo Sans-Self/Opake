@@ -8,6 +8,7 @@ Contributions welcome — from humans and AI agents alike.
 2. Install Rust 1.75+ via [rustup](https://rustup.rs)
 3. Run the test suite: `cargo test`
 4. Run the linter: `cargo clippy -- -D warnings`
+5. For web frontend work: install [Bun](https://bun.sh), then `cd web && bun install`
 
 ## Code style
 
@@ -26,11 +27,12 @@ opake-core      platform-agnostic library (compiles to WASM)
                 - XRPC client with automatic token refresh
                 - document operations (upload, download, list, delete, resolve)
                 - AT Protocol record types and lexicon constants
+                - Storage trait + config/identity/session types (storage.rs)
                 - shared config path resolution (paths.rs)
 
-opake-cli       thin CLI wrapper
+opake-cli       CLI binary wrapping opake-core
                 - clap command definitions
-                - config/session/identity persistence
+                - FileStorage (impl Storage over filesystem, TOML + JSON)
                 - user interaction (prompts, formatting)
 
 opake-appview   indexer + REST API for grant/keyring discovery
@@ -43,9 +45,15 @@ opake-derive    proc-macro crate
                 - #[derive(RedactedDebug)] with #[redact] field attribute
                 - generates Debug impls showing byte length instead of content
                 - used by opake-core (ContentKey, Session) and opake-cli (Identity)
+
+web/            React SPA (Vite + TanStack Router + Tailwind/daisyUI)
+                - opake-core via WASM (wasm-pack build)
+                - IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
+                - Zustand stores, Web Worker for off-main-thread crypto
+                - cabinet file browser UI with panel navigation
 ```
 
-`opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O happens in the binary crates.
+`opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O goes through the `Storage` trait — `FileStorage` (CLI) and `IndexedDbStorage` (web) are the platform-specific implementations.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structure and encryption model, and [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 
@@ -59,11 +67,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structur
 - The `test-utils` feature flag gates test infrastructure in `opake-core`
 
 ```sh
-cargo test                          # all tests
+cargo test                          # all Rust tests
 cargo test -p opake-core            # core only
 cargo test -p opake-cli             # CLI only
 cargo test -p opake-appview         # appview only
 cargo test -- --test-output         # show println output
+
+cd web && bun run test              # web frontend tests (Vitest + fake-indexeddb)
 ```
 
 ## Commit messages

@@ -99,6 +99,18 @@ opake shared --long
 # revoke a share grant
 opake revoke at://did:plc:abc/app.opake.cloud.grant/tid123
 
+# check incoming grants (via AppView)
+opake inbox --appview https://appview.example.com
+opake inbox --long
+
+# keyring-based group sharing
+opake keyring create family-photos
+opake keyring ls
+opake keyring add-member family-photos alice.example.com
+opake upload photo.jpg --keyring family-photos
+opake download --keyring-member at://did:plc:abc/app.opake.cloud.document/tid456
+opake keyring remove-member family-photos alice.example.com
+
 # remove an account
 opake logout bob.other.com
 ```
@@ -115,12 +127,13 @@ See [docs/appview.md](docs/appview.md) for configuration, authentication, API en
 
 ## Architecture
 
-Four crates:
+Four crates + a web frontend:
 
-- **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations.
-- **`opake-cli`** — thin CLI wrapper. Config, session, identity persistence.
+- **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations, `Storage` trait.
+- **`opake-cli`** — CLI binary. `FileStorage` (filesystem-backed), command dispatch.
 - **`opake-appview`** — Axum-based indexer and REST API. Jetstream firehose consumer, SQLite storage, DID-scoped Ed25519 auth.
 - **`opake-derive`** — Proc-macro crate. `RedactedDebug` derive macro for secret-safe Debug output.
+- **`web/`** — React SPA (Vite + TanStack Router + Tailwind/daisyUI). Uses `opake-core` via WASM. `IndexedDbStorage` (IndexedDB-backed) implements the same `Storage` trait as the CLI.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
 
@@ -139,16 +152,25 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate
 - [x] AppView indexer (grants + keyrings from firehose)
 - [x] AppView REST API with DID-scoped Ed25519 auth
 - [x] Folder hierarchy (mkdir, tree, path-aware rm/mv/cat/upload)
-- [ ] Grant discovery (inbox command — queries AppView)
-- [ ] Keyring-based group sharing
-- [ ] Web UI (SPA frontend)
+- [x] Grant discovery (inbox command — queries AppView)
+- [x] Keyring-based group sharing
+- [ ] Web UI — cabinet file browser (in progress, auth stubbed)
+- [ ] AT Protocol OAuth (DPoP) for browser authentication
+- [ ] Seed phrase key derivation for multi-device
 
 ## Development
 
 ```sh
-cargo test           # run all tests
+cargo test           # run all Rust tests
 cargo clippy         # lint
 cargo fmt            # format
+
+# web frontend
+cd web
+bun install          # install deps
+bun run wasm:build   # build opake-core WASM module
+bun run dev          # start Vite dev server
+bun run test         # run Vitest suite
 ```
 
 CI runs on [Tangled](https://tangled.org) via `.tangled/workflows/test.yml`.
