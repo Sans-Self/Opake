@@ -1,0 +1,18 @@
+[package]
+name = "opake-wasm"
+description = "WASM bindings for opake-core crypto primitives"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opake-core = { path = "../opake-core" }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+serde = { workspace = true }
+
+# OsRng on wasm32 needs crypto.getRandomValues()
+getrandom = { version = "0.2", features = ["js"] }

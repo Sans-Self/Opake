@@ -14,6 +14,10 @@ extern crate self as opake_core;
 
 pub use opake_derive::RedactedDebug;
 
+pub fn binding_check() -> &'static str {
+    "WORKS"
+}
+
 pub mod atproto;
 pub mod client;
 pub mod crypto;

@@ -1,5 +1,7 @@
 /target
 node_modules/
+web/dist/
+web/src/wasm/
 settings.local.json
 .claude/settings.local.json
 .mcp.json

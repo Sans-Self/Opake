@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Wire opake-core WASM into web frontend [#163](https://issues.opake.app/issues/163.html)
 - Add cat command to read and display file contents [#154](https://issues.opake.app/issues/154.html)
 - Add directory record type and mkdir command [#98](https://issues.opake.app/issues/98.html)
 - Add issue tracker link to README [#142](https://issues.opake.app/issues/142.html)
@@ -51,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Amend web scaffold into WASM commit [#164](https://issues.opake.app/issues/164.html)
 - Update blackbox tests and docs for new commands [#159](https://issues.opake.app/issues/159.html)
 - Add path-aware mv command [#157](https://issues.opake.app/issues/157.html)
 - Add path-aware upload with directory placement [#158](https://issues.opake.app/issues/158.html)
