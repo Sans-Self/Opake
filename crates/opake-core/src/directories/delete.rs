@@ -71,6 +71,7 @@ mod tests {
         mock.enqueue(get_record_response(&uri, &directory));
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: b"{}".to_vec(),
         });
 
@@ -135,6 +136,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 404,
+            headers: vec![],
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 

@@ -29,7 +29,7 @@ pub const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";
 pub(crate) mod tests {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-    use crate::client::{HttpResponse, Session, XrpcClient};
+    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
     use crate::records::{
         AtBytes, BlobRef, CidLink, DirectEncryption, Document, Encryption, EncryptionEnvelope,
         WrappedKey,
@@ -40,12 +40,12 @@ pub(crate) mod tests {
     pub const TEST_URI: &str = "at://did:plc:test/app.opake.cloud.document/abc123";
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
-        let session = Session {
+        let session = Session::Legacy(LegacySession {
             did: TEST_DID.into(),
             handle: "test.handle".into(),
             access_jwt: "test-jwt".into(),
             refresh_jwt: "test-refresh".into(),
-        };
+        });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
@@ -104,6 +104,7 @@ pub(crate) mod tests {
 
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }

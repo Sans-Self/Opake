@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod identity;
 mod keyring_store;
+mod oauth;
 mod session;
 mod transport;
 pub mod utils;
@@ -60,7 +61,7 @@ async fn run_with_context(
     let ctx = session::resolve_context(storage, as_flag)?;
     let refreshed = cmd.execute(&ctx).await?;
     if let Some(ref s) = refreshed {
-        session::persist_session(&ctx.storage, &s.did, s)?;
+        session::persist_session(&ctx.storage, s.did(), s)?;
     }
     Ok(())
 }
@@ -95,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Login(cmd) => {
             let session = cmd.execute(&storage).await?;
             if let Some(ref s) = session {
-                session::persist_session(&storage, &s.did, s)?;
+                session::persist_session(&storage, s.did(), s)?;
             }
         }
         Command::Logout(cmd) => cmd.run(&storage)?,

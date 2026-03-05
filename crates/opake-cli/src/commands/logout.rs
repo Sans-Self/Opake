@@ -6,14 +6,25 @@ use crate::config::{resolve_handle_or_did, FileStorage};
 #[derive(Args)]
 /// Remove an account
 pub struct LogoutCommand {
-    /// Handle or DID of the account to remove
-    account: String,
+    /// Handle or DID of the account to remove (defaults to only account)
+    account: Option<String>,
 }
 
 impl LogoutCommand {
     pub fn run(self, storage: &FileStorage) -> Result<()> {
         let cfg = storage.load_config_anyhow()?;
-        let did = resolve_handle_or_did(&cfg, &self.account)?;
+        let did = match self.account {
+            Some(input) => resolve_handle_or_did(&cfg, &input)?,
+            None => {
+                let mut dids: Vec<_> = cfg.accounts.keys().collect();
+                anyhow::ensure!(!dids.is_empty(), "no accounts to log out");
+                anyhow::ensure!(
+                    dids.len() == 1,
+                    "multiple accounts — specify which one to log out"
+                );
+                dids.remove(0).clone()
+            }
+        };
         let handle = cfg
             .accounts
             .get(&did)
@@ -56,7 +67,7 @@ mod tests {
             .unwrap();
 
         let cmd = LogoutCommand {
-            account: "alice.test".into(),
+            account: Some("alice.test".into()),
         };
         cmd.run(&storage).unwrap();
 
@@ -85,7 +96,7 @@ mod tests {
             .unwrap();
 
         let cmd = LogoutCommand {
-            account: "nobody.test".into(),
+            account: Some("nobody.test".into()),
         };
         assert!(cmd.run(&storage).is_err());
     }

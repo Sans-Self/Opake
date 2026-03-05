@@ -24,6 +24,7 @@ fn did_document_response() -> HttpResponse {
     });
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&body).unwrap(),
     }
 }
@@ -36,6 +37,7 @@ fn record_response(uri: &str, value: &impl serde::Serialize) -> HttpResponse {
     });
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&body).unwrap(),
     }
 }
@@ -43,6 +45,7 @@ fn record_response(uri: &str, value: &impl serde::Serialize) -> HttpResponse {
 fn blob_response(data: &[u8]) -> HttpResponse {
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: data.to_vec(),
     }
 }

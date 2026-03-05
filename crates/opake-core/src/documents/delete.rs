@@ -44,6 +44,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: b"{}".to_vec(),
         });
 
@@ -102,6 +103,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 404,
+            headers: vec![],
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 
@@ -116,6 +118,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"storage error"}"#.to_vec(),
         });
 

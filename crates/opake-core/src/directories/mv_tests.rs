@@ -12,6 +12,7 @@ use crate::documents::tests::dummy_document;
 fn record_response<T: serde::Serialize>(uri: &str, record: &T) -> HttpResponse {
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&serde_json::json!({
             "uri": uri,
             "cid": "bafyrecord",

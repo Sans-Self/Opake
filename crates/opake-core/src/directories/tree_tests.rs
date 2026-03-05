@@ -17,6 +17,7 @@ fn doc_record_response(uri: &str, name: &str) -> HttpResponse {
     let doc = dummy_document(name, 100, vec![]);
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&serde_json::json!({
             "uri": uri,
             "cid": "bafydocument",
@@ -96,6 +97,7 @@ async fn load_propagates_pds_error() {
     let mock = MockTransport::new();
     mock.enqueue(HttpResponse {
         status: 500,
+        headers: vec![],
         body: br#"{"error":"InternalServerError","message":"boom"}"#.to_vec(),
     });
 
@@ -155,6 +157,7 @@ async fn resolve_at_uri_not_found() {
     // getRecord 404 for unknown document
     mock.enqueue(HttpResponse {
         status: 404,
+        headers: vec![],
         body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
     });
 

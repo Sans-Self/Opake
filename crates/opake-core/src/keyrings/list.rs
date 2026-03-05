@@ -33,19 +33,19 @@ pub async fn list_keyrings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{HttpResponse, Session, XrpcClient};
+    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
     use crate::records::{self, AtBytes, Keyring, WrappedKey};
     use crate::test_utils::MockTransport;
 
     const TEST_DID: &str = "did:plc:owner";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
-        let session = Session {
+        let session = Session::Legacy(LegacySession {
             did: TEST_DID.into(),
             handle: "owner.test".into(),
             access_jwt: "test-jwt".into(),
             refresh_jwt: "test-refresh".into(),
-        };
+        });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
@@ -92,6 +92,7 @@ mod tests {
 
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }

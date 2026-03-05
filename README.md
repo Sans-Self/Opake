@@ -37,8 +37,11 @@ Produces two binaries: `target/release/opake` (CLI) and `target/release/opake-ap
 ## Usage
 
 ```sh
-# authenticate with your PDS
+# authenticate with your PDS (uses OAuth by default)
 opake login --pds https://pds.example.com --identifier alice.example.com
+
+# force legacy password-based auth
+opake login --pds https://pds.example.com --identifier alice.example.com --legacy
 
 # log in to a second account
 opake login --pds https://other-pds.example.com --identifier bob.other.com
@@ -111,7 +114,8 @@ opake upload photo.jpg --keyring family-photos
 opake download --keyring-member at://did:plc:abc/app.opake.cloud.document/tid456
 opake keyring remove-member family-photos alice.example.com
 
-# remove an account
+# remove an account (defaults to only account if just one)
+opake logout
 opake logout bob.other.com
 ```
 
@@ -155,7 +159,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate
 - [x] Grant discovery (inbox command — queries AppView)
 - [x] Keyring-based group sharing
 - [ ] Web UI — cabinet file browser (in progress, auth stubbed)
-- [ ] AT Protocol OAuth (DPoP) for browser authentication
+- [x] AT Protocol OAuth (DPoP) for CLI and browser authentication
 - [ ] Seed phrase key derivation for multi-device
 
 ## Development

@@ -138,6 +138,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: inbox_json(&[&grant_json("g1"), &grant_json("g2")], None),
         });
 
@@ -168,10 +169,12 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: inbox_json(&[&grant_json("g1")], Some("cursor1")),
         });
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: inbox_json(&[&grant_json("g2")], None),
         });
 
@@ -189,6 +192,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: inbox_json(&[], None),
         });
 
@@ -211,6 +215,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 401,
+            headers: vec![],
             body: r#"{"error":"signature verification failed"}"#.as_bytes().to_vec(),
         });
 
@@ -239,6 +244,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: r#"{"error":"internal server error"}"#.as_bytes().to_vec(),
         });
 

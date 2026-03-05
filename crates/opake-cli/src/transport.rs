@@ -32,6 +32,18 @@ impl Transport for ReqwestTransport {
                 RequestBody::Bytes { data, content_type } => {
                     builder.header("Content-Type", content_type).body(data)
                 }
+                RequestBody::Form(params) => {
+                    let encoded: String = params
+                        .iter()
+                        .map(|(k, v)| {
+                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("&");
+                    builder
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .body(encoded)
+                }
             };
         }
 
@@ -41,6 +53,11 @@ impl Transport for ReqwestTransport {
         })?;
 
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
+            .collect();
         let body = response.bytes().await.map_err(|e| Error::Xrpc {
             status,
             message: e.to_string(),
@@ -48,6 +65,7 @@ impl Transport for ReqwestTransport {
 
         Ok(HttpResponse {
             status,
+            headers,
             body: body.to_vec(),
         })
     }

@@ -231,12 +231,17 @@ mod tests {
             "value": doc,
         }))
         .unwrap();
-        HttpResponse { status: 200, body }
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body,
+        }
     }
 
     fn blob_response(data: &[u8]) -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: data.to_vec(),
         }
     }
@@ -333,6 +338,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&doc_value).unwrap(),
         });
 
@@ -349,6 +355,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 404,
+            headers: vec![],
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 
@@ -370,6 +377,7 @@ mod tests {
         mock.enqueue(record_response(&doc));
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"blob storage error"}"#.to_vec(),
         });
 

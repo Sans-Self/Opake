@@ -64,6 +64,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(crate::client::HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"oops"}"#.to_vec(),
         });
 

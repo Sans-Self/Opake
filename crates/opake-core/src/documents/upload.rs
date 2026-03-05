@@ -198,6 +198,7 @@ mod tests {
         });
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }
@@ -210,6 +211,7 @@ mod tests {
         });
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }
@@ -316,6 +318,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"blob storage down"}"#.to_vec(),
         });
 
@@ -335,6 +338,7 @@ mod tests {
         mock.enqueue(upload_blob_response());
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"record write failed"}"#.to_vec(),
         });
 

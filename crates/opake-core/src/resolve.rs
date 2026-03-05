@@ -140,6 +140,7 @@ mod tests {
     fn success(body: &str) -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: body.as_bytes().to_vec(),
         }
     }
@@ -234,6 +235,7 @@ mod tests {
         )));
         mock.enqueue(HttpResponse {
             status: 404,
+            headers: vec![],
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 
@@ -278,12 +280,12 @@ mod tests {
         });
         mock.enqueue(success(&put_response.to_string()));
 
-        let session = crate::client::Session {
+        let session = crate::client::Session::Legacy(crate::client::LegacySession {
             did: "did:plc:test".into(),
             handle: "test.handle".into(),
             access_jwt: "test-jwt".into(),
             refresh_jwt: "test-refresh".into(),
-        };
+        });
         let mut client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
 
         let signing_key = [88u8; 32];

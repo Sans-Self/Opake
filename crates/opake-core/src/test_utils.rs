@@ -74,10 +74,12 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: b"first".to_vec(),
         });
         mock.enqueue(HttpResponse {
             status: 201,
+            headers: vec![],
             body: b"second".to_vec(),
         });
 
@@ -95,10 +97,12 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: vec![],
         });
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: vec![],
         });
 

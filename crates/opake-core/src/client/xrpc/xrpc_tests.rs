@@ -4,6 +4,7 @@ use crate::test_utils::MockTransport;
 fn response(status: u16, body: &str) -> HttpResponse {
     HttpResponse {
         status,
+        headers: vec![],
         body: body.as_bytes().to_vec(),
     }
 }
@@ -135,6 +136,7 @@ fn redirect_300_is_error() {
 fn expired_token_response() -> HttpResponse {
     HttpResponse {
         status: 400,
+        headers: vec![],
         body: br#"{"error":"ExpiredToken","message":"Token has expired"}"#.to_vec(),
     }
 }
@@ -148,6 +150,7 @@ fn refresh_session_response() -> HttpResponse {
     });
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&body).unwrap(),
     }
 }
@@ -155,17 +158,18 @@ fn refresh_session_response() -> HttpResponse {
 fn success_response(body: &str) -> HttpResponse {
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: body.as_bytes().to_vec(),
     }
 }
 
 fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
-    let session = Session {
+    let session = Session::Legacy(LegacySession {
         did: "did:plc:test".into(),
         handle: "test.handle".into(),
         access_jwt: "stale-access-jwt".into(),
         refresh_jwt: "valid-refresh-jwt".into(),
-    };
+    });
     XrpcClient::with_session(mock, "https://pds.test".into(), session)
 }
 
@@ -189,8 +193,13 @@ async fn refresh_on_expired_token_then_retry() {
     assert!(client.session_refreshed());
 
     let session = client.session().unwrap();
-    assert_eq!(session.access_jwt, "fresh-access-jwt");
-    assert_eq!(session.refresh_jwt, "fresh-refresh-jwt");
+    match session {
+        Session::Legacy(s) => {
+            assert_eq!(s.access_jwt, "fresh-access-jwt");
+            assert_eq!(s.refresh_jwt, "fresh-refresh-jwt");
+        }
+        _ => panic!("expected Legacy session after refresh"),
+    }
 
     // Verify: 3 requests — original, refresh, retry
     let reqs = mock.requests();
@@ -215,6 +224,7 @@ async fn refresh_failure_propagates_error() {
     // Refresh fails
     mock.enqueue(HttpResponse {
         status: 401,
+        headers: vec![],
         body: br#"{"error":"InvalidToken","message":"bad refresh token"}"#.to_vec(),
     });
 
@@ -234,6 +244,7 @@ async fn non_expired_error_passes_through() {
     let mock = MockTransport::new();
     mock.enqueue(HttpResponse {
         status: 500,
+        headers: vec![],
         body: br#"{"error":"InternalServerError","message":"oops"}"#.to_vec(),
     });
 

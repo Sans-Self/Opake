@@ -40,12 +40,29 @@ pub struct LoginCommand {
     /// Handle or DID
     #[arg(long)]
     identifier: String,
+
+    /// Force legacy password-based authentication
+    #[arg(long)]
+    legacy: bool,
 }
 
 impl LoginCommand {
     pub async fn execute(self, storage: &FileStorage) -> Result<Option<Session>> {
         debug!("Starting login command");
 
+        if !self.legacy {
+            match crate::oauth::try_oauth_login(&self.pds, &self.identifier, storage).await {
+                Ok(session) => return Ok(Some(session)),
+                Err(e) => {
+                    log::warn!("OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}");
+                }
+            }
+        }
+
+        self.legacy_login(storage).await
+    }
+
+    async fn legacy_login(self, storage: &FileStorage) -> Result<Option<Session>> {
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {
             prompt_password(&self.identifier, &self.pds)
         })?;
@@ -61,17 +78,17 @@ impl LoginCommand {
         let mut cfg = storage.load_config_anyhow().unwrap_or_default();
 
         cfg.add_account(
-            session.did.clone(),
+            session.did().to_owned(),
             AccountConfig {
                 pds_url: self.pds.clone(),
-                handle: session.handle.clone(),
+                handle: session.handle().to_owned(),
             },
         );
 
         storage.save_config_anyhow(&cfg)?;
 
         let (identity, generated) =
-            identity::ensure_identity(storage, &session.did, &mut opake_core::crypto::OsRng)?;
+            identity::ensure_identity(storage, session.did(), &mut opake_core::crypto::OsRng)?;
 
         if generated {
             println!("Generated new encryption keypair");
@@ -88,7 +105,7 @@ impl LoginCommand {
         .await?;
         println!("Published encryption public key");
 
-        println!("Logged in as {}", session.handle);
+        println!("Logged in as {}", session.handle());
 
         Ok(Some(session))
     }
@@ -116,6 +133,7 @@ mod tests {
             Self {
                 response: HttpResponse {
                     status: 200,
+                    headers: vec![],
                     body: serde_json::to_vec(&body).unwrap(),
                 },
             }
@@ -129,6 +147,7 @@ mod tests {
             Self {
                 response: HttpResponse {
                     status: 401,
+                    headers: vec![],
                     body: serde_json::to_vec(&body).unwrap(),
                 },
             }
@@ -148,10 +167,15 @@ mod tests {
 
         let session = client.login("alice.test", "s3cret").await.unwrap();
 
-        assert_eq!(session.did, "did:plc:test123");
-        assert_eq!(session.handle, "alice.test");
-        assert!(!session.access_jwt.is_empty());
-        assert!(!session.refresh_jwt.is_empty());
+        assert_eq!(session.did(), "did:plc:test123");
+        assert_eq!(session.handle(), "alice.test");
+        match session {
+            Session::Legacy(s) => {
+                assert!(!s.access_jwt.is_empty());
+                assert!(!s.refresh_jwt.is_empty());
+            }
+            _ => panic!("expected Legacy session"),
+        }
     }
 
     #[tokio::test]
@@ -189,7 +213,6 @@ mod tests {
 
     #[test]
     fn test_resolve_password_env_preserves_whitespace() {
-        // env vars aren't trimmed — spaces in passwords are valid
         let result = resolve_password(Some("  spaced  ".into()), || {
             panic!("prompt should not be called")
         });
@@ -204,7 +227,6 @@ mod tests {
 
     #[test]
     fn test_resolve_password_rejects_empty_from_prompt() {
-        // user just hits enter — trims to empty
         let result = resolve_password(None, || Ok("".into()));
         assert!(result.is_err());
     }

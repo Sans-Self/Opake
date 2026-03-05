@@ -4,6 +4,7 @@ use crate::test_utils::MockTransport;
 fn response(status: u16, body: &str) -> HttpResponse {
     HttpResponse {
         status,
+        headers: vec![],
         body: body.as_bytes().to_vec(),
     }
 }
@@ -87,6 +88,7 @@ async fn get_blob_public_happy_path() {
     let blob_data = b"encrypted-blob-bytes";
     mock.enqueue(HttpResponse {
         status: 200,
+        headers: vec![],
         body: blob_data.to_vec(),
     });
 

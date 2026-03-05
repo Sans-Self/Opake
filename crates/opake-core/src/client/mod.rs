@@ -2,7 +2,10 @@ mod appview;
 mod appview_auth;
 mod appview_types;
 mod did;
+pub mod dpop;
 mod list;
+pub mod oauth_discovery;
+pub mod oauth_token;
 mod transport;
 mod xrpc;
 

@@ -16,7 +16,13 @@ pub enum HttpMethod {
 #[derive(Debug, Clone)]
 pub enum RequestBody {
     Json(serde_json::Value),
-    Bytes { data: Vec<u8>, content_type: String },
+    Bytes {
+        data: Vec<u8>,
+        content_type: String,
+    },
+    /// URL-encoded form body (`application/x-www-form-urlencoded`).
+    /// Used for OAuth token requests.
+    Form(Vec<(String, String)>),
 }
 
 #[derive(Debug, Clone)]
@@ -30,7 +36,18 @@ pub struct HttpRequest {
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
     pub status: u16,
+    pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+impl HttpResponse {
+    /// Case-insensitive header lookup. Returns the first matching value.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
 }
 
 /// The only thing a platform needs to provide: send an HTTP request, get bytes back.

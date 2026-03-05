@@ -5,6 +5,15 @@ use super::{RecordEntry, RecordPage, RecordRef, Transport};
 use crate::client::transport::*;
 use crate::error::Error;
 
+/// Inject `$type` into a serialized record value.
+fn record_with_type<R: Serialize>(collection: &str, record: &R) -> serde_json::Value {
+    let mut value = serde_json::to_value(record).expect("record must be serializable");
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert("$type".into(), collection.into());
+    }
+    value
+}
+
 impl<T: Transport> super::XrpcClient<T> {
     /// Create a record via `com.atproto.repo.createRecord`.
     pub async fn create_record<R: Serialize>(
@@ -13,24 +22,23 @@ impl<T: Transport> super::XrpcClient<T> {
         record: &R,
     ) -> Result<RecordRef, Error> {
         debug!("creating record in {}", collection);
-        let auth = self.auth_header()?;
-        let did = self.did()?;
+        let did = self.did()?.to_owned();
 
         let body = serde_json::json!({
             "repo": did,
             "collection": collection,
-            "record": record,
+            "record": record_with_type(collection, record),
         });
 
-        let response = self
-            .send_checked(HttpRequest {
-                method: HttpMethod::Post,
-                url: format!("{}/xrpc/com.atproto.repo.createRecord", self.base_url),
-                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
-                body: Some(RequestBody::Json(body)),
-            })
-            .await?;
+        let mut request = HttpRequest {
+            method: HttpMethod::Post,
+            url: format!("{}/xrpc/com.atproto.repo.createRecord", self.base_url),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(RequestBody::Json(body)),
+        };
+        self.attach_auth(&mut request)?;
 
+        let response = self.send_checked(request).await?;
         Ok(serde_json::from_slice(&response.body)?)
     }
 
@@ -45,25 +53,24 @@ impl<T: Transport> super::XrpcClient<T> {
         record: &R,
     ) -> Result<RecordRef, Error> {
         debug!("putting record {}/{}", collection, rkey);
-        let auth = self.auth_header()?;
-        let did = self.did()?;
+        let did = self.did()?.to_owned();
 
         let body = serde_json::json!({
             "repo": did,
             "collection": collection,
             "rkey": rkey,
-            "record": record,
+            "record": record_with_type(collection, record),
         });
 
-        let response = self
-            .send_checked(HttpRequest {
-                method: HttpMethod::Post,
-                url: format!("{}/xrpc/com.atproto.repo.putRecord", self.base_url),
-                headers: vec![auth, ("Content-Type".into(), "application/json".into())],
-                body: Some(RequestBody::Json(body)),
-            })
-            .await?;
+        let mut request = HttpRequest {
+            method: HttpMethod::Post,
+            url: format!("{}/xrpc/com.atproto.repo.putRecord", self.base_url),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(RequestBody::Json(body)),
+        };
+        self.attach_auth(&mut request)?;
 
+        let response = self.send_checked(request).await?;
         Ok(serde_json::from_slice(&response.body)?)
     }
 
@@ -75,21 +82,20 @@ impl<T: Transport> super::XrpcClient<T> {
         rkey: &str,
     ) -> Result<RecordEntry, Error> {
         debug!("getting record {}/{}/{}", did, collection, rkey);
-        let auth = self.auth_header()?;
         let url = format!(
             "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection={}&rkey={}",
             self.base_url, did, collection, rkey,
         );
 
-        let response = self
-            .send_checked(HttpRequest {
-                method: HttpMethod::Get,
-                url,
-                headers: vec![auth],
-                body: None,
-            })
-            .await?;
+        let mut request = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![],
+            body: None,
+        };
+        self.attach_auth(&mut request)?;
 
+        let response = self.send_checked(request).await?;
         Ok(serde_json::from_slice(&response.body)?)
     }
 
@@ -101,8 +107,7 @@ impl<T: Transport> super::XrpcClient<T> {
         cursor: Option<&str>,
     ) -> Result<RecordPage, Error> {
         debug!("listing records in {}", collection);
-        let auth = self.auth_header()?;
-        let did = self.did()?;
+        let did = self.did()?.to_owned();
 
         let mut url = format!(
             "{}/xrpc/com.atproto.repo.listRecords?repo={}&collection={}",
@@ -115,23 +120,22 @@ impl<T: Transport> super::XrpcClient<T> {
             url.push_str(&format!("&cursor={}", cursor));
         }
 
-        let response = self
-            .send_checked(HttpRequest {
-                method: HttpMethod::Get,
-                url,
-                headers: vec![auth],
-                body: None,
-            })
-            .await?;
+        let mut request = HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![],
+            body: None,
+        };
+        self.attach_auth(&mut request)?;
 
+        let response = self.send_checked(request).await?;
         Ok(serde_json::from_slice(&response.body)?)
     }
 
     /// Delete a record via `com.atproto.repo.deleteRecord`.
     pub async fn delete_record(&mut self, collection: &str, rkey: &str) -> Result<(), Error> {
         debug!("deleting record {}/{}", collection, rkey);
-        let auth = self.auth_header()?;
-        let did = self.did()?;
+        let did = self.did()?.to_owned();
 
         let body = serde_json::json!({
             "repo": did,
@@ -139,14 +143,15 @@ impl<T: Transport> super::XrpcClient<T> {
             "rkey": rkey,
         });
 
-        self.send_checked(HttpRequest {
+        let mut request = HttpRequest {
             method: HttpMethod::Post,
             url: format!("{}/xrpc/com.atproto.repo.deleteRecord", self.base_url),
-            headers: vec![auth, ("Content-Type".into(), "application/json".into())],
+            headers: vec![("Content-Type".into(), "application/json".into())],
             body: Some(RequestBody::Json(body)),
-        })
-        .await?;
+        };
+        self.attach_auth(&mut request)?;
 
+        self.send_checked(request).await?;
         Ok(())
     }
 }

@@ -143,6 +143,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         });
 
@@ -171,6 +172,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
+            headers: vec![],
             body: br#"{"error":"InternalServerError","message":"something broke"}"#.to_vec(),
         });
 

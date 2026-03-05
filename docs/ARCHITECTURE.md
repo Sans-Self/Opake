@@ -74,9 +74,12 @@ crates/
         transport.rs   Transport trait (HTTP abstraction for WASM compat)
         did.rs         Unauthenticated DID resolution and cross-PDS queries
         list.rs        Generic paginated collection fetcher
+        dpop.rs        DPoP keypair (P-256/ES256) + proof JWT generation
+        oauth_discovery.rs  OAuth AS discovery + PKCE S256 generation
+        oauth_token.rs PAR, authorization code exchange, token refresh (all with DPoP)
         xrpc/
-          mod.rs       XrpcClient struct, Session, response types, check_response()
-          auth.rs      login(), refresh_session()
+          mod.rs       XrpcClient struct, Session enum (Legacy/OAuth), dual auth dispatch
+          auth.rs      login(), refresh_session() (legacy + OAuth)
           blobs.rs     upload_blob(), get_blob()
           repo.rs      create_record(), put_record(), get_record(), list_records(), delete_record()
       directories/
@@ -117,9 +120,10 @@ crates/
       identity.rs      Keypair generation, migration, permission checks
       keyring_store.rs Local group key persistence (per-keyring)
       transport.rs     reqwest-based Transport implementation
+      oauth.rs         OAuth loopback redirect server + browser open
       utils.rs         Test harness, env helpers
       commands/
-        login.rs       Auth + key publish
+        login.rs       Auth + key publish (OAuth-first with --legacy fallback)
         upload.rs      File → encrypt → upload (direct or --keyring)
         download.rs    Download + decrypt (direct, keyring, or --grant)
         ls.rs          List documents
@@ -311,11 +315,28 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 
 **Web (`IndexedDbStorage`)** — Dexie.js over IndexedDB with three object stores (`configs`, `identities`, `sessions`). `removeAccount` runs config mutation + data deletion in a single transaction for atomicity.
 
+## Authentication
+
+The CLI authenticates via AT Protocol OAuth 2.0 with DPoP (Demonstrating Proof-of-Possession). On `opake login`, the CLI:
+
+1. Discovers the PDS's authorization server via `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`
+2. Generates a DPoP keypair (P-256/ES256) and PKCE S256 challenge
+3. Sends a Pushed Authorization Request (PAR) with DPoP proof
+4. Opens the browser for user authorization
+5. Listens on a loopback server (`127.0.0.1`) for the OAuth callback
+6. Exchanges the authorization code for tokens with DPoP proof
+
+If OAuth discovery fails (PDS doesn't support it), the CLI falls back to legacy password-based `createSession` with a warning.
+
+`Session` is a discriminated union — `Legacy(LegacySession)` or `OAuth(OAuthSession)`. The XRPC client dispatches auth headers based on the variant: `Authorization: Bearer` for legacy, `Authorization: DPoP` + `DPoP` proof header for OAuth. Token refresh also dispatches per-variant. Existing `session.json` files without a `"type"` field deserialize as `Legacy` for backward compatibility.
+
+The DPoP key is per-session (generated at login time), not per-identity. It's a separate key from the X25519 encryption key and Ed25519 signing key.
+
 ## Multi-Account Support
 
 The CLI supports multiple authenticated accounts. Each account has its own:
 
-- Session tokens (access + refresh JWT)
+- Session (OAuth tokens + DPoP key, or legacy JWTs)
 - X25519 keypair
 - PDS URL and handle
 

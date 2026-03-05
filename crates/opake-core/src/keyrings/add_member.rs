@@ -53,7 +53,7 @@ pub async fn add_member(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{HttpResponse, RequestBody, Session, XrpcClient};
+    use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
     use crate::records::{AtBytes, Keyring, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::MockTransport;
@@ -62,12 +62,12 @@ mod tests {
     const KEYRING_URI: &str = "at://did:plc:owner/app.opake.cloud.keyring/kr1";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
-        let session = Session {
+        let session = Session::Legacy(LegacySession {
             did: TEST_DID.into(),
             handle: "owner.test".into(),
             access_jwt: "test-jwt".into(),
             refresh_jwt: "test-refresh".into(),
-        };
+        });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
@@ -100,6 +100,7 @@ mod tests {
     fn get_record_response(keyring: &Keyring) -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&serde_json::json!({
                 "uri": KEYRING_URI,
                 "cid": "bafykeyring",
@@ -112,6 +113,7 @@ mod tests {
     fn put_record_response() -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&serde_json::json!({
                 "uri": KEYRING_URI,
                 "cid": "bafyupdated",

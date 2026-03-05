@@ -18,6 +18,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 aes-gcm = "0.10"
+p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
+urlencoding = "2"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 aes-kw = { version = "0.2", features = ["alloc"] }
 hkdf = "0.12"                   # HKDF key derivation (RFC 5869)

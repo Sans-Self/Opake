@@ -51,25 +51,26 @@ pub async fn create_grant(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{HttpResponse, RequestBody, Session, XrpcClient};
+    use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::crypto::{generate_content_key, OsRng};
     use crate::test_utils::MockTransport;
 
     const TEST_DID: &str = "did:plc:owner";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
-        let session = Session {
+        let session = Session::Legacy(LegacySession {
             did: TEST_DID.into(),
             handle: "owner.test".into(),
             access_jwt: "test-jwt".into(),
             refresh_jwt: "test-refresh".into(),
-        };
+        });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
     fn create_record_response(uri: &str) -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&serde_json::json!({
                 "uri": uri,
                 "cid": "bafygrant",

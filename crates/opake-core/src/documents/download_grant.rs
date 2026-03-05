@@ -128,6 +128,7 @@ mod tests {
         });
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }
@@ -140,6 +141,7 @@ mod tests {
         });
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: serde_json::to_vec(&body).unwrap(),
         }
     }
@@ -151,12 +153,17 @@ mod tests {
             "value": doc,
         }))
         .unwrap();
-        HttpResponse { status: 200, body }
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body,
+        }
     }
 
     fn blob_response(data: &[u8]) -> HttpResponse {
         HttpResponse {
             status: 200,
+            headers: vec![],
             body: data.to_vec(),
         }
     }

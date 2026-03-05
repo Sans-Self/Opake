@@ -79,16 +79,17 @@ mod tests {
     use super::*;
     use crate::config::{AccountConfig, Config};
     use crate::utils::test_harness::test_storage;
+    use opake_core::client::LegacySession;
     use std::collections::BTreeMap;
     use std::fs;
 
     fn fake_session() -> Session {
-        Session {
+        Session::Legacy(LegacySession {
             did: "did:plc:test123".into(),
             handle: "alice.test".into(),
             access_jwt: "eyJ.access.token".into(),
             refresh_jwt: "eyJ.refresh.token".into(),
-        }
+        })
     }
 
     fn setup_account(storage: &FileStorage, did: &str, pds_url: &str, handle: &str) {
@@ -118,10 +119,8 @@ mod tests {
         persist_session(&storage, did, &session).unwrap();
 
         let loaded: Session = storage.load_account_json(did, "session.json").unwrap();
-        assert_eq!(loaded.did, session.did);
-        assert_eq!(loaded.handle, session.handle);
-        assert_eq!(loaded.access_jwt, session.access_jwt);
-        assert_eq!(loaded.refresh_jwt, session.refresh_jwt);
+        assert_eq!(loaded.did(), session.did());
+        assert_eq!(loaded.handle(), session.handle());
     }
 
     #[test]

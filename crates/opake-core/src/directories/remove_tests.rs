@@ -17,6 +17,7 @@ const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.cloud.document/sunset"
 fn delete_ok() -> HttpResponse {
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: b"{}".to_vec(),
     }
 }
@@ -26,6 +27,7 @@ fn doc_record_response(uri: &str, name: &str) -> HttpResponse {
     let doc = dummy_document(name, 100, vec![]);
     HttpResponse {
         status: 200,
+        headers: vec![],
         body: serde_json::to_vec(&serde_json::json!({
             "uri": uri,
             "cid": "bafydocument",
