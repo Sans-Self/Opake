@@ -3,6 +3,7 @@ use chrono::Utc;
 use clap::Args;
 use log::debug;
 use opake_core::client::{Session, XrpcClient};
+use opake_core::resolve::resolve_pds_for_login;
 
 use crate::config::{AccountConfig, FileStorage};
 use crate::identity;
@@ -33,54 +34,84 @@ fn prompt_password(identifier: &str, pds: &str) -> Result<String> {
 #[derive(Args)]
 /// Authenticate with your PDS
 pub struct LoginCommand {
-    /// PDS URL (e.g. https://pds.example.com)
-    #[arg(long)]
-    pds: String,
-
-    /// Handle or DID
-    #[arg(long)]
+    /// Handle or DID (e.g. alice.bsky.social, did:plc:...)
     identifier: String,
+
+    /// PDS URL override (e.g. https://pds.example.com). Resolved automatically if omitted.
+    #[arg(long)]
+    pds: Option<String>,
 
     /// Force legacy password-based authentication
     #[arg(long)]
     legacy: bool,
+
+    /// Don't redirect to frontend after OAuth - show inline response instead
+    #[arg(long)]
+    no_redirect: bool,
 }
 
 impl LoginCommand {
     pub async fn execute(self, storage: &FileStorage) -> Result<Option<Session>> {
         debug!("Starting login command");
 
-        if !self.legacy {
-            match crate::oauth::try_oauth_login(&self.pds, &self.identifier, storage).await {
-                Ok(session) => return Ok(Some(session)),
-                Err(e) => {
-                    log::warn!("OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}");
-                }
+        // Resolve PDS, DID, and handle — either from --pds or by querying the network.
+        let (pds_url, identifier, resolved_handle) = match self.pds {
+            Some(pds) => (pds, self.identifier, None),
+            None => {
+                println!("Resolving PDS for {}...", self.identifier);
+                let transport = ReqwestTransport::new();
+                let (did, pds, handle) = resolve_pds_for_login(&transport, &self.identifier)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("failed to resolve PDS for '{}': {e}", self.identifier)
+                    })?;
+                debug!("resolved: did={did}, pds={pds}, handle={handle:?}");
+                println!("Found PDS: {pds}");
+                (pds, did, handle)
             }
+        };
+
+        if self.legacy {
+            return Self::legacy_login(&pds_url, &identifier, storage).await;
         }
 
-        self.legacy_login(storage).await
+        match crate::oauth::try_oauth_login(
+            &pds_url,
+            &identifier,
+            resolved_handle.as_deref(),
+            storage,
+            self.no_redirect,
+        )
+        .await
+        {
+            Ok(session) => Ok(Some(session)),
+            Err(e) => {
+                log::warn!("OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}");
+                Self::legacy_login(&pds_url, &identifier, storage).await
+            }
+        }
     }
 
-    async fn legacy_login(self, storage: &FileStorage) -> Result<Option<Session>> {
+    async fn legacy_login(
+        pds_url: &str,
+        identifier: &str,
+        storage: &FileStorage,
+    ) -> Result<Option<Session>> {
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {
-            prompt_password(&self.identifier, &self.pds)
+            prompt_password(identifier, pds_url)
         })?;
 
         let transport = ReqwestTransport::new();
-        let mut client = XrpcClient::new(transport, self.pds.clone());
+        let mut client = XrpcClient::new(transport, pds_url.to_string());
 
-        let session = client
-            .login(self.identifier.trim(), &password)
-            .await?
-            .clone();
+        let session = client.login(identifier.trim(), &password).await?.clone();
 
         let mut cfg = storage.load_config_anyhow().unwrap_or_default();
 
         cfg.add_account(
             session.did().to_owned(),
             AccountConfig {
-                pds_url: self.pds.clone(),
+                pds_url: pds_url.to_string(),
                 handle: session.handle().to_owned(),
             },
         );

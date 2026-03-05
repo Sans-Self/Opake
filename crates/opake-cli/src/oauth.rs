@@ -23,10 +23,18 @@ use crate::transport::ReqwestTransport;
 
 /// Attempt a full OAuth login flow. Returns `Err` if the PDS doesn't support
 /// OAuth discovery, so the caller can fall back to password auth.
+///
+/// `handle` is the resolved handle from the DID document — may differ from
+/// `identifier` when the user logs in by DID.
+///
+/// `no_redirect` controls the callback response: if false (default), redirects
+/// to the frontend callback page; if true, serves inline HTML.
 pub async fn try_oauth_login(
     pds_url: &str,
     identifier: &str,
+    handle: Option<&str>,
     storage: &FileStorage,
+    no_redirect: bool,
 ) -> Result<Session> {
     let transport = ReqwestTransport::new();
 
@@ -41,7 +49,7 @@ pub async fn try_oauth_login(
     // Step 2: Bind loopback server to get the redirect URI
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let redirect_uri = format!("http://localhost:{port}/callback");
     debug!("loopback server on port {port}");
 
     // Step 3: Generate DPoP keypair and PKCE challenge
@@ -53,10 +61,14 @@ pub async fn try_oauth_login(
     OsRng.fill_bytes(&mut state_bytes);
     let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
 
-    // Client ID: for native apps, use the redirect URI as client_id per atproto spec
+    // Client ID: for loopback apps, metadata is encoded in the URL query params.
+    // Must be http://localhost (not 127.0.0.1) — the AS recognizes this as a
+    // loopback client and uses hardcoded metadata instead of fetching it.
+    let scope = "atproto transition:generic";
     let client_id = format!(
-        "http://localhost?redirect_uri={}",
-        urlencoding::encode(&redirect_uri)
+        "http://localhost?redirect_uri={}&scope={}",
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(scope),
     );
 
     let par_endpoint = asm
@@ -75,7 +87,7 @@ pub async fn try_oauth_login(
         &client_id,
         &redirect_uri,
         &pkce,
-        "atproto",
+        scope,
         &state,
         &dpop_key,
         &mut dpop_nonce,
@@ -95,12 +107,38 @@ pub async fn try_oauth_login(
     println!("If the browser doesn't open, visit:\n  {auth_url}");
     open_browser(&auth_url);
 
+    // Frontend callback URL - used when redirecting after OAuth.
+    // Can be overridden via OPAKE_FRONTEND_URL env var.
+    let frontend_callback_url = if no_redirect {
+        None
+    } else {
+        Some(
+            std::env::var("OPAKE_FRONTEND_URL")
+                .unwrap_or_else(|_| "https://app.opake.app/oauth/cli-callback".to_string()),
+        )
+    };
+
     // Step 6: Wait for the callback (PAR request_uri expires)
-    let (code, callback_state) = wait_for_callback(listener, par_response.expires_in).await?;
+    let (code, callback_state, error) = wait_for_callback(
+        listener,
+        par_response.expires_in,
+        frontend_callback_url.as_deref(),
+    )
+    .await?;
+
+    let callback_state =
+        callback_state.ok_or_else(|| anyhow::anyhow!("callback missing state parameter"))?;
     anyhow::ensure!(
         callback_state == state,
         "OAuth state mismatch — possible CSRF attack"
     );
+
+    // Check for AS errors (user denied, etc.) after CSRF validation
+    if let Some(err) = error {
+        anyhow::bail!("OAuth error from AS: {err}");
+    }
+
+    let code = code.ok_or_else(|| anyhow::anyhow!("callback missing authorization code"))?;
     info!("received authorization code");
 
     // Step 7: Exchange code for tokens
@@ -128,7 +166,13 @@ pub async fn try_oauth_login(
         .ok_or_else(|| anyhow::anyhow!("token response missing `sub` claim"))?;
     info!("authenticated as {did}");
 
-    let handle = identifier.to_string();
+    let handle = handle
+        .map(|h| h.to_string())
+        .or_else(|| {
+            // Only use the raw identifier as handle if it's not a DID.
+            (!identifier.starts_with("did:")).then(|| identifier.to_string())
+        })
+        .unwrap_or_default();
 
     let expires_at = token_response
         .expires_in
@@ -190,9 +234,16 @@ pub async fn try_oauth_login(
 }
 
 /// Wait for the OAuth callback on the loopback server.
-/// Returns `(code, state)` from the query parameters.
+/// Returns `(code, state, error)` from the query parameters.
 /// Times out after `expires_in` seconds (the PAR request_uri lifetime).
-async fn wait_for_callback(listener: TcpListener, expires_in: u64) -> Result<(String, String)> {
+///
+/// If `frontend_callback_url` is `Some`, redirects to that URL after OAuth.
+/// If `None`, serves inline HTML instead (used with `--no-redirect`).
+async fn wait_for_callback(
+    listener: TcpListener,
+    expires_in: u64,
+    frontend_callback_url: Option<&str>,
+) -> Result<(Option<String>, Option<String>, Option<String>)> {
     let timeout = std::time::Duration::from_secs(expires_in);
     let (mut stream, _addr) = tokio::time::timeout(timeout, listener.accept())
         .await
@@ -233,28 +284,34 @@ async fn wait_for_callback(listener: TcpListener, expires_in: u64) -> Result<(St
         }
     }
 
-    // Respond to browser
-    let (status, body) = if error.is_some() {
-        ("400 Bad Request", "<html><body><h1>Authentication failed</h1><p>You can close this tab.</p></body></html>")
+    // Build response: redirect to frontend or inline HTML
+    let response = if let Some(callback_url) = frontend_callback_url {
+        // Redirect to frontend callback — no OAuth params, they're already
+        // handled by CLI. Only pass error for display if present.
+        let location = if let Some(ref err) = error {
+            let err = urlencoding::encode(err);
+            format!("{callback_url}?error={err}")
+        } else {
+            callback_url.to_string()
+        };
+        format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\nConnection: close\r\n\r\n",)
     } else {
-        ("200 OK", "<html><body><h1>Authentication successful</h1><p>You can close this tab and return to the terminal.</p></body></html>")
+        // Inline HTML response (--no-redirect)
+        let (status, body) = if error.is_some() {
+            ("400 Bad Request", "<html><body><h1>Authentication failed</h1><p>You can close this tab.</p></body></html>")
+        } else {
+            ("200 OK", "<html><body><h1>Authentication successful</h1><p>You can close this tab and return to your terminal.</p></body></html>")
+        };
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
     };
 
-    let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
     stream.write_all(response.as_bytes()).await?;
     stream.shutdown().await?;
 
-    if let Some(err) = error {
-        anyhow::bail!("OAuth error from AS: {err}");
-    }
-
-    Ok((
-        code.ok_or_else(|| anyhow::anyhow!("callback missing `code` parameter"))?,
-        state.ok_or_else(|| anyhow::anyhow!("callback missing `state` parameter"))?,
-    ))
+    Ok((code, state, error))
 }
 
 /// Open a URL in the system browser. Best-effort — doesn't fail if the

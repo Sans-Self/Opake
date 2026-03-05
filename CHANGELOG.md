@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Add handle-based login with automatic PDS resolution [#182](https://issues.opake.app/issues/182.html)
 - Implement web login flow with AT Protocol OAuth [#167](https://issues.opake.app/issues/167.html)
 - Add AT Protocol OAuth (DPoP) for CLI authentication [#175](https://issues.opake.app/issues/175.html)
 - Wire opake-core WASM into web frontend [#163](https://issues.opake.app/issues/163.html)

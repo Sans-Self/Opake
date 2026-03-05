@@ -11,7 +11,8 @@ sequenceDiagram
     participant Browser
     participant PDS/AS
 
-    User->>CLI: opake login --pds <url> --identifier <handle>
+    User->>CLI: opake login <handle>
+    CLI->>CLI: Resolve PDS from handle (public API → DID doc)
 
     CLI->>PDS/AS: GET /.well-known/oauth-protected-resource
     PDS/AS-->>CLI: { authorization_servers: [<as_url>] }
@@ -54,7 +55,8 @@ sequenceDiagram
     participant CLI
     participant PDS
 
-    User->>CLI: opake login --pds <url> --identifier <handle> --legacy
+    User->>CLI: opake login <handle> --legacy
+    CLI->>CLI: Resolve PDS from handle
     CLI->>User: Password prompt (or OPAKE_PASSWORD env)
     User-->>CLI: password
 

@@ -10,7 +10,7 @@ mod repo;
 
 use serde::{Deserialize, Serialize};
 
-use super::dpop::{create_dpop_proof, extract_dpop_nonce, DpopKeyPair};
+use super::dpop::{create_dpop_proof, extract_dpop_nonce, is_use_dpop_nonce_error, DpopKeyPair};
 use super::transport::*;
 use crate::crypto::OsRng;
 use crate::error::Error;
@@ -90,7 +90,7 @@ impl<'de> Deserialize<'de> for Session {
         let value = serde_json::Value::deserialize(deserializer)?;
 
         match value.get("type").and_then(|t| t.as_str()) {
-            Some("oauth") => {
+            Some("oauth" | "oAuth") => {
                 let oauth: OAuthSession =
                     serde_json::from_value(value).map_err(serde::de::Error::custom)?;
                 Ok(Session::OAuth(oauth))
@@ -305,6 +305,17 @@ impl<T: Transport> XrpcClient<T> {
         let mut response = self.transport.send(request.clone()).await?;
         self.update_dpop_nonce(&response);
 
+        // The PDS may reject the first request for a stale DPoP nonce (the AS
+        // nonce doesn't work here). Retry with the PDS-provided nonce.
+        if is_use_dpop_nonce_error(&response) {
+            let retried = self.replace_auth_headers(request.clone())?;
+            response = self.transport.send(retried).await?;
+            self.update_dpop_nonce(&response);
+        }
+
+        // After a nonce fix (or on the first attempt), the token itself may be
+        // expired. Refresh and retry. A second nonce error here is not retried —
+        // one retry is the spec-expected behavior (RFC 9449 §7.1).
         if Self::is_expired_token(&response) {
             self.refresh_session().await?;
             let retried = self.replace_auth_headers(request)?;

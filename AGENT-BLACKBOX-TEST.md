@@ -31,11 +31,11 @@ Substitute real handles/DIDs for `<A-handle>`, `<B-handle>`, etc.
 ### 1.1 Login
 
 ```bash
-opake login --pds <A-pds-url> --identifier <A-handle>
-# prompts for password, prints "Logged in as <handle>"
+opake login <A-handle>
+# resolves PDS, authenticates via OAuth, prints "Logged in as <handle>"
 # also publishes encryption public key (putRecord)
 
-opake login --pds <B-pds-url> --identifier <B-handle>
+opake login <B-handle>
 ```
 
 **Verify:**

@@ -37,14 +37,17 @@ Produces two binaries: `target/release/opake` (CLI) and `target/release/opake-ap
 ## Usage
 
 ```sh
-# authenticate with your PDS (uses OAuth by default)
-opake login --pds https://pds.example.com --identifier alice.example.com
+# authenticate (resolves PDS automatically, uses OAuth by default)
+opake login alice.example.com
+
+# explicit PDS override
+opake login alice.example.com --pds https://pds.example.com
 
 # force legacy password-based auth
-opake login --pds https://pds.example.com --identifier alice.example.com --legacy
+opake login alice.example.com --legacy
 
 # log in to a second account
-opake login --pds https://other-pds.example.com --identifier bob.other.com
+opake login bob.other.com
 
 # list accounts and switch default
 opake accounts

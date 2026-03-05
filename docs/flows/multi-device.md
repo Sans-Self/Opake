@@ -36,7 +36,7 @@ sequenceDiagram
     participant Crypto
     participant PDS
 
-    User->>CLI: opake login --pds <url> --identifier <handle>
+    User->>CLI: opake login <handle>
     CLI->>User: No identity found. Enter seed phrase or generate new?
     User-->>CLI: "abandon ability able about above absent ..."
 
@@ -98,7 +98,7 @@ sequenceDiagram
     participant CLI
     participant PDS
 
-    User->>CLI: opake login --pds <url> --identifier <handle>
+    User->>CLI: opake login <handle>
     CLI->>CLI: Derive keypair from seed phrase
 
     CLI->>PDS: getRecord (publicKey/self)

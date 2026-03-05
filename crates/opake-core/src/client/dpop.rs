@@ -184,10 +184,13 @@ pub fn extract_dpop_nonce(response: &HttpResponse) -> Option<String> {
     response.header("dpop-nonce").map(|v| v.to_string())
 }
 
-/// Check whether a response is a `use_dpop_nonce` error — the AS telling us
-/// to retry with the nonce it provided in the `DPoP-Nonce` header.
+/// Check whether a response is a `use_dpop_nonce` error — the server telling
+/// us to retry with the nonce it provided in the `DPoP-Nonce` header.
+///
+/// The AS returns 400 during token exchange; the PDS returns 401 for resource
+/// requests. Both are valid per the atproto OAuth spec.
 pub fn is_use_dpop_nonce_error(response: &HttpResponse) -> bool {
-    if response.status != 400 {
+    if response.status != 400 && response.status != 401 {
         return false;
     }
 

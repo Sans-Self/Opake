@@ -10,6 +10,9 @@ use crate::client::{
     get_record_public, pds_from_did_document, resolve_did_document, resolve_handle, Transport,
     XrpcClient,
 };
+
+/// Public Bluesky API — used for handle resolution when no PDS is known yet.
+const BSKY_PUBLIC_API: &str = "https://public.api.bsky.app";
 use crate::crypto::X25519PublicKey;
 use crate::error::Error;
 use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
@@ -27,6 +30,39 @@ pub struct ResolvedIdentity {
     pub algo: String,
     /// Ed25519 signing key — present if the user has published one.
     pub signing_key: Option<Ed25519PublicKeyBytes>,
+}
+
+/// Bootstrap resolution for login: resolve a handle or DID to (did, pds_url, handle)
+/// without needing a known PDS.
+///
+/// If input starts with `did:` → fetch DID document → extract PDS + handle.
+/// If input is a handle → resolve via the public Bluesky API → fetch DID document → extract PDS.
+///
+/// The returned handle comes from the DID document's `alsoKnownAs`, not the raw input.
+pub async fn resolve_pds_for_login(
+    transport: &impl Transport,
+    handle_or_did: &str,
+) -> Result<(String, String, Option<String>), Error> {
+    let did = if handle_or_did.starts_with("did:") {
+        debug!("input is already a DID: {}", handle_or_did);
+        handle_or_did.to_string()
+    } else {
+        debug!("resolving handle {} via public API", handle_or_did);
+        resolve_handle(transport, BSKY_PUBLIC_API, handle_or_did).await?
+    };
+
+    debug!("fetching DID document for {}", did);
+    let doc = resolve_did_document(transport, &did).await?;
+    let pds_url = pds_from_did_document(&doc)?;
+    debug!("resolved PDS: {}", pds_url);
+
+    let handle = doc
+        .also_known_as
+        .iter()
+        .find_map(|alias| alias.strip_prefix("at://"))
+        .map(|h| h.to_string());
+
+    Ok((did, pds_url, handle))
 }
 
 /// Full resolution: input → DID → PDS → public key.
@@ -303,6 +339,115 @@ mod tests {
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].url.contains("putRecord"));
+    }
+
+    #[tokio::test]
+    async fn login_resolve_from_handle() {
+        let mock = MockTransport::new();
+
+        // 1. resolveHandle via public API → DID
+        mock.enqueue(success(r#"{"did":"did:plc:alice"}"#));
+        // 2. DID document
+        mock.enqueue(success(&did_document_json(
+            "did:plc:alice",
+            "alice.bsky.social",
+            "https://morel.us-east.host.bsky.network",
+        )));
+
+        let (did, pds, handle) = resolve_pds_for_login(&mock, "alice.bsky.social")
+            .await
+            .unwrap();
+
+        assert_eq!(did, "did:plc:alice");
+        assert_eq!(pds, "https://morel.us-east.host.bsky.network");
+        assert_eq!(handle.as_deref(), Some("alice.bsky.social"));
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 2);
+        assert!(reqs[0].url.contains("resolveHandle"));
+        assert!(reqs[0].url.contains("public.api.bsky.app"));
+        assert!(reqs[1].url.contains("plc.directory"));
+    }
+
+    #[tokio::test]
+    async fn login_resolve_from_did() {
+        let mock = MockTransport::new();
+
+        // Only 1 request — DID document, no resolveHandle
+        mock.enqueue(success(&did_document_json(
+            "did:plc:bob",
+            "bob.test",
+            "https://pds.bob.example.com",
+        )));
+
+        let (did, pds, handle) = resolve_pds_for_login(&mock, "did:plc:bob").await.unwrap();
+
+        assert_eq!(did, "did:plc:bob");
+        assert_eq!(pds, "https://pds.bob.example.com");
+        assert_eq!(handle.as_deref(), Some("bob.test"));
+
+        assert_eq!(mock.requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn login_resolve_handle_not_found() {
+        let mock = MockTransport::new();
+
+        // resolveHandle returns 400 (unknown handle)
+        mock.enqueue(HttpResponse {
+            status: 400,
+            headers: vec![],
+            body: br#"{"error":"InvalidRequest","message":"Unable to resolve handle"}"#.to_vec(),
+        });
+
+        let err = resolve_pds_for_login(&mock, "nonexistent.invalid")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("400"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn login_resolve_did_no_pds_in_document() {
+        let mock = MockTransport::new();
+
+        // DID doc with no atproto_pds service
+        mock.enqueue(success(
+            &serde_json::json!({
+                "id": "did:plc:nopds",
+                "service": []
+            })
+            .to_string(),
+        ));
+
+        let err = resolve_pds_for_login(&mock, "did:plc:nopds")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("atproto_pds"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn login_resolve_did_no_also_known_as() {
+        let mock = MockTransport::new();
+
+        // DID doc with PDS but no alsoKnownAs
+        mock.enqueue(success(
+            &serde_json::json!({
+                "id": "did:plc:nohandle",
+                "service": [{
+                    "id": "#atproto_pds",
+                    "serviceEndpoint": "https://pds.nohandle",
+                }]
+            })
+            .to_string(),
+        ));
+
+        let (did, pds, handle) = resolve_pds_for_login(&mock, "did:plc:nohandle")
+            .await
+            .unwrap();
+
+        assert_eq!(did, "did:plc:nohandle");
+        assert_eq!(pds, "https://pds.nohandle");
+        assert!(handle.is_none());
     }
 
     #[tokio::test]

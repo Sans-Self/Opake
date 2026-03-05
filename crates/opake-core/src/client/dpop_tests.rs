@@ -256,9 +256,19 @@ fn is_use_dpop_nonce_error_rejects_other_400() {
 }
 
 #[test]
-fn is_use_dpop_nonce_error_rejects_non_400() {
+fn is_use_dpop_nonce_error_detects_401() {
     let response = HttpResponse {
         status: 401,
+        headers: vec![("DPoP-Nonce".into(), "pds-nonce".into())],
+        body: br#"{"error":"use_dpop_nonce"}"#.to_vec(),
+    };
+    assert!(is_use_dpop_nonce_error(&response));
+}
+
+#[test]
+fn is_use_dpop_nonce_error_rejects_other_status() {
+    let response = HttpResponse {
+        status: 403,
         headers: vec![],
         body: br#"{"error":"use_dpop_nonce"}"#.to_vec(),
     };

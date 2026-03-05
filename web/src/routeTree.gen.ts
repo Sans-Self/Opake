@@ -12,7 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as CabinetRouteImport } from './routes/cabinet'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as OauthCallbackRouteImport } from './routes/oauth.callback'
+import { Route as OauthCliCallbackRouteImport } from './routes/oauth.cli-callback'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -29,9 +29,9 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OauthCallbackRoute = OauthCallbackRouteImport.update({
-  id: '/oauth/callback',
-  path: '/oauth/callback',
+const OauthCliCallbackRoute = OauthCliCallbackRouteImport.update({
+  id: '/oauth/cli-callback',
+  path: '/oauth/cli-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -39,34 +39,34 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
+  '/oauth/cli-callback': typeof OauthCliCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
+  '/oauth/cli-callback': typeof OauthCliCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/cabinet': typeof CabinetRoute
   '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
+  '/oauth/cli-callback': typeof OauthCliCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/cabinet' | '/login' | '/oauth/callback'
+  fullPaths: '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/cabinet' | '/login' | '/oauth/callback'
-  id: '__root__' | '/' | '/cabinet' | '/login' | '/oauth/callback'
+  to: '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
+  id: '__root__' | '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CabinetRoute: typeof CabinetRoute
   LoginRoute: typeof LoginRoute
-  OauthCallbackRoute: typeof OauthCallbackRoute
+  OauthCliCallbackRoute: typeof OauthCliCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -92,11 +92,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/oauth/callback': {
-      id: '/oauth/callback'
-      path: '/oauth/callback'
-      fullPath: '/oauth/callback'
-      preLoaderRoute: typeof OauthCallbackRouteImport
+    '/oauth/cli-callback': {
+      id: '/oauth/cli-callback'
+      path: '/oauth/cli-callback'
+      fullPath: '/oauth/cli-callback'
+      preLoaderRoute: typeof OauthCliCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -106,7 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CabinetRoute: CabinetRoute,
   LoginRoute: LoginRoute,
-  OauthCallbackRoute: OauthCallbackRoute,
+  OauthCliCallbackRoute: OauthCliCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
