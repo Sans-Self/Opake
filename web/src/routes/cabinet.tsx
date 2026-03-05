@@ -95,8 +95,8 @@ function CabinetPage() {
 
 export const Route = createFileRoute("/cabinet")({
   beforeLoad: () => {
-    const { currentDid } = useAuthStore.getState();
-    if (!currentDid) throw redirect({ to: "/login" });
+    const state = useAuthStore.getState();
+    if (state.phase !== "ready") throw redirect({ to: "/login" });
   },
   component: CabinetPage,
 });

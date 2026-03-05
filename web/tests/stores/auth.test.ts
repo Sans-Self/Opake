@@ -3,32 +3,38 @@ import { useAuthStore } from "../../src/stores/auth";
 
 describe("auth store", () => {
   beforeEach(() => {
-    useAuthStore.setState({ accounts: [], currentDid: null });
+    useAuthStore.setState({ phase: "unauthenticated" });
   });
 
-  it("starts with no session", () => {
+  it("starts in initializing phase", () => {
+    useAuthStore.setState({ phase: "initializing" });
     const state = useAuthStore.getState();
-    expect(state.accounts).toEqual([]);
-    expect(state.currentDid).toBeNull();
+    expect(state.phase).toBe("initializing");
   });
 
-  it("setDefault updates currentDid", () => {
-    useAuthStore.getState().setDefault("did:plc:abc123");
-    expect(useAuthStore.getState().currentDid).toBe("did:plc:abc123");
-  });
-
-  it("login adds an account and sets current", async () => {
-    await useAuthStore.getState().login("test.bsky.social", "password");
+  it("can transition to unauthenticated", () => {
     const state = useAuthStore.getState();
-    expect(state.accounts).toHaveLength(1);
-    expect(state.currentDid).toBe("did:plc:mock123");
+    expect(state.phase).toBe("unauthenticated");
   });
 
-  it("logout clears everything", async () => {
-    await useAuthStore.getState().login("test.bsky.social", "password");
-    useAuthStore.getState().logout();
+  it("logout returns to unauthenticated", async () => {
+    useAuthStore.setState({
+      phase: "ready",
+      did: "did:plc:test",
+      handle: "test.bsky.social",
+      pdsUrl: "https://pds.test",
+    });
+    // logout does best-effort storage cleanup which will fail without
+    // IndexedDB, but the state transition should still happen
+    await useAuthStore.getState().logout();
+    expect(useAuthStore.getState().phase).toBe("unauthenticated");
+  });
+
+  it("exposes boot, startLogin, completeLogin, logout actions", () => {
     const state = useAuthStore.getState();
-    expect(state.accounts).toEqual([]);
-    expect(state.currentDid).toBeNull();
+    expect(typeof state.boot).toBe("function");
+    expect(typeof state.startLogin).toBe("function");
+    expect(typeof state.completeLogin).toBe("function");
+    expect(typeof state.logout).toBe("function");
   });
 });

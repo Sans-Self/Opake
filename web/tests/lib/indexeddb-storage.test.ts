@@ -28,6 +28,7 @@ const testIdentity: Identity = {
 };
 
 const testSession: Session = {
+  type: "legacy",
   did: "did:plc:alice",
   handle: "alice.test",
   accessJwt: "eyJ.access.token",
@@ -134,7 +135,10 @@ describe("session", () => {
     const refreshed: Session = { ...testSession, accessJwt: "new.jwt" };
     await storage.saveSession("did:plc:alice", refreshed);
     const loaded = await storage.loadSession("did:plc:alice");
-    expect(loaded.accessJwt).toBe("new.jwt");
+    expect(loaded.type).toBe("legacy");
+    if (loaded.type === "legacy") {
+      expect(loaded.accessJwt).toBe("new.jwt");
+    }
   });
 });
 

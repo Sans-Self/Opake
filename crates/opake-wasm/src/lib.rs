@@ -3,8 +3,11 @@ pub fn binding_check() -> String {
     opake_core::binding_check().to_owned()
 }
 
+use opake_core::client::dpop::DpopKeyPair;
+use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{ContentKey, EncryptedPayload, OsRng, X25519PrivateKey, X25519PublicKey};
 use opake_core::records::WrappedKey;
+use opake_core::storage::Identity;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -109,4 +112,60 @@ fn content_key_from_slice(bytes: &[u8]) -> Result<ContentKey, JsError> {
         .try_into()
         .map_err(|_| JsError::new("content key must be exactly 32 bytes"))?;
     Ok(ContentKey(arr))
+}
+
+// ---------------------------------------------------------------------------
+// OAuth / DPoP exports
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_name = generateDpopKeyPair)]
+pub fn generate_dpop_key_pair() -> Result<JsValue, JsError> {
+    let keypair = DpopKeyPair::generate(&mut OsRng);
+    serde_wasm_bindgen::to_value(&keypair).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = createDpopProof)]
+pub fn create_dpop_proof_js(
+    keypair_json: JsValue,
+    method: &str,
+    url: &str,
+    timestamp: f64,
+    nonce: Option<String>,
+    access_token: Option<String>,
+) -> Result<String, JsError> {
+    let keypair: DpopKeyPair =
+        serde_wasm_bindgen::from_value(keypair_json).map_err(|e| JsError::new(&e.to_string()))?;
+    opake_core::client::dpop::create_dpop_proof(
+        &keypair,
+        method,
+        url,
+        timestamp as i64,
+        nonce.as_deref(),
+        access_token.as_deref(),
+        &mut OsRng,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// DTO for PkceChallenge — the core type doesn't derive Serialize.
+#[derive(Serialize)]
+struct PkceChallengeDto {
+    verifier: String,
+    challenge: String,
+}
+
+#[wasm_bindgen(js_name = generatePkce)]
+pub fn generate_pkce_js() -> Result<JsValue, JsError> {
+    let pkce = generate_pkce(&mut OsRng);
+    let dto = PkceChallengeDto {
+        verifier: pkce.verifier,
+        challenge: pkce.challenge,
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = generateIdentity)]
+pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {
+    let identity = Identity::generate(did, &mut OsRng);
+    serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
 }

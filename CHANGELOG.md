@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Implement web login flow with AT Protocol OAuth [#167](https://issues.opake.app/issues/167.html)
 - Add AT Protocol OAuth (DPoP) for CLI authentication [#175](https://issues.opake.app/issues/175.html)
 - Wire opake-core WASM into web frontend [#163](https://issues.opake.app/issues/163.html)
 - Add cat command to read and display file contents [#154](https://issues.opake.app/issues/154.html)

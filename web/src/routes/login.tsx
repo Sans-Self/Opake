@@ -5,13 +5,17 @@ import { useAuthStore } from "@/stores/auth";
 
 function LoginPage() {
   const navigate = useNavigate();
-  const login = useAuthStore((s) => s.login);
-  const [handle, setHandle] = useState("alice.bsky.social");
+  const phase = useAuthStore((s) => s.phase);
+  const startLogin = useAuthStore((s) => s.startLogin);
+  const [handle, setHandle] = useState("");
+  const isLoading = phase === "authenticating";
+  const errorMessage = phase === "error" ? useAuthStore.getState() : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await login(handle, "");
-    navigate({ to: "/cabinet" });
+    if (!handle.trim()) return;
+    await startLogin(handle.trim());
+    // startLogin redirects to the AS — we won't reach here unless it errors
   };
 
   return (
@@ -27,20 +31,35 @@ function LoginPage() {
           Sign in to Opake
         </h1>
         <p className="mb-5 text-caption text-text-muted">
-          Enter your PDS handle to continue.
+          Enter your AT Protocol handle to continue.
         </p>
         <label className="input input-bordered mb-3 flex items-center gap-2">
           <input
             type="text"
-            placeholder="handle.bsky.social"
+            placeholder="you.bsky.social"
             value={handle}
             onChange={(e) => setHandle(e.target.value)}
             className="grow"
             required
+            disabled={isLoading}
+            aria-label="AT Protocol handle"
           />
         </label>
-        <button type="submit" className="btn btn-neutral w-full">
-          Sign in
+        {phase === "error" && errorMessage && (
+          <p className="mb-3 text-caption text-error" role="alert">
+            {"message" in errorMessage ? errorMessage.message : "Login failed"}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="btn btn-neutral w-full"
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <span className="loading loading-spinner loading-sm" />
+          ) : (
+            "Sign in"
+          )}
         </button>
       </form>
     </div>
@@ -49,8 +68,8 @@ function LoginPage() {
 
 export const Route = createFileRoute("/login")({
   beforeLoad: () => {
-    const { currentDid } = useAuthStore.getState();
-    if (currentDid) throw redirect({ to: "/cabinet" });
+    const state = useAuthStore.getState();
+    if (state.phase === "ready") throw redirect({ to: "/cabinet" });
   },
   component: LoginPage,
 });

@@ -8,8 +8,13 @@ import init, {
   unwrapKey,
   wrapContentKeyForKeyring,
   unwrapContentKeyFromKeyring,
+  generateDpopKeyPair as wasmGenerateDpopKeyPair,
+  createDpopProof as wasmCreateDpopProof,
+  generatePkce as wasmGeneratePkce,
+  generateIdentity as wasmGenerateIdentity,
 } from "@/wasm/opake-wasm/opake";
-import type { EncryptedPayload, WrappedKey } from "@/lib/crypto-types";
+import type { EncryptedPayload, WrappedKey, DpopKeyPair, PkceChallenge } from "@/lib/crypto-types";
+import type { Identity } from "@/lib/storage-types";
 
 await init();
 
@@ -62,6 +67,38 @@ const cryptoApi = {
     groupKey: Uint8Array,
   ): Uint8Array {
     return unwrapContentKeyFromKeyring(wrapped, groupKey);
+  },
+
+  // OAuth / DPoP
+
+  generateDpopKeyPair(): DpopKeyPair {
+    return wasmGenerateDpopKeyPair() as DpopKeyPair;
+  },
+
+  createDpopProof(
+    keypair: DpopKeyPair,
+    method: string,
+    url: string,
+    timestamp: number,
+    nonce: string | null,
+    accessToken: string | null,
+  ): string {
+    return wasmCreateDpopProof(
+      keypair,
+      method,
+      url,
+      timestamp,
+      nonce ?? undefined,
+      accessToken ?? undefined,
+    );
+  },
+
+  generatePkce(): PkceChallenge {
+    return wasmGeneratePkce() as PkceChallenge;
+  },
+
+  generateIdentity(did: string): Identity {
+    return wasmGenerateIdentity(did) as Identity;
   },
 };
 
