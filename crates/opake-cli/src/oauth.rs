@@ -17,8 +17,8 @@ use opake_core::crypto::OsRng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::commands::login::ensure_identity_and_publish;
 use crate::config::{AccountConfig, FileStorage};
-use crate::identity;
 use crate::transport::ReqwestTransport;
 
 /// Attempt a full OAuth login flow. Returns `Err` if the PDS doesn't support
@@ -35,6 +35,7 @@ pub async fn try_oauth_login(
     handle: Option<&str>,
     storage: &FileStorage,
     no_redirect: bool,
+    force: bool,
 ) -> Result<Session> {
     let transport = ReqwestTransport::new();
 
@@ -212,41 +213,7 @@ pub async fn try_oauth_login(
         session.clone(),
     );
 
-    let has_local_identity = identity::load_identity(storage, &did).is_ok();
-    let has_published_key = client
-        .get_record(
-            &did,
-            opake_core::records::PUBLIC_KEY_COLLECTION,
-            opake_core::records::PUBLIC_KEY_RKEY,
-        )
-        .await
-        .is_ok();
-
-    if !has_local_identity && has_published_key {
-        // Existing identity on another device — don't generate a new one.
-        println!("Logged in as {handle} (OAuth)");
-        println!();
-        println!("This account has an existing encryption identity.");
-        println!("Run `opake pair request` to transfer it from another device.");
-        return Ok(session);
-    }
-
-    let (identity, generated) = identity::ensure_identity(storage, &did, &mut OsRng)?;
-    if generated {
-        println!("Generated new encryption keypair");
-    }
-
-    let public_key_bytes = identity.public_key_bytes()?;
-    let verify_key_bytes = identity.verify_key_bytes()?;
-    opake_core::resolve::publish_public_key(
-        &mut client,
-        &public_key_bytes,
-        verify_key_bytes.as_ref(),
-        &Utc::now().to_rfc3339(),
-    )
-    .await?;
-    println!("Published encryption public key");
-
+    ensure_identity_and_publish(&mut client, storage, &did, force).await?;
     println!("Logged in as {handle} (OAuth)");
 
     Ok(session)

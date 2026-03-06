@@ -13,6 +13,9 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as CabinetRouteImport } from './routes/cabinet'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OauthCliCallbackRouteImport } from './routes/oauth.cli-callback'
+import { Route as OauthCallbackRouteImport } from './routes/oauth.callback'
+import { Route as CabinetDevicesIndexRouteImport } from './routes/cabinet.devices.index'
+import { Route as CabinetDevicesPairRouteImport } from './routes/cabinet.devices.pair'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -34,38 +37,85 @@ const OauthCliCallbackRoute = OauthCliCallbackRouteImport.update({
   path: '/oauth/cli-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthCallbackRoute = OauthCallbackRouteImport.update({
+  id: '/oauth/callback',
+  path: '/oauth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CabinetDevicesIndexRoute = CabinetDevicesIndexRouteImport.update({
+  id: '/devices/',
+  path: '/devices/',
+  getParentRoute: () => CabinetRoute,
+} as any)
+const CabinetDevicesPairRoute = CabinetDevicesPairRouteImport.update({
+  id: '/devices/pair',
+  path: '/devices/pair',
+  getParentRoute: () => CabinetRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRoute
+  '/cabinet': typeof CabinetRouteWithChildren
   '/login': typeof LoginRoute
+  '/oauth/callback': typeof OauthCallbackRoute
   '/oauth/cli-callback': typeof OauthCliCallbackRoute
+  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
+  '/cabinet/devices/': typeof CabinetDevicesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRoute
+  '/cabinet': typeof CabinetRouteWithChildren
   '/login': typeof LoginRoute
+  '/oauth/callback': typeof OauthCallbackRoute
   '/oauth/cli-callback': typeof OauthCliCallbackRoute
+  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
+  '/cabinet/devices': typeof CabinetDevicesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRoute
+  '/cabinet': typeof CabinetRouteWithChildren
   '/login': typeof LoginRoute
+  '/oauth/callback': typeof OauthCallbackRoute
   '/oauth/cli-callback': typeof OauthCliCallbackRoute
+  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
+  '/cabinet/devices/': typeof CabinetDevicesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
+  fullPaths:
+    | '/'
+    | '/cabinet'
+    | '/login'
+    | '/oauth/callback'
+    | '/oauth/cli-callback'
+    | '/cabinet/devices/pair'
+    | '/cabinet/devices/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
-  id: '__root__' | '/' | '/cabinet' | '/login' | '/oauth/cli-callback'
+  to:
+    | '/'
+    | '/cabinet'
+    | '/login'
+    | '/oauth/callback'
+    | '/oauth/cli-callback'
+    | '/cabinet/devices/pair'
+    | '/cabinet/devices'
+  id:
+    | '__root__'
+    | '/'
+    | '/cabinet'
+    | '/login'
+    | '/oauth/callback'
+    | '/oauth/cli-callback'
+    | '/cabinet/devices/pair'
+    | '/cabinet/devices/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CabinetRoute: typeof CabinetRoute
+  CabinetRoute: typeof CabinetRouteWithChildren
   LoginRoute: typeof LoginRoute
+  OauthCallbackRoute: typeof OauthCallbackRoute
   OauthCliCallbackRoute: typeof OauthCliCallbackRoute
 }
 
@@ -99,13 +149,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OauthCliCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/callback': {
+      id: '/oauth/callback'
+      path: '/oauth/callback'
+      fullPath: '/oauth/callback'
+      preLoaderRoute: typeof OauthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cabinet/devices/': {
+      id: '/cabinet/devices/'
+      path: '/devices'
+      fullPath: '/cabinet/devices/'
+      preLoaderRoute: typeof CabinetDevicesIndexRouteImport
+      parentRoute: typeof CabinetRoute
+    }
+    '/cabinet/devices/pair': {
+      id: '/cabinet/devices/pair'
+      path: '/devices/pair'
+      fullPath: '/cabinet/devices/pair'
+      preLoaderRoute: typeof CabinetDevicesPairRouteImport
+      parentRoute: typeof CabinetRoute
+    }
   }
 }
 
+interface CabinetRouteChildren {
+  CabinetDevicesPairRoute: typeof CabinetDevicesPairRoute
+  CabinetDevicesIndexRoute: typeof CabinetDevicesIndexRoute
+}
+
+const CabinetRouteChildren: CabinetRouteChildren = {
+  CabinetDevicesPairRoute: CabinetDevicesPairRoute,
+  CabinetDevicesIndexRoute: CabinetDevicesIndexRoute,
+}
+
+const CabinetRouteWithChildren =
+  CabinetRoute._addFileChildren(CabinetRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CabinetRoute: CabinetRoute,
+  CabinetRoute: CabinetRouteWithChildren,
   LoginRoute: LoginRoute,
+  OauthCallbackRoute: OauthCallbackRoute,
   OauthCliCallbackRoute: OauthCliCallbackRoute,
 }
 export const routeTree = rootRouteImport

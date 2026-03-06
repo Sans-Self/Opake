@@ -3,6 +3,10 @@ import { createRoot } from "react-dom/client";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import "./index.css";
+import { getCryptoWorker } from "@/lib/worker";
+
+console.debug("[opake] app starting");
+getCryptoWorker(); // warm up WASM worker early
 
 const router = createRouter({ routeTree });
 

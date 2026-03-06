@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Build web login, callback, setup, and recover routes [#173](https://issues.opake.app/issues/173.html)
 - Add device-to-device key pairing via PDS [#183](https://issues.opake.app/issues/183.html)
 - Wire authenticated API layer for PDS and AppView [#174](https://issues.opake.app/issues/174.html)
 - Rewrite web auth store as discriminated union state machine [#172](https://issues.opake.app/issues/172.html)

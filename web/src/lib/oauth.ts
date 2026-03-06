@@ -146,10 +146,12 @@ async function fetchWithDpop(
   accessToken: string | null,
   worker: CryptoWorker,
 ): Promise<{ response: Response; dpopNonce: string | null }> {
+  console.debug("[dpop] creating proof for", method, url);
   const timestamp = Math.floor(Date.now() / 1000);
   const proof = await worker.createDpopProof(
     dpopKey, method, url, timestamp, dpopNonce, accessToken,
   );
+  console.debug("[dpop] proof created, sending request");
 
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
@@ -160,6 +162,7 @@ async function fetchWithDpop(
   }
 
   let response = await fetch(url, { method, headers, body: body.toString() });
+  console.debug("[dpop] response:", response.status);
   let nonce = response.headers.get("dpop-nonce") ?? dpopNonce;
 
   // Retry on use_dpop_nonce
@@ -168,13 +171,16 @@ async function fetchWithDpop(
       error?: string;
       error_description?: string;
     } | null;
+    console.debug("[dpop] 400 error body:", errorBody);
 
     if (errorBody?.error === "use_dpop_nonce" && nonce) {
+      console.debug("[dpop] retrying with server nonce");
       const retryProof = await worker.createDpopProof(
         dpopKey, method, url, timestamp, nonce, accessToken,
       );
       headers.DPoP = retryProof;
       response = await fetch(url, { method, headers, body: body.toString() });
+      console.debug("[dpop] retry response:", response.status);
       nonce = response.headers.get("dpop-nonce") ?? nonce;
     }
   }
@@ -310,25 +316,34 @@ export async function publishPublicKey(
     record.signingAlgo = "ed25519";
   }
 
-  const timestamp = Math.floor(Date.now() / 1000);
-  const proof = await worker.createDpopProof(
-    dpopKey, "POST", url, timestamp, dpopNonce, accessToken,
-  );
+  const jsonBody = JSON.stringify({
+    repo: did,
+    collection: "app.opake.cloud.publicKey",
+    rkey: "self",
+    record,
+  });
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
+  const makeHeaders = async (nonce: string | null): Promise<Record<string, string>> => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const proof = await worker.createDpopProof(
+      dpopKey, "POST", url, timestamp, nonce, accessToken,
+    );
+    return {
       "Content-Type": "application/json",
       Authorization: `DPoP ${accessToken}`,
       DPoP: proof,
-    },
-    body: JSON.stringify({
-      repo: did,
-      collection: "app.opake.cloud.publicKey",
-      rkey: "self",
-      record,
-    }),
-  });
+    };
+  };
+
+  let headers = await makeHeaders(dpopNonce);
+  let response = await fetch(url, { method: "POST", headers, body: jsonBody });
+
+  // DPoP nonce retry — PDS nonce differs from AS nonce
+  if ((response.status === 401 || response.status === 400) && response.headers.has("dpop-nonce")) {
+    const nonce = response.headers.get("dpop-nonce");
+    headers = await makeHeaders(nonce);
+    response = await fetch(url, { method: "POST", headers, body: jsonBody });
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");

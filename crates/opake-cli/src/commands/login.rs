@@ -2,7 +2,9 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Args;
 use log::debug;
+use opake_core::client::Transport;
 use opake_core::client::{Session, XrpcClient};
+use opake_core::crypto::OsRng;
 use opake_core::resolve::resolve_pds_for_login;
 
 use crate::config::{AccountConfig, FileStorage};
@@ -48,6 +50,10 @@ pub struct LoginCommand {
     /// Don't redirect to frontend after OAuth - show inline response instead
     #[arg(long)]
     no_redirect: bool,
+
+    /// Overwrite existing encryption identity (generates new keypair even if one exists on PDS)
+    #[arg(long)]
+    force: bool,
 }
 
 impl LoginCommand {
@@ -72,7 +78,7 @@ impl LoginCommand {
         };
 
         if self.legacy {
-            return Self::legacy_login(&pds_url, &identifier, storage).await;
+            return Self::legacy_login(&pds_url, &identifier, storage, self.force).await;
         }
 
         match crate::oauth::try_oauth_login(
@@ -81,13 +87,14 @@ impl LoginCommand {
             resolved_handle.as_deref(),
             storage,
             self.no_redirect,
+            self.force,
         )
         .await
         {
             Ok(session) => Ok(Some(session)),
             Err(e) => {
                 log::warn!("OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}");
-                Self::legacy_login(&pds_url, &identifier, storage).await
+                Self::legacy_login(&pds_url, &identifier, storage, self.force).await
             }
         }
     }
@@ -96,6 +103,7 @@ impl LoginCommand {
         pds_url: &str,
         identifier: &str,
         storage: &FileStorage,
+        force: bool,
     ) -> Result<Option<Session>> {
         let password = resolve_password(prefixed_get_env("PASSWORD"), || {
             prompt_password(identifier, pds_url)
@@ -118,47 +126,73 @@ impl LoginCommand {
 
         storage.save_config_anyhow(&cfg)?;
 
-        let has_local_identity = identity::load_identity(storage, session.did()).is_ok();
-        let has_published_key = client
-            .get_record(
-                session.did(),
-                opake_core::records::PUBLIC_KEY_COLLECTION,
-                opake_core::records::PUBLIC_KEY_RKEY,
-            )
-            .await
-            .is_ok();
-
-        if !has_local_identity && has_published_key {
-            // Existing identity on another device — don't generate a new one.
-            println!("Logged in as {}", session.handle());
-            println!();
-            println!("This account has an existing encryption identity.");
-            println!("Run `opake pair request` to transfer it from another device.");
-            return Ok(Some(session));
-        }
-
-        let (identity, generated) =
-            identity::ensure_identity(storage, session.did(), &mut opake_core::crypto::OsRng)?;
-
-        if generated {
-            println!("Generated new encryption keypair");
-        }
-
-        let public_key_bytes = identity.public_key_bytes()?;
-        let verify_key_bytes = identity.verify_key_bytes()?;
-        opake_core::resolve::publish_public_key(
-            &mut client,
-            &public_key_bytes,
-            verify_key_bytes.as_ref(),
-            &Utc::now().to_rfc3339(),
-        )
-        .await?;
-        println!("Published encryption public key");
-
+        ensure_identity_and_publish(&mut client, storage, session.did(), force).await?;
         println!("Logged in as {}", session.handle());
 
         Ok(Some(session))
     }
+}
+
+/// Check for existing published key, prompt for --force confirmation if needed,
+/// generate (or load) identity, and publish the public key. Shared by both
+/// legacy and OAuth login paths.
+pub async fn ensure_identity_and_publish(
+    client: &mut XrpcClient<impl Transport>,
+    storage: &FileStorage,
+    did: &str,
+    force: bool,
+) -> Result<()> {
+    let has_local_identity = identity::load_identity(storage, did).is_ok();
+    let has_published_key = client
+        .get_record(
+            did,
+            opake_core::records::PUBLIC_KEY_COLLECTION,
+            opake_core::records::PUBLIC_KEY_RKEY,
+        )
+        .await
+        .is_ok();
+
+    if !has_local_identity && has_published_key && force {
+        println!();
+        println!("WARNING: --force will generate a new encryption identity.");
+        println!("All data encrypted to the old identity will become permanently unreadable.");
+        println!();
+        println!("Type exactly: This will brick my data and I am okay with that");
+        print!("> ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut confirmation = String::new();
+        std::io::stdin().read_line(&mut confirmation)?;
+        if confirmation.trim() != "This will brick my data and I am okay with that" {
+            anyhow::bail!("Identity reset cancelled.");
+        }
+        println!("Proceeding with new identity generation.");
+    }
+
+    if !has_local_identity && has_published_key && !force {
+        println!();
+        println!("This account has an existing encryption identity.");
+        println!("Run `opake pair request` to transfer it from another device,");
+        println!("or `opake login --force` to generate a new identity (invalidates old one).");
+        return Ok(());
+    }
+
+    let (identity, generated) = identity::ensure_identity(storage, did, &mut OsRng)?;
+    if generated {
+        println!("Generated new encryption keypair");
+    }
+
+    let public_key_bytes = identity.public_key_bytes()?;
+    let verify_key_bytes = identity.verify_key_bytes()?;
+    opake_core::resolve::publish_public_key(
+        client,
+        &public_key_bytes,
+        verify_key_bytes.as_ref(),
+        &Utc::now().to_rfc3339(),
+    )
+    .await?;
+    println!("Published encryption public key");
+
+    Ok(())
 }
 
 #[cfg(test)]

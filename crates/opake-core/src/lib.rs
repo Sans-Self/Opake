@@ -15,6 +15,7 @@ extern crate self as opake_core;
 pub use opake_derive::RedactedDebug;
 
 pub fn binding_check() -> &'static str {
+    log::debug!("binding_check called");
     "WORKS"
 }
 

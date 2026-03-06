@@ -1,13 +1,16 @@
 // Auth store — real OAuth 2.0 + DPoP flow via Zustand.
 //
 // State machine: initializing → unauthenticated ↔ authenticating → ready
+//                                                 ↘ awaiting_identity
 //                                                 ↘ error
 
 import { create } from "zustand";
-import { wrap, type Remote } from "comlink";
-import type { CryptoApi } from "@/workers/crypto.worker";
 import type { OAuthSession, Config } from "@/lib/storage-types";
 import { IndexedDbStorage } from "@/lib/indexeddb-storage";
+import type { Remote } from "comlink";
+import type { CryptoApi } from "@/workers/crypto.worker";
+import { getCryptoWorker } from "@/lib/worker";
+import { authenticatedXrpc } from "@/lib/api";
 import {
   resolveHandleToPds,
   discoverAuthorizationServer,
@@ -32,6 +35,7 @@ type AuthPhase =
   | { phase: "unauthenticated" }
   | { phase: "authenticating" }
   | { phase: "ready"; did: string; handle: string; pdsUrl: string }
+  | { phase: "awaiting_identity"; did: string; handle: string; pdsUrl: string }
   | { phase: "error"; message: string };
 
 interface AuthActions {
@@ -49,17 +53,31 @@ type AuthState = AuthPhase & AuthActions;
 
 const storage = new IndexedDbStorage();
 
-let workerInstance: Remote<CryptoApi> | null = null;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function getWorker(): Remote<CryptoApi> {
-  if (!workerInstance) {
-    const raw = new Worker(
-      new URL("../workers/crypto.worker.ts", import.meta.url),
-      { type: "module" },
+/** Check if publicKey/self already exists on the PDS (i.e. another device published it). */
+async function checkExistingPublicKey(
+  pdsUrl: string,
+  did: string,
+  session: OAuthSession,
+  _worker: Remote<CryptoApi>,
+): Promise<boolean> {
+  try {
+    await authenticatedXrpc(
+      {
+        pdsUrl,
+        lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=app.opake.cloud.publicKey&rkey=self`,
+        method: "GET",
+      },
+      session,
     );
-    workerInstance = wrap<CryptoApi>(raw);
+    return true;
+  } catch (error) {
+    console.warn("[auth] publicKey/self lookup failed (treating as new account):", error);
+    return false;
   }
-  return workerInstance;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +104,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Verify session exists
       await storage.loadSession(did);
-      set({ phase: "ready", did, handle: account.handle, pdsUrl: account.pdsUrl });
+
+      // Check if identity exists locally
+      const hasIdentity = await storage
+        .loadIdentity(did)
+        .then(() => true)
+        .catch(() => false);
+
+      if (hasIdentity) {
+        set({ phase: "ready", did, handle: account.handle, pdsUrl: account.pdsUrl });
+      } else {
+        set({ phase: "awaiting_identity", did, handle: account.handle, pdsUrl: account.pdsUrl });
+      }
     } catch {
       set({ phase: "unauthenticated" });
     }
@@ -94,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   startLogin: async (handle: string) => {
     set({ phase: "authenticating" });
-    const worker = getWorker();
+    const worker = getCryptoWorker();
 
     try {
       // Resolve handle → PDS
@@ -147,18 +176,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       );
       window.location.href = authUrl;
     } catch (error) {
+      console.error("[auth] startLogin failed:", error);
       const message = error instanceof Error ? error.message : String(error);
       set({ phase: "error", message });
     }
   },
 
   completeLogin: async (code: string, callbackState: string) => {
+    console.debug("[auth] completeLogin called, current phase:", get().phase);
     if (get().phase === "ready") return;
     set({ phase: "authenticating" });
-    const worker = getWorker();
+    const worker = getCryptoWorker();
 
     try {
       const pending = loadPendingState();
+      console.debug("[auth] pending state:", pending ? "loaded" : "missing");
       if (!pending) throw new Error("No pending OAuth state — start login again");
 
       // CSRF verification
@@ -167,6 +199,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error("OAuth state mismatch — possible CSRF attack");
       }
 
+      console.debug("[auth] CSRF ok, exchanging code");
       const redirectUri = buildRedirectUri();
 
       // Exchange code for tokens
@@ -181,6 +214,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         worker,
       );
 
+      console.debug("[auth] token exchange done, sub:", tokenResponse.sub);
       const did = tokenResponse.sub;
       if (!did) throw new Error("Token response missing `sub` claim");
 
@@ -202,22 +236,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         clientId: pending.clientId,
       };
 
-      // Generate identity keypair
-      const identity = await worker.generateIdentity(did);
-
-      // Publish public key to PDS
-      await publishPublicKey(
+      console.debug("[auth] checking existing publicKey/self");
+      // Check if this DID already has a publicKey/self record on the PDS.
+      // If so, another device owns the identity — don't overwrite it.
+      const hasExistingKey = await checkExistingPublicKey(
         pending.pdsUrl,
         did,
-        identity.publicKey,
-        identity.verifyKey,
-        session.accessToken,
-        session.dpopKey,
-        session.dpopNonce,
+        session,
         worker,
       );
 
-      // Persist everything to IndexedDB
+      // Persist config + session regardless
       const config: Config = await storage.loadConfig().catch(() => ({
         defaultDid: null,
         accounts: {},
@@ -228,17 +257,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       await storage.saveConfig(config);
       await storage.saveSession(did, session);
-      await storage.saveIdentity(did, identity);
 
       clearPendingState();
 
-      set({
-        phase: "ready",
-        did,
-        handle: pending.handle,
-        pdsUrl: pending.pdsUrl,
-      });
+      console.debug("[auth] hasExistingKey:", hasExistingKey);
+
+      if (hasExistingKey) {
+        // Identity exists on PDS but not locally — user needs to pair
+        set({
+          phase: "awaiting_identity",
+          did,
+          handle: pending.handle,
+          pdsUrl: pending.pdsUrl,
+        });
+      } else {
+        // Fresh account — generate identity and publish key
+        const identity = await worker.generateIdentity(did);
+
+        await publishPublicKey(
+          pending.pdsUrl,
+          did,
+          identity.publicKey,
+          identity.verifyKey,
+          session.accessToken,
+          session.dpopKey,
+          session.dpopNonce,
+          worker,
+        );
+
+        await storage.saveIdentity(did, identity);
+
+        set({
+          phase: "ready",
+          did,
+          handle: pending.handle,
+          pdsUrl: pending.pdsUrl,
+        });
+      }
     } catch (error) {
+      console.error("[auth] completeLogin failed:", error);
       clearPendingState();
       const message = error instanceof Error ? error.message : String(error);
       set({ phase: "error", message });
@@ -247,7 +304,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     const current = get();
-    if (current.phase === "ready") {
+    if (current.phase === "ready" || current.phase === "awaiting_identity") {
       try {
         await storage.removeAccount(current.did);
       } catch {

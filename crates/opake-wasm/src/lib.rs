@@ -1,8 +1,3 @@
-#[wasm_bindgen(js_name = bindingCheck)]
-pub fn binding_check() -> String {
-    opake_core::binding_check().to_owned()
-}
-
 use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{ContentKey, EncryptedPayload, OsRng, X25519PrivateKey, X25519PublicKey};
@@ -10,6 +5,17 @@ use opake_core::records::WrappedKey;
 use opake_core::storage::Identity;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(start)]
+pub fn init() {
+    console_error_panic_hook::set_once();
+    console_log::init_with_level(log::Level::Debug).ok();
+}
+
+#[wasm_bindgen(js_name = bindingCheck)]
+pub fn binding_check() -> String {
+    opake_core::binding_check().to_owned()
+}
 
 /// DTO for EncryptedPayload that serializes the nonce as Vec<u8>
 /// so serde-wasm-bindgen produces a proper Uint8Array instead of

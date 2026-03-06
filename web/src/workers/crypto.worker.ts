@@ -17,7 +17,9 @@ import init, {
 import type { EncryptedPayload, WrappedKey, DpopKeyPair, PkceChallenge, EphemeralKeypair } from "@/lib/crypto-types";
 import type { Identity } from "@/lib/storage-types";
 
+console.debug("[worker] initializing WASM");
 await init();
+console.debug("[worker] ready, binding check:", bindingCheck());
 
 const cryptoApi = {
   ping(): string {
