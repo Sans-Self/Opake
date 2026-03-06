@@ -9,6 +9,7 @@ use opake_core::documents;
 use opake_core::client::Session;
 
 use crate::commands::Execute;
+use crate::document_resolve;
 use crate::identity;
 use crate::keyring_store;
 use crate::session::{self, CommandContext};
@@ -89,7 +90,14 @@ impl Execute for DownloadCommand {
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
             let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-            let uri = documents::resolve_uri(&mut client, reference).await?;
+            let uri = document_resolve::resolve_uri(
+                &mut client,
+                reference,
+                &id.did,
+                &private_key,
+                &ctx.storage,
+            )
+            .await?;
 
             // Peek at the document to check if it uses keyring encryption.
             // If so, load the local group key before attempting decryption.

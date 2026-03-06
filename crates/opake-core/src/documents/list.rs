@@ -1,10 +1,16 @@
 use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::Document;
+use crate::records::{Document, EncryptedMetadata, Encryption};
 
 use super::DOCUMENT_COLLECTION;
 
 /// A document listing entry with its AT-URI and parsed metadata.
+///
+/// A document listing entry with its AT-URI and parsed metadata.
+///
+/// The `name`/`size`/`mime_type`/`tags` fields contain dummy placeholder
+/// values. Callers must decrypt `encrypted_metadata` using the content key
+/// (unwrapped from `encryption`) to get real values.
 #[derive(Debug)]
 pub struct DocumentEntry {
     pub uri: String,
@@ -13,6 +19,8 @@ pub struct DocumentEntry {
     pub mime_type: Option<String>,
     pub tags: Vec<String>,
     pub created_at: String,
+    pub encrypted_metadata: EncryptedMetadata,
+    pub encryption: Encryption,
 }
 
 /// Fetch all document records, paginating through the full collection.
@@ -29,6 +37,8 @@ pub async fn list_documents(
             mime_type: doc.mime_type,
             tags: doc.tags,
             created_at: doc.created_at,
+            encrypted_metadata: doc.encrypted_metadata,
+            encryption: doc.encryption,
         }
     })
     .await

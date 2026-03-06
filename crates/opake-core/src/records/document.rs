@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, EncryptionEnvelope, KeyringRef, SCHEMA_VERSION};
+use super::{default_version, EncryptedMetadata, EncryptionEnvelope, KeyringRef, SCHEMA_VERSION};
 use crate::atproto::{AtBytes, BlobRef};
 
 /// Content key wrapped directly to individual DIDs.
@@ -44,6 +44,7 @@ pub struct Document {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    pub encrypted_metadata: EncryptedMetadata,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
     pub created_at: String,
@@ -55,7 +56,13 @@ impl Document {
     /// Construct a new document with the current schema version and sensible
     /// defaults for optional fields. Callers set tags/description/etc. via
     /// struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
-    pub fn new(name: String, blob: BlobRef, encryption: Encryption, created_at: String) -> Self {
+    pub fn new(
+        name: String,
+        blob: BlobRef,
+        encryption: Encryption,
+        encrypted_metadata: EncryptedMetadata,
+        created_at: String,
+    ) -> Self {
         Self {
             opake_version: SCHEMA_VERSION,
             name,
@@ -65,6 +72,7 @@ impl Document {
             encryption,
             tags: Vec::new(),
             description: None,
+            encrypted_metadata,
             visibility: None,
             created_at,
             modified_at: None,

@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::debug;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, RngCore, X25519PublicKey};
 use crate::error::Error;
 use crate::records::{
     AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope, KeyringEncryption,
@@ -14,6 +14,31 @@ use super::DOCUMENT_COLLECTION;
 /// Maximum blob size accepted by a standard PDS (50 MB).
 const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
 
+/// Plaintext name written to the record when metadata is encrypted.
+pub const OPAQUE_PLACEHOLDER_NAME: &str = "encrypted";
+
+/// Plaintext MIME type written to the record when metadata is encrypted.
+pub const OPAQUE_PLACEHOLDER_MIME: &str = "application/octet-stream";
+
+/// Build a `DocumentMetadata` from upload parameters and encrypt it.
+fn build_encrypted_metadata(
+    content_key: &crypto::ContentKey,
+    filename: &str,
+    mime_type: &str,
+    size: u64,
+    description: Option<&str>,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<crate::records::EncryptedMetadata, Error> {
+    let metadata = DocumentMetadata {
+        name: filename.into(),
+        mime_type: Some(mime_type.into()),
+        size: Some(size),
+        tags: vec![],
+        description: description.map(Into::into),
+    };
+    crypto::encrypt_metadata(content_key, &metadata, rng)
+}
+
 /// Everything needed to encrypt and upload a document, minus the transport
 /// and RNG (which are passed separately).
 pub struct UploadParams<'a> {
@@ -22,7 +47,7 @@ pub struct UploadParams<'a> {
     pub mime_type: &'a str,
     pub owner_did: &'a str,
     pub owner_pubkey: &'a X25519PublicKey,
-    pub tags: Vec<String>,
+    pub description: Option<&'a str>,
     pub created_at: &'a str,
 }
 
@@ -30,8 +55,9 @@ pub struct UploadParams<'a> {
 /// owner's public key, and create the document record. Returns the AT-URI of
 /// the created record.
 ///
-/// The caller is responsible for reading the file from disk, detecting the MIME
-/// type, and extracting the filename — this function is platform-agnostic.
+/// Metadata (name, mimeType, size, tags, description) is always encrypted
+/// alongside the blob using the same content key. The plaintext record fields
+/// are set to dummy values.
 pub async fn encrypt_and_upload(
     client: &mut XrpcClient<impl Transport>,
     params: &UploadParams<'_>,
@@ -66,13 +92,20 @@ pub async fn encrypt_and_upload(
 
     let wrapped_key = crypto::wrap_key(&content_key, params.owner_pubkey, params.owner_did, rng)?;
 
+    let encrypted_metadata = build_encrypted_metadata(
+        &content_key,
+        params.filename,
+        params.mime_type,
+        params.plaintext.len() as u64,
+        params.description,
+        rng,
+    )?;
+
     let document = Document {
-        mime_type: Some(params.mime_type.into()),
-        size: Some(params.plaintext.len() as u64),
-        tags: params.tags.clone(),
+        mime_type: Some(OPAQUE_PLACEHOLDER_MIME.into()),
         visibility: Some("private".into()),
         ..Document::new(
-            params.filename.into(),
+            OPAQUE_PLACEHOLDER_NAME.into(),
             blob_ref,
             Encryption::Direct(DirectEncryption {
                 envelope: EncryptionEnvelope {
@@ -83,6 +116,7 @@ pub async fn encrypt_and_upload(
                     keys: vec![wrapped_key],
                 },
             }),
+            encrypted_metadata,
             params.created_at.into(),
         )
     };
@@ -100,7 +134,7 @@ pub struct KeyringUploadParams<'a> {
     pub keyring_uri: &'a str,
     pub group_key: &'a ContentKey,
     pub rotation: u64,
-    pub tags: Vec<String>,
+    pub description: Option<&'a str>,
     pub created_at: &'a str,
 }
 
@@ -140,13 +174,20 @@ pub async fn encrypt_and_upload_keyring(
 
     let wrapped_content_key = crypto::wrap_content_key_for_keyring(&content_key, params.group_key)?;
 
+    let encrypted_metadata = build_encrypted_metadata(
+        &content_key,
+        params.filename,
+        params.mime_type,
+        params.plaintext.len() as u64,
+        params.description,
+        rng,
+    )?;
+
     let document = Document {
-        mime_type: Some(params.mime_type.into()),
-        size: Some(params.plaintext.len() as u64),
-        tags: params.tags.clone(),
+        mime_type: Some(OPAQUE_PLACEHOLDER_MIME.into()),
         visibility: Some("private".into()),
         ..Document::new(
-            params.filename.into(),
+            OPAQUE_PLACEHOLDER_NAME.into(),
             blob_ref,
             Encryption::Keyring(KeyringEncryption {
                 keyring_ref: KeyringRef {
@@ -161,6 +202,7 @@ pub async fn encrypt_and_upload_keyring(
                     encoded: BASE64.encode(payload.nonce),
                 },
             }),
+            encrypted_metadata,
             params.created_at.into(),
         )
     };
@@ -220,7 +262,6 @@ mod tests {
         plaintext: &'a [u8],
         filename: &'a str,
         public_key: &'a X25519PublicKey,
-        tags: Vec<String>,
     ) -> UploadParams<'a> {
         UploadParams {
             plaintext,
@@ -228,7 +269,7 @@ mod tests {
             mime_type: "text/plain",
             owner_did: TEST_DID,
             owner_pubkey: public_key,
-            tags,
+            description: None,
             created_at: "2026-03-01T00:00:00Z",
         }
     }
@@ -241,12 +282,7 @@ mod tests {
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock.clone());
-        let params = test_params(
-            b"hello world",
-            "hello.txt",
-            &public_key,
-            vec!["test".into()],
-        );
+        let params = test_params(b"hello world", "hello.txt", &public_key);
         let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
@@ -264,11 +300,22 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["collection"], "app.opake.document");
                 let record = &v["record"];
-                assert_eq!(record["name"], "hello.txt");
-                assert_eq!(record["mimeType"], "text/plain");
-                assert_eq!(record["size"], 11);
-                assert_eq!(record["tags"], serde_json::json!(["test"]));
+
+                // Plaintext fields are dummies
+                assert_eq!(record["name"], OPAQUE_PLACEHOLDER_NAME);
+                assert_eq!(record["mimeType"], OPAQUE_PLACEHOLDER_MIME);
+                assert!(record.get("size").is_none() || record["size"].is_null());
+                assert!(record.get("tags").is_none());
                 assert_eq!(record["visibility"], "private");
+
+                // Encrypted metadata is present
+                assert!(
+                    record.get("encryptedMetadata").is_some(),
+                    "should have encryptedMetadata"
+                );
+                let em = &record["encryptedMetadata"];
+                assert!(em["ciphertext"]["$bytes"].is_string());
+                assert!(em["nonce"]["$bytes"].is_string());
 
                 // Verify encryption envelope structure
                 let enc = &record["encryption"];
@@ -282,13 +329,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn encrypted_metadata_decrypts_to_original() {
+        let (public_key, private_key) = test_keypair();
+        let mock = MockTransport::new();
+        mock.enqueue(upload_blob_response());
+        mock.enqueue(create_record_response());
+
+        let mut client = mock_client(mock.clone());
+        let params = UploadParams {
+            plaintext: b"test data",
+            filename: "report.pdf",
+            mime_type: "application/pdf",
+            owner_did: TEST_DID,
+            owner_pubkey: &public_key,
+            description: Some("Quarterly report"),
+            created_at: "2026-03-01T00:00:00Z",
+        };
+        encrypt_and_upload(&mut client, &params, &mut OsRng)
+            .await
+            .unwrap();
+
+        let requests = mock.requests();
+        let create_body = match &requests[1].body {
+            Some(RequestBody::Json(v)) => v.clone(),
+            _ => panic!("expected JSON body"),
+        };
+        let doc: Document = serde_json::from_value(create_body["record"].clone()).unwrap();
+
+        // Unwrap content key
+        let envelope = match &doc.encryption {
+            Encryption::Direct(d) => &d.envelope,
+            _ => panic!("expected direct encryption"),
+        };
+        let content_key = crypto::unwrap_key(&envelope.keys[0], &private_key).unwrap();
+
+        // Decrypt metadata
+        let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata).unwrap();
+
+        assert_eq!(metadata.name, "report.pdf");
+        assert_eq!(metadata.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(metadata.size, Some(9));
+        assert!(metadata.tags.is_empty());
+        assert_eq!(metadata.description.as_deref(), Some("Quarterly report"));
+    }
+
+    #[tokio::test]
     async fn rejects_oversized_blob() {
         let (public_key, _) = test_keypair();
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
 
         let oversized = vec![0u8; MAX_BLOB_SIZE + 1];
-        let params = test_params(&oversized, "big.bin", &public_key, vec![]);
+        let params = test_params(&oversized, "big.bin", &public_key);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -304,7 +396,7 @@ mod tests {
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock);
-        let params = test_params(b"", "empty.txt", &public_key, vec![]);
+        let params = test_params(b"", "empty.txt", &public_key);
         let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
@@ -323,7 +415,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let params = test_params(b"data", "file.bin", &public_key, vec![]);
+        let params = test_params(b"data", "file.bin", &public_key);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -343,7 +435,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let params = test_params(b"data", "file.bin", &public_key, vec![]);
+        let params = test_params(b"data", "file.bin", &public_key);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -361,7 +453,7 @@ mod tests {
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock.clone());
-        let params = test_params(plaintext, "roundtrip.txt", &public_key, vec![]);
+        let params = test_params(plaintext, "roundtrip.txt", &public_key);
         encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();

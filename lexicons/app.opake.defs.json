@@ -75,6 +75,23 @@
       }
     },
 
+    "encryptedMetadata": {
+      "type": "object",
+      "description": "AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON object with the real document metadata (name, mimeType, size, tags, description). Encrypted with the same content key as the blob.",
+      "required": ["ciphertext", "nonce"],
+      "properties": {
+        "ciphertext": {
+          "type": "bytes",
+          "description": "AES-256-GCM ciphertext of the JSON-serialized metadata object."
+        },
+        "nonce": {
+          "type": "bytes",
+          "description": "12-byte initialization vector for AES-256-GCM.",
+          "maxLength": 24
+        }
+      }
+    },
+
     "visibility": {
       "type": "string",
       "description": "Hint for AppViews and clients about intended visibility of the content.",

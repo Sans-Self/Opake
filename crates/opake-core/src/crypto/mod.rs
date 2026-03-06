@@ -12,6 +12,7 @@
 mod content;
 mod key_wrapping;
 mod keyring_wrapping;
+mod metadata;
 
 use crate::records::SCHEMA_VERSION;
 
@@ -29,6 +30,7 @@ pub use x25519_dalek::{
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
 pub use keyring_wrapping::{unwrap_content_key_from_keyring, wrap_content_key_for_keyring};
+pub use metadata::{decrypt_metadata, encrypt_metadata, DocumentMetadata};
 
 const WRAP_ALGO: &str = "x25519-hkdf-a256kw";
 const CONTENT_KEY_LEN: usize = 32;

@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod document_resolve;
 mod identity;
 mod keyring_store;
 mod oauth;
@@ -42,7 +43,8 @@ enum Command {
     Inbox(commands::inbox::InboxCommand),
     Ls(commands::ls::LsCommand),
     Mkdir(commands::mkdir::MkdirCommand),
-    Mv(commands::mv::MvCommand),
+    /// Moves a file to another directory. Use the metadata command for that.
+    Move(commands::move_cmd::MoveCommand),
     Rm(commands::rm::RmCommand),
     Resolve(commands::resolve::ResolveCommand),
     Share(commands::share::ShareCommand),
@@ -109,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Inbox(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Ls(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Mkdir(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Mv(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Move(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Rm(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Resolve(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Share(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,

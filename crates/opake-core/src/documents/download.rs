@@ -25,6 +25,16 @@ pub(super) fn decrypt_with_nonce(
     crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })
 }
 
+/// Resolve a document's name from encrypted metadata if present, falling
+/// back to the plaintext `name` field for pre-encryption records.
+pub(super) fn resolve_document_name(
+    doc: &Document,
+    content_key: &ContentKey,
+) -> Result<String, Error> {
+    let metadata = crypto::decrypt_metadata(content_key, &doc.encrypted_metadata)?;
+    Ok(metadata.name)
+}
+
 /// Backwards-compat wrapper used by download_grant.
 pub(super) fn decrypt_with_envelope(
     content_key: &ContentKey,
@@ -157,7 +167,8 @@ pub async fn download_with_group_key(
         .await?;
 
     let plaintext = decrypt_with_nonce(&content_key, nonce, ciphertext)?;
-    Ok((doc.name, plaintext))
+    let name = resolve_document_name(&doc, &content_key)?;
+    Ok((name, plaintext))
 }
 
 #[cfg(test)]
@@ -169,7 +180,7 @@ mod tests {
     use crate::test_utils::MockTransport;
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-    use super::super::tests::{mock_client, TEST_DID, TEST_URI};
+    use super::super::tests::{dummy_encrypted_metadata, mock_client, TEST_DID, TEST_URI};
 
     fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
@@ -181,6 +192,7 @@ mod tests {
         ciphertext: Vec<u8>,
         nonce: [u8; 12],
         wrapped_key: records::WrappedKey,
+        content_key: crypto::ContentKey,
     }
 
     fn encrypt_for_download(plaintext: &[u8], public_key: &X25519PublicKey) -> EncryptedFixture {
@@ -192,16 +204,27 @@ mod tests {
             ciphertext: payload.ciphertext,
             nonce: payload.nonce,
             wrapped_key,
+            content_key,
         }
     }
 
     fn document_from_fixture(fixture: &EncryptedFixture) -> Document {
+        let metadata = crypto::DocumentMetadata {
+            name: "test-file.txt".into(),
+            mime_type: Some("text/plain".into()),
+            size: Some(42),
+            tags: vec![],
+            description: None,
+        };
+        let encrypted_metadata =
+            crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
+
         Document {
             mime_type: Some("text/plain".into()),
             size: Some(42),
             visibility: Some("private".into()),
             ..Document::new(
-                "test-file.txt".into(),
+                "encrypted".into(),
                 BlobRef {
                     blob_type: "blob".into(),
                     reference: CidLink {
@@ -219,6 +242,7 @@ mod tests {
                         keys: vec![fixture.wrapped_key.clone()],
                     },
                 }),
+                encrypted_metadata,
                 "2026-03-01T00:00:00Z".into(),
             )
         }
@@ -329,6 +353,10 @@ mod tests {
                         "rotation": 1,
                     },
                     "algo": "aes-256-gcm",
+                    "nonce": { "$bytes": "AAAAAAAAAAAAAAAA" },
+                },
+                "encryptedMetadata": {
+                    "ciphertext": { "$bytes": "AAAA" },
                     "nonce": { "$bytes": "AAAAAAAAAAAAAAAA" },
                 },
                 "createdAt": "2026-03-01T00:00:00Z",

@@ -9,7 +9,7 @@ mod delete;
 mod entries;
 mod get_or_create_root;
 mod list;
-mod mv;
+mod move_entry;
 mod remove;
 mod tree;
 
@@ -18,7 +18,7 @@ pub use delete::delete_directory;
 pub use entries::{add_entry, remove_entry};
 pub use get_or_create_root::get_or_create_root;
 pub use list::{list_directories, DirectoryEntry};
-pub use mv::{check_cycle, move_entry, MoveDestination, MoveResult};
+pub use move_entry::{check_cycle, move_entry, MoveResult};
 pub use remove::{remove, RemoveResult};
 pub use tree::{DirectoryTree, EntryKind, ResolvedPath};
 

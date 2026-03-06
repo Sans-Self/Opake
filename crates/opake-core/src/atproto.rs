@@ -62,6 +62,14 @@ pub struct AtBytes {
 }
 
 impl AtBytes {
+    /// Construct from raw bytes, base64-encoding them for the wire format.
+    pub fn from_raw(bytes: &[u8]) -> Self {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        Self {
+            encoded: BASE64.encode(bytes),
+        }
+    }
+
     /// Decode the base64 payload, accepting both padded and unpadded input.
     ///
     /// The PDS strips padding from `$bytes` fields during CBOR→JSON

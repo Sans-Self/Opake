@@ -5,6 +5,8 @@ use opake_core::documents::{self, DocumentEntry};
 use opake_core::client::Session;
 
 use crate::commands::Execute;
+use crate::document_resolve;
+use crate::identity;
 use crate::session::{self, CommandContext};
 
 #[derive(Args)]
@@ -76,6 +78,12 @@ impl Execute for LsCommand {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let mut entries = documents::list_documents(&mut client).await?;
 
+        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+        let private_key = id.private_key_bytes()?;
+        for entry in &mut entries {
+            document_resolve::decrypt_entry_in_place(entry, &ctx.did, &private_key, &ctx.storage);
+        }
+
         if let Some(ref tag) = self.tag {
             filter_by_tag(&mut entries, tag);
         }
@@ -104,6 +112,38 @@ impl Execute for LsCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opake_core::records::{
+        AtBytes, DirectEncryption, EncryptedMetadata, Encryption, EncryptionEnvelope, WrappedKey,
+    };
+
+    fn dummy_encrypted_metadata() -> EncryptedMetadata {
+        EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
+            },
+            nonce: AtBytes {
+                encoded: "AAAAAAAAAAAAAAAA".into(),
+            },
+        }
+    }
+
+    fn dummy_encryption() -> Encryption {
+        Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: "AAAAAAAAAAAAAAAA".into(),
+                },
+                keys: vec![WrappedKey {
+                    did: "did:plc:test".into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-hkdf-a256kw".into(),
+                }],
+            },
+        })
+    }
 
     fn entry(name: &str, uri: &str, tags: Vec<String>) -> DocumentEntry {
         DocumentEntry {
@@ -113,6 +153,8 @@ mod tests {
             mime_type: Some("text/plain".into()),
             tags,
             created_at: "2026-03-01T00:00:00Z".into(),
+            encrypted_metadata: dummy_encrypted_metadata(),
+            encryption: dummy_encryption(),
         }
     }
 

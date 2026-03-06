@@ -27,3 +27,12 @@ pub struct KeyringRef {
     pub wrapped_content_key: AtBytes,
     pub rotation: u64,
 }
+
+/// AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON
+/// object with the real metadata (name, mimeType, size, tags, description).
+/// Encrypted with the same content key as the blob.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedMetadata {
+    pub ciphertext: AtBytes,
+    pub nonce: AtBytes,
+}

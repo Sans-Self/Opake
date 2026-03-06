@@ -22,7 +22,7 @@ use crate::error::Error;
 pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 // Re-export all record types at the `records::` level.
-pub use defs::{EncryptionEnvelope, KeyringRef, WrappedKey};
+pub use defs::{EncryptedMetadata, EncryptionEnvelope, KeyringRef, WrappedKey};
 pub use directory::Directory;
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
 pub use grant::Grant;

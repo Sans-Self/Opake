@@ -7,7 +7,7 @@ pub mod login;
 pub mod logout;
 pub mod ls;
 pub mod mkdir;
-pub mod mv;
+pub mod move_cmd;
 pub mod pair;
 pub mod resolve;
 pub mod revoke;

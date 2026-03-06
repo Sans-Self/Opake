@@ -27,9 +27,9 @@ pub struct UploadCommand {
     #[arg(long)]
     keyring: Option<String>,
 
-    /// Comma-separated tags for categorization
-    #[arg(long, value_delimiter = ',')]
-    tags: Vec<String>,
+    /// Optional description for the document
+    #[arg(long)]
+    description: Option<String>,
 
     /// Place the uploaded document into a directory
     #[arg(long)]
@@ -72,7 +72,7 @@ impl Execute for UploadCommand {
                 keyring_uri: &entry.uri,
                 group_key: &group_key,
                 rotation: entry.rotation,
-                tags: self.tags,
+                description: self.description.as_deref(),
                 created_at: &now,
             };
 
@@ -87,7 +87,7 @@ impl Execute for UploadCommand {
                 mime_type,
                 owner_did: &id.did,
                 owner_pubkey: &owner_pubkey,
-                tags: self.tags,
+                description: self.description.as_deref(),
                 created_at: &now,
             };
 
@@ -115,7 +115,6 @@ impl Execute for UploadCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::FileStorage;
     use crate::utils::test_harness::test_storage;
 
     #[test]
@@ -125,7 +124,7 @@ mod tests {
         let cmd = UploadCommand {
             path: PathBuf::from("/tmp/opake-test-nonexistent-file-abc123"),
             keyring: None,
-            tags: vec![],
+            description: None,
             dir: None,
         };
         let ctx = CommandContext {

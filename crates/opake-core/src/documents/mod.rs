@@ -21,6 +21,7 @@ pub use list::{list_documents, DocumentEntry};
 pub use resolve::resolve_uri;
 pub use upload::{
     encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
+    OPAQUE_PLACEHOLDER_NAME,
 };
 
 pub const DOCUMENT_COLLECTION: &str = "app.opake.document";
@@ -31,8 +32,8 @@ pub(crate) mod tests {
 
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
     use crate::records::{
-        AtBytes, BlobRef, CidLink, DirectEncryption, Document, Encryption, EncryptionEnvelope,
-        WrappedKey,
+        AtBytes, BlobRef, CidLink, DirectEncryption, Document, EncryptedMetadata, Encryption,
+        EncryptionEnvelope, WrappedKey,
     };
     use crate::test_utils::MockTransport;
 
@@ -47,6 +48,17 @@ pub(crate) mod tests {
             refresh_jwt: "test-refresh".into(),
         });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
+    }
+
+    pub fn dummy_encrypted_metadata() -> EncryptedMetadata {
+        EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: BASE64.encode([0u8; 32]),
+            },
+            nonce: AtBytes {
+                encoded: BASE64.encode([0u8; 12]),
+            },
+        }
     }
 
     pub fn dummy_document(name: &str, size: u64, tags: Vec<String>) -> Document {
@@ -80,6 +92,7 @@ pub(crate) mod tests {
                         }],
                     },
                 }),
+                dummy_encrypted_metadata(),
                 "2026-03-01T00:00:00Z".into(),
             )
         }

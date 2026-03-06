@@ -1,7 +1,9 @@
 use super::*;
 use crate::client::HttpResponse;
 use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-use crate::records::{AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringRef, WrappedKey};
+use crate::records::{
+    AtBytes, BlobRef, CidLink, EncryptedMetadata, KeyringEncryption, KeyringRef, WrappedKey,
+};
 use crate::test_utils::MockTransport;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
@@ -55,6 +57,7 @@ fn blob_response(data: &[u8]) -> HttpResponse {
 struct KeyringFixture {
     ciphertext: Vec<u8>,
     nonce: [u8; 12],
+    content_key: ContentKey,
     group_key: ContentKey,
     owner_wrapped_gk: WrappedKey,
     member_wrapped_gk: WrappedKey,
@@ -82,6 +85,7 @@ fn create_keyring_fixture(
     KeyringFixture {
         ciphertext: payload.ciphertext,
         nonce: payload.nonce,
+        content_key,
         group_key,
         owner_wrapped_gk,
         member_wrapped_gk,
@@ -90,11 +94,21 @@ fn create_keyring_fixture(
 }
 
 fn keyring_document_at_rotation(fixture: &KeyringFixture, rotation: u64) -> Document {
+    let metadata = crypto::DocumentMetadata {
+        name: "keyring-file.txt".into(),
+        mime_type: Some("text/plain".into()),
+        size: Some(42),
+        tags: vec![],
+        description: None,
+    };
+    let encrypted_metadata =
+        crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
+
     Document {
         mime_type: Some("text/plain".into()),
         size: Some(42),
         ..Document::new(
-            "keyring-file.txt".into(),
+            "encrypted".into(),
             BlobRef {
                 blob_type: "blob".into(),
                 reference: CidLink {
@@ -116,6 +130,7 @@ fn keyring_document_at_rotation(fixture: &KeyringFixture, rotation: u64) -> Docu
                     encoded: BASE64.encode(fixture.nonce),
                 },
             }),
+            encrypted_metadata,
             "2026-03-01T00:00:00Z".into(),
         )
     }
@@ -207,11 +222,20 @@ async fn rejects_direct_encrypted_document() {
     let payload = crypto::encrypt_blob(&content_key, b"data", &mut OsRng).unwrap();
     let wrapped = crypto::wrap_key(&content_key, &member_pub, MEMBER_DID, &mut OsRng).unwrap();
 
+    let metadata = crypto::DocumentMetadata {
+        name: "direct-file.txt".into(),
+        mime_type: Some("text/plain".into()),
+        size: Some(4),
+        tags: vec![],
+        description: None,
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng).unwrap();
+
     let doc = Document {
         mime_type: Some("text/plain".into()),
         size: Some(4),
         ..Document::new(
-            "direct-file.txt".into(),
+            "encrypted".into(),
             BlobRef {
                 blob_type: "blob".into(),
                 reference: CidLink {
@@ -229,6 +253,7 @@ async fn rejects_direct_encrypted_document() {
                     keys: vec![wrapped],
                 },
             }),
+            encrypted_metadata,
             "2026-03-01T00:00:00Z".into(),
         )
     };

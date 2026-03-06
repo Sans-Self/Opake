@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::keyrings::KEYRING_COLLECTION;
 use crate::records::{self, Document, Encryption, Keyring};
 
-use super::download::decrypt_with_nonce;
+use super::download::{decrypt_with_nonce, resolve_document_name};
 use super::DOCUMENT_COLLECTION;
 
 /// Result of downloading a keyring-encrypted document as a member.
@@ -138,9 +138,10 @@ pub async fn download_from_keyring_member(
         get_blob_public(transport, &owner_pds, owner_did, &doc.blob.reference.cid).await?;
 
     let plaintext = decrypt_with_nonce(&content_key, &kr_enc.nonce, ciphertext)?;
+    let filename = resolve_document_name(&doc, &content_key)?;
 
     Ok(KeyringDownloadResult {
-        filename: doc.name,
+        filename,
         plaintext,
         group_key,
         keyring_rkey: kr_at.rkey,

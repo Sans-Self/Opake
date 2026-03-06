@@ -7,6 +7,8 @@ use opake_core::error::Error as CoreError;
 use opake_core::{atproto, documents};
 
 use crate::commands::Execute;
+use crate::document_resolve;
+use crate::identity;
 use crate::session::{self, CommandContext};
 
 #[derive(Args)]
@@ -40,6 +42,9 @@ enum Resolution {
 async fn try_fast_resolve(
     client: &mut opake_core::client::XrpcClient<impl opake_core::client::Transport>,
     reference: &str,
+    did: &str,
+    private_key: &opake_core::crypto::X25519PrivateKey,
+    storage: &crate::config::FileStorage,
 ) -> Result<Resolution, CoreError> {
     // Paths always need the tree.
     if reference.contains('/') {
@@ -61,8 +66,8 @@ async fn try_fast_resolve(
         }));
     }
 
-    // Bare name — try document-only resolution (1 paginated API call).
-    match documents::resolve_uri(client, reference).await {
+    // Bare name — try document-only resolution with metadata decryption.
+    match document_resolve::resolve_uri(client, reference, did, private_key, storage).await {
         Ok(uri) => Ok(Resolution::Fast(ResolvedPath {
             uri,
             kind: EntryKind::Document,
@@ -80,7 +85,17 @@ impl Execute for RmCommand {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let now = Utc::now().to_rfc3339();
 
-        let resolution = try_fast_resolve(&mut client, &self.reference).await?;
+        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+        let private_key = id.private_key_bytes()?;
+
+        let resolution = try_fast_resolve(
+            &mut client,
+            &self.reference,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        )
+        .await?;
 
         // Fast path: document by bare name or AT-URI, no tree needed.
         if let Resolution::Fast(resolved) = resolution {

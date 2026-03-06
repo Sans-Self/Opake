@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::records::{self, Document, Grant};
 use crate::sharing::GRANT_COLLECTION;
 
-use super::download::decrypt_with_envelope;
+use super::download::{decrypt_with_envelope, resolve_document_name};
 
 /// Download and decrypt a file using a grant URI.
 ///
@@ -97,7 +97,8 @@ pub async fn download_from_grant(
     .await?;
 
     let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext)?;
-    Ok((doc.name, plaintext))
+    let name = resolve_document_name(&doc, &content_key)?;
+    Ok((name, plaintext))
 }
 
 #[cfg(test)]
@@ -106,7 +107,8 @@ mod tests {
     use crate::client::HttpResponse;
     use crate::crypto::{OsRng, X25519PublicKey};
     use crate::records::{
-        AtBytes, BlobRef, CidLink, DirectEncryption, Encryption, EncryptionEnvelope,
+        AtBytes, BlobRef, CidLink, DirectEncryption, EncryptedMetadata, Encryption,
+        EncryptionEnvelope,
     };
     use crate::test_utils::MockTransport;
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -168,17 +170,55 @@ mod tests {
         }
     }
 
+    struct GrantFixture {
+        payload: crypto::EncryptedPayload,
+        owner_wrapped: records::WrappedKey,
+        recipient_wrapped: records::WrappedKey,
+        content_key: crypto::ContentKey,
+    }
+
+    fn encrypt_and_wrap(plaintext: &[u8], recipient_public: &X25519PublicKey) -> GrantFixture {
+        let content_key = crypto::generate_content_key(&mut OsRng);
+        let payload = crypto::encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
+        let owner_wrapped =
+            crypto::wrap_key(&content_key, &[99u8; 32], OWNER_DID, &mut OsRng).unwrap();
+        let recipient_wrapped = crypto::wrap_key(
+            &content_key,
+            recipient_public,
+            "did:plc:recipient",
+            &mut OsRng,
+        )
+        .unwrap();
+        GrantFixture {
+            payload,
+            owner_wrapped,
+            recipient_wrapped,
+            content_key,
+        }
+    }
+
     fn make_document(
         name: &str,
         ciphertext_len: usize,
         nonce: &[u8; 12],
         owner_wrapped: records::WrappedKey,
+        content_key: &crypto::ContentKey,
     ) -> Document {
+        let metadata = crypto::DocumentMetadata {
+            name: name.into(),
+            mime_type: Some("text/plain".into()),
+            size: Some(42),
+            tags: vec![],
+            description: None,
+        };
+        let encrypted_metadata =
+            crypto::encrypt_metadata(content_key, &metadata, &mut OsRng).unwrap();
+
         Document {
             mime_type: Some("text/plain".into()),
             size: Some(42),
             ..Document::new(
-                name.into(),
+                "encrypted".into(),
                 BlobRef {
                     blob_type: "blob".into(),
                     reference: CidLink {
@@ -196,31 +236,10 @@ mod tests {
                         keys: vec![owner_wrapped],
                     },
                 }),
+                encrypted_metadata,
                 "2026-03-01T00:00:00Z".into(),
             )
         }
-    }
-
-    fn encrypt_and_wrap(
-        plaintext: &[u8],
-        recipient_public: &X25519PublicKey,
-    ) -> (
-        crypto::EncryptedPayload,
-        records::WrappedKey,
-        records::WrappedKey,
-    ) {
-        let content_key = crypto::generate_content_key(&mut OsRng);
-        let payload = crypto::encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
-        let owner_wrapped =
-            crypto::wrap_key(&content_key, &[99u8; 32], OWNER_DID, &mut OsRng).unwrap();
-        let recipient_wrapped = crypto::wrap_key(
-            &content_key,
-            recipient_public,
-            "did:plc:recipient",
-            &mut OsRng,
-        )
-        .unwrap();
-        (payload, owner_wrapped, recipient_wrapped)
     }
 
     #[tokio::test]
@@ -230,20 +249,20 @@ mod tests {
         let recipient_private = recipient_secret.to_bytes();
 
         let plaintext = b"shared secret content";
-        let (payload, owner_wrapped, recipient_wrapped) =
-            encrypt_and_wrap(plaintext, recipient_public.as_bytes());
+        let fixture = encrypt_and_wrap(plaintext, recipient_public.as_bytes());
 
         let doc = make_document(
             "shared-file.txt",
-            payload.ciphertext.len(),
-            &payload.nonce,
-            owner_wrapped,
+            fixture.payload.ciphertext.len(),
+            &fixture.payload.nonce,
+            fixture.owner_wrapped,
+            &fixture.content_key,
         );
 
         let grant = Grant::new(
             DOC_URI.to_string(),
             "did:plc:recipient".to_string(),
-            recipient_wrapped,
+            fixture.recipient_wrapped,
             "2026-03-01T12:00:00Z".to_string(),
         );
 
@@ -251,7 +270,7 @@ mod tests {
         mock.enqueue(did_document_response());
         mock.enqueue(grant_record_response(&grant));
         mock.enqueue(record_response(&doc));
-        mock.enqueue(blob_response(&payload.ciphertext));
+        mock.enqueue(blob_response(&fixture.payload.ciphertext));
 
         let (name, decrypted) = download_from_grant(&mock, &recipient_private, GRANT_URI)
             .await

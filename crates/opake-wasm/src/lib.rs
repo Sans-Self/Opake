@@ -1,6 +1,8 @@
 use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
-use opake_core::crypto::{ContentKey, EncryptedPayload, OsRng, X25519PrivateKey, X25519PublicKey};
+use opake_core::crypto::{
+    ContentKey, DocumentMetadata, EncryptedPayload, OsRng, X25519PrivateKey, X25519PublicKey,
+};
 use opake_core::records::WrappedKey;
 use opake_core::storage::Identity;
 use serde::Serialize;
@@ -195,4 +197,53 @@ pub fn generate_ephemeral_keypair() -> Result<JsValue, JsError> {
         private_key: kp.private_key.to_vec(),
     };
     serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Metadata encryption exports
+// ---------------------------------------------------------------------------
+
+/// Encrypt a metadata JS object with a content key.
+///
+/// `metadata` must be a JS object matching `DocumentMetadata`
+/// (fields: name, mimeType?, size?, tags?, description?).
+/// Returns a JS object with `ciphertext` (Uint8Array) and `nonce` (Uint8Array).
+#[wasm_bindgen(js_name = encryptMetadata)]
+pub fn encrypt_metadata_js(key: &[u8], metadata: JsValue) -> Result<JsValue, JsError> {
+    let content_key = content_key_from_slice(key)?;
+    let metadata: DocumentMetadata =
+        serde_wasm_bindgen::from_value(metadata).map_err(|e| JsError::new(&e.to_string()))?;
+    let encrypted = opake_core::crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let ciphertext = encrypted
+        .ciphertext
+        .decode()
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let nonce = encrypted
+        .nonce
+        .decode()
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let dto = EncryptedPayloadDto { ciphertext, nonce };
+    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Decrypt encrypted metadata back to a JS object.
+///
+/// Returns a JS object matching `DocumentMetadata`.
+#[wasm_bindgen(js_name = decryptMetadata)]
+pub fn decrypt_metadata_js(
+    key: &[u8],
+    ciphertext: &[u8],
+    nonce: &[u8],
+) -> Result<JsValue, JsError> {
+    let content_key = content_key_from_slice(key)?;
+    let encrypted = opake_core::records::EncryptedMetadata {
+        ciphertext: opake_core::records::AtBytes::from_raw(ciphertext),
+        nonce: opake_core::records::AtBytes::from_raw(nonce),
+    };
+    let metadata = opake_core::crypto::decrypt_metadata(&content_key, &encrypted)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&metadata).map_err(|e| JsError::new(&e.to_string()))
 }
