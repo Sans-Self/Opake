@@ -126,8 +126,6 @@ async fn inbox_returns_grants() {
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:me".into(),
         document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
-        permissions: Some("read".into()),
-        note: Some("test file".into()),
         created_at: "2026-03-01T12:00:00Z".into(),
         indexed_at: "2026-03-01T12:00:01Z".into(),
     };
@@ -147,8 +145,6 @@ async fn inbox_returns_grants() {
         items[0]["documentUri"],
         "at://did:plc:owner/app.opake.document/3xyz"
     );
-    assert_eq!(items[0]["permissions"], "read");
-    assert_eq!(items[0]["note"], "test file");
 }
 
 #[tokio::test]
@@ -161,8 +157,6 @@ async fn inbox_pagination() {
             owner_did: "did:plc:owner".into(),
             recipient_did: "did:plc:me".into(),
             document_uri: format!("at://did:plc:owner/app.opake.document/{i}"),
-            permissions: None,
-            note: None,
             created_at: "2026-03-01T12:00:00Z".into(),
             indexed_at: format!("2026-03-01T12:00:0{i}Z"),
         };
@@ -199,7 +193,6 @@ async fn keyrings_returns_memberships() {
                 c,
                 "at://did:plc:owner/app.opake.keyring/3def",
                 "did:plc:owner",
-                "family-photos",
                 &["did:plc:me".into(), "did:plc:other".into()],
                 "2026-03-01T12:00:00Z",
             )
@@ -213,7 +206,6 @@ async fn keyrings_returns_memberships() {
     let items = json["keyrings"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["ownerDid"], "did:plc:owner");
-    assert_eq!(items[0]["name"], "family-photos");
 }
 
 #[tokio::test]
@@ -225,8 +217,6 @@ async fn health_omits_counts() {
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:me".into(),
         document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
-        permissions: None,
-        note: None,
         created_at: "2026-03-01T12:00:00Z".into(),
         indexed_at: "2026-03-01T12:00:01Z".into(),
     };

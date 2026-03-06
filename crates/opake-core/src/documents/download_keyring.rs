@@ -112,8 +112,8 @@ pub async fn download_from_keyring_member(
     }
     .ok_or_else(|| {
         Error::InvalidRecord(format!(
-            "DID ({member_did}) is not a member of keyring {:?} at rotation {doc_rotation}",
-            keyring.name,
+            "DID ({member_did}) is not a member of keyring {} at rotation {doc_rotation}",
+            kr_enc.keyring_ref.keyring,
         ))
     })?;
 

@@ -17,10 +17,7 @@ pub struct SharedCommand {
 fn format_short(entries: &[GrantEntry]) -> String {
     entries
         .iter()
-        .map(|e| {
-            let perms = e.permissions.as_deref().unwrap_or("—");
-            format!("{}\t{}\t{}", e.recipient, perms, e.uri)
-        })
+        .map(|e| format!("{}\t{}", e.recipient, e.uri))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -29,15 +26,9 @@ fn format_long(entries: &[GrantEntry]) -> String {
     entries
         .iter()
         .map(|e| {
-            let perms = e.permissions.as_deref().unwrap_or("—");
-            let note = e
-                .note
-                .as_deref()
-                .map(|n| format!("\n           note: {n}"))
-                .unwrap_or_default();
             format!(
-                "{:>10}  {}  {}\n           doc: {}\n           grant: {}{}",
-                perms, e.created_at, e.recipient, e.document, e.uri, note,
+                "  {}  {}\n           doc: {}\n           grant: {}",
+                e.created_at, e.recipient, e.document, e.uri,
             )
         })
         .collect::<Vec<_>>()
@@ -70,13 +61,24 @@ impl Execute for SharedCommand {
 mod tests {
     use super::*;
 
-    fn entry(recipient: &str, doc: &str, perms: Option<&str>, note: Option<&str>) -> GrantEntry {
+    fn dummy_encrypted_metadata() -> opake_core::records::EncryptedMetadata {
+        opake_core::records::EncryptedMetadata {
+            ciphertext: opake_core::records::AtBytes {
+                encoded: "AAAA".into(),
+            },
+            nonce: opake_core::records::AtBytes {
+                encoded: "BBBB".into(),
+            },
+        }
+    }
+
+    fn entry(recipient: &str, doc: &str) -> GrantEntry {
         GrantEntry {
             uri: format!("at://did:plc:owner/app.opake.grant/g1"),
             document: doc.into(),
             recipient: recipient.into(),
-            permissions: perms.map(|s| s.into()),
-            note: note.map(|s| s.into()),
+            encrypted_metadata: dummy_encrypted_metadata(),
+            expires_at: None,
             created_at: "2026-03-01T12:00:00Z".into(),
         }
     }
@@ -86,41 +88,21 @@ mod tests {
         let entries = vec![entry(
             "did:plc:bob",
             "at://did:plc:owner/app.opake.document/doc1",
-            Some("read"),
-            None,
         )];
         let output = format_short(&entries);
         assert!(output.contains("did:plc:bob"));
-        assert!(output.contains("read"));
         assert!(output.contains("grant/g1"));
     }
 
     #[test]
-    fn short_format_missing_permissions() {
-        let entries = vec![entry("did:plc:bob", "at://doc", None, None)];
-        let output = format_short(&entries);
-        assert!(output.contains('—'));
-    }
-
-    #[test]
-    fn long_format_with_note() {
+    fn long_format() {
         let entries = vec![entry(
             "did:plc:bob",
             "at://did:plc:owner/app.opake.document/doc1",
-            Some("read"),
-            Some("tax doc"),
         )];
         let output = format_long(&entries);
         assert!(output.contains("did:plc:bob"));
         assert!(output.contains("doc: at://"));
         assert!(output.contains("grant: at://"));
-        assert!(output.contains("note: tax doc"));
-    }
-
-    #[test]
-    fn long_format_no_note() {
-        let entries = vec![entry("did:plc:bob", "at://doc", Some("read"), None)];
-        let output = format_long(&entries);
-        assert!(!output.contains("note:"));
     }
 }

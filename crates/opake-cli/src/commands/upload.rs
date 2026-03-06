@@ -56,7 +56,11 @@ impl Execute for UploadCommand {
         let now = Utc::now().to_rfc3339();
 
         let uri = if let Some(keyring_name) = &self.keyring {
-            let entry = keyrings::resolve_keyring_uri(&mut client, keyring_name).await?;
+            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+            let private_key = id.private_key_bytes()?;
+            let entry =
+                keyrings::resolve_keyring_uri(&mut client, keyring_name, &id.did, &private_key)
+                    .await?;
             let at_uri = atproto::parse_at_uri(&entry.uri)?;
             let group_key = keyring_store::load_group_key(
                 &ctx.storage,

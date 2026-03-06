@@ -20,6 +20,10 @@ fn grant_event_json(operation: &str) -> String {
         "ciphertext": {{ "$bytes": "AAAA" }},
         "algo": "x25519-hkdf-a256kw"
       }},
+      "encryptedMetadata": {{
+        "ciphertext": {{ "$bytes": "AAAA" }},
+        "nonce": {{ "$bytes": "AAAAAAAAAAAAAAAA" }}
+      }},
       "createdAt": "2026-03-01T12:00:00Z"
     }},
     "cid": "bafyabc"
@@ -41,7 +45,6 @@ fn keyring_event_json(operation: &str) -> String {
     "rkey": "3def",
     "record": {{
       "opakeVersion": 1,
-      "name": "family-photos",
       "algo": "aes-256-gcm",
       "members": [
         {{
@@ -56,6 +59,10 @@ fn keyring_event_json(operation: &str) -> String {
         }}
       ],
       "rotation": 0,
+      "encryptedMetadata": {{
+        "ciphertext": {{ "$bytes": "AAAA" }},
+        "nonce": {{ "$bytes": "AAAAAAAAAAAAAAAA" }}
+      }},
       "createdAt": "2026-03-01T12:00:00Z"
     }},
     "cid": "bafydef"
@@ -135,12 +142,10 @@ fn parses_keyring_create() {
         IndexableEvent::UpsertKeyring {
             uri,
             owner_did,
-            name,
             member_dids,
         } => {
             assert_eq!(uri, "at://did:plc:owner123/app.opake.keyring/3def");
             assert_eq!(owner_did, "did:plc:owner123");
-            assert_eq!(name, "family-photos");
             assert_eq!(member_dids, vec!["did:plc:alice", "did:plc:bob"]);
         }
         other => panic!("expected UpsertKeyring, got {other:?}"),

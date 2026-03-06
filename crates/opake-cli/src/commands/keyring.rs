@@ -82,6 +82,7 @@ async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session
 
     let params = CreateKeyringParams {
         name: &args.name,
+        description: None,
         owner_did: &id.did,
         owner_public_key: &owner_pubkey,
         created_at: &Utc::now().to_rfc3339(),
@@ -98,6 +99,8 @@ async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session
 
 async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+    let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+    let private_key = id.private_key_bytes()?;
     let entries = keyrings::list_keyrings(&mut client).await?;
 
     if entries.is_empty() {
@@ -106,13 +109,16 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     }
 
     for entry in &entries {
+        let name = keyrings::decrypt_keyring_name(entry, &id.did, &private_key)
+            .unwrap_or_else(|| "<encrypted>".into());
+
         if args.long {
             println!(
                 "{}\t{} member(s)\trotation:{}\t{}",
-                entry.name, entry.member_count, entry.rotation, entry.uri,
+                name, entry.member_count, entry.rotation, entry.uri,
             );
         } else {
-            println!("{}\t{} member(s)", entry.name, entry.member_count);
+            println!("{}\t{} member(s)", name, entry.member_count);
         }
     }
 
@@ -122,8 +128,11 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
 
 async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<Session>> {
     let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+    let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+    let private_key = id.private_key_bytes()?;
 
-    let entry = keyrings::resolve_keyring_uri(&mut client, &args.keyring).await?;
+    let entry =
+        keyrings::resolve_keyring_uri(&mut client, &args.keyring, &id.did, &private_key).await?;
     let at_uri = atproto::parse_at_uri(&entry.uri)?;
 
     let group_key =
@@ -150,9 +159,15 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
 
 async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<Option<Session>> {
     let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+    let id = identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
+    let private_key = id.private_key_bytes()?;
 
-    let entry = keyrings::resolve_keyring_uri(&mut client, &args.keyring).await?;
+    let entry =
+        keyrings::resolve_keyring_uri(&mut client, &args.keyring, &id.did, &private_key).await?;
     let at_uri = atproto::parse_at_uri(&entry.uri)?;
+
+    let old_group_key =
+        keyring_store::load_group_key(&ctx.storage, &ctx.did, &at_uri.rkey, entry.rotation)?;
 
     // Resolve the member to remove — we need their DID
     let transport = ReqwestTransport::new();
@@ -160,9 +175,6 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
 
     if !args.yes {
-        let id =
-            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
-
         // Check they're actually a member before prompting
         let kr_record = client
             .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
@@ -226,6 +238,7 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
         &entry.uri,
         &resolved.did,
         &remaining_keys,
+        &old_group_key,
         &Utc::now().to_rfc3339(),
         &mut OsRng,
     )

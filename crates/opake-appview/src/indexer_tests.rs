@@ -18,8 +18,6 @@ fn indexes_grant_create() {
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:recipient".into(),
         document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
-        permissions: Some("read".into()),
-        note: Some("shared file".into()),
         created_at: "2026-03-01T12:00:00Z".into(),
     };
     process_event(&state, &event, 1709330400000000).unwrap();
@@ -30,7 +28,6 @@ fn indexes_grant_create() {
         .unwrap();
     assert_eq!(inbox.len(), 1);
     assert_eq!(inbox[0].owner_did, "did:plc:owner");
-    assert_eq!(inbox[0].note.as_deref(), Some("shared file"));
 }
 
 #[test]
@@ -43,8 +40,6 @@ fn indexes_grant_delete() {
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:recipient".into(),
         document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
-        permissions: None,
-        note: None,
         created_at: "2026-03-01T12:00:00Z".into(),
     };
     process_event(&state, &create, 1709330400000000).unwrap();
@@ -65,7 +60,6 @@ fn indexes_keyring_create() {
     let event = IndexableEvent::UpsertKeyring {
         uri: "at://did:plc:owner/app.opake.keyring/3def".into(),
         owner_did: "did:plc:owner".into(),
-        name: "family-photos".into(),
         member_dids: vec!["did:plc:alice".into(), "did:plc:bob".into()],
     };
     process_event(&state, &event, 1709330400000000).unwrap();
@@ -75,7 +69,6 @@ fn indexes_keyring_create() {
         .with_conn(|c| keyrings::list_keyrings_for_member(c, "did:plc:alice", 50, None))
         .unwrap();
     assert_eq!(alice.len(), 1);
-    assert_eq!(alice[0].keyring_name, "family-photos");
 
     let bob = state
         .db
@@ -92,7 +85,6 @@ fn indexes_keyring_update_replaces_members() {
     let create = IndexableEvent::UpsertKeyring {
         uri: uri.into(),
         owner_did: "did:plc:owner".into(),
-        name: "family-photos".into(),
         member_dids: vec!["did:plc:alice".into(), "did:plc:bob".into()],
     };
     process_event(&state, &create, 1709330400000000).unwrap();
@@ -101,7 +93,6 @@ fn indexes_keyring_update_replaces_members() {
     let update = IndexableEvent::UpsertKeyring {
         uri: uri.into(),
         owner_did: "did:plc:owner".into(),
-        name: "family-photos".into(),
         member_dids: vec!["did:plc:alice".into(), "did:plc:charlie".into()],
     };
     process_event(&state, &update, 1709330500000000).unwrap();
@@ -127,7 +118,6 @@ fn indexes_keyring_delete() {
     let create = IndexableEvent::UpsertKeyring {
         uri: uri.into(),
         owner_did: "did:plc:owner".into(),
-        name: "family-photos".into(),
         member_dids: vec!["did:plc:alice".into()],
     };
     process_event(&state, &create, 1709330400000000).unwrap();

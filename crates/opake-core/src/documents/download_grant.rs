@@ -110,7 +110,7 @@ mod tests {
         AtBytes, BlobRef, CidLink, DirectEncryption, EncryptedMetadata, Encryption,
         EncryptionEnvelope,
     };
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
     const OWNER_DID: &str = "did:plc:owner";
@@ -263,6 +263,7 @@ mod tests {
             DOC_URI.to_string(),
             "did:plc:recipient".to_string(),
             fixture.recipient_wrapped,
+            dummy_encrypted_metadata(),
             "2026-03-01T12:00:00Z".to_string(),
         );
 

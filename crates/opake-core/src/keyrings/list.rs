@@ -1,6 +1,6 @@
 use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::Keyring;
+use crate::records::{EncryptedMetadata, Keyring};
 
 use super::KEYRING_COLLECTION;
 
@@ -8,9 +8,10 @@ use super::KEYRING_COLLECTION;
 #[derive(Debug)]
 pub struct KeyringEntry {
     pub uri: String,
-    pub name: String,
     pub member_count: usize,
     pub rotation: u64,
+    pub encrypted_metadata: EncryptedMetadata,
+    pub members: Vec<crate::records::WrappedKey>,
     pub created_at: String,
 }
 
@@ -21,9 +22,10 @@ pub async fn list_keyrings(
     list_collection(client, KEYRING_COLLECTION, |uri, keyring: Keyring| {
         KeyringEntry {
             uri: uri.to_owned(),
-            name: keyring.name,
             member_count: keyring.members.len(),
             rotation: keyring.rotation,
+            encrypted_metadata: keyring.encrypted_metadata,
+            members: keyring.members,
             created_at: keyring.created_at,
         }
     })
@@ -35,7 +37,7 @@ mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
     use crate::records::{self, AtBytes, Keyring, WrappedKey};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
     const TEST_DID: &str = "did:plc:owner";
 
@@ -49,7 +51,7 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn dummy_keyring(name: &str, member_count: usize) -> Keyring {
+    fn dummy_keyring(member_count: usize) -> Keyring {
         let members: Vec<WrappedKey> = (0..member_count)
             .map(|i| WrappedKey {
                 did: format!("did:plc:member{i}"),
@@ -62,12 +64,11 @@ mod tests {
 
         Keyring {
             opake_version: records::SCHEMA_VERSION,
-            name: name.into(),
-            description: None,
             algo: "aes-256-gcm".into(),
             members,
             rotation: 0,
             key_history: Vec::new(),
+            encrypted_metadata: dummy_encrypted_metadata(),
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }
@@ -100,16 +101,12 @@ mod tests {
     #[tokio::test]
     async fn single_keyring() {
         let mock = MockTransport::new();
-        mock.enqueue(list_response(
-            &[("kr1", dummy_keyring("family-photos", 2))],
-            None,
-        ));
+        mock.enqueue(list_response(&[("kr1", dummy_keyring(2))], None));
 
         let mut client = mock_client(mock.clone());
         let entries = list_keyrings(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "family-photos");
         assert_eq!(entries[0].member_count, 2);
         assert_eq!(entries[0].rotation, 0);
         assert!(entries[0].uri.contains("kr1"));
@@ -122,10 +119,7 @@ mod tests {
     async fn multiple_keyrings() {
         let mock = MockTransport::new();
         mock.enqueue(list_response(
-            &[
-                ("kr1", dummy_keyring("photos", 1)),
-                ("kr2", dummy_keyring("documents", 3)),
-            ],
+            &[("kr1", dummy_keyring(1)), ("kr2", dummy_keyring(3))],
             None,
         ));
 
@@ -133,8 +127,7 @@ mod tests {
         let entries = list_keyrings(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "photos");
-        assert_eq!(entries[1].name, "documents");
+        assert_eq!(entries[0].member_count, 1);
         assert_eq!(entries[1].member_count, 3);
     }
 
@@ -152,17 +145,17 @@ mod tests {
     async fn paginates() {
         let mock = MockTransport::new();
         mock.enqueue(list_response(
-            &[("kr1", dummy_keyring("first", 1))],
+            &[("kr1", dummy_keyring(1))],
             Some("cursor-1"),
         ));
-        mock.enqueue(list_response(&[("kr2", dummy_keyring("second", 1))], None));
+        mock.enqueue(list_response(&[("kr2", dummy_keyring(1))], None));
 
         let mut client = mock_client(mock.clone());
         let entries = list_keyrings(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "first");
-        assert_eq!(entries[1].name, "second");
+        assert!(entries[0].uri.contains("kr1"));
+        assert!(entries[1].uri.contains("kr2"));
 
         let reqs = mock.requests();
         assert!(reqs[1].url.contains("cursor=cursor-1"));
@@ -170,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_future_version() {
-        let mut kr = dummy_keyring("future", 1);
+        let mut kr = dummy_keyring(1);
         kr.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();

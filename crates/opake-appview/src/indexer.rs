@@ -85,8 +85,6 @@ fn process_event(
             owner_did,
             recipient_did,
             document_uri,
-            permissions,
-            note,
             created_at,
         } => {
             let grant = IndexedGrant {
@@ -94,8 +92,6 @@ fn process_event(
                 owner_did: owner_did.clone(),
                 recipient_did: recipient_did.clone(),
                 document_uri: document_uri.clone(),
-                permissions: permissions.clone(),
-                note: note.clone(),
                 created_at: created_at.clone(),
                 indexed_at: now.clone(),
             };
@@ -111,10 +107,9 @@ fn process_event(
         IndexableEvent::UpsertKeyring {
             uri,
             owner_did,
-            name,
             member_dids,
         } => {
-            keyrings::upsert_keyring_members(conn, uri, owner_did, name, member_dids, &now)?;
+            keyrings::upsert_keyring_members(conn, uri, owner_did, member_dids, &now)?;
             log::debug!("indexed keyring: {uri} ({} members)", member_dids.len());
             Ok(())
         }

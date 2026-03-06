@@ -4,11 +4,11 @@ use crate::error::Result;
 
 /// A keyring membership row as stored in the index.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct IndexedKeyringMember {
     pub keyring_uri: String,
     pub member_did: String,
     pub owner_did: String,
-    pub keyring_name: String,
     pub indexed_at: String,
 }
 
@@ -19,7 +19,6 @@ pub fn upsert_keyring_members(
     conn: &Connection,
     keyring_uri: &str,
     owner_did: &str,
-    keyring_name: &str,
     member_dids: &[String],
     indexed_at: &str,
 ) -> Result<()> {
@@ -29,18 +28,12 @@ pub fn upsert_keyring_members(
     )?;
 
     let mut stmt = conn.prepare(
-        "INSERT INTO keyring_members (keyring_uri, member_did, owner_did, keyring_name, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO keyring_members (keyring_uri, member_did, owner_did, indexed_at)
+         VALUES (?1, ?2, ?3, ?4)",
     )?;
 
     for did in member_dids {
-        stmt.execute(params![
-            keyring_uri,
-            did,
-            owner_did,
-            keyring_name,
-            indexed_at
-        ])?;
+        stmt.execute(params![keyring_uri, did, owner_did, indexed_at])?;
     }
 
     Ok(())
@@ -68,7 +61,7 @@ pub fn list_keyrings_for_member(
     if let Some(cursor) = cursor {
         let (cursor_time, cursor_uri) = parse_cursor(cursor);
         let mut stmt = conn.prepare(
-            "SELECT keyring_uri, member_did, owner_did, keyring_name, indexed_at
+            "SELECT keyring_uri, member_did, owner_did, indexed_at
              FROM keyring_members
              WHERE member_did = ?1
                AND (indexed_at < ?2 OR (indexed_at = ?2 AND keyring_uri < ?3))
@@ -84,7 +77,7 @@ pub fn list_keyrings_for_member(
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT keyring_uri, member_did, owner_did, keyring_name, indexed_at
+            "SELECT keyring_uri, member_did, owner_did, indexed_at
              FROM keyring_members
              WHERE member_did = ?1
              ORDER BY indexed_at DESC, keyring_uri DESC
@@ -104,8 +97,7 @@ fn row_to_member(row: &rusqlite::Row) -> rusqlite::Result<IndexedKeyringMember> 
         keyring_uri: row.get(0)?,
         member_did: row.get(1)?,
         owner_did: row.get(2)?,
-        keyring_name: row.get(3)?,
-        indexed_at: row.get(4)?,
+        indexed_at: row.get(3)?,
     })
 }
 

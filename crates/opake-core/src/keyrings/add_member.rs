@@ -56,7 +56,7 @@ mod tests {
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
     use crate::records::{AtBytes, Keyring, WrappedKey, SCHEMA_VERSION};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
     const TEST_DID: &str = "did:plc:owner";
     const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
@@ -80,8 +80,6 @@ mod tests {
     fn existing_keyring(owner_did: &str) -> Keyring {
         Keyring {
             opake_version: SCHEMA_VERSION,
-            name: "test-keyring".into(),
-            description: None,
             algo: "aes-256-gcm".into(),
             members: vec![WrappedKey {
                 did: owner_did.into(),
@@ -92,6 +90,7 @@ mod tests {
             }],
             rotation: 0,
             key_history: Vec::new(),
+            encrypted_metadata: dummy_encrypted_metadata(),
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }

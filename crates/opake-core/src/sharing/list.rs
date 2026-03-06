@@ -1,6 +1,6 @@
 use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::Grant;
+use crate::records::{EncryptedMetadata, Grant};
 
 use super::GRANT_COLLECTION;
 
@@ -10,8 +10,8 @@ pub struct GrantEntry {
     pub uri: String,
     pub document: String,
     pub recipient: String,
-    pub permissions: Option<String>,
-    pub note: Option<String>,
+    pub encrypted_metadata: EncryptedMetadata,
+    pub expires_at: Option<String>,
     pub created_at: String,
 }
 
@@ -25,8 +25,8 @@ pub async fn list_grants(
         uri: uri.to_owned(),
         document: grant.document,
         recipient: grant.recipient,
-        permissions: grant.permissions,
-        note: grant.note,
+        encrypted_metadata: grant.encrypted_metadata,
+        expires_at: grant.expires_at,
         created_at: grant.created_at,
     })
     .await
@@ -37,7 +37,7 @@ mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
     use crate::records::{self, AtBytes, Grant, WrappedKey};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
     const TEST_DID: &str = "did:plc:owner";
 
@@ -52,22 +52,19 @@ mod tests {
     }
 
     fn dummy_grant(recipient: &str, doc_rkey: &str) -> Grant {
-        Grant {
-            permissions: Some("read".into()),
-            note: Some("here you go".into()),
-            ..Grant::new(
-                format!("at://{TEST_DID}/app.opake.document/{doc_rkey}"),
-                recipient.into(),
-                WrappedKey {
-                    did: recipient.into(),
-                    ciphertext: AtBytes {
-                        encoded: "AAAA".into(),
-                    },
-                    algo: "x25519-hkdf-a256kw".into(),
+        Grant::new(
+            format!("at://{TEST_DID}/app.opake.document/{doc_rkey}"),
+            recipient.into(),
+            WrappedKey {
+                did: recipient.into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
                 },
-                "2026-03-01T12:00:00Z".into(),
-            )
-        }
+                algo: "x25519-hkdf-a256kw".into(),
+            },
+            dummy_encrypted_metadata(),
+            "2026-03-01T12:00:00Z".into(),
+        )
     }
 
     fn list_grants_response(grants: &[(&str, Grant)], cursor: Option<&str>) -> HttpResponse {
@@ -105,8 +102,6 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].recipient, "did:plc:bob");
-        assert_eq!(entries[0].permissions.as_deref(), Some("read"));
-        assert_eq!(entries[0].note.as_deref(), Some("here you go"));
         assert!(entries[0].document.contains("doc1"));
         assert!(entries[0].uri.contains("g1"));
 

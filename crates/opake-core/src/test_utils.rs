@@ -5,6 +5,19 @@ use std::sync::{Arc, Mutex};
 
 use crate::client::{HttpRequest, HttpResponse, Transport};
 use crate::error::Error;
+use crate::records::{AtBytes, EncryptedMetadata};
+
+/// A no-op encrypted metadata value for tests that don't exercise decryption.
+pub fn dummy_encrypted_metadata() -> EncryptedMetadata {
+    EncryptedMetadata {
+        ciphertext: AtBytes {
+            encoded: "AAAA".into(),
+        },
+        nonce: AtBytes {
+            encoded: "BBBB".into(),
+        },
+    }
+}
 
 /// A test double for Transport that serves canned responses in FIFO order
 /// and captures every request for post-hoc assertion.

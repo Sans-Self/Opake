@@ -31,7 +31,8 @@ pub(super) fn resolve_document_name(
     doc: &Document,
     content_key: &ContentKey,
 ) -> Result<String, Error> {
-    let metadata = crypto::decrypt_metadata(content_key, &doc.encrypted_metadata)?;
+    let metadata: crypto::DocumentMetadata =
+        crypto::decrypt_metadata(content_key, &doc.encrypted_metadata)?;
     Ok(metadata.name)
 }
 

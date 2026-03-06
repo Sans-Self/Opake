@@ -2,7 +2,7 @@ use log::debug;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore, X25519PublicKey};
 use crate::error::Error;
 use crate::records::{self, KeyHistoryEntry, Keyring};
 
@@ -16,6 +16,9 @@ pub struct MemberKey<'a> {
 
 /// Remove a member from a keyring, rotate the group key, and re-wrap to
 /// remaining members.
+///
+/// `old_group_key` is needed to decrypt the existing encrypted metadata so it
+/// can be re-encrypted under the new group key.
 ///
 /// Returns `(new_group_key, new_rotation)` — the caller must store the key
 /// against the rotation number locally.
@@ -33,6 +36,7 @@ pub async fn remove_member(
     keyring_uri: &str,
     remove_did: &str,
     remaining_keys: &[MemberKey<'_>],
+    old_group_key: &ContentKey,
     modified_at: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(ContentKey, u64), Error> {
@@ -72,6 +76,11 @@ pub async fn remove_member(
         .map(|mk| (mk.did, mk.public_key))
         .collect();
     let (new_group_key, new_wrapped) = crypto::create_group_key(&did_keys, rng)?;
+
+    // Re-encrypt metadata: decrypt with old group key, encrypt with new one
+    let metadata: KeyringMetadata =
+        crypto::decrypt_metadata(old_group_key, &keyring.encrypted_metadata)?;
+    keyring.encrypted_metadata = crypto::encrypt_metadata(&new_group_key, &metadata, rng)?;
 
     keyring.members = new_wrapped;
     keyring.rotation += 1;

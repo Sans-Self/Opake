@@ -1,7 +1,7 @@
 use log::debug;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore, X25519PublicKey};
 use crate::error::Error;
 use crate::records::Keyring;
 
@@ -10,6 +10,7 @@ use super::KEYRING_COLLECTION;
 /// Everything needed to create a keyring record.
 pub struct CreateKeyringParams<'a> {
     pub name: &'a str,
+    pub description: Option<&'a str>,
     pub owner_did: &'a str,
     pub owner_public_key: &'a X25519PublicKey,
     pub created_at: &'a str,
@@ -28,9 +29,15 @@ pub async fn create_keyring(
     let members = [(params.owner_did, params.owner_public_key)];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, rng)?;
 
+    let metadata = KeyringMetadata {
+        name: params.name.to_string(),
+        description: params.description.map(String::from),
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, rng)?;
+
     let keyring = Keyring::new(
-        params.name.to_string(),
         wrapped_keys,
+        encrypted_metadata,
         params.created_at.to_string(),
     );
 
@@ -88,6 +95,7 @@ mod tests {
         let mut client = mock_client(mock.clone());
         let params = CreateKeyringParams {
             name: "family-photos",
+            description: None,
             owner_did: TEST_DID,
             owner_public_key: &pubkey,
             created_at: "2026-03-01T00:00:00Z",
@@ -108,7 +116,6 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["collection"], KEYRING_COLLECTION);
                 let record: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
-                assert_eq!(record.name, "family-photos");
                 assert_eq!(record.algo, "aes-256-gcm");
                 assert_eq!(record.rotation, 0);
                 assert_eq!(record.members.len(), 1);
@@ -135,6 +142,7 @@ mod tests {
         let mut client = mock_client(mock);
         let params = CreateKeyringParams {
             name: "broken",
+            description: None,
             owner_did: TEST_DID,
             owner_public_key: &pubkey,
             created_at: "2026-03-01T00:00:00Z",

@@ -1,7 +1,7 @@
 use log::debug;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, RngCore, X25519PublicKey};
 use crate::error::Error;
 use crate::records::Grant;
 
@@ -32,16 +32,19 @@ pub async fn create_grant(
         rng,
     )?;
 
-    let grant = Grant {
+    let metadata = GrantMetadata {
         permissions: Some(params.permissions.to_string()),
         note: params.note.map(|n| n.to_string()),
-        ..Grant::new(
-            params.document_uri.to_string(),
-            params.recipient_did.to_string(),
-            wrapped_key,
-            params.created_at.to_string(),
-        )
     };
+    let encrypted_metadata = crypto::encrypt_metadata(params.content_key, &metadata, rng)?;
+
+    let grant = Grant::new(
+        params.document_uri.to_string(),
+        params.recipient_did.to_string(),
+        wrapped_key,
+        encrypted_metadata,
+        params.created_at.to_string(),
+    );
 
     debug!("creating grant record");
     let record_ref = client.create_record(GRANT_COLLECTION, &grant).await?;
@@ -115,12 +118,13 @@ mod tests {
                 assert_eq!(v["collection"], GRANT_COLLECTION);
                 let record = &v["record"];
                 assert_eq!(record["recipient"], "did:plc:recipient");
-                assert_eq!(record["permissions"], "read");
-                assert_eq!(record["note"], "here you go");
                 assert_eq!(
                     record["document"],
                     "at://did:plc:owner/app.opake.document/doc1"
                 );
+                // encrypted metadata envelope is present
+                assert!(record["encryptedMetadata"]["ciphertext"]["$bytes"].is_string());
+                assert!(record["encryptedMetadata"]["nonce"]["$bytes"].is_string());
             }
             _ => panic!("expected JSON body"),
         }

@@ -22,10 +22,7 @@ pub struct InboxCommand {
 fn format_short(grants: &[InboxGrant]) -> String {
     grants
         .iter()
-        .map(|g| {
-            let perms = g.permissions.as_deref().unwrap_or("—");
-            format!("{}\t{}\t{}", g.owner_did, perms, g.uri)
-        })
+        .map(|g| format!("{}\t{}", g.owner_did, g.uri))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -34,15 +31,9 @@ fn format_long(grants: &[InboxGrant]) -> String {
     grants
         .iter()
         .map(|g| {
-            let perms = g.permissions.as_deref().unwrap_or("—");
-            let note = g
-                .note
-                .as_deref()
-                .map(|n| format!("\n           note: {n}"))
-                .unwrap_or_default();
             format!(
-                "{:>10}  {}  {}\n           doc: {}\n           grant: {}{}",
-                perms, g.created_at, g.owner_did, g.document_uri, g.uri, note,
+                "  {}  {}\n           doc: {}\n           grant: {}",
+                g.created_at, g.owner_did, g.document_uri, g.uri,
             )
         })
         .collect::<Vec<_>>()
@@ -83,59 +74,29 @@ impl Execute for InboxCommand {
 mod tests {
     use super::*;
 
-    fn grant(owner: &str, doc_suffix: &str, perms: Option<&str>, note: Option<&str>) -> InboxGrant {
+    fn grant(owner: &str, doc_suffix: &str) -> InboxGrant {
         InboxGrant {
             uri: "at://did:plc:owner/app.opake.grant/g1".into(),
             owner_did: owner.into(),
             document_uri: format!("at://did:plc:owner/app.opake.document/{doc_suffix}"),
-            permissions: perms.map(|s| s.into()),
-            note: note.map(|s| s.into()),
             created_at: "2026-03-01T12:00:00Z".into(),
         }
     }
 
     #[test]
     fn short_format() {
-        let grants = vec![grant("did:plc:alice", "doc1", Some("read"), None)];
+        let grants = vec![grant("did:plc:alice", "doc1")];
         let output = format_short(&grants);
         assert!(output.contains("did:plc:alice"));
-        assert!(output.contains("read"));
         assert!(output.contains("grant/g1"));
     }
 
     #[test]
-    fn short_format_missing_permissions() {
-        let grants = vec![grant("did:plc:alice", "doc1", None, None)];
-        let output = format_short(&grants);
-        assert!(output.contains('—'));
-    }
-
-    #[test]
-    fn long_format_with_note() {
-        let grants = vec![grant(
-            "did:plc:alice",
-            "doc1",
-            Some("read"),
-            Some("tax docs"),
-        )];
+    fn long_format() {
+        let grants = vec![grant("did:plc:alice", "doc1")];
         let output = format_long(&grants);
         assert!(output.contains("did:plc:alice"));
         assert!(output.contains("doc: at://"));
         assert!(output.contains("grant: at://"));
-        assert!(output.contains("note: tax docs"));
-    }
-
-    #[test]
-    fn long_format_no_note() {
-        let grants = vec![grant("did:plc:alice", "doc1", Some("read"), None)];
-        let output = format_long(&grants);
-        assert!(!output.contains("note:"));
-    }
-
-    #[test]
-    fn long_format_missing_permissions_shows_em_dash() {
-        let grants = vec![grant("did:plc:alice", "doc1", None, None)];
-        let output = format_long(&grants);
-        assert!(output.contains('—'));
     }
 }

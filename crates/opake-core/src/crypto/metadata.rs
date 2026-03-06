@@ -3,14 +3,17 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{ContentKey, CryptoRng, RngCore};
 use crate::error::Error;
 use crate::records::{AtBytes, EncryptedMetadata};
 
-/// The plaintext metadata that gets encrypted inside `encryptedMetadata`.
-/// Serialized to JSON before encryption.
+// ---------------------------------------------------------------------------
+// Metadata types — one per record kind
+// ---------------------------------------------------------------------------
+
+/// Plaintext document metadata encrypted inside `encryptedMetadata`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentMetadata {
@@ -25,13 +28,39 @@ pub struct DocumentMetadata {
     pub description: Option<String>,
 }
 
-/// Encrypt document metadata with the same content key used for the blob.
+/// Plaintext keyring metadata. Encrypted with the keyring's group key so only
+/// members can see the name/description.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyringMetadata {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Plaintext grant metadata. Encrypted with the document's content key so both
+/// grantor and recipient can read it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Generic encrypt / decrypt
+// ---------------------------------------------------------------------------
+
+/// Encrypt a metadata value with AES-256-GCM using a fresh nonce.
 ///
-/// Serializes the metadata to JSON, encrypts with AES-256-GCM using a fresh
-/// nonce, and returns the result as an `EncryptedMetadata` record field.
-pub fn encrypt_metadata(
+/// Works for any `Serialize` type — the value is JSON-serialized before
+/// encryption. Use the same symmetric key that protects the parent record
+/// (content key for documents/grants, group key for keyrings).
+pub fn encrypt_metadata<T: Serialize>(
     key: &ContentKey,
-    metadata: &DocumentMetadata,
+    metadata: &T,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<EncryptedMetadata, Error> {
     let plaintext = serde_json::to_vec(metadata)
@@ -53,11 +82,14 @@ pub fn encrypt_metadata(
     })
 }
 
-/// Decrypt an `EncryptedMetadata` payload back to `DocumentMetadata`.
-pub fn decrypt_metadata(
+/// Decrypt an `EncryptedMetadata` payload back to `T`.
+///
+/// Callers specify the expected type at the call site, e.g.
+/// `decrypt_metadata::<DocumentMetadata>(key, encrypted)`.
+pub fn decrypt_metadata<T: DeserializeOwned>(
     key: &ContentKey,
     encrypted: &EncryptedMetadata,
-) -> Result<DocumentMetadata, Error> {
+) -> Result<T, Error> {
     let ciphertext = encrypted
         .ciphertext
         .decode()

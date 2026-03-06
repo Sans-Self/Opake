@@ -4,7 +4,7 @@ use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
 use crate::records::{
     AtBytes, BlobRef, CidLink, EncryptedMetadata, KeyringEncryption, KeyringRef, WrappedKey,
 };
-use crate::test_utils::MockTransport;
+use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 const OWNER_DID: &str = "did:plc:owner";
@@ -142,11 +142,11 @@ fn keyring_document(fixture: &KeyringFixture) -> Document {
 
 fn keyring_record(fixture: &KeyringFixture) -> Keyring {
     Keyring::new(
-        "test-keyring".into(),
         vec![
             fixture.owner_wrapped_gk.clone(),
             fixture.member_wrapped_gk.clone(),
         ],
+        dummy_encrypted_metadata(),
         "2026-03-01T00:00:00Z".into(),
     )
 }

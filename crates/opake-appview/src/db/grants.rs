@@ -9,22 +9,18 @@ pub struct IndexedGrant {
     pub owner_did: String,
     pub recipient_did: String,
     pub document_uri: String,
-    pub permissions: Option<String>,
-    pub note: Option<String>,
     pub created_at: String,
     pub indexed_at: String,
 }
 
 pub fn upsert_grant(conn: &Connection, grant: &IndexedGrant) -> Result<()> {
     conn.execute(
-        "INSERT INTO grants (uri, owner_did, recipient_did, document_uri, permissions, note, created_at, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO grants (uri, owner_did, recipient_did, document_uri, created_at, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(uri) DO UPDATE SET
            owner_did = excluded.owner_did,
            recipient_did = excluded.recipient_did,
            document_uri = excluded.document_uri,
-           permissions = excluded.permissions,
-           note = excluded.note,
            created_at = excluded.created_at,
            indexed_at = excluded.indexed_at",
         params![
@@ -32,8 +28,6 @@ pub fn upsert_grant(conn: &Connection, grant: &IndexedGrant) -> Result<()> {
             grant.owner_did,
             grant.recipient_did,
             grant.document_uri,
-            grant.permissions,
-            grant.note,
             grant.created_at,
             grant.indexed_at,
         ],
@@ -59,7 +53,7 @@ pub fn list_inbox(
     if let Some(cursor) = cursor {
         let (cursor_time, cursor_uri) = parse_cursor(cursor);
         let mut stmt = conn.prepare(
-            "SELECT uri, owner_did, recipient_did, document_uri, permissions, note, created_at, indexed_at
+            "SELECT uri, owner_did, recipient_did, document_uri, created_at, indexed_at
              FROM grants
              WHERE recipient_did = ?1
                AND (indexed_at < ?2 OR (indexed_at = ?2 AND uri < ?3))
@@ -75,7 +69,7 @@ pub fn list_inbox(
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT uri, owner_did, recipient_did, document_uri, permissions, note, created_at, indexed_at
+            "SELECT uri, owner_did, recipient_did, document_uri, created_at, indexed_at
              FROM grants
              WHERE recipient_did = ?1
              ORDER BY indexed_at DESC, uri DESC
@@ -91,6 +85,7 @@ pub fn list_inbox(
 }
 
 /// List grants created by an owner DID, newest first.
+#[allow(dead_code)]
 pub fn list_grants_by_owner(
     conn: &Connection,
     owner_did: &str,
@@ -102,7 +97,7 @@ pub fn list_grants_by_owner(
     if let Some(cursor) = cursor {
         let (cursor_time, cursor_uri) = parse_cursor(cursor);
         let mut stmt = conn.prepare(
-            "SELECT uri, owner_did, recipient_did, document_uri, permissions, note, created_at, indexed_at
+            "SELECT uri, owner_did, recipient_did, document_uri, created_at, indexed_at
              FROM grants
              WHERE owner_did = ?1
                AND (indexed_at < ?2 OR (indexed_at = ?2 AND uri < ?3))
@@ -118,7 +113,7 @@ pub fn list_grants_by_owner(
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT uri, owner_did, recipient_did, document_uri, permissions, note, created_at, indexed_at
+            "SELECT uri, owner_did, recipient_did, document_uri, created_at, indexed_at
              FROM grants
              WHERE owner_did = ?1
              ORDER BY indexed_at DESC, uri DESC
@@ -139,10 +134,8 @@ fn row_to_grant(row: &rusqlite::Row) -> rusqlite::Result<IndexedGrant> {
         owner_did: row.get(1)?,
         recipient_did: row.get(2)?,
         document_uri: row.get(3)?,
-        permissions: row.get(4)?,
-        note: row.get(5)?,
-        created_at: row.get(6)?,
-        indexed_at: row.get(7)?,
+        created_at: row.get(4)?,
+        indexed_at: row.get(5)?,
     })
 }
 

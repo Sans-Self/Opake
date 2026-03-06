@@ -17,8 +17,6 @@ pub struct GrantItem {
     pub uri: String,
     pub owner_did: String,
     pub document_uri: String,
-    pub permissions: Option<String>,
-    pub note: Option<String>,
     pub created_at: String,
 }
 
@@ -28,8 +26,6 @@ impl From<&IndexedGrant> for GrantItem {
             uri: g.uri.clone(),
             owner_did: g.owner_did.clone(),
             document_uri: g.document_uri.clone(),
-            permissions: g.permissions.clone(),
-            note: g.note.clone(),
             created_at: g.created_at.clone(),
         }
     }
@@ -48,7 +44,6 @@ pub struct KeyringsResponse {
 pub struct KeyringItem {
     pub uri: String,
     pub owner_did: String,
-    pub name: String,
     pub indexed_at: String,
 }
 
@@ -57,7 +52,6 @@ impl From<&IndexedKeyringMember> for KeyringItem {
         Self {
             uri: m.keyring_uri.clone(),
             owner_did: m.owner_did.clone(),
-            name: m.keyring_name.clone(),
             indexed_at: m.indexed_at.clone(),
         }
     }

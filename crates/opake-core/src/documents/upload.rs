@@ -364,7 +364,8 @@ mod tests {
         let content_key = crypto::unwrap_key(&envelope.keys[0], &private_key).unwrap();
 
         // Decrypt metadata
-        let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata).unwrap();
+        let metadata: crypto::DocumentMetadata =
+            crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata).unwrap();
 
         assert_eq!(metadata.name, "report.pdf");
         assert_eq!(metadata.mime_type.as_deref(), Some("application/pdf"));

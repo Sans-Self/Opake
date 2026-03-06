@@ -31,8 +31,6 @@ pub enum IndexableEvent {
         owner_did: String,
         recipient_did: String,
         document_uri: String,
-        permissions: Option<String>,
-        note: Option<String>,
         created_at: String,
     },
     DeleteGrant {
@@ -41,7 +39,6 @@ pub enum IndexableEvent {
     UpsertKeyring {
         uri: String,
         owner_did: String,
-        name: String,
         member_dids: Vec<String>,
     },
     DeleteKeyring {
@@ -71,8 +68,6 @@ pub fn parse_event(raw: &str) -> Option<(IndexableEvent, i64)> {
                     owner_did: event.did,
                     recipient_did: grant.recipient,
                     document_uri: grant.document,
-                    permissions: grant.permissions,
-                    note: grant.note,
                     created_at: grant.created_at,
                 },
                 event.time_us,
@@ -88,7 +83,6 @@ pub fn parse_event(raw: &str) -> Option<(IndexableEvent, i64)> {
                 IndexableEvent::UpsertKeyring {
                     uri,
                     owner_did: event.did,
-                    name: keyring.name,
                     member_dids,
                 },
                 event.time_us,

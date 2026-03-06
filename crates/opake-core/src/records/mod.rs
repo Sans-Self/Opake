@@ -172,7 +172,6 @@ mod tests {
         // Verify they deserialize to an empty vec.
         let json = serde_json::json!({
             "opakeVersion": 1,
-            "name": "old-keyring",
             "algo": "aes-256-gcm",
             "members": [{
                 "did": "did:plc:test",
@@ -180,6 +179,10 @@ mod tests {
                 "algo": "x25519-hkdf-a256kw",
             }],
             "rotation": 0,
+            "encryptedMetadata": {
+                "ciphertext": { "$bytes": "AAAA" },
+                "nonce": { "$bytes": "AAAAAAAAAAAAAAAA" },
+            },
             "createdAt": "2026-03-01T00:00:00Z",
         });
 
@@ -190,7 +193,6 @@ mod tests {
     #[test]
     fn keyring_key_history_omitted_when_empty() {
         let keyring = Keyring::new(
-            "fresh".into(),
             vec![WrappedKey {
                 did: "did:plc:test".into(),
                 ciphertext: AtBytes {
@@ -198,6 +200,14 @@ mod tests {
                 },
                 algo: "x25519-hkdf-a256kw".into(),
             }],
+            EncryptedMetadata {
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                nonce: AtBytes {
+                    encoded: "BBBB".into(),
+                },
+            },
             "2026-03-01T00:00:00Z".into(),
         );
 

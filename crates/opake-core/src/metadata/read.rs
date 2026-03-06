@@ -38,7 +38,8 @@ pub async fn fetch_document_metadata(
 
     let content_key = unwrap_content_key(&doc, did, private_key, group_key)?;
 
-    let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
+    let metadata: DocumentMetadata =
+        crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
 
     Ok(DocumentMetadataResult {
         metadata,

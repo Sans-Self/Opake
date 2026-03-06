@@ -11,8 +11,6 @@ fn make_grant(uri: &str, recipient: &str, owner: &str, doc_uri: &str) -> Indexed
         owner_did: owner.into(),
         recipient_did: recipient.into(),
         document_uri: doc_uri.into(),
-        permissions: Some("read".into()),
-        note: None,
         created_at: "2026-03-01T12:00:00Z".into(),
         indexed_at: "2026-03-01T12:00:01Z".into(),
     }
@@ -49,14 +47,17 @@ fn grant_upsert_overwrites() {
     );
     db.with_conn(|c| grants::upsert_grant(c, &grant)).unwrap();
 
-    grant.note = Some("updated note".into());
+    grant.document_uri = "at://did:plc:owner/app.opake.document/updated".into();
     db.with_conn(|c| grants::upsert_grant(c, &grant)).unwrap();
 
     let inbox = db
         .with_conn(|c| grants::list_inbox(c, "did:plc:recipient", 50, None))
         .unwrap();
     assert_eq!(inbox.len(), 1);
-    assert_eq!(inbox[0].note.as_deref(), Some("updated note"));
+    assert_eq!(
+        inbox[0].document_uri,
+        "at://did:plc:owner/app.opake.document/updated"
+    );
 }
 
 #[test]
@@ -88,8 +89,6 @@ fn grant_pagination() {
             owner_did: "did:plc:owner".into(),
             recipient_did: "did:plc:me".into(),
             document_uri: format!("at://did:plc:owner/app.opake.document/{i}"),
-            permissions: None,
-            note: None,
             created_at: "2026-03-01T12:00:00Z".into(),
             indexed_at: format!("2026-03-01T12:00:0{i}Z"),
         };
@@ -123,7 +122,6 @@ fn keyring_upsert_and_query() {
             c,
             "at://did:plc:owner/app.opake.keyring/3def",
             "did:plc:owner",
-            "family-photos",
             &members,
             "2026-03-01T12:00:00Z",
         )
@@ -134,7 +132,6 @@ fn keyring_upsert_and_query() {
         .with_conn(|c| keyrings::list_keyrings_for_member(c, "did:plc:alice", 50, None))
         .unwrap();
     assert_eq!(alice_keyrings.len(), 1);
-    assert_eq!(alice_keyrings[0].keyring_name, "family-photos");
 
     let bob_keyrings = db
         .with_conn(|c| keyrings::list_keyrings_for_member(c, "did:plc:bob", 50, None))
@@ -159,7 +156,6 @@ fn keyring_update_replaces_members() {
             c,
             uri,
             "did:plc:owner",
-            "family-photos",
             &["did:plc:alice".into(), "did:plc:bob".into()],
             "2026-03-01T12:00:00Z",
         )
@@ -172,7 +168,6 @@ fn keyring_update_replaces_members() {
             c,
             uri,
             "did:plc:owner",
-            "family-photos",
             &["did:plc:alice".into(), "did:plc:charlie".into()],
             "2026-03-01T13:00:00Z",
         )
@@ -202,7 +197,6 @@ fn keyring_delete() {
             c,
             uri,
             "did:plc:owner",
-            "family-photos",
             &["did:plc:alice".into()],
             "2026-03-01T12:00:00Z",
         )

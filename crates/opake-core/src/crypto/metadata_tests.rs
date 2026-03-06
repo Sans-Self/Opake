@@ -17,7 +17,7 @@ fn roundtrip() {
     let metadata = sample_metadata();
 
     let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
-    let decrypted = decrypt_metadata(&key, &encrypted).unwrap();
+    let decrypted: DocumentMetadata = decrypt_metadata(&key, &encrypted).unwrap();
 
     assert_eq!(decrypted, metadata);
 }
@@ -29,7 +29,7 @@ fn wrong_key_fails() {
     let metadata = sample_metadata();
 
     let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
-    let err = decrypt_metadata(&wrong_key, &encrypted).unwrap_err();
+    let err = decrypt_metadata::<DocumentMetadata>(&wrong_key, &encrypted).unwrap_err();
 
     assert!(
         err.to_string().contains("aead"),
@@ -49,7 +49,7 @@ fn minimal_metadata() {
     };
 
     let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
-    let decrypted = decrypt_metadata(&key, &encrypted).unwrap();
+    let decrypted: DocumentMetadata = decrypt_metadata(&key, &encrypted).unwrap();
 
     assert_eq!(decrypted.name, "unnamed");
     assert!(decrypted.mime_type.is_none());
@@ -77,4 +77,67 @@ fn camel_case_serialization() {
 
     assert!(json.get("mimeType").is_some());
     assert!(json.get("mime_type").is_none());
+}
+
+#[test]
+fn keyring_metadata_roundtrip() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = KeyringMetadata {
+        name: "family-photos".into(),
+        description: Some("Photos from the holidays".into()),
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: KeyringMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert_eq!(decrypted.name, "family-photos");
+    assert_eq!(
+        decrypted.description.as_deref(),
+        Some("Photos from the holidays")
+    );
+}
+
+#[test]
+fn keyring_metadata_minimal() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = KeyringMetadata {
+        name: "bare".into(),
+        description: None,
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: KeyringMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert_eq!(decrypted.name, "bare");
+    assert!(decrypted.description.is_none());
+}
+
+#[test]
+fn grant_metadata_roundtrip() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = GrantMetadata {
+        permissions: Some("read".into()),
+        note: Some("shared for review".into()),
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: GrantMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert_eq!(decrypted.permissions.as_deref(), Some("read"));
+    assert_eq!(decrypted.note.as_deref(), Some("shared for review"));
+}
+
+#[test]
+fn grant_metadata_minimal() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = GrantMetadata {
+        permissions: None,
+        note: None,
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: GrantMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert!(decrypted.permissions.is_none());
+    assert!(decrypted.note.is_none());
 }

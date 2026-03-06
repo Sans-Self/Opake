@@ -1,8 +1,8 @@
 use super::*;
 use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
+use crate::crypto::{self, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
 use crate::records::{AtBytes, Keyring, WrappedKey};
-use crate::test_utils::MockTransport;
+use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
 const TEST_DID: &str = "did:plc:owner";
 const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
@@ -23,27 +23,38 @@ fn test_keypair() -> (X25519PublicKey, [u8; 32]) {
     (public.to_bytes(), secret.to_bytes())
 }
 
-fn two_member_keyring() -> Keyring {
-    Keyring::new(
-        "test-keyring".into(),
-        vec![
-            WrappedKey {
-                did: TEST_DID.into(),
-                ciphertext: AtBytes {
-                    encoded: "AAAA".into(),
-                },
-                algo: "x25519-hkdf-a256kw".into(),
+fn two_member_keyring() -> (Keyring, ContentKey) {
+    let members_keys = [
+        (TEST_DID, &test_keypair().0),
+        ("did:plc:bob", &test_keypair().0),
+    ];
+    // We need a real group key so remove_member can decrypt metadata
+    let group_key = crypto::generate_content_key(&mut OsRng);
+    let metadata = crypto::KeyringMetadata {
+        name: "test-keyring".into(),
+        description: None,
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, &mut OsRng).unwrap();
+
+    let members = vec![
+        WrappedKey {
+            did: TEST_DID.into(),
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
             },
-            WrappedKey {
-                did: "did:plc:bob".into(),
-                ciphertext: AtBytes {
-                    encoded: "BBBB".into(),
-                },
-                algo: "x25519-hkdf-a256kw".into(),
+            algo: "x25519-hkdf-a256kw".into(),
+        },
+        WrappedKey {
+            did: "did:plc:bob".into(),
+            ciphertext: AtBytes {
+                encoded: "BBBB".into(),
             },
-        ],
-        "2026-03-01T00:00:00Z".into(),
-    )
+            algo: "x25519-hkdf-a256kw".into(),
+        },
+    ];
+
+    let keyring = Keyring::new(members, encrypted_metadata, "2026-03-01T00:00:00Z".into());
+    (keyring, group_key)
 }
 
 fn get_record_response(keyring: &Keyring) -> HttpResponse {
@@ -73,7 +84,7 @@ fn put_record_response() -> HttpResponse {
 
 #[tokio::test]
 async fn happy_path_removes_and_rotates() {
-    let keyring = two_member_keyring();
+    let (keyring, old_group_key) = two_member_keyring();
     let (owner_pubkey, owner_privkey) = test_keypair();
 
     let mock = MockTransport::new();
@@ -91,6 +102,7 @@ async fn happy_path_removes_and_rotates() {
         KEYRING_URI,
         "did:plc:bob",
         &remaining,
+        &old_group_key,
         "2026-03-01T12:00:00Z",
         &mut OsRng,
     )
@@ -128,7 +140,7 @@ async fn happy_path_removes_and_rotates() {
 
 #[tokio::test]
 async fn rejects_nonexistent_member() {
-    let keyring = two_member_keyring();
+    let (keyring, old_group_key) = two_member_keyring();
     let (owner_pubkey, _) = test_keypair();
 
     let mock = MockTransport::new();
@@ -145,6 +157,7 @@ async fn rejects_nonexistent_member() {
         KEYRING_URI,
         "did:plc:nobody",
         &remaining,
+        &old_group_key,
         "2026-03-01T12:00:00Z",
         &mut OsRng,
     )

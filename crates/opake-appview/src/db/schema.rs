@@ -11,8 +11,6 @@ CREATE TABLE IF NOT EXISTS grants (
     owner_did TEXT NOT NULL,
     recipient_did TEXT NOT NULL,
     document_uri TEXT NOT NULL,
-    permissions TEXT,
-    note TEXT,
     created_at TEXT NOT NULL,
     indexed_at TEXT NOT NULL
 );
@@ -23,7 +21,6 @@ CREATE TABLE IF NOT EXISTS keyring_members (
     keyring_uri TEXT NOT NULL,
     member_did TEXT NOT NULL,
     owner_did TEXT NOT NULL,
-    keyring_name TEXT NOT NULL,
     indexed_at TEXT NOT NULL,
     PRIMARY KEY (keyring_uri, member_did)
 );

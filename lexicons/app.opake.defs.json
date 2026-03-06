@@ -77,7 +77,7 @@
 
     "encryptedMetadata": {
       "type": "object",
-      "description": "AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON object with the real document metadata (name, mimeType, size, tags, description). Encrypted with the same content key as the blob.",
+      "description": "AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON object with the real record metadata. Encrypted with the symmetric key that protects the parent record (content key for documents/grants, group key for keyrings).",
       "required": ["ciphertext", "nonce"],
       "properties": {
         "ciphertext": {

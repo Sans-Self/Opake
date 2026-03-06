@@ -25,22 +25,12 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "name", "algo", "members", "createdAt"],
+        "required": ["opakeVersion", "algo", "members", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
             "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "description": "Human-readable name for this keyring (e.g. 'family-photos', 'work-projects').",
-            "maxLength": 256
-          },
-          "description": {
-            "type": "string",
-            "description": "Optional description of this keyring's purpose.",
-            "maxLength": 1024
           },
           "algo": {
             "type": "string",
@@ -68,6 +58,11 @@
           "createdAt": {
             "type": "string",
             "format": "datetime"
+          },
+          "encryptedMetadata": {
+            "type": "ref",
+            "ref": "app.opake.defs#encryptedMetadata",
+            "description": "Encrypted keyring metadata (name, description). Encrypted with the group key so only members can read it."
           },
           "modifiedAt": {
             "type": "string",

@@ -76,7 +76,10 @@ pub fn decrypt_entry_name(
         }
     };
 
-    match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata) {
+    match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
+        &content_key,
+        &entry.encrypted_metadata,
+    ) {
         Ok(metadata) => metadata.name,
         Err(e) => {
             warn!("metadata decryption failed for {}: {e}", entry.uri);
@@ -103,7 +106,10 @@ pub fn decrypt_entry_in_place(
         }
     };
 
-    match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata) {
+    match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
+        &content_key,
+        &entry.encrypted_metadata,
+    ) {
         Ok(metadata) => {
             entry.name = metadata.name;
             entry.mime_type = metadata.mime_type;
