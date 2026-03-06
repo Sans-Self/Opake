@@ -50,7 +50,7 @@ pub async fn try_oauth_login(
     // Step 2: Bind loopback server to get the redirect URI
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://localhost:{port}/callback");
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
     debug!("loopback server on port {port}");
 
     // Step 3: Generate DPoP keypair and PKCE challenge
