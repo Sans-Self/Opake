@@ -6,7 +6,7 @@ use opake_core::resolve;
 
 use crate::commands::Execute;
 use crate::session::CommandContext;
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
 /// Resolve a user's DID and encryption public key

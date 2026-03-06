@@ -35,6 +35,38 @@ pub struct DidService {
 // Unauthenticated free functions
 // ---------------------------------------------------------------------------
 
+/// Resolve a handle to a DID via `GET https://{handle}/.well-known/atproto-did`.
+/// Unauthenticated — direct HTTP to the handle's domain. Response is plain text.
+pub async fn resolve_handle_wellknown(
+    transport: &impl Transport,
+    handle: &str,
+) -> Result<String, Error> {
+    debug!("resolving handle {} via .well-known/atproto-did", handle);
+
+    let response = transport
+        .send(HttpRequest {
+            method: HttpMethod::Get,
+            url: format!("https://{handle}/.well-known/atproto-did"),
+            headers: vec![],
+            body: None,
+        })
+        .await?;
+
+    check_response(&response)?;
+
+    let did = String::from_utf8(response.body)
+        .map_err(|e| Error::InvalidRecord(format!("invalid UTF-8 in .well-known response: {e}")))?;
+    let did = did.trim().to_string();
+
+    if !did.starts_with("did:") {
+        return Err(Error::InvalidRecord(format!(
+            ".well-known/atproto-did response is not a DID: {did}"
+        )));
+    }
+
+    Ok(did)
+}
+
 /// Resolve a handle to a DID via `com.atproto.identity.resolveHandle`.
 /// Unauthenticated — can be called against any PDS.
 pub async fn resolve_handle(

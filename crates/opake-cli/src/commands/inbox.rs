@@ -5,7 +5,7 @@ use opake_core::client::{fetch_inbox_all, InboxGrant, Session};
 use crate::commands::Execute;
 use crate::identity;
 use crate::session::CommandContext;
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
 /// List grants shared with you (via appview)

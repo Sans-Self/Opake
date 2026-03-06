@@ -7,8 +7,8 @@
 use log::debug;
 
 use crate::client::{
-    get_record_public, pds_from_did_document, resolve_did_document, resolve_handle, Transport,
-    XrpcClient,
+    get_record_public, pds_from_did_document, resolve_did_document, resolve_handle,
+    resolve_handle_wellknown, Transport, XrpcClient,
 };
 
 /// Public Bluesky API — used for handle resolution when no PDS is known yet.
@@ -47,8 +47,16 @@ pub async fn resolve_pds_for_login(
         debug!("input is already a DID: {}", handle_or_did);
         handle_or_did.to_string()
     } else {
-        debug!("resolving handle {} via public API", handle_or_did);
-        resolve_handle(transport, BSKY_PUBLIC_API, handle_or_did).await?
+        match resolve_handle_wellknown(transport, handle_or_did).await {
+            Ok(did) => {
+                debug!("resolved via .well-known: {}", did);
+                did
+            }
+            Err(_) => {
+                debug!(".well-known failed, falling back to public API");
+                resolve_handle(transport, BSKY_PUBLIC_API, handle_or_did).await?
+            }
+        }
     };
 
     debug!("fetching DID document for {}", did);
@@ -65,6 +73,26 @@ pub async fn resolve_pds_for_login(
     Ok((did, pds_url, handle))
 }
 
+/// Like `resolve_pds_for_login`, but tries DNS TXT resolution first.
+///
+/// DNS is the fastest path — a single `_atproto.{handle}` TXT lookup that
+/// skips the `.well-known` and `resolveHandle` HTTP round-trips entirely.
+/// Falls through to HTTP-based resolution on any DNS failure.
+#[cfg(feature = "dns")]
+pub async fn resolve_pds_for_login_with_dns(
+    transport: &impl Transport,
+    handle_or_did: &str,
+) -> Result<(String, String, Option<String>), Error> {
+    let identifier = if !handle_or_did.starts_with("did:") {
+        crate::client::resolve_handle_dns(handle_or_did)
+            .await
+            .unwrap_or_else(|| handle_or_did.to_string())
+    } else {
+        handle_or_did.to_string()
+    };
+    resolve_pds_for_login(transport, &identifier).await
+}
+
 /// Full resolution: input → DID → PDS → public key.
 ///
 /// If `input` starts with `did:`, it's used directly. Otherwise it's treated
@@ -79,8 +107,16 @@ pub async fn resolve_identity(
         debug!("input is already a DID: {}", input);
         input.to_string()
     } else {
-        debug!("resolving handle: {}", input);
-        resolve_handle(transport, caller_pds_url, input).await?
+        match resolve_handle_wellknown(transport, input).await {
+            Ok(did) => {
+                debug!("resolved via .well-known: {}", did);
+                did
+            }
+            Err(_) => {
+                debug!(".well-known failed, falling back to caller PDS");
+                resolve_handle(transport, caller_pds_url, input).await?
+            }
+        }
     };
 
     // Step 2: Fetch DID document
@@ -204,13 +240,25 @@ mod tests {
         entry.to_string()
     }
 
+    fn wellknown_404() -> HttpResponse {
+        HttpResponse {
+            status: 404,
+            headers: vec![],
+            body: b"Not Found".to_vec(),
+        }
+    }
+
     #[tokio::test]
-    async fn resolve_from_handle() {
+    async fn resolve_from_handle_via_wellknown() {
         let mock = MockTransport::new();
         let pubkey = [42u8; 32];
 
-        // 1. resolveHandle → DID
-        mock.enqueue(success(r#"{"did":"did:plc:target"}"#));
+        // 1. .well-known/atproto-did → DID (skips resolveHandle)
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: b"did:plc:target".to_vec(),
+        });
         // 2. DID document
         mock.enqueue(success(&did_document_json(
             "did:plc:target",
@@ -228,13 +276,46 @@ mod tests {
         assert_eq!(result.handle.as_deref(), Some("alice.test"));
         assert_eq!(result.pds_url, "https://pds.alice.example.com");
         assert_eq!(result.public_key, pubkey);
-        assert_eq!(result.algo, "x25519");
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 3);
-        assert!(reqs[0].url.contains("resolveHandle"));
-        assert!(reqs[1].url.contains("plc.directory"));
-        assert!(reqs[2].url.contains("pds.alice.example.com"));
+        assert!(reqs[0].url.contains(".well-known/atproto-did"));
+    }
+
+    #[tokio::test]
+    async fn resolve_from_handle_wellknown_fallback() {
+        let mock = MockTransport::new();
+        let pubkey = [42u8; 32];
+
+        // 1. .well-known → 404
+        mock.enqueue(wellknown_404());
+        // 2. resolveHandle → DID
+        mock.enqueue(success(r#"{"did":"did:plc:target"}"#));
+        // 3. DID document
+        mock.enqueue(success(&did_document_json(
+            "did:plc:target",
+            "alice.test",
+            "https://pds.alice.example.com",
+        )));
+        // 4. Public key record
+        mock.enqueue(success(&public_key_record_json(&pubkey)));
+
+        let result = resolve_identity(&mock, "https://pds.caller", "alice.test")
+            .await
+            .unwrap();
+
+        assert_eq!(result.did, "did:plc:target");
+        assert_eq!(result.handle.as_deref(), Some("alice.test"));
+        assert_eq!(result.pds_url, "https://pds.alice.example.com");
+        assert_eq!(result.public_key, pubkey);
+        assert_eq!(result.algo, "x25519");
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 4);
+        assert!(reqs[0].url.contains(".well-known/atproto-did"));
+        assert!(reqs[1].url.contains("resolveHandle"));
+        assert!(reqs[2].url.contains("plc.directory"));
+        assert!(reqs[3].url.contains("pds.alice.example.com"));
     }
 
     #[tokio::test]
@@ -342,11 +423,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn login_resolve_from_handle() {
+    async fn login_resolve_via_wellknown() {
         let mock = MockTransport::new();
 
-        // 1. resolveHandle via public API → DID
-        mock.enqueue(success(r#"{"did":"did:plc:alice"}"#));
+        // 1. .well-known → DID
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: b"did:plc:alice".to_vec(),
+        });
         // 2. DID document
         mock.enqueue(success(&did_document_json(
             "did:plc:alice",
@@ -364,9 +449,38 @@ mod tests {
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 2);
-        assert!(reqs[0].url.contains("resolveHandle"));
-        assert!(reqs[0].url.contains("public.api.bsky.app"));
-        assert!(reqs[1].url.contains("plc.directory"));
+        assert!(reqs[0].url.contains(".well-known/atproto-did"));
+    }
+
+    #[tokio::test]
+    async fn login_resolve_from_handle_wellknown_fallback() {
+        let mock = MockTransport::new();
+
+        // 1. .well-known → 404
+        mock.enqueue(wellknown_404());
+        // 2. resolveHandle via public API → DID
+        mock.enqueue(success(r#"{"did":"did:plc:alice"}"#));
+        // 3. DID document
+        mock.enqueue(success(&did_document_json(
+            "did:plc:alice",
+            "alice.bsky.social",
+            "https://morel.us-east.host.bsky.network",
+        )));
+
+        let (did, pds, handle) = resolve_pds_for_login(&mock, "alice.bsky.social")
+            .await
+            .unwrap();
+
+        assert_eq!(did, "did:plc:alice");
+        assert_eq!(pds, "https://morel.us-east.host.bsky.network");
+        assert_eq!(handle.as_deref(), Some("alice.bsky.social"));
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[0].url.contains(".well-known/atproto-did"));
+        assert!(reqs[1].url.contains("resolveHandle"));
+        assert!(reqs[1].url.contains("public.api.bsky.app"));
+        assert!(reqs[2].url.contains("plc.directory"));
     }
 
     #[tokio::test]
@@ -393,7 +507,9 @@ mod tests {
     async fn login_resolve_handle_not_found() {
         let mock = MockTransport::new();
 
-        // resolveHandle returns 400 (unknown handle)
+        // 1. .well-known → 404
+        mock.enqueue(wellknown_404());
+        // 2. resolveHandle returns 400 (unknown handle)
         mock.enqueue(HttpResponse {
             status: 400,
             headers: vec![],

@@ -12,7 +12,7 @@ use crate::commands::Execute;
 use crate::identity;
 use crate::keyring_store;
 use crate::session::{self, CommandContext};
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
 /// Download and decrypt a file

@@ -181,6 +181,17 @@ pub struct XrpcClient<T: Transport> {
     session_refreshed: bool,
 }
 
+#[cfg(feature = "reqwest-transport")]
+impl XrpcClient<super::ReqwestTransport> {
+    pub fn reqwest(base_url: String) -> Self {
+        Self::new(super::ReqwestTransport::new(), base_url)
+    }
+
+    pub fn reqwest_with_session(base_url: String, session: Session) -> Self {
+        Self::with_session(super::ReqwestTransport::new(), base_url, session)
+    }
+}
+
 impl<T: Transport> XrpcClient<T> {
     pub fn new(transport: T, base_url: String) -> Self {
         Self {

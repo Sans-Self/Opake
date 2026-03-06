@@ -10,7 +10,7 @@ use opake_core::sharing::{self, GrantParams};
 use crate::commands::Execute;
 use crate::identity;
 use crate::session::{self, CommandContext};
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
 /// Share a document with another user

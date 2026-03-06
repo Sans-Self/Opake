@@ -7,6 +7,9 @@ license.workspace = true
 
 [features]
 test-utils = []
+reqwest-transport = ["dep:reqwest"]
+dns = ["dep:hickory-resolver"]
+native = ["reqwest-transport", "dns"]
 
 [dependencies]
 opake-derive = { path = "../opake-derive" }
@@ -16,6 +19,9 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+reqwest = { workspace = true, optional = true }
+hickory-resolver = { version = "0.24", optional = true }
 
 aes-gcm = "0.10"
 p256 = { version = "0.13", features = ["ecdsa", "jwk"] }

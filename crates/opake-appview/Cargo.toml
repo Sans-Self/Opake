@@ -10,7 +10,7 @@ name = "opake-appview"
 path = "src/main.rs"
 
 [dependencies]
-opake-core = { path = "../opake-core" }
+opake-core = { path = "../opake-core", features = ["native"] }
 axum = "0.8"
 base64.workspace = true
 chrono.workspace = true

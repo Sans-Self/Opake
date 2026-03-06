@@ -4,7 +4,6 @@ mod identity;
 mod keyring_store;
 mod oauth;
 mod session;
-mod transport;
 pub mod utils;
 
 use clap::{Parser, Subcommand};

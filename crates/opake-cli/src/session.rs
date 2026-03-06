@@ -2,7 +2,7 @@ use log::info;
 use opake_core::client::{Session, XrpcClient};
 
 use crate::config::{resolve_handle_or_did, FileStorage};
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 /// Resolved account context passed to every command.
 #[derive(Debug)]

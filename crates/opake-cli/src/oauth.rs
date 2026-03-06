@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 
 use crate::commands::login::ensure_identity_and_publish;
 use crate::config::{AccountConfig, FileStorage};
-use crate::transport::ReqwestTransport;
+use opake_core::client::ReqwestTransport;
 
 /// Attempt a full OAuth login flow. Returns `Err` if the PDS doesn't support
 /// OAuth discovery, so the caller can fall back to password auth.

@@ -13,6 +13,64 @@ fn success_response(body: &str) -> HttpResponse {
     response(200, body)
 }
 
+// -- resolve_handle_wellknown --
+
+#[tokio::test]
+async fn resolve_wellknown_happy_path() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"did:plc:abc123".to_vec(),
+    });
+
+    let did = resolve_handle_wellknown(&mock, "alice.test").await.unwrap();
+    assert_eq!(did, "did:plc:abc123");
+
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].url, "https://alice.test/.well-known/atproto-did");
+}
+
+#[tokio::test]
+async fn resolve_wellknown_trims_whitespace() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"  did:plc:abc123\n".to_vec(),
+    });
+
+    let did = resolve_handle_wellknown(&mock, "alice.test").await.unwrap();
+    assert_eq!(did, "did:plc:abc123");
+}
+
+#[tokio::test]
+async fn resolve_wellknown_rejects_non_did() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: b"not-a-did".to_vec(),
+    });
+
+    let err = resolve_handle_wellknown(&mock, "alice.test")
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not a DID"));
+}
+
+#[tokio::test]
+async fn resolve_wellknown_404() {
+    let mock = MockTransport::new();
+    mock.enqueue(response(404, "Not Found"));
+
+    let err = resolve_handle_wellknown(&mock, "noserver.test")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::NotFound(_)));
+}
+
 // -- resolve_handle --
 
 #[tokio::test]

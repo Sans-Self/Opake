@@ -1,16 +1,14 @@
+use crate::config::{AccountConfig, FileStorage};
+use crate::identity;
+use crate::utils::prefixed_get_env;
 use anyhow::Result;
 use chrono::Utc;
 use clap::Args;
 use log::debug;
+use opake_core::client::ReqwestTransport;
 use opake_core::client::Transport;
 use opake_core::client::{Session, XrpcClient};
 use opake_core::crypto::OsRng;
-use opake_core::resolve::resolve_pds_for_login;
-
-use crate::config::{AccountConfig, FileStorage};
-use crate::identity;
-use crate::transport::ReqwestTransport;
-use crate::utils::prefixed_get_env;
 
 /// Resolve password from env var or a fallback function (e.g. stdin prompt).
 pub fn resolve_password(
@@ -66,11 +64,14 @@ impl LoginCommand {
             None => {
                 println!("Resolving PDS for {}...", self.identifier);
                 let transport = ReqwestTransport::new();
-                let (did, pds, handle) = resolve_pds_for_login(&transport, &self.identifier)
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!("failed to resolve PDS for '{}': {e}", self.identifier)
-                    })?;
+                let (did, pds, handle) = opake_core::resolve::resolve_pds_for_login_with_dns(
+                    &transport,
+                    &self.identifier,
+                )
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("failed to resolve PDS for '{}': {e}", self.identifier)
+                })?;
                 debug!("resolved: did={did}, pds={pds}, handle={handle:?}");
                 println!("Found PDS: {pds}");
                 (pds, did, handle)

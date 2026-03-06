@@ -1,7 +1,7 @@
 // reqwest-based Transport implementation for native (non-WASM) targets.
 
-use opake_core::client::{HttpMethod, HttpRequest, HttpResponse, RequestBody, Transport};
-use opake_core::error::Error;
+use crate::client::{HttpMethod, HttpRequest, HttpResponse, RequestBody, Transport};
+use crate::error::Error;
 
 pub struct ReqwestTransport {
     http: reqwest::Client,
@@ -12,6 +12,12 @@ impl ReqwestTransport {
         Self {
             http: reqwest::Client::new(),
         }
+    }
+}
+
+impl Default for ReqwestTransport {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
