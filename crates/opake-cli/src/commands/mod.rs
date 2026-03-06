@@ -8,6 +8,7 @@ pub mod logout;
 pub mod ls;
 pub mod mkdir;
 pub mod mv;
+pub mod pair;
 pub mod resolve;
 pub mod revoke;
 pub mod rm;

@@ -20,6 +20,8 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.cloud.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.cloud.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
 | `app.opake.cloud.grant` | record | A share grant — gives a DID access to a specific document's key |
+| `app.opake.cloud.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
+| `app.opake.cloud.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
 
 ## Flow: Sharing a file with another DID
 
@@ -84,5 +86,47 @@ sequenceDiagram
 ```
 
 Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Removing a member archives the old rotation's member entries into `keyHistory`, then rotates GK and re-wraps to the remaining members — per-document content keys and blobs stay untouched. The history lets remaining members decrypt pre-rotation documents even on new devices.
+
+## Flow: Device-to-device identity pairing
+
+```mermaid
+sequenceDiagram
+    participant DevB as Device B (new)
+    participant PDS
+    participant DevA as Device A (existing)
+
+    Note over DevB,PDS: 1. New device creates pair request
+    DevB->>DevB: Generate ephemeral X25519 keypair
+    DevB->>PDS: createRecord(pairRequest, { ephemeralKey })
+    DevB->>DevB: Display key fingerprint
+    DevB->>DevB: Poll for pairResponse...
+
+    Note over DevA,PDS: 2. Existing device approves
+    DevA->>PDS: listRecords(pairRequest)
+    PDS-->>DevA: Pending requests with fingerprints
+    DevA->>DevA: User confirms matching fingerprint
+
+    Note over DevA,PDS: 3. Existing device sends identity
+    DevA->>DevA: Generate content key K
+    DevA->>DevA: Serialize identity → JSON
+    DevA->>DevA: Encrypt identity with K (AES-256-GCM)
+    DevA->>DevA: Wrap K to ephemeral pubkey (x25519-hkdf-a256kw)
+    DevA->>PDS: createRecord(pairResponse, { wrappedKey, ciphertext })
+
+    Note over DevB,PDS: 4. New device receives identity
+    DevB->>PDS: listRecords(pairResponse)
+    PDS-->>DevB: Matching response
+    DevB->>DevB: Unwrap K with ephemeral private key
+    DevB->>DevB: Decrypt identity JSON
+    DevB->>PDS: getRecord(publicKey/self)
+    DevB->>DevB: Verify public key matches published key
+    DevB->>DevB: Save identity.json
+
+    Note over DevB,PDS: 5. Cleanup
+    DevB->>PDS: deleteRecord(pairRequest)
+    DevB->>PDS: deleteRecord(pairResponse)
+```
+
+Both devices are authenticated to the same DID. The PDS is just a relay — the encryption is the access control. Ephemeral key fingerprints are displayed for visual SAS comparison.
 
 For detailed sequence diagrams of every CLI operation, see [docs/flows/](../docs/flows/).

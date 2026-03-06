@@ -169,3 +169,24 @@ pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {
     let identity = Identity::generate(did, &mut OsRng);
     serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
 }
+
+// ---------------------------------------------------------------------------
+// Ephemeral keypair (for device pairing)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EphemeralKeypairDto {
+    public_key: Vec<u8>,
+    private_key: Vec<u8>,
+}
+
+#[wasm_bindgen(js_name = generateEphemeralKeypair)]
+pub fn generate_ephemeral_keypair() -> Result<JsValue, JsError> {
+    let kp = opake_core::crypto::generate_ephemeral_keypair(&mut OsRng);
+    let dto = EphemeralKeypairDto {
+        public_key: kp.public_key.to_vec(),
+        private_key: kp.private_key.to_vec(),
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+}

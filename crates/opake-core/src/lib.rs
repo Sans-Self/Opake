@@ -25,6 +25,7 @@ pub mod directories;
 pub mod documents;
 pub mod error;
 pub mod keyrings;
+pub mod pairing;
 pub mod paths;
 pub mod records;
 pub mod resolve;

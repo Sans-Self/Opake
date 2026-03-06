@@ -111,6 +111,12 @@ crates/
         create.rs      create_grant()
         list.rs        list_grants()
         revoke.rs      revoke_grant()
+      pairing/
+        mod.rs         Re-exports
+        request.rs     create_pair_request() — write ephemeral key to PDS
+        respond.rs     respond_to_pair_request() — encrypt + wrap identity
+        receive.rs     receive_pair_response() — decrypt + verify identity
+        cleanup.rs     cleanup_pair_records() — delete request + response
 
   opake-cli/           CLI binary wrapping opake-core
     src/
@@ -134,6 +140,7 @@ crates/
         revoke.rs      Grant deletion
         shared.rs      List created grants
         keyring.rs     Keyring CRUD (create, ls, add-member, remove-member)
+        pair.rs        Device pairing (request, approve)
         accounts.rs    List accounts
         logout.rs      Remove account
         set_default.rs Switch default account
@@ -359,6 +366,38 @@ Storage layout:
 Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring file holds an array of `{ rotation, group_key }` entries so that keys from previous rotations remain available for decrypting older documents. Legacy files (single `group_key` without rotation) are auto-migrated to rotation 0 on read.
 
 The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.
+
+## Device Pairing
+
+When a user logs in on a new device, they need their X25519 identity keypair from the existing device. The PDS acts as a relay — both devices are authenticated to the same DID and can read/write records in the same repo.
+
+The protocol uses ephemeral X25519 Diffie-Hellman to establish a shared secret. The identity payload is encrypted with AES-256-GCM and the content key is wrapped to the ephemeral public key using the same `x25519-hkdf-a256kw` scheme as document encryption. Both `pairRequest` and `pairResponse` records are deleted after a successful transfer.
+
+```
+Device B (new)                    PDS                    Device A (existing)
+     |                             |                              |
+     |-- createRecord pairReq --->|                              |
+     |   { ephemeralKey }          |                              |
+     |                             |<--- listRecords pairReq ----|
+     |                             |--- return pairRequest ------>|
+     |                             |                              |
+     |                             |          DH + encrypt identity
+     |                             |                              |
+     |                             |<--- createRecord pairResp --|
+     |-- listRecords pairResp --->|   { wrappedKey, ciphertext } |
+     |<-- return pairResponse ----|                              |
+     |                             |                              |
+     |  unwrap + decrypt identity  |                              |
+     |  verify pubkey matches      |                              |
+     |  save identity.json         |                              |
+     |                             |                              |
+     |-- deleteRecord pairReq --->|                              |
+     |-- deleteRecord pairResp -->|                              |
+```
+
+Login on a second device detects an existing `publicKey/self` record and skips identity generation, directing the user to `opake pair request` instead. This prevents accidental key overwrites.
+
+See [docs/flows/pairing.md](flows/pairing.md) for the full sequence diagrams.
 
 ## File Permissions
 

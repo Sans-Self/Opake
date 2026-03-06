@@ -33,3 +33,9 @@ export interface PkceChallenge {
   verifier: string;
   challenge: string;
 }
+
+// Mirrors: opake-core EphemeralKeypair (crypto/mod.rs)
+export interface EphemeralKeypair {
+  publicKey: Uint8Array;
+  privateKey: Uint8Array;
+}

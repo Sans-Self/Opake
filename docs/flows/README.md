@@ -11,4 +11,5 @@ Sequence diagrams for every CLI operation. All crypto happens client-side — th
 | [crypto.md](crypto.md) | Key wrapping, content encryption primitives |
 | [keyrings.md](keyrings.md) | Create, list, add/remove member, keyring upload/download |
 | [revisions.md](revisions.md) | Collaborative editing via revision records (planned) |
+| [pairing.md](pairing.md) | Device-to-device identity transfer via PDS relay |
 | [multi-device.md](multi-device.md) | Seed phrase identity, BIP-39 derivation (planned) |

@@ -1,5 +1,7 @@
 # Multi-Device Identity (Planned)
 
+> **Current MVP:** Device-to-device pairing transfers the existing identity via the PDS as a relay. See [pairing.md](pairing.md) for the implemented protocol. Seed phrase derivation (below) is a future replacement that eliminates the need for an existing device.
+
 Deterministic keypair derivation from a BIP-39 mnemonic. Same seed on any device produces the same X25519 keypair — no key sync protocol needed. Replaces the current plaintext keypair file at `~/.config/opake/accounts/<did>/identity.json`.
 
 ## Keypair Derivation

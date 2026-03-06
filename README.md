@@ -10,6 +10,16 @@ Your data is opaque to everyone without the key. That's the point.
 
 [Issue Tracker](https://issues.opake.app) · [Architecture](docs/ARCHITECTURE.md) · [Lexicons](lexicons/README.md)
 
+## Install
+
+Requires Rust 1.75+.
+
+```sh
+cargo install --path crates/opake-cli
+```
+
+This puts `opake` in your `~/.cargo/bin/`.
+
 ## How It Works
 
 ```
@@ -117,6 +127,10 @@ opake upload photo.jpg --keyring family-photos
 opake download --keyring-member at://did:plc:abc/app.opake.cloud.document/tid456
 opake keyring remove-member family-photos alice.example.com
 
+# transfer encryption identity to a new device
+opake pair request              # on the NEW device (polls for approval)
+opake pair approve              # on the EXISTING device (select + approve)
+
 # remove an account (defaults to only account if just one)
 opake logout
 opake logout bob.other.com
@@ -163,6 +177,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate
 - [x] Keyring-based group sharing
 - [ ] Web UI — cabinet file browser (in progress, auth stubbed)
 - [x] AT Protocol OAuth (DPoP) for CLI and browser authentication
+- [x] Device-to-device identity pairing via PDS relay
 - [ ] Seed phrase key derivation for multi-device
 
 ## Development

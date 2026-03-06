@@ -50,6 +50,7 @@ enum Command {
     Shared(commands::shared::SharedCommand),
     Revoke(commands::revoke::RevokeCommand),
     Keyring(commands::keyring::KeyringCommand),
+    Pair(commands::pair::PairCommand),
     Tree(commands::tree::TreeCommand),
 }
 
@@ -116,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Shared(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Revoke(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
     }
 

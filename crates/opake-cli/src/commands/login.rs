@@ -118,6 +118,25 @@ impl LoginCommand {
 
         storage.save_config_anyhow(&cfg)?;
 
+        let has_local_identity = identity::load_identity(storage, session.did()).is_ok();
+        let has_published_key = client
+            .get_record(
+                session.did(),
+                opake_core::records::PUBLIC_KEY_COLLECTION,
+                opake_core::records::PUBLIC_KEY_RKEY,
+            )
+            .await
+            .is_ok();
+
+        if !has_local_identity && has_published_key {
+            // Existing identity on another device — don't generate a new one.
+            println!("Logged in as {}", session.handle());
+            println!();
+            println!("This account has an existing encryption identity.");
+            println!("Run `opake pair request` to transfer it from another device.");
+            return Ok(Some(session));
+        }
+
         let (identity, generated) =
             identity::ensure_identity(storage, session.did(), &mut opake_core::crypto::OsRng)?;
 

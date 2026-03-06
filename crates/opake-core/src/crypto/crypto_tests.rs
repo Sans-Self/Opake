@@ -165,6 +165,40 @@ fn create_group_key_wraps_to_all_members() {
     assert_eq!(group_key.0, unwrapped_b.0);
 }
 
+// -- Ephemeral keypair --
+
+#[test]
+fn ephemeral_keypair_has_correct_key_lengths() {
+    let kp = generate_ephemeral_keypair(&mut OsRng);
+    assert_eq!(kp.public_key.len(), 32);
+    assert_eq!(kp.private_key.len(), 32);
+}
+
+#[test]
+fn ephemeral_keypair_unique_each_time() {
+    let a = generate_ephemeral_keypair(&mut OsRng);
+    let b = generate_ephemeral_keypair(&mut OsRng);
+    assert_ne!(a.public_key, b.public_key);
+    assert_ne!(a.private_key, b.private_key);
+}
+
+#[test]
+fn ephemeral_keypair_compatible_with_wrap_unwrap() {
+    let ephemeral = generate_ephemeral_keypair(&mut OsRng);
+    let content_key = generate_content_key(&mut OsRng);
+
+    let wrapped = wrap_key(
+        &content_key,
+        &ephemeral.public_key,
+        "did:plc:ephemeral",
+        &mut OsRng,
+    )
+    .unwrap();
+    let unwrapped = unwrap_key(&wrapped, &ephemeral.private_key).unwrap();
+
+    assert_eq!(content_key.0, unwrapped.0);
+}
+
 // -- Keyring wrapping (symmetric AES-KW) --
 
 #[test]

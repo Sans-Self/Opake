@@ -12,8 +12,9 @@ import init, {
   createDpopProof as wasmCreateDpopProof,
   generatePkce as wasmGeneratePkce,
   generateIdentity as wasmGenerateIdentity,
+  generateEphemeralKeypair as wasmGenerateEphemeralKeypair,
 } from "@/wasm/opake-wasm/opake";
-import type { EncryptedPayload, WrappedKey, DpopKeyPair, PkceChallenge } from "@/lib/crypto-types";
+import type { EncryptedPayload, WrappedKey, DpopKeyPair, PkceChallenge, EphemeralKeypair } from "@/lib/crypto-types";
 import type { Identity } from "@/lib/storage-types";
 
 await init();
@@ -99,6 +100,10 @@ const cryptoApi = {
 
   generateIdentity(did: string): Identity {
     return wasmGenerateIdentity(did) as Identity;
+  },
+
+  generateEphemeralKeypair(): EphemeralKeypair {
+    return wasmGenerateEphemeralKeypair() as EphemeralKeypair;
   },
 };
 

@@ -212,6 +212,25 @@ pub async fn try_oauth_login(
         session.clone(),
     );
 
+    let has_local_identity = identity::load_identity(storage, &did).is_ok();
+    let has_published_key = client
+        .get_record(
+            &did,
+            opake_core::records::PUBLIC_KEY_COLLECTION,
+            opake_core::records::PUBLIC_KEY_RKEY,
+        )
+        .await
+        .is_ok();
+
+    if !has_local_identity && has_published_key {
+        // Existing identity on another device — don't generate a new one.
+        println!("Logged in as {handle} (OAuth)");
+        println!();
+        println!("This account has an existing encryption identity.");
+        println!("Run `opake pair request` to transfer it from another device.");
+        return Ok(session);
+    }
+
     let (identity, generated) = identity::ensure_identity(storage, &did, &mut OsRng)?;
     if generated {
         println!("Generated new encryption keypair");

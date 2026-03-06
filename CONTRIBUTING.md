@@ -26,6 +26,7 @@ opake-core      platform-agnostic library (compiles to WASM)
                 - encryption/decryption (AES-256-GCM, x25519 key wrapping)
                 - XRPC client with automatic token refresh
                 - document operations (upload, download, list, delete, resolve)
+                - device pairing (ephemeral DH key exchange, identity transfer)
                 - AT Protocol record types and lexicon constants
                 - Storage trait + config/identity/session types (storage.rs)
                 - shared config path resolution (paths.rs)

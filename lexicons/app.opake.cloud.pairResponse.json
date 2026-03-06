@@ -1,0 +1,52 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.cloud.pairResponse",
+  "description": "A device pairing response. Created by the existing device after approving a pairing request. Contains the encryption identity encrypted to the requesting device's ephemeral key via DH + HKDF + AES-KW + AES-256-GCM.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["version", "request", "wrappedKey", "ciphertext", "nonce", "algo", "createdAt"],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Schema version for forward compatibility."
+          },
+          "request": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT URI of the pairRequest record this responds to."
+          },
+          "wrappedKey": {
+            "type": "ref",
+            "ref": "app.opake.cloud.defs#wrappedKey",
+            "description": "Content encryption key wrapped to the ephemeral key from the pair request."
+          },
+          "ciphertext": {
+            "type": "bytes",
+            "maxLength": 4096,
+            "description": "The serialized identity JSON, encrypted with AES-256-GCM using the content key."
+          },
+          "nonce": {
+            "type": "bytes",
+            "maxLength": 24,
+            "description": "Nonce/IV for the AES-256-GCM encryption."
+          },
+          "algo": {
+            "type": "string",
+            "knownValues": ["aes-256-gcm"],
+            "description": "Symmetric algorithm used for the identity payload encryption."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this pairing response was created."
+          }
+        }
+      }
+    }
+  }
+}

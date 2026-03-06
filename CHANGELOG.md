@@ -12,6 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Add device-to-device key pairing via PDS [#183](https://issues.opake.app/issues/183.html)
+- Wire authenticated API layer for PDS and AppView [#174](https://issues.opake.app/issues/174.html)
+- Rewrite web auth store as discriminated union state machine [#172](https://issues.opake.app/issues/172.html)
+- Add OAuth client infrastructure to web frontend [#171](https://issues.opake.app/issues/171.html)
+- Refactor cabinet components to use daisyUI semantic classes [#166](https://issues.opake.app/issues/166.html)
+- Add web identity resolution [#152](https://issues.opake.app/issues/152.html)
+- Add web login and account switching [#144](https://issues.opake.app/issues/144.html)
+- Cache URI → name mappings for DirectoryTree resolution [#155](https://issues.opake.app/issues/155.html)
+- Add tree command to display document hierarchy [#90](https://issues.opake.app/issues/90.html)
 - Add handle-based login with automatic PDS resolution [#182](https://issues.opake.app/issues/182.html)
 - Implement web login flow with AT Protocol OAuth [#167](https://issues.opake.app/issues/167.html)
 - Add AT Protocol OAuth (DPoP) for CLI authentication [#175](https://issues.opake.app/issues/175.html)
@@ -55,6 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Add browser key storage with IndexedDB and Web Crypto API [#160](https://issues.opake.app/issues/160.html)
+- Add inbox command for grant discovery via AppView [#162](https://issues.opake.app/issues/162.html)
 - Port Figma Make cabinet design into web frontend [#165](https://issues.opake.app/issues/165.html)
 - Amend web scaffold into WASM commit [#164](https://issues.opake.app/issues/164.html)
 - Update blackbox tests and docs for new commands [#159](https://issues.opake.app/issues/159.html)

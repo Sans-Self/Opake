@@ -209,6 +209,52 @@ the document with a fresh content key.
 - For true revocation of old content: re-encrypt affected documents with new content keys (see #88)
 
 
+## 6. Pair request (new device requesting identity)
+
+A new device generates an ephemeral X25519 keypair and publishes the public half. The fingerprint is displayed for visual comparison on both devices.
+
+```json
+{
+  "$type": "app.opake.cloud.pairRequest",
+  "version": 1,
+  "ephemeralKey": { "$bytes": "base64-encoded-32-byte-x25519-ephemeral-public-key" },
+  "algo": "x25519",
+  "createdAt": "2026-03-06T14:00:00.000Z"
+}
+```
+
+This record uses a TID rkey (multiple pending requests are possible). The existing device lists these to show pending requests. Both devices display the key fingerprint for out-of-band verification.
+
+## 7. Pair response (existing device sending identity)
+
+The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and wraps the content key to the ephemeral public key from the request.
+
+```json
+{
+  "$type": "app.opake.cloud.pairResponse",
+  "version": 1,
+  "request": "at://did:plc:alice123/app.opake.cloud.pairRequest/3kabcd",
+  "wrappedKey": {
+    "did": "did:plc:alice123",
+    "ciphertext": { "$bytes": "base64-content-key-wrapped-to-ephemeral-pubkey" },
+    "algo": "x25519-hkdf-a256kw"
+  },
+  "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-identity-json" },
+  "nonce": { "$bytes": "base64-encoded-12-byte-nonce" },
+  "algo": "aes-256-gcm",
+  "createdAt": "2026-03-06T14:01:00.000Z"
+}
+```
+
+**How the new device decrypts:**
+1. Unwraps the content key using the ephemeral private key (held in memory)
+2. Decrypts the ciphertext with the content key + nonce → identity JSON
+3. Verifies the derived public key matches the published `publicKey/self` record
+4. Saves the identity to disk
+
+Both records are deleted after successful transfer. The ephemeral keypair is never persisted — it exists only in memory during the pairing session.
+
+
 ## Design Decisions & Notes
 
 ### Why plaintext metadata?

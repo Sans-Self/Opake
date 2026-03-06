@@ -82,6 +82,23 @@ pub type X25519PrivateKey = [u8; X25519_KEY_LEN];
 /// A DID string paired with its X25519 public key.
 pub type DidPublicKey<'a> = (&'a str, &'a X25519PublicKey);
 
+/// An ephemeral X25519 keypair for one-time key exchanges (e.g. device pairing).
+/// The private key is held in memory only — never persisted.
+pub struct EphemeralKeypair {
+    pub public_key: X25519PublicKey,
+    pub private_key: X25519PrivateKey,
+}
+
+/// Generate a fresh ephemeral X25519 keypair for a one-time DH exchange.
+pub fn generate_ephemeral_keypair(rng: &mut (impl CryptoRng + RngCore)) -> EphemeralKeypair {
+    let secret = X25519DalekStaticSecret::random_from_rng(&mut *rng);
+    let public = X25519DalekPublicKey::from(&secret);
+    EphemeralKeypair {
+        public_key: *public.as_bytes(),
+        private_key: secret.to_bytes(),
+    }
+}
+
 /// The result of encrypting plaintext content.
 #[derive(crate::RedactedDebug)]
 pub struct EncryptedPayload {

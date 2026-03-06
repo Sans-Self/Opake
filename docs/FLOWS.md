@@ -11,4 +11,5 @@ This document has been split into per-topic files for maintainability. See [flow
 | [flows/crypto.md](flows/crypto.md) | Key wrapping, content encryption primitives |
 | [flows/keyrings.md](flows/keyrings.md) | Create, list, add/remove member, keyring upload/download |
 | [flows/revisions.md](flows/revisions.md) | Collaborative editing via revision records (planned) |
+| [flows/pairing.md](flows/pairing.md) | Device-to-device identity transfer via PDS relay |
 | [flows/multi-device.md](flows/multi-device.md) | Seed phrase identity, BIP-39 derivation (planned) |
