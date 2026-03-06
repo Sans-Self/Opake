@@ -22,10 +22,10 @@ fn record_response<T: serde::Serialize>(uri: &str, record: &T) -> HttpResponse {
     }
 }
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.cloud.directory/self";
-const DIR_A_URI: &str = "at://did:plc:test/app.opake.cloud.directory/dirA";
-const DIR_B_URI: &str = "at://did:plc:test/app.opake.cloud.directory/dirB";
-const DOC_URI: &str = "at://did:plc:test/app.opake.cloud.document/doc1";
+const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
+const DIR_A_URI: &str = "at://did:plc:test/app.opake.directory/dirA";
+const DIR_B_URI: &str = "at://did:plc:test/app.opake.directory/dirB";
+const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
 
 async fn load_tree_with(dirs: &[(&str, Directory)]) -> DirectoryTree {
     let mock = MockTransport::new();

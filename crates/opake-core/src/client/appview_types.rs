@@ -30,9 +30,9 @@ mod tests {
     fn deserialize_full_response() {
         let json = r#"{
             "grants": [{
-                "uri": "at://did:plc:owner/app.opake.cloud.grant/tid1",
+                "uri": "at://did:plc:owner/app.opake.grant/tid1",
                 "ownerDid": "did:plc:owner",
-                "documentUri": "at://did:plc:owner/app.opake.cloud.document/doc1",
+                "documentUri": "at://did:plc:owner/app.opake.document/doc1",
                 "permissions": "read",
                 "note": "tax docs",
                 "createdAt": "2026-03-01T12:00:00Z"
@@ -45,7 +45,7 @@ mod tests {
         assert_eq!(resp.grants[0].owner_did, "did:plc:owner");
         assert_eq!(
             resp.grants[0].document_uri,
-            "at://did:plc:owner/app.opake.cloud.document/doc1"
+            "at://did:plc:owner/app.opake.document/doc1"
         );
         assert_eq!(resp.grants[0].permissions.as_deref(), Some("read"));
         assert_eq!(resp.grants[0].note.as_deref(), Some("tax docs"));
@@ -64,9 +64,9 @@ mod tests {
     fn deserialize_null_optionals() {
         let json = r#"{
             "grants": [{
-                "uri": "at://did:plc:owner/app.opake.cloud.grant/tid1",
+                "uri": "at://did:plc:owner/app.opake.grant/tid1",
                 "ownerDid": "did:plc:owner",
-                "documentUri": "at://did:plc:owner/app.opake.cloud.document/doc1",
+                "documentUri": "at://did:plc:owner/app.opake.document/doc1",
                 "permissions": null,
                 "note": null,
                 "createdAt": "2026-03-01T12:00:00Z"

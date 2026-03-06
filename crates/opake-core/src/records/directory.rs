@@ -6,7 +6,7 @@ use super::{default_version, SCHEMA_VERSION};
 #[serde(rename_all = "camelCase")]
 pub struct Directory {
     #[serde(default = "default_version")]
-    pub version: u32,
+    pub opake_version: u32,
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<String>,
@@ -18,7 +18,7 @@ pub struct Directory {
 impl Directory {
     pub fn new(name: String, created_at: String) -> Self {
         Self {
-            version: SCHEMA_VERSION,
+            opake_version: SCHEMA_VERSION,
             name,
             entries: Vec::new(),
             created_at,

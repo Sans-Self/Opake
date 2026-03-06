@@ -61,7 +61,7 @@ mod tests {
             .collect();
 
         Keyring {
-            version: records::SCHEMA_VERSION,
+            opake_version: records::SCHEMA_VERSION,
             name: name.into(),
             description: None,
             algo: "aes-256-gcm".into(),
@@ -78,7 +78,7 @@ mod tests {
             .iter()
             .map(|(rkey, kr)| {
                 serde_json::json!({
-                    "uri": format!("at://{TEST_DID}/app.opake.cloud.keyring/{rkey}"),
+                    "uri": format!("at://{TEST_DID}/app.opake.keyring/{rkey}"),
                     "cid": "bafykeyring",
                     "value": kr,
                 })
@@ -115,7 +115,7 @@ mod tests {
         assert!(entries[0].uri.contains("kr1"));
 
         let reqs = mock.requests();
-        assert!(reqs[0].url.contains("app.opake.cloud.keyring"));
+        assert!(reqs[0].url.contains("app.opake.keyring"));
     }
 
     #[tokio::test]
@@ -171,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn skips_future_version() {
         let mut kr = dummy_keyring("future", 1);
-        kr.version = records::SCHEMA_VERSION + 1;
+        kr.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(list_response(&[("kr1", kr)], None));

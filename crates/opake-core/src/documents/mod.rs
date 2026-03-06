@@ -23,7 +23,7 @@ pub use upload::{
     encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
 };
 
-pub const DOCUMENT_COLLECTION: &str = "app.opake.cloud.document";
+pub const DOCUMENT_COLLECTION: &str = "app.opake.document";
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -37,7 +37,7 @@ pub(crate) mod tests {
     use crate::test_utils::MockTransport;
 
     pub const TEST_DID: &str = "did:plc:test";
-    pub const TEST_URI: &str = "at://did:plc:test/app.opake.cloud.document/abc123";
+    pub const TEST_URI: &str = "at://did:plc:test/app.opake.document/abc123";
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         let session = Session::Legacy(LegacySession {
@@ -90,7 +90,7 @@ pub(crate) mod tests {
             .iter()
             .map(|(rkey, doc)| {
                 serde_json::json!({
-                    "uri": format!("at://{}/app.opake.cloud.document/{}", TEST_DID, rkey),
+                    "uri": format!("at://{}/app.opake.document/{}", TEST_DID, rkey),
                     "cid": "bafyrecord",
                     "value": doc,
                 })

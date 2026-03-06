@@ -122,10 +122,10 @@ async fn inbox_returns_grants() {
     let state = test_state();
 
     let grant = IndexedGrant {
-        uri: "at://did:plc:owner/app.opake.cloud.grant/3abc".into(),
+        uri: "at://did:plc:owner/app.opake.grant/3abc".into(),
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:me".into(),
-        document_uri: "at://did:plc:owner/app.opake.cloud.document/3xyz".into(),
+        document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
         permissions: Some("read".into()),
         note: Some("test file".into()),
         created_at: "2026-03-01T12:00:00Z".into(),
@@ -145,7 +145,7 @@ async fn inbox_returns_grants() {
     assert_eq!(items[0]["ownerDid"], "did:plc:owner");
     assert_eq!(
         items[0]["documentUri"],
-        "at://did:plc:owner/app.opake.cloud.document/3xyz"
+        "at://did:plc:owner/app.opake.document/3xyz"
     );
     assert_eq!(items[0]["permissions"], "read");
     assert_eq!(items[0]["note"], "test file");
@@ -157,10 +157,10 @@ async fn inbox_pagination() {
 
     for i in 0..5 {
         let grant = IndexedGrant {
-            uri: format!("at://did:plc:owner/app.opake.cloud.grant/{i}"),
+            uri: format!("at://did:plc:owner/app.opake.grant/{i}"),
             owner_did: "did:plc:owner".into(),
             recipient_did: "did:plc:me".into(),
-            document_uri: format!("at://did:plc:owner/app.opake.cloud.document/{i}"),
+            document_uri: format!("at://did:plc:owner/app.opake.document/{i}"),
             permissions: None,
             note: None,
             created_at: "2026-03-01T12:00:00Z".into(),
@@ -197,7 +197,7 @@ async fn keyrings_returns_memberships() {
         .with_conn(|c| {
             db_keyrings::upsert_keyring_members(
                 c,
-                "at://did:plc:owner/app.opake.cloud.keyring/3def",
+                "at://did:plc:owner/app.opake.keyring/3def",
                 "did:plc:owner",
                 "family-photos",
                 &["did:plc:me".into(), "did:plc:other".into()],
@@ -221,10 +221,10 @@ async fn health_omits_counts() {
     let state = test_state();
 
     let grant = IndexedGrant {
-        uri: "at://did:plc:owner/app.opake.cloud.grant/3abc".into(),
+        uri: "at://did:plc:owner/app.opake.grant/3abc".into(),
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:me".into(),
-        document_uri: "at://did:plc:owner/app.opake.cloud.document/3xyz".into(),
+        document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
         permissions: None,
         note: None,
         created_at: "2026-03-01T12:00:00Z".into(),

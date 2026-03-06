@@ -1,4 +1,4 @@
-# app.opake.cloud.* Lexicon Schemas
+# app.opake.* Lexicon Schemas
 
 An encrypted personal cloud built on AT Protocol.
 
@@ -14,14 +14,14 @@ The encryption model follows the same hybrid pattern as git-crypt:
 
 | NSID | Type | Purpose |
 |------|------|---------|
-| `app.opake.cloud.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
-| `app.opake.cloud.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
-| `app.opake.cloud.document` | record | An encrypted file/document with metadata |
-| `app.opake.cloud.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
-| `app.opake.cloud.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
-| `app.opake.cloud.grant` | record | A share grant — gives a DID access to a specific document's key |
-| `app.opake.cloud.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
-| `app.opake.cloud.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
+| `app.opake.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
+| `app.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
+| `app.opake.document` | record | An encrypted file/document with metadata |
+| `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
+| `app.opake.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
+| `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
+| `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
+| `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
 
 ## Flow: Sharing a file with another DID
 

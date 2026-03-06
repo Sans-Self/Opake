@@ -305,8 +305,8 @@ export async function publishPublicKey(
   const url = `${base}/xrpc/com.atproto.repo.putRecord`;
 
   const record: Record<string, unknown> = {
-    $type: "app.opake.cloud.publicKey",
-    version: 1,
+    $type: "app.opake.publicKey",
+    opakeVersion: 1,
     algo: "x25519",
     publicKey: { $bytes: publicKey },
     createdAt: new Date().toISOString(),
@@ -318,7 +318,7 @@ export async function publishPublicKey(
 
   const jsonBody = JSON.stringify({
     repo: did,
-    collection: "app.opake.cloud.publicKey",
+    collection: "app.opake.publicKey",
     rkey: "self",
     record,
   });

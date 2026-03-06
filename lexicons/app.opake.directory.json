@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.directory",
+  "id": "app.opake.directory",
   "defs": {
     "main": {
       "type": "record",
@@ -8,11 +8,11 @@
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["version", "name", "createdAt"],
+        "required": ["opakeVersion", "name", "createdAt"],
         "properties": {
-          "version": {
+          "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.cloud.* namespace.",
+            "description": "Schema version for the app.opake.* namespace.",
             "minimum": 1
           },
           "name": {

@@ -185,7 +185,7 @@ async fn refresh_on_expired_token_then_retry() {
 
     let mut client = mock_client(mock.clone());
     let page = client
-        .list_records("app.opake.cloud.document", Some(100), None)
+        .list_records("app.opake.document", Some(100), None)
         .await
         .unwrap();
 
@@ -230,7 +230,7 @@ async fn refresh_failure_propagates_error() {
 
     let mut client = mock_client(mock);
     let err = client
-        .list_records("app.opake.cloud.document", Some(100), None)
+        .list_records("app.opake.document", Some(100), None)
         .await
         .unwrap_err();
 
@@ -250,7 +250,7 @@ async fn non_expired_error_passes_through() {
 
     let mut client = mock_client(mock);
     let err = client
-        .list_records("app.opake.cloud.document", Some(100), None)
+        .list_records("app.opake.document", Some(100), None)
         .await
         .unwrap_err();
 
@@ -287,7 +287,7 @@ fn is_expired_token_rejects_no_json() {
 async fn put_record_sends_rkey_and_returns_ref() {
     let mock = MockTransport::new();
     let body = serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.cloud.publicKey/self",
+        "uri": "at://did:plc:test/app.opake.publicKey/self",
         "cid": "bafyputrecord",
     });
     mock.enqueue(success_response(&body.to_string()));
@@ -296,14 +296,11 @@ async fn put_record_sends_rkey_and_returns_ref() {
 
     let record = serde_json::json!({ "hello": "world" });
     let result = client
-        .put_record("app.opake.cloud.publicKey", "self", &record)
+        .put_record("app.opake.publicKey", "self", &record)
         .await
         .unwrap();
 
-    assert_eq!(
-        result.uri,
-        "at://did:plc:test/app.opake.cloud.publicKey/self"
-    );
+    assert_eq!(result.uri, "at://did:plc:test/app.opake.publicKey/self");
     assert_eq!(result.cid, "bafyputrecord");
 
     let reqs = mock.requests();
@@ -316,6 +313,6 @@ async fn put_record_sends_rkey_and_returns_ref() {
         _ => panic!("expected JSON body"),
     };
     assert_eq!(sent_body["rkey"], "self");
-    assert_eq!(sent_body["collection"], "app.opake.cloud.publicKey");
+    assert_eq!(sent_body["collection"], "app.opake.publicKey");
     assert_eq!(sent_body["repo"], "did:plc:test");
 }

@@ -85,9 +85,9 @@ mod tests {
 
     fn grant(owner: &str, doc_suffix: &str, perms: Option<&str>, note: Option<&str>) -> InboxGrant {
         InboxGrant {
-            uri: "at://did:plc:owner/app.opake.cloud.grant/g1".into(),
+            uri: "at://did:plc:owner/app.opake.grant/g1".into(),
             owner_did: owner.into(),
-            document_uri: format!("at://did:plc:owner/app.opake.cloud.document/{doc_suffix}"),
+            document_uri: format!("at://did:plc:owner/app.opake.document/{doc_suffix}"),
             permissions: perms.map(|s| s.into()),
             note: note.map(|s| s.into()),
             created_at: "2026-03-01T12:00:00Z".into(),

@@ -1,4 +1,4 @@
-// Typed representations of the app.opake.cloud.* lexicon records.
+// Typed representations of the app.opake.* lexicon records.
 //
 // These mirror the lexicon JSON schemas and handle atproto's serialization
 // conventions ($type discriminators, $bytes for binary data, $link for CIDs).
@@ -31,19 +31,19 @@ pub use pair_request::{PairRequest, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
-/// The current app.opake.cloud.* schema version this client understands.
+/// The current app.opake.* schema version this client understands.
 /// Records with version <= this are compatible; higher versions must be rejected.
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Record types that carry a schema version number.
 pub trait Versioned {
-    fn version(&self) -> u32;
+    fn opake_version(&self) -> u32;
 }
 
 macro_rules! impl_versioned {
     ($($ty:ty),+ $(,)?) => {
         $(impl Versioned for $ty {
-            fn version(&self) -> u32 { self.version }
+            fn opake_version(&self) -> u32 { self.opake_version }
         })+
     };
 }
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn public_key_record_new_sets_defaults() {
         let record = PublicKeyRecord::new(&[42u8; 32], "2026-03-01T00:00:00Z");
-        assert_eq!(record.version, SCHEMA_VERSION);
+        assert_eq!(record.opake_version, SCHEMA_VERSION);
         assert_eq!(record.algo, "x25519");
         assert_eq!(record.created_at, "2026-03-01T00:00:00Z");
     }
@@ -111,7 +111,7 @@ mod tests {
         let json = serde_json::to_string(&record).unwrap();
         let parsed: PublicKeyRecord = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.version, record.version);
+        assert_eq!(parsed.opake_version, record.opake_version);
         assert_eq!(parsed.public_key.encoded, record.public_key.encoded);
         assert_eq!(parsed.algo, "x25519");
         assert_eq!(parsed.created_at, "2026-03-01T12:00:00Z");
@@ -131,7 +131,7 @@ mod tests {
         let json = serde_json::to_string(&directory).unwrap();
         let parsed: Directory = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.version, SCHEMA_VERSION);
+        assert_eq!(parsed.opake_version, SCHEMA_VERSION);
         assert_eq!(parsed.name, "/");
         assert!(parsed.entries.is_empty());
         assert_eq!(parsed.created_at, "2026-03-01T00:00:00Z");
@@ -152,8 +152,8 @@ mod tests {
     fn directory_with_entries_roundtrips() {
         let mut directory = Directory::new("Photos".into(), "2026-03-01T00:00:00Z".into());
         directory.entries = vec![
-            "at://did:plc:test/app.opake.cloud.document/abc".into(),
-            "at://did:plc:test/app.opake.cloud.directory/def".into(),
+            "at://did:plc:test/app.opake.document/abc".into(),
+            "at://did:plc:test/app.opake.directory/def".into(),
         ];
         directory.modified_at = Some("2026-03-01T12:00:00Z".into());
 
@@ -171,7 +171,7 @@ mod tests {
         // Records created before key_history existed won't have the field.
         // Verify they deserialize to an empty vec.
         let json = serde_json::json!({
-            "version": 1,
+            "opakeVersion": 1,
             "name": "old-keyring",
             "algo": "aes-256-gcm",
             "members": [{

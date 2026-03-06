@@ -4,12 +4,12 @@ use crate::test_utils::MockTransport;
 
 use super::super::tests::{dummy_directory_with_entries, list_records_response, mock_client};
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.cloud.directory/self";
-const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.cloud.directory/photos";
-const DIR_VACATION_URI: &str = "at://did:plc:test/app.opake.cloud.directory/vacation";
-const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.cloud.document/beach";
-const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.cloud.document/notes";
-const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.cloud.document/sunset";
+const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
+const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
+const DIR_VACATION_URI: &str = "at://did:plc:test/app.opake.directory/vacation";
+const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
+const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.document/notes";
+const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.document/sunset";
 
 /// getRecord response for a document — minimal but parseable.
 fn doc_record_response(uri: &str, name: &str) -> HttpResponse {
@@ -163,10 +163,7 @@ async fn resolve_at_uri_not_found() {
 
     let mut client = mock_client(mock);
     let err = tree
-        .resolve(
-            &mut client,
-            "at://did:plc:test/app.opake.cloud.document/nope",
-        )
+        .resolve(&mut client, "at://did:plc:test/app.opake.document/nope")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -327,10 +324,7 @@ async fn resolve_bare_name_no_root_searches_directories() {
 
     let mut client = mock_client(mock);
     let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
-    assert_eq!(
-        resolved.uri,
-        "at://did:plc:test/app.opake.cloud.directory/photos"
-    );
+    assert_eq!(resolved.uri, "at://did:plc:test/app.opake.directory/photos");
     assert_eq!(resolved.kind, EntryKind::Directory);
 }
 
@@ -390,7 +384,7 @@ async fn collect_descendants_empty() {
                 "self",
                 dummy_directory_with_entries(
                     "/",
-                    vec!["at://did:plc:test/app.opake.cloud.directory/empty".into()],
+                    vec!["at://did:plc:test/app.opake.directory/empty".into()],
                 ),
             ),
             ("empty", dummy_directory_with_entries("Empty", vec![])),
@@ -401,6 +395,6 @@ async fn collect_descendants_empty() {
     let mut client = mock_client(mock);
     let tree = DirectoryTree::load(&mut client).await.unwrap();
 
-    let descendants = tree.collect_descendants("at://did:plc:test/app.opake.cloud.directory/empty");
+    let descendants = tree.collect_descendants("at://did:plc:test/app.opake.directory/empty");
     assert!(descendants.is_empty());
 }

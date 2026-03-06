@@ -22,7 +22,7 @@ pub use mv::{check_cycle, move_entry, MoveDestination, MoveResult};
 pub use remove::{remove, RemoveResult};
 pub use tree::{DirectoryTree, EntryKind, ResolvedPath};
 
-pub const DIRECTORY_COLLECTION: &str = "app.opake.cloud.directory";
+pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";
 pub const ROOT_DIRECTORY_NAME: &str = "/";
 

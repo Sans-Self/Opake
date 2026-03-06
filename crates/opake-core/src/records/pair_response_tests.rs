@@ -5,8 +5,8 @@ use crate::records::SCHEMA_VERSION;
 #[test]
 fn pair_response_roundtrips_through_json() {
     let record = PairResponse {
-        version: SCHEMA_VERSION,
-        request: "at://did:plc:test/app.opake.cloud.pairRequest/abc123".into(),
+        opake_version: SCHEMA_VERSION,
+        request: "at://did:plc:test/app.opake.pairRequest/abc123".into(),
         wrapped_key: WrappedKey {
             did: "did:plc:test".into(),
             ciphertext: AtBytes {
@@ -27,7 +27,7 @@ fn pair_response_roundtrips_through_json() {
     let json = serde_json::to_string(&record).unwrap();
     let parsed: PairResponse = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(parsed.version, SCHEMA_VERSION);
+    assert_eq!(parsed.opake_version, SCHEMA_VERSION);
     assert_eq!(parsed.request, record.request);
     assert_eq!(parsed.wrapped_key.did, "did:plc:test");
     assert_eq!(parsed.wrapped_key.algo, "x25519-hkdf-a256kw");
@@ -38,8 +38,8 @@ fn pair_response_roundtrips_through_json() {
 #[test]
 fn pair_response_uses_atbytes_wire_format() {
     let record = PairResponse {
-        version: SCHEMA_VERSION,
-        request: "at://did:plc:test/app.opake.cloud.pairRequest/abc123".into(),
+        opake_version: SCHEMA_VERSION,
+        request: "at://did:plc:test/app.opake.pairRequest/abc123".into(),
         wrapped_key: WrappedKey {
             did: "did:plc:test".into(),
             ciphertext: AtBytes {

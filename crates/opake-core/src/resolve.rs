@@ -146,7 +146,7 @@ pub async fn resolve_identity(
     .await?;
 
     let record: PublicKeyRecord = serde_json::from_value(entry.value)?;
-    records::check_version(record.version)?;
+    records::check_version(record.opake_version)?;
 
     // Step 6: Decode and validate public key bytes
     let key_bytes = record
@@ -233,7 +233,7 @@ mod tests {
     fn public_key_record_json(public_key: &X25519PublicKey) -> String {
         let record = PublicKeyRecord::new(public_key, "2026-03-01T00:00:00Z");
         let entry = serde_json::json!({
-            "uri": "at://did:plc:target/app.opake.cloud.publicKey/self",
+            "uri": "at://did:plc:target/app.opake.publicKey/self",
             "cid": "bafyrecord",
             "value": record,
         });
@@ -372,9 +372,9 @@ mod tests {
         )));
 
         let mut record = PublicKeyRecord::new(&[1u8; 32], "2026-03-01T00:00:00Z");
-        record.version = SCHEMA_VERSION + 1;
+        record.opake_version = SCHEMA_VERSION + 1;
         let entry = serde_json::json!({
-            "uri": "at://did:plc:future/app.opake.cloud.publicKey/self",
+            "uri": "at://did:plc:future/app.opake.publicKey/self",
             "cid": "bafy",
             "value": record,
         });
@@ -392,7 +392,7 @@ mod tests {
         let pubkey = [55u8; 32];
 
         let put_response = serde_json::json!({
-            "uri": "at://did:plc:test/app.opake.cloud.publicKey/self",
+            "uri": "at://did:plc:test/app.opake.publicKey/self",
             "cid": "bafypublished",
         });
         mock.enqueue(success(&put_response.to_string()));
@@ -415,7 +415,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(uri, "at://did:plc:test/app.opake.cloud.publicKey/self");
+        assert_eq!(uri, "at://did:plc:test/app.opake.publicKey/self");
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);

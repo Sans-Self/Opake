@@ -44,7 +44,7 @@ impl KeyCache {
     }
 }
 
-/// Fetch the Ed25519 signing key from a user's `app.opake.cloud.publicKey/self` record.
+/// Fetch the Ed25519 signing key from a user's `app.opake.publicKey/self` record.
 ///
 /// Resolution: DID → DID document → PDS URL → getRecord → signingKey field.
 async fn fetch_signing_key(did: &str) -> Result<VerifyingKey> {
@@ -84,7 +84,7 @@ async fn fetch_signing_key(did: &str) -> Result<VerifyingKey> {
 
     // Step 2: Fetch public key record from the user's PDS
     let record_url = format!(
-        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=app.opake.cloud.publicKey&rkey=self",
+        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=app.opake.publicKey&rkey=self",
         pds_url.trim_end_matches('/'),
         did
     );

@@ -82,7 +82,7 @@ mod tests {
     async fn happy_path() {
         let (pubkey, privkey) = test_pubkey();
         let mock = MockTransport::new();
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.keyring/tid123");
+        let uri = format!("at://{TEST_DID}/app.opake.keyring/tid123");
         mock.enqueue(create_record_response(&uri));
 
         let mut client = mock_client(mock.clone());

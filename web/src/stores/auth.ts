@@ -68,7 +68,7 @@ async function checkExistingPublicKey(
     await authenticatedXrpc(
       {
         pdsUrl,
-        lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=app.opake.cloud.publicKey&rkey=self`,
+        lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=app.opake.publicKey&rkey=self`,
         method: "GET",
       },
       session,

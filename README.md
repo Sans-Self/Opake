@@ -4,7 +4,7 @@
 
 An encrypted personal cloud built on the [AT Protocol](https://atproto.com).
 
-Opake uses your existing PDS as a storage and identity layer. Files are encrypted client-side with AES-256-GCM before upload — the PDS only ever sees ciphertext. Custom lexicons under `app.opake.cloud.*` give structure to documents, encryption metadata, and sharing grants.
+Opake uses your existing PDS as a storage and identity layer. Files are encrypted client-side with AES-256-GCM before upload — the PDS only ever sees ciphertext. Custom lexicons under `app.opake.*` give structure to documents, encryption metadata, and sharing grants.
 
 Your data is opaque to everyone without the key. That's the point.
 
@@ -27,7 +27,7 @@ plaintext file
   → encrypt with random AES-256-GCM key
   → upload ciphertext blob to PDS
   → wrap content key to owner's DID public key
-  → store metadata as app.opake.cloud.document record
+  → store metadata as app.opake.document record
 ```
 
 No modifications to the PDS. All crypto happens on your machine.
@@ -91,7 +91,7 @@ opake cat notes.txt
 opake cat Photos/notes.txt
 
 # download a shared file from another user (via grant URI)
-opake download --grant at://did:plc:abc/app.opake.cloud.grant/tid123
+opake download --grant at://did:plc:abc/app.opake.grant/tid123
 
 # delete (supports paths and recursive directory deletion)
 opake rm photo.jpg
@@ -113,7 +113,7 @@ opake shared
 opake shared --long
 
 # revoke a share grant
-opake revoke at://did:plc:abc/app.opake.cloud.grant/tid123
+opake revoke at://did:plc:abc/app.opake.grant/tid123
 
 # check incoming grants (via AppView)
 opake inbox --appview https://appview.example.com
@@ -124,7 +124,7 @@ opake keyring create family-photos
 opake keyring ls
 opake keyring add-member family-photos alice.example.com
 opake upload photo.jpg --keyring family-photos
-opake download --keyring-member at://did:plc:abc/app.opake.cloud.document/tid456
+opake download --keyring-member at://did:plc:abc/app.opake.document/tid456
 opake keyring remove-member family-photos alice.example.com
 
 # transfer encryption identity to a new device
@@ -165,7 +165,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate
 - [x] Asymmetric key wrapping (x25519-hkdf-a256kw)
 - [x] Automatic token refresh
 - [x] Multi-account support (--as flag, logout, set-default, accounts)
-- [x] Public key auto-publish on login (app.opake.cloud.publicKey record)
+- [x] Public key auto-publish on login (app.opake.publicKey record)
 - [x] DID resolution and public key extraction
 - [x] Direct file sharing between DIDs
 - [x] Cross-PDS shared file download (via --grant flag)

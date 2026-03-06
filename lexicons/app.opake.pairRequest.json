@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.pairRequest",
+  "id": "app.opake.pairRequest",
   "description": "A device pairing request. Created by a new device that needs the existing encryption identity transferred from another device. The ephemeral key is used for a one-time DH key exchange to protect the identity in transit.",
   "defs": {
     "main": {
@@ -8,9 +8,9 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["version", "ephemeralKey", "algo", "createdAt"],
+        "required": ["opakeVersion", "ephemeralKey", "algo", "createdAt"],
         "properties": {
-          "version": {
+          "opakeVersion": {
             "type": "integer",
             "minimum": 1,
             "description": "Schema version for forward compatibility."

@@ -58,7 +58,7 @@ mod tests {
         assert!(entries[0].uri.contains("dir1"));
 
         let reqs = mock.requests();
-        assert!(reqs[0].url.contains("app.opake.cloud.directory"));
+        assert!(reqs[0].url.contains("app.opake.directory"));
     }
 
     #[tokio::test]
@@ -69,7 +69,7 @@ mod tests {
                 "dir2",
                 dummy_directory_with_entries(
                     "Documents",
-                    vec!["at://did:plc:test/app.opake.cloud.document/a".into()],
+                    vec!["at://did:plc:test/app.opake.document/a".into()],
                 ),
             ),
         ];
@@ -122,7 +122,7 @@ mod tests {
     #[tokio::test]
     async fn skips_future_version() {
         let mut directory = dummy_directory("Future");
-        directory.version = records::SCHEMA_VERSION + 1;
+        directory.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[("d1", directory)], None));

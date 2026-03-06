@@ -10,7 +10,7 @@ use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
 /// Delete a directory record by AT-URI.
 ///
 /// Rejects deletion of the root directory (rkey "self") and non-empty
-/// directories. Validates the collection is `app.opake.cloud.directory`.
+/// directories. Validates the collection is `app.opake.directory`.
 pub async fn delete_directory(
     client: &mut XrpcClient<impl Transport>,
     uri: &str,
@@ -36,7 +36,7 @@ pub async fn delete_directory(
         .await?;
 
     let directory: Directory = serde_json::from_value(entry.value)?;
-    records::check_version(directory.version)?;
+    records::check_version(directory.opake_version)?;
 
     if !directory.entries.is_empty() {
         return Err(Error::InvalidRecord(format!(
@@ -66,7 +66,7 @@ mod tests {
     #[tokio::test]
     async fn happy_path() {
         let directory = dummy_directory("Photos");
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.directory/dir1");
+        let uri = format!("at://{TEST_DID}/app.opake.directory/dir1");
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(&uri, &directory));
         mock.enqueue(HttpResponse {
@@ -88,7 +88,7 @@ mod tests {
     async fn rejects_root_deletion() {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.directory/self");
+        let uri = format!("at://{TEST_DID}/app.opake.directory/self");
 
         let err = delete_directory(&mut client, &uri).await.unwrap_err();
         assert!(err.to_string().contains("root directory"));
@@ -98,9 +98,9 @@ mod tests {
     async fn rejects_non_empty_directory() {
         let directory = dummy_directory_with_entries(
             "Photos",
-            vec!["at://did:plc:test/app.opake.cloud.document/doc1".into()],
+            vec!["at://did:plc:test/app.opake.document/doc1".into()],
         );
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.directory/dir1");
+        let uri = format!("at://{TEST_DID}/app.opake.directory/dir1");
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(&uri, &directory));
 
@@ -113,7 +113,7 @@ mod tests {
     async fn rejects_wrong_collection() {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.document/abc");
+        let uri = format!("at://{TEST_DID}/app.opake.document/abc");
 
         let err = delete_directory(&mut client, &uri).await.unwrap_err();
         assert!(err.to_string().contains("expected a directory URI"));
@@ -132,7 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn pds_404_on_fetch() {
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.directory/gone");
+        let uri = format!("at://{TEST_DID}/app.opake.directory/gone");
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 404,

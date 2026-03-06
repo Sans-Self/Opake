@@ -133,7 +133,7 @@ async fn rename_entry(
                 .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
                 .await?;
             let mut doc: Document = serde_json::from_value(entry.value)?;
-            records::check_version(doc.version)?;
+            records::check_version(doc.opake_version)?;
 
             doc.name = new_name.to_string();
             doc.modified_at = Some(modified_at.to_string());
@@ -153,7 +153,7 @@ async fn rename_entry(
                 .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
                 .await?;
             let mut dir: Directory = serde_json::from_value(entry.value)?;
-            records::check_version(dir.version)?;
+            records::check_version(dir.opake_version)?;
 
             dir.name = new_name.to_string();
             dir.modified_at = Some(modified_at.to_string());

@@ -43,11 +43,11 @@ where
                 }
             };
 
-            if records::check_version(parsed.version()).is_err() {
+            if records::check_version(parsed.opake_version()).is_err() {
                 debug!(
                     "skipping record {} with unsupported version {}",
                     record.uri,
-                    parsed.version()
+                    parsed.opake_version()
                 );
                 continue;
             }
@@ -83,7 +83,7 @@ mod tests {
     }
 
     impl Versioned for FakeRecord {
-        fn version(&self) -> u32 {
+        fn opake_version(&self) -> u32 {
             self.version
         }
     }

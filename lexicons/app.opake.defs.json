@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.defs",
+  "id": "app.opake.defs",
   "defs": {
     "wrappedKey": {
       "type": "object",
@@ -60,7 +60,7 @@
         "keyring": {
           "type": "string",
           "format": "at-uri",
-          "description": "AT URI of the app.opake.cloud.keyring record."
+          "description": "AT URI of the app.opake.keyring record."
         },
         "wrappedContentKey": {
           "type": "bytes",

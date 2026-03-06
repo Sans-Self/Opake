@@ -30,8 +30,8 @@ interface PairResponseRecord {
   nonce: AtBytes;
 }
 
-const PAIR_REQUEST_COLLECTION = "app.opake.cloud.pairRequest";
-const PAIR_RESPONSE_COLLECTION = "app.opake.cloud.pairResponse";
+const PAIR_REQUEST_COLLECTION = "app.opake.pairRequest";
+const PAIR_RESPONSE_COLLECTION = "app.opake.pairResponse";
 const SCHEMA_VERSION = 1;
 
 // ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ export async function createPairRequest(
 
   const record = {
     $type: PAIR_REQUEST_COLLECTION,
-    version: SCHEMA_VERSION,
+    opakeVersion: SCHEMA_VERSION,
     ephemeralKey: { $bytes: uint8ArrayToBase64(ephemeralPubKey) },
     algo: "x25519",
     createdAt: new Date().toISOString(),
@@ -205,7 +205,7 @@ export async function approvePairRequest(
 
   const record = {
     $type: PAIR_RESPONSE_COLLECTION,
-    version: SCHEMA_VERSION,
+    opakeVersion: SCHEMA_VERSION,
     request: requestUri,
     wrappedKey,
     ciphertext: { $bytes: uint8ArrayToBase64(encrypted.ciphertext) },

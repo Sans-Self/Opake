@@ -22,10 +22,10 @@ fn make_grant(uri: &str, recipient: &str, owner: &str, doc_uri: &str) -> Indexed
 fn grant_upsert_and_query() {
     let db = test_db();
     let grant = make_grant(
-        "at://did:plc:owner/app.opake.cloud.grant/3abc",
+        "at://did:plc:owner/app.opake.grant/3abc",
         "did:plc:recipient",
         "did:plc:owner",
-        "at://did:plc:owner/app.opake.cloud.document/3xyz",
+        "at://did:plc:owner/app.opake.document/3xyz",
     );
 
     db.with_conn(|c| grants::upsert_grant(c, &grant)).unwrap();
@@ -42,10 +42,10 @@ fn grant_upsert_and_query() {
 fn grant_upsert_overwrites() {
     let db = test_db();
     let mut grant = make_grant(
-        "at://did:plc:owner/app.opake.cloud.grant/3abc",
+        "at://did:plc:owner/app.opake.grant/3abc",
         "did:plc:recipient",
         "did:plc:owner",
-        "at://did:plc:owner/app.opake.cloud.document/3xyz",
+        "at://did:plc:owner/app.opake.document/3xyz",
     );
     db.with_conn(|c| grants::upsert_grant(c, &grant)).unwrap();
 
@@ -63,10 +63,10 @@ fn grant_upsert_overwrites() {
 fn grant_delete() {
     let db = test_db();
     let grant = make_grant(
-        "at://did:plc:owner/app.opake.cloud.grant/3abc",
+        "at://did:plc:owner/app.opake.grant/3abc",
         "did:plc:recipient",
         "did:plc:owner",
-        "at://did:plc:owner/app.opake.cloud.document/3xyz",
+        "at://did:plc:owner/app.opake.document/3xyz",
     );
     db.with_conn(|c| grants::upsert_grant(c, &grant)).unwrap();
     db.with_conn(|c| grants::delete_grant(c, &grant.uri))
@@ -84,10 +84,10 @@ fn grant_pagination() {
 
     for i in 0..5 {
         let grant = IndexedGrant {
-            uri: format!("at://did:plc:owner/app.opake.cloud.grant/{i}"),
+            uri: format!("at://did:plc:owner/app.opake.grant/{i}"),
             owner_did: "did:plc:owner".into(),
             recipient_did: "did:plc:me".into(),
-            document_uri: format!("at://did:plc:owner/app.opake.cloud.document/{i}"),
+            document_uri: format!("at://did:plc:owner/app.opake.document/{i}"),
             permissions: None,
             note: None,
             created_at: "2026-03-01T12:00:00Z".into(),
@@ -121,7 +121,7 @@ fn keyring_upsert_and_query() {
     db.with_conn(|c| {
         keyrings::upsert_keyring_members(
             c,
-            "at://did:plc:owner/app.opake.cloud.keyring/3def",
+            "at://did:plc:owner/app.opake.keyring/3def",
             "did:plc:owner",
             "family-photos",
             &members,
@@ -151,7 +151,7 @@ fn keyring_upsert_and_query() {
 #[test]
 fn keyring_update_replaces_members() {
     let db = test_db();
-    let uri = "at://did:plc:owner/app.opake.cloud.keyring/3def";
+    let uri = "at://did:plc:owner/app.opake.keyring/3def";
 
     // Initially: alice + bob
     db.with_conn(|c| {
@@ -195,7 +195,7 @@ fn keyring_update_replaces_members() {
 #[test]
 fn keyring_delete() {
     let db = test_db();
-    let uri = "at://did:plc:owner/app.opake.cloud.keyring/3def";
+    let uri = "at://did:plc:owner/app.opake.keyring/3def";
 
     db.with_conn(|c| {
         keyrings::upsert_keyring_members(

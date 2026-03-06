@@ -56,7 +56,7 @@ mod tests {
             permissions: Some("read".into()),
             note: Some("here you go".into()),
             ..Grant::new(
-                format!("at://{TEST_DID}/app.opake.cloud.document/{doc_rkey}"),
+                format!("at://{TEST_DID}/app.opake.document/{doc_rkey}"),
                 recipient.into(),
                 WrappedKey {
                     did: recipient.into(),
@@ -75,7 +75,7 @@ mod tests {
             .iter()
             .map(|(rkey, grant)| {
                 serde_json::json!({
-                    "uri": format!("at://{TEST_DID}/app.opake.cloud.grant/{rkey}"),
+                    "uri": format!("at://{TEST_DID}/app.opake.grant/{rkey}"),
                     "cid": "bafygrant",
                     "value": grant,
                 })
@@ -113,7 +113,7 @@ mod tests {
         let requests = mock.requests();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].url.contains("listRecords"));
-        assert!(requests[0].url.contains("app.opake.cloud.grant"));
+        assert!(requests[0].url.contains("app.opake.grant"));
     }
 
     #[tokio::test]
@@ -172,12 +172,12 @@ mod tests {
         let body = serde_json::json!({
             "records": [
                 {
-                    "uri": "at://did:plc:owner/app.opake.cloud.grant/bad",
+                    "uri": "at://did:plc:owner/app.opake.grant/bad",
                     "cid": "bafybad",
                     "value": { "not": "a grant" },
                 },
                 {
-                    "uri": "at://did:plc:owner/app.opake.cloud.grant/good",
+                    "uri": "at://did:plc:owner/app.opake.grant/good",
                     "cid": "bafygood",
                     "value": dummy_grant("did:plc:bob", "doc1"),
                 },
@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn skips_future_version() {
         let mut grant = dummy_grant("did:plc:bob", "doc1");
-        grant.version = records::SCHEMA_VERSION + 1;
+        grant.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(list_grants_response(&[("g1", grant)], None));

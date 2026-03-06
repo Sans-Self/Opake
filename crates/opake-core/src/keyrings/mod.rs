@@ -18,7 +18,7 @@ pub use remove_member::{remove_member, MemberKey};
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
 
-pub const KEYRING_COLLECTION: &str = "app.opake.cloud.keyring";
+pub const KEYRING_COLLECTION: &str = "app.opake.keyring";
 
 /// Resolve a keyring name to its AT-URI by listing all keyrings and matching.
 ///

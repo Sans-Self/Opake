@@ -10,7 +10,7 @@ The name comes from the Dutch-flavored spelling of "opaque."
 
 ## Why atproto?
 
-A PDS is essentially cloud storage with an API. It stores signed, schema-validated records in a Merkle Search Tree, plus binary blobs. It doesn't understand or inspect the data — it just manages it. We define custom lexicons under `app.opake.cloud.*` to give structure to our files, encryption metadata, and sharing grants. The PDS handles identity (DID-based), authentication, blob storage (up to 50MB default), federation, and sync — all for free.
+A PDS is essentially cloud storage with an API. It stores signed, schema-validated records in a Merkle Search Tree, plus binary blobs. It doesn't understand or inspect the data — it just manages it. We define custom lexicons under `app.opake.*` to give structure to our files, encryption metadata, and sharing grants. The PDS handles identity (DID-based), authentication, blob storage (up to 50MB default), federation, and sync — all for free.
 
 The PDS is external. It's already running. This project talks to it over XRPC.
 
@@ -21,7 +21,7 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 3. **Two-layer key for keyrings.** Per-document content key wrapped under group key. Rotating the group key doesn't require re-encrypting blobs.
 4. **No revocation guarantee for historical access.** Same as git-crypt. True revocation requires re-encrypting the blob with a new content key.
 5. **Plaintext metadata is opt-in transparency.** Names and tags unencrypted by default for AppView indexing. Full opacity via dummy values + encrypted metadata payload.
-6. **Public keys as PDS records.** atproto DID docs only have signing keys. Opake publishes X25519 encryption public keys as `app.opake.cloud.publicKey/self` singleton records.
+6. **Public keys as PDS records.** atproto DID docs only have signing keys. Opake publishes X25519 encryption public keys as `app.opake.publicKey/self` singleton records.
 7. **Multi-device: seed phrase** (future). MVP uses plaintext keypair at `~/.config/opake/accounts/<did>/identity.json`.
 8. **Storage trait in opake-core.** Config, Identity, Session types and the `Storage` trait live in core so both CLI (`FileStorage`, filesystem) and web (`IndexedDbStorage`, IndexedDB) share the same contract. Platform-specific I/O is injected, never imported.
 

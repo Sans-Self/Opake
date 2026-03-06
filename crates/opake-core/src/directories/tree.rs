@@ -83,7 +83,7 @@ async fn fetch_document_name(
         Err(_) => return Ok(None),
     };
 
-    if records::check_version(doc.version).is_err() {
+    if records::check_version(doc.opake_version).is_err() {
         return Ok(None);
     }
 

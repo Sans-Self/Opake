@@ -5,7 +5,7 @@ use crate::records::{AtBytes, Keyring, WrappedKey};
 use crate::test_utils::MockTransport;
 
 const TEST_DID: &str = "did:plc:owner";
-const KEYRING_URI: &str = "at://did:plc:owner/app.opake.cloud.keyring/kr1";
+const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
 
 fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
     let session = Session::Legacy(LegacySession {

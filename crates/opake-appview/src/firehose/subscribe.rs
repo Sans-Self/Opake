@@ -10,9 +10,8 @@ type WsStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 /// Build the Jetstream subscription URL with collection filters and optional cursor.
 pub fn subscription_url(base_url: &str, cursor: Option<i64>) -> String {
-    let mut url = format!(
-        "{base_url}?wantedCollections=app.opake.cloud.grant&wantedCollections=app.opake.cloud.keyring"
-    );
+    let mut url =
+        format!("{base_url}?wantedCollections=app.opake.grant&wantedCollections=app.opake.keyring");
     if let Some(cursor_us) = cursor {
         url.push_str(&format!("&cursor={cursor_us}"));
     }

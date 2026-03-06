@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.pairResponse",
+  "id": "app.opake.pairResponse",
   "description": "A device pairing response. Created by the existing device after approving a pairing request. Contains the encryption identity encrypted to the requesting device's ephemeral key via DH + HKDF + AES-KW + AES-256-GCM.",
   "defs": {
     "main": {
@@ -8,9 +8,9 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["version", "request", "wrappedKey", "ciphertext", "nonce", "algo", "createdAt"],
+        "required": ["opakeVersion", "request", "wrappedKey", "ciphertext", "nonce", "algo", "createdAt"],
         "properties": {
-          "version": {
+          "opakeVersion": {
             "type": "integer",
             "minimum": 1,
             "description": "Schema version for forward compatibility."
@@ -22,7 +22,7 @@
           },
           "wrappedKey": {
             "type": "ref",
-            "ref": "app.opake.cloud.defs#wrappedKey",
+            "ref": "app.opake.defs#wrappedKey",
             "description": "Content encryption key wrapped to the ephemeral key from the pair request."
           },
           "ciphertext": {

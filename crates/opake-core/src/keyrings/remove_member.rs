@@ -44,7 +44,7 @@ pub async fn remove_member(
         .await?;
 
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
-    records::check_version(keyring.version)?;
+    records::check_version(keyring.opake_version)?;
 
     let original_count = keyring.members.len();
     keyring.members.retain(|m| m.did != remove_did);

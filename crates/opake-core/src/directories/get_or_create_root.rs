@@ -48,7 +48,7 @@ mod tests {
         TEST_DID,
     };
 
-    const ROOT_URI: &str = "at://did:plc:test/app.opake.cloud.directory/self";
+    const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 
     #[tokio::test]
     async fn returns_existing_root() {

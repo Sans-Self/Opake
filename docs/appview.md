@@ -1,6 +1,6 @@
 # AppView: API & Deployment
 
-The AppView indexes `app.opake.cloud.grant` and `app.opake.cloud.keyring` records from the AT Protocol firehose and serves them via a REST API. It enables the `inbox` command — "what's been shared with me?" — without scanning every PDS in the network.
+The AppView indexes `app.opake.grant` and `app.opake.keyring` records from the AT Protocol firehose and serves them via a REST API. It enables the `inbox` command — "what's been shared with me?" — without scanning every PDS in the network.
 
 ## Running Modes
 
@@ -63,7 +63,7 @@ GET:/api/inbox:1709330400:did:plc:abc123
 1. Parse header — extract DID, timestamp, signature
 2. Reject if timestamp is >60 seconds from now (replay protection)
 3. Reject if `?did=` parameter doesn't match authenticated DID (scope enforcement)
-4. Fetch `app.opake.cloud.publicKey/self` from the user's PDS
+4. Fetch `app.opake.publicKey/self` from the user's PDS
 5. Extract `signingKey` (Ed25519) from the record
 6. Verify signature with `ed25519-dalek`
 7. Cache verified key for 5 minutes
@@ -104,15 +104,15 @@ Returns grants where `did` is the recipient. Newest first.
 {
   "grants": [
     {
-      "uri": "at://did:plc:owner/app.opake.cloud.grant/3abc",
+      "uri": "at://did:plc:owner/app.opake.grant/3abc",
       "ownerDid": "did:plc:owner",
-      "documentUri": "at://did:plc:owner/app.opake.cloud.document/3xyz",
+      "documentUri": "at://did:plc:owner/app.opake.document/3xyz",
       "permissions": "read",
       "note": "photos from the trip",
       "createdAt": "2026-03-01T12:00:00Z"
     }
   ],
-  "cursor": "2026-03-01T12:00:01Z::at://did:plc:owner/app.opake.cloud.grant/3abc"
+  "cursor": "2026-03-01T12:00:01Z::at://did:plc:owner/app.opake.grant/3abc"
 }
 
 ```
@@ -125,7 +125,7 @@ Returns keyrings where `did` is a member.
 {
   "keyrings": [
     {
-      "uri": "at://did:plc:owner/app.opake.cloud.keyring/3def",
+      "uri": "at://did:plc:owner/app.opake.keyring/3def",
       "ownerDid": "did:plc:owner",
       "name": "family-photos",
       "indexedAt": "2026-03-01T12:00:00Z"

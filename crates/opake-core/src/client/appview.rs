@@ -125,7 +125,7 @@ mod tests {
 
     fn grant_json(uri_suffix: &str) -> String {
         format!(
-            r#"{{"uri":"at://did:plc:owner/app.opake.cloud.grant/{uri_suffix}","ownerDid":"did:plc:owner","documentUri":"at://did:plc:owner/app.opake.cloud.document/doc1","permissions":"read","note":null,"createdAt":"2026-03-01T12:00:00Z"}}"#
+            r#"{{"uri":"at://did:plc:owner/app.opake.grant/{uri_suffix}","ownerDid":"did:plc:owner","documentUri":"at://did:plc:owner/app.opake.document/doc1","permissions":"read","note":null,"createdAt":"2026-03-01T12:00:00Z"}}"#
         )
     }
 

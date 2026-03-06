@@ -9,11 +9,11 @@ fn grant_event_json(operation: &str) -> String {
   "commit": {{
     "rev": "3l3qo2vutsw2b",
     "operation": "{operation}",
-    "collection": "app.opake.cloud.grant",
+    "collection": "app.opake.grant",
     "rkey": "3abc",
     "record": {{
-      "version": 1,
-      "document": "at://did:plc:owner123/app.opake.cloud.document/3xyz",
+      "opakeVersion": 1,
+      "document": "at://did:plc:owner123/app.opake.document/3xyz",
       "recipient": "did:plc:recipient456",
       "wrappedKey": {{
         "did": "did:plc:recipient456",
@@ -37,10 +37,10 @@ fn keyring_event_json(operation: &str) -> String {
   "commit": {{
     "rev": "3l3qo2vutsw2b",
     "operation": "{operation}",
-    "collection": "app.opake.cloud.keyring",
+    "collection": "app.opake.keyring",
     "rkey": "3def",
     "record": {{
-      "version": 1,
+      "opakeVersion": 1,
       "name": "family-photos",
       "algo": "aes-256-gcm",
       "members": [
@@ -94,12 +94,12 @@ fn parses_grant_create() {
             document_uri,
             ..
         } => {
-            assert_eq!(uri, "at://did:plc:owner123/app.opake.cloud.grant/3abc");
+            assert_eq!(uri, "at://did:plc:owner123/app.opake.grant/3abc");
             assert_eq!(owner_did, "did:plc:owner123");
             assert_eq!(recipient_did, "did:plc:recipient456");
             assert_eq!(
                 document_uri,
-                "at://did:plc:owner123/app.opake.cloud.document/3xyz"
+                "at://did:plc:owner123/app.opake.document/3xyz"
             );
         }
         other => panic!("expected UpsertGrant, got {other:?}"),
@@ -115,11 +115,11 @@ fn parses_grant_update() {
 
 #[test]
 fn parses_grant_delete() {
-    let json = delete_event_json("app.opake.cloud.grant", "3abc");
+    let json = delete_event_json("app.opake.grant", "3abc");
     let (event, _) = parse_event(&json).unwrap();
     match event {
         IndexableEvent::DeleteGrant { uri } => {
-            assert_eq!(uri, "at://did:plc:owner123/app.opake.cloud.grant/3abc");
+            assert_eq!(uri, "at://did:plc:owner123/app.opake.grant/3abc");
         }
         other => panic!("expected DeleteGrant, got {other:?}"),
     }
@@ -138,7 +138,7 @@ fn parses_keyring_create() {
             name,
             member_dids,
         } => {
-            assert_eq!(uri, "at://did:plc:owner123/app.opake.cloud.keyring/3def");
+            assert_eq!(uri, "at://did:plc:owner123/app.opake.keyring/3def");
             assert_eq!(owner_did, "did:plc:owner123");
             assert_eq!(name, "family-photos");
             assert_eq!(member_dids, vec!["did:plc:alice", "did:plc:bob"]);
@@ -149,7 +149,7 @@ fn parses_keyring_create() {
 
 #[test]
 fn parses_keyring_delete() {
-    let json = delete_event_json("app.opake.cloud.keyring", "3def");
+    let json = delete_event_json("app.opake.keyring", "3def");
     let (event, _) = parse_event(&json).unwrap();
     assert!(matches!(event, IndexableEvent::DeleteKeyring { .. }));
 }
@@ -193,7 +193,7 @@ fn ignores_grant_with_invalid_record() {
   "commit": {
     "rev": "abc",
     "operation": "create",
-    "collection": "app.opake.cloud.grant",
+    "collection": "app.opake.grant",
     "rkey": "3abc",
     "record": {"garbage": true},
     "cid": "bafyabc"

@@ -6,8 +6,8 @@ Every Opake user publishes their X25519 encryption public key as a singleton rec
 
 ```json
 {
-  "$type": "app.opake.cloud.publicKey",
-  "version": 1,
+  "$type": "app.opake.publicKey",
+  "opakeVersion": 1,
   "publicKey": { "$bytes": "base64-encoded-32-byte-x25519-public-key" },
   "algo": "x25519",
   "createdAt": "2026-03-01T10:00:00.000Z"
@@ -22,11 +22,11 @@ The root directory is a singleton at rkey `self`. It's lazy-created the first ti
 
 ```json
 {
-  "$type": "app.opake.cloud.directory",
-  "version": 1,
+  "$type": "app.opake.directory",
+  "opakeVersion": 1,
   "name": "/",
   "entries": [
-    "at://did:plc:alice123/app.opake.cloud.directory/3k..."
+    "at://did:plc:alice123/app.opake.directory/3k..."
   ],
   "createdAt": "2026-03-01T10:00:00.000Z",
   "modifiedAt": "2026-03-01T10:00:00.000Z"
@@ -39,13 +39,13 @@ Directories are purely organizational — no encryption, no crypto. The `entries
 
 ```json
 {
-  "$type": "app.opake.cloud.directory",
-  "version": 1,
+  "$type": "app.opake.directory",
+  "opakeVersion": 1,
   "name": "Photos",
   "entries": [
-    "at://did:plc:alice123/app.opake.cloud.document/3kabcd",
-    "at://did:plc:alice123/app.opake.cloud.document/3kefgh",
-    "at://did:plc:alice123/app.opake.cloud.directory/3kijkl"
+    "at://did:plc:alice123/app.opake.document/3kabcd",
+    "at://did:plc:alice123/app.opake.document/3kefgh",
+    "at://did:plc:alice123/app.opake.directory/3kijkl"
   ],
   "createdAt": "2026-03-01T10:05:00.000Z",
   "modifiedAt": "2026-03-01T11:30:00.000Z"
@@ -58,8 +58,8 @@ This directory contains two documents and a subdirectory. Non-root directories u
 
 ```json
 {
-  "$type": "app.opake.cloud.document",
-  "version": 1,
+  "$type": "app.opake.document",
+  "opakeVersion": 1,
   "name": "tax-return-2025.pdf",
   "mimeType": "application/pdf",
   "size": 284619,
@@ -70,7 +70,7 @@ This directory contains two documents and a subdirectory. Non-root directories u
     "size": 284640
   },
   "encryption": {
-    "$type": "app.opake.cloud.document#directEncryption",
+    "$type": "app.opake.document#directEncryption",
     "envelope": {
       "algo": "aes-256-gcm",
       "nonce": { "$bytes": "base64-encoded-12-byte-nonce" },
@@ -98,9 +98,9 @@ can decrypt.
 
 ```json
 {
-  "$type": "app.opake.cloud.grant",
-  "version": 1,
-  "document": "at://did:plc:alice123/app.opake.cloud.document/3k...",
+  "$type": "app.opake.grant",
+  "opakeVersion": 1,
+  "document": "at://did:plc:alice123/app.opake.document/3k...",
   "recipient": "did:plc:bob456",
   "wrappedKey": {
     "did": "did:plc:bob456",
@@ -131,8 +131,8 @@ the document with a fresh content key.
 
 ```json
 {
-  "$type": "app.opake.cloud.keyring",
-  "version": 1,
+  "$type": "app.opake.keyring",
+  "opakeVersion": 1,
   "name": "family-photos",
   "description": "Shared photo collection for the family",
   "algo": "aes-256-gcm",
@@ -162,8 +162,8 @@ the document with a fresh content key.
 
 ```json
 {
-  "$type": "app.opake.cloud.document",
-  "version": 1,
+  "$type": "app.opake.document",
+  "opakeVersion": 1,
   "name": "beach-sunset.jpg",
   "mimeType": "image/jpeg",
   "size": 3841029,
@@ -174,9 +174,9 @@ the document with a fresh content key.
     "size": 3841056
   },
   "encryption": {
-    "$type": "app.opake.cloud.document#keyringEncryption",
+    "$type": "app.opake.document#keyringEncryption",
     "keyringRef": {
-      "keyring": "at://did:plc:alice123/app.opake.cloud.keyring/3k...",
+      "keyring": "at://did:plc:alice123/app.opake.keyring/3k...",
       "wrappedContentKey": { "$bytes": "base64-content-key-encrypted-with-group-key" },
       "rotation": 0
     },
@@ -215,8 +215,8 @@ A new device generates an ephemeral X25519 keypair and publishes the public half
 
 ```json
 {
-  "$type": "app.opake.cloud.pairRequest",
-  "version": 1,
+  "$type": "app.opake.pairRequest",
+  "opakeVersion": 1,
   "ephemeralKey": { "$bytes": "base64-encoded-32-byte-x25519-ephemeral-public-key" },
   "algo": "x25519",
   "createdAt": "2026-03-06T14:00:00.000Z"
@@ -231,9 +231,9 @@ The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and w
 
 ```json
 {
-  "$type": "app.opake.cloud.pairResponse",
-  "version": 1,
-  "request": "at://did:plc:alice123/app.opake.cloud.pairRequest/3kabcd",
+  "$type": "app.opake.pairResponse",
+  "opakeVersion": 1,
+  "request": "at://did:plc:alice123/app.opake.pairRequest/3kabcd",
   "wrappedKey": {
     "did": "did:plc:alice123",
     "ciphertext": { "$bytes": "base64-content-key-wrapped-to-ephemeral-pubkey" },

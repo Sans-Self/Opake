@@ -29,7 +29,7 @@ pub async fn respond_to_pair_request(
     let wrapped = wrap_key(&content_key, ephemeral_public_key, &identity.did, rng)?;
 
     let record = PairResponse {
-        version: SCHEMA_VERSION,
+        opake_version: SCHEMA_VERSION,
         request: request_uri.to_string(),
         wrapped_key: wrapped,
         ciphertext: AtBytes {

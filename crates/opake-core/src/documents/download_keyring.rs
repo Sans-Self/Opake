@@ -68,7 +68,7 @@ pub async fn download_from_keyring_member(
     .await?;
 
     let doc: Document = serde_json::from_value(doc_entry.value)?;
-    records::check_version(doc.version)?;
+    records::check_version(doc.opake_version)?;
 
     // Must be keyring-encrypted
     let kr_enc = match &doc.encryption {
@@ -95,7 +95,7 @@ pub async fn download_from_keyring_member(
     .await?;
 
     let keyring: Keyring = serde_json::from_value(kr_entry.value)?;
-    records::check_version(keyring.version)?;
+    records::check_version(keyring.opake_version)?;
 
     // Find the member's wrapped group key — check the current rotation first,
     // then fall back to key_history if the document was encrypted under an

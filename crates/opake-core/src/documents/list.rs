@@ -60,7 +60,7 @@ mod tests {
         let requests = mock.requests();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].url.contains("listRecords"));
-        assert!(requests[0].url.contains("app.opake.cloud.document"));
+        assert!(requests[0].url.contains("app.opake.document"));
     }
 
     #[tokio::test]
@@ -128,12 +128,12 @@ mod tests {
         let body = serde_json::json!({
             "records": [
                 {
-                    "uri": "at://did:plc:test/app.opake.cloud.document/bad1",
+                    "uri": "at://did:plc:test/app.opake.document/bad1",
                     "cid": "bafybad",
                     "value": { "this": "is not a document" },
                 },
                 {
-                    "uri": "at://did:plc:test/app.opake.cloud.document/good1",
+                    "uri": "at://did:plc:test/app.opake.document/good1",
                     "cid": "bafygood",
                     "value": dummy_document("good.txt", 42, vec![]),
                 },
@@ -157,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn skips_future_schema_version() {
         let mut doc = dummy_document("future.txt", 100, vec![]);
-        doc.version = records::SCHEMA_VERSION + 1;
+        doc.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[("f1", doc)], None));

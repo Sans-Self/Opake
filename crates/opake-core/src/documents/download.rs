@@ -113,7 +113,7 @@ async fn fetch_document_and_key(
         .await?;
 
     let doc: Document = serde_json::from_value(entry.value)?;
-    records::check_version(doc.version)?;
+    records::check_version(doc.opake_version)?;
 
     debug!("unwrapping content key");
     let content_key = unwrap_document_key(&doc, did, private_key, group_key)?;
@@ -313,7 +313,7 @@ mod tests {
             "uri": TEST_URI,
             "cid": "bafyrecord",
             "value": {
-                "version": 1,
+                "opakeVersion": 1,
                 "name": "keyring-doc.txt",
                 "blob": {
                     "$type": "blob",
@@ -322,9 +322,9 @@ mod tests {
                     "size": 100,
                 },
                 "encryption": {
-                    "$type": "app.opake.cloud.document#keyringEncryption",
+                    "$type": "app.opake.document#keyringEncryption",
                     "keyringRef": {
-                        "keyring": "at://did:plc:test/app.opake.cloud.keyring/kr1",
+                        "keyring": "at://did:plc:test/app.opake.keyring/kr1",
                         "wrappedContentKey": { "$bytes": "AAAA" },
                         "rotation": 1,
                     },
@@ -393,7 +393,7 @@ mod tests {
         let (public_key, private_key) = test_keypair();
         let fixture = encrypt_for_download(b"data", &public_key);
         let mut doc = document_from_fixture(&fixture);
-        doc.version = records::SCHEMA_VERSION + 1;
+        doc.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));

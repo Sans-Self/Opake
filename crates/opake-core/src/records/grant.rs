@@ -6,7 +6,7 @@ use super::{default_version, WrappedKey, SCHEMA_VERSION};
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
     #[serde(default = "default_version")]
-    pub version: u32,
+    pub opake_version: u32,
     pub document: String,
     pub recipient: String,
     pub wrapped_key: WrappedKey,
@@ -27,7 +27,7 @@ impl Grant {
         created_at: String,
     ) -> Self {
         Self {
-            version: SCHEMA_VERSION,
+            opake_version: SCHEMA_VERSION,
             document,
             recipient,
             wrapped_key,

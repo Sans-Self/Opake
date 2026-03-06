@@ -14,10 +14,10 @@ fn test_state() -> Arc<AppState> {
 fn indexes_grant_create() {
     let state = test_state();
     let event = IndexableEvent::UpsertGrant {
-        uri: "at://did:plc:owner/app.opake.cloud.grant/3abc".into(),
+        uri: "at://did:plc:owner/app.opake.grant/3abc".into(),
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:recipient".into(),
-        document_uri: "at://did:plc:owner/app.opake.cloud.document/3xyz".into(),
+        document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
         permissions: Some("read".into()),
         note: Some("shared file".into()),
         created_at: "2026-03-01T12:00:00Z".into(),
@@ -36,13 +36,13 @@ fn indexes_grant_create() {
 #[test]
 fn indexes_grant_delete() {
     let state = test_state();
-    let uri = "at://did:plc:owner/app.opake.cloud.grant/3abc";
+    let uri = "at://did:plc:owner/app.opake.grant/3abc";
 
     let create = IndexableEvent::UpsertGrant {
         uri: uri.into(),
         owner_did: "did:plc:owner".into(),
         recipient_did: "did:plc:recipient".into(),
-        document_uri: "at://did:plc:owner/app.opake.cloud.document/3xyz".into(),
+        document_uri: "at://did:plc:owner/app.opake.document/3xyz".into(),
         permissions: None,
         note: None,
         created_at: "2026-03-01T12:00:00Z".into(),
@@ -63,7 +63,7 @@ fn indexes_grant_delete() {
 fn indexes_keyring_create() {
     let state = test_state();
     let event = IndexableEvent::UpsertKeyring {
-        uri: "at://did:plc:owner/app.opake.cloud.keyring/3def".into(),
+        uri: "at://did:plc:owner/app.opake.keyring/3def".into(),
         owner_did: "did:plc:owner".into(),
         name: "family-photos".into(),
         member_dids: vec!["did:plc:alice".into(), "did:plc:bob".into()],
@@ -87,7 +87,7 @@ fn indexes_keyring_create() {
 #[test]
 fn indexes_keyring_update_replaces_members() {
     let state = test_state();
-    let uri = "at://did:plc:owner/app.opake.cloud.keyring/3def";
+    let uri = "at://did:plc:owner/app.opake.keyring/3def";
 
     let create = IndexableEvent::UpsertKeyring {
         uri: uri.into(),
@@ -122,7 +122,7 @@ fn indexes_keyring_update_replaces_members() {
 #[test]
 fn indexes_keyring_delete() {
     let state = test_state();
-    let uri = "at://did:plc:owner/app.opake.cloud.keyring/3def";
+    let uri = "at://did:plc:owner/app.opake.keyring/3def";
 
     let create = IndexableEvent::UpsertKeyring {
         uri: uri.into(),

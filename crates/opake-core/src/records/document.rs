@@ -22,9 +22,9 @@ pub struct KeyringEncryption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "$type")]
 pub enum Encryption {
-    #[serde(rename = "app.opake.cloud.document#directEncryption")]
+    #[serde(rename = "app.opake.document#directEncryption")]
     Direct(DirectEncryption),
-    #[serde(rename = "app.opake.cloud.document#keyringEncryption")]
+    #[serde(rename = "app.opake.document#keyringEncryption")]
     Keyring(KeyringEncryption),
 }
 
@@ -32,7 +32,7 @@ pub enum Encryption {
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     #[serde(default = "default_version")]
-    pub version: u32,
+    pub opake_version: u32,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
@@ -57,7 +57,7 @@ impl Document {
     /// struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
     pub fn new(name: String, blob: BlobRef, encryption: Encryption, created_at: String) -> Self {
         Self {
-            version: SCHEMA_VERSION,
+            opake_version: SCHEMA_VERSION,
             name,
             mime_type: None,
             size: None,

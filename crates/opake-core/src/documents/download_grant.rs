@@ -49,7 +49,7 @@ pub async fn download_from_grant(
     .await?;
 
     let grant: Grant = serde_json::from_value(grant_entry.value)?;
-    records::check_version(grant.version)?;
+    records::check_version(grant.opake_version)?;
 
     // Unwrap the content key from the grant
     debug!("unwrapping content key from grant");
@@ -68,7 +68,7 @@ pub async fn download_from_grant(
     .await?;
 
     let doc: Document = serde_json::from_value(doc_entry.value)?;
-    records::check_version(doc.version)?;
+    records::check_version(doc.opake_version)?;
 
     // Grants always wrap the content key directly — the document's own
     // encryption type doesn't matter for the grant path, we just need the nonce.
@@ -113,8 +113,8 @@ mod tests {
 
     const OWNER_DID: &str = "did:plc:owner";
     const OWNER_PDS: &str = "https://pds.owner.example.com";
-    const GRANT_URI: &str = "at://did:plc:owner/app.opake.cloud.grant/grant1";
-    const DOC_URI: &str = "at://did:plc:owner/app.opake.cloud.document/doc1";
+    const GRANT_URI: &str = "at://did:plc:owner/app.opake.grant/grant1";
+    const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
 
     fn did_document_response() -> HttpResponse {
         let body = serde_json::json!({
@@ -272,13 +272,9 @@ mod tests {
     #[tokio::test]
     async fn rejects_non_grant_uri() {
         let mock = MockTransport::new();
-        let err = download_from_grant(
-            &mock,
-            &[0u8; 32],
-            "at://did:plc:x/app.opake.cloud.document/abc",
-        )
-        .await
-        .unwrap_err();
+        let err = download_from_grant(&mock, &[0u8; 32], "at://did:plc:x/app.opake.document/abc")
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("grant"), "got: {err}");
     }
 }

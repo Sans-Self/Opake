@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.keyring",
+  "id": "app.opake.keyring",
   "defs": {
     "keyHistoryEntry": {
       "type": "object",
@@ -13,7 +13,7 @@
         },
         "members": {
           "type": "array",
-          "items": { "type": "ref", "ref": "app.opake.cloud.defs#wrappedKey" },
+          "items": { "type": "ref", "ref": "app.opake.defs#wrappedKey" },
           "minLength": 1,
           "maxLength": 256
         }
@@ -25,11 +25,11 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["version", "name", "algo", "members", "createdAt"],
+        "required": ["opakeVersion", "name", "algo", "members", "createdAt"],
         "properties": {
-          "version": {
+          "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.cloud.* namespace. Clients should reject records with a version they do not understand.",
+            "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
           },
           "name": {
@@ -50,7 +50,7 @@
           "members": {
             "type": "array",
             "description": "The group key wrapped to each member's DID public key. Each entry allows that DID to recover the group key.",
-            "items": { "type": "ref", "ref": "app.opake.cloud.defs#wrappedKey" },
+            "items": { "type": "ref", "ref": "app.opake.defs#wrappedKey" },
             "minLength": 1,
             "maxLength": 256
           },

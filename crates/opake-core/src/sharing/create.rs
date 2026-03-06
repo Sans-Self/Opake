@@ -82,7 +82,7 @@ mod tests {
     #[tokio::test]
     async fn create_grant_happy_path() {
         let mock = MockTransport::new();
-        let grant_uri = "at://did:plc:owner/app.opake.cloud.grant/tid123";
+        let grant_uri = "at://did:plc:owner/app.opake.grant/tid123";
         mock.enqueue(create_record_response(grant_uri));
 
         let mut client = mock_client(mock.clone());
@@ -92,7 +92,7 @@ mod tests {
         let recipient_public = crate::crypto::X25519DalekPublicKey::from(&recipient_secret);
 
         let params = GrantParams {
-            document_uri: "at://did:plc:owner/app.opake.cloud.document/doc1",
+            document_uri: "at://did:plc:owner/app.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
             recipient_public_key: recipient_public.as_bytes(),
@@ -119,7 +119,7 @@ mod tests {
                 assert_eq!(record["note"], "here you go");
                 assert_eq!(
                     record["document"],
-                    "at://did:plc:owner/app.opake.cloud.document/doc1"
+                    "at://did:plc:owner/app.opake.document/doc1"
                 );
             }
             _ => panic!("expected JSON body"),
@@ -130,7 +130,7 @@ mod tests {
     async fn created_grant_key_is_unwrappable() {
         let mock = MockTransport::new();
         mock.enqueue(create_record_response(
-            "at://did:plc:owner/app.opake.cloud.grant/tid",
+            "at://did:plc:owner/app.opake.grant/tid",
         ));
 
         let mut client = mock_client(mock.clone());
@@ -140,7 +140,7 @@ mod tests {
         let recipient_public = crate::crypto::X25519DalekPublicKey::from(&recipient_secret);
 
         let params = GrantParams {
-            document_uri: "at://did:plc:owner/app.opake.cloud.document/doc1",
+            document_uri: "at://did:plc:owner/app.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
             recipient_public_key: recipient_public.as_bytes(),

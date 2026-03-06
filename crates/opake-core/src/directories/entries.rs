@@ -24,7 +24,7 @@ pub async fn add_entry(
         .await?;
 
     let mut directory: Directory = serde_json::from_value(entry.value)?;
-    records::check_version(directory.version)?;
+    records::check_version(directory.opake_version)?;
 
     if directory.entries.iter().any(|e| e == entry_uri) {
         return Err(Error::InvalidRecord(format!(
@@ -60,7 +60,7 @@ pub async fn remove_entry(
         .await?;
 
     let mut directory: Directory = serde_json::from_value(entry.value)?;
-    records::check_version(directory.version)?;
+    records::check_version(directory.opake_version)?;
 
     let original_len = directory.entries.len();
     directory.entries.retain(|e| e != entry_uri);
@@ -92,9 +92,9 @@ mod tests {
         dummy_directory_with_entries, get_record_response, mock_client, put_record_response,
     };
 
-    const DIR_URI: &str = "at://did:plc:test/app.opake.cloud.directory/dir1";
-    const DOC_URI: &str = "at://did:plc:test/app.opake.cloud.document/doc1";
-    const DOC_URI_2: &str = "at://did:plc:test/app.opake.cloud.document/doc2";
+    const DIR_URI: &str = "at://did:plc:test/app.opake.directory/dir1";
+    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+    const DOC_URI_2: &str = "at://did:plc:test/app.opake.document/doc2";
 
     #[tokio::test]
     async fn add_entry_happy_path() {
@@ -140,7 +140,7 @@ mod tests {
     #[tokio::test]
     async fn add_entry_rejects_future_version() {
         let mut directory = dummy_directory_with_entries("/", vec![]);
-        directory.version = SCHEMA_VERSION + 1;
+        directory.opake_version = SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(DIR_URI, &directory));
@@ -186,7 +186,7 @@ mod tests {
         let err = remove_entry(
             &mut client,
             DIR_URI,
-            "at://did:plc:test/app.opake.cloud.document/nope",
+            "at://did:plc:test/app.opake.document/nope",
             "2026-03-01T12:00:00Z",
         )
         .await
@@ -198,7 +198,7 @@ mod tests {
     #[tokio::test]
     async fn remove_entry_rejects_future_version() {
         let mut directory = dummy_directory_with_entries("/", vec![DOC_URI.into()]);
-        directory.version = SCHEMA_VERSION + 1;
+        directory.opake_version = SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(DIR_URI, &directory));

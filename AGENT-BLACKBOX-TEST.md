@@ -88,7 +88,7 @@ A$ opake resolve <A-handle>
 echo "hello opake" > /tmp/test-direct.txt
 
 A$ opake upload /tmp/test-direct.txt
-# prints: test-direct.txt → at://did:plc:A/app.opake.cloud.document/<rkey>
+# prints: test-direct.txt → at://did:plc:A/app.opake.document/<rkey>
 ```
 
 Save the output AT-URI as `$DOC_URI`.
@@ -158,7 +158,7 @@ A$ opake download empty.bin -o /tmp/empty-download.bin
 
 ```bash
 A$ opake mkdir Photos
-# prints: Photos → at://did:plc:A/app.opake.cloud.directory/<rkey>
+# prints: Photos → at://did:plc:A/app.opake.directory/<rkey>
 
 A$ opake mkdir Archive
 ```
@@ -317,7 +317,7 @@ Save URI as `$SHARED_URI`.
 
 ```bash
 A$ opake share shared-file.txt <B-handle> --note "for your eyes only"
-# prints: shared with <B-handle> → at://did:plc:A/app.opake.cloud.grant/<grant-rkey>
+# prints: shared with <B-handle> → at://did:plc:A/app.opake.grant/<grant-rkey>
 ```
 
 Save grant URI as `$GRANT_URI`.
@@ -376,7 +376,7 @@ B$ opake download --grant $GRANT_URI -o /tmp/should-fail.txt
 
 ```bash
 A$ opake keyring create family-photos
-# prints: family-photos → at://did:plc:A/app.opake.cloud.keyring/<kr-rkey>
+# prints: family-photos → at://did:plc:A/app.opake.keyring/<kr-rkey>
 ```
 
 ### 6.2 List keyrings

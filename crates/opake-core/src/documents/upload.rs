@@ -206,7 +206,7 @@ mod tests {
     /// Fake createRecord response — the PDS returns a record ref.
     fn create_record_response() -> HttpResponse {
         let body = serde_json::json!({
-            "uri": format!("at://{}/app.opake.cloud.document/new123", TEST_DID),
+            "uri": format!("at://{}/app.opake.document/new123", TEST_DID),
             "cid": "bafynewrecord",
         });
         HttpResponse {
@@ -251,7 +251,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(uri.contains("app.opake.cloud.document"));
+        assert!(uri.contains("app.opake.document"));
         assert!(uri.contains(TEST_DID));
 
         let requests = mock.requests();
@@ -262,7 +262,7 @@ mod tests {
         // Verify the document record sent to createRecord
         match &requests[1].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.cloud.document");
+                assert_eq!(v["collection"], "app.opake.document");
                 let record = &v["record"];
                 assert_eq!(record["name"], "hello.txt");
                 assert_eq!(record["mimeType"], "text/plain");
@@ -309,7 +309,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(uri.contains("app.opake.cloud.document"));
+        assert!(uri.contains("app.opake.document"));
     }
 
     #[tokio::test]

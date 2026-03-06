@@ -7,12 +7,12 @@ use super::super::tests::{
     put_record_response,
 };
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.cloud.directory/self";
-const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.cloud.directory/photos";
-const DIR_VACATION_URI: &str = "at://did:plc:test/app.opake.cloud.directory/vacation";
-const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.cloud.document/beach";
-const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.cloud.document/notes";
-const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.cloud.document/sunset";
+const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
+const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
+const DIR_VACATION_URI: &str = "at://did:plc:test/app.opake.directory/vacation";
+const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
+const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.document/notes";
+const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.document/sunset";
 
 fn delete_ok() -> HttpResponse {
     HttpResponse {
@@ -129,7 +129,7 @@ async fn remove_document_without_parent() {
     let tree = DirectoryTree::load(&mut client).await.unwrap();
 
     let resolved = ResolvedPath {
-        uri: "at://did:plc:test/app.opake.cloud.document/orphan".into(),
+        uri: "at://did:plc:test/app.opake.document/orphan".into(),
         kind: EntryKind::Document,
         name: "orphan.txt".into(),
         parent_uri: None,
@@ -153,7 +153,7 @@ async fn remove_empty_directory() {
     let mock = MockTransport::new();
     let root = dummy_directory_with_entries(
         "/",
-        vec!["at://did:plc:test/app.opake.cloud.directory/empty".into()],
+        vec!["at://did:plc:test/app.opake.directory/empty".into()],
     );
     mock.enqueue(list_records_response(
         &[

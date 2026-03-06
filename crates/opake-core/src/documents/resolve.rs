@@ -49,13 +49,10 @@ mod tests {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
 
-        let uri = resolve_uri(
-            &mut client,
-            "at://did:plc:test/app.opake.cloud.document/abc",
-        )
-        .await
-        .unwrap();
-        assert_eq!(uri, "at://did:plc:test/app.opake.cloud.document/abc");
+        let uri = resolve_uri(&mut client, "at://did:plc:test/app.opake.document/abc")
+            .await
+            .unwrap();
+        assert_eq!(uri, "at://did:plc:test/app.opake.document/abc");
     }
 
     #[tokio::test]

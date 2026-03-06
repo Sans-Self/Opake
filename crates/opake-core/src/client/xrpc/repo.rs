@@ -45,7 +45,7 @@ impl<T: Transport> super::XrpcClient<T> {
     /// Upsert a record with an explicit rkey via `com.atproto.repo.putRecord`.
     ///
     /// Idempotent — creates or overwrites the record at `collection/rkey`.
-    /// Used for singleton records like `app.opake.cloud.publicKey/self`.
+    /// Used for singleton records like `app.opake.publicKey/self`.
     pub async fn put_record<R: Serialize>(
         &mut self,
         collection: &str,

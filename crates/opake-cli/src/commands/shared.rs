@@ -72,7 +72,7 @@ mod tests {
 
     fn entry(recipient: &str, doc: &str, perms: Option<&str>, note: Option<&str>) -> GrantEntry {
         GrantEntry {
-            uri: format!("at://did:plc:owner/app.opake.cloud.grant/g1"),
+            uri: format!("at://did:plc:owner/app.opake.grant/g1"),
             document: doc.into(),
             recipient: recipient.into(),
             permissions: perms.map(|s| s.into()),
@@ -85,7 +85,7 @@ mod tests {
     fn short_format() {
         let entries = vec![entry(
             "did:plc:bob",
-            "at://did:plc:owner/app.opake.cloud.document/doc1",
+            "at://did:plc:owner/app.opake.document/doc1",
             Some("read"),
             None,
         )];
@@ -106,7 +106,7 @@ mod tests {
     fn long_format_with_note() {
         let entries = vec![entry(
             "did:plc:bob",
-            "at://did:plc:owner/app.opake.cloud.document/doc1",
+            "at://did:plc:owner/app.opake.document/doc1",
             Some("read"),
             Some("tax doc"),
         )];

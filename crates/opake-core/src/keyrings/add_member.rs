@@ -29,7 +29,7 @@ pub async fn add_member(
         .await?;
 
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
-    records::check_version(keyring.version)?;
+    records::check_version(keyring.opake_version)?;
 
     if keyring.members.iter().any(|m| m.did == new_member_did) {
         return Err(Error::InvalidRecord(format!(
@@ -59,7 +59,7 @@ mod tests {
     use crate::test_utils::MockTransport;
 
     const TEST_DID: &str = "did:plc:owner";
-    const KEYRING_URI: &str = "at://did:plc:owner/app.opake.cloud.keyring/kr1";
+    const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         let session = Session::Legacy(LegacySession {
@@ -79,7 +79,7 @@ mod tests {
 
     fn existing_keyring(owner_did: &str) -> Keyring {
         Keyring {
-            version: SCHEMA_VERSION,
+            opake_version: SCHEMA_VERSION,
             name: "test-keyring".into(),
             description: None,
             algo: "aes-256-gcm".into(),
@@ -195,7 +195,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_future_version() {
         let mut keyring = existing_keyring(TEST_DID);
-        keyring.version = SCHEMA_VERSION + 1;
+        keyring.opake_version = SCHEMA_VERSION + 1;
         let (pubkey, _) = test_keypair();
         let group_key = crypto::generate_content_key(&mut OsRng);
 

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.cloud.document",
+  "id": "app.opake.document",
   "defs": {
     "main": {
       "type": "record",
@@ -8,11 +8,11 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["version", "name", "blob", "encryption", "createdAt"],
+        "required": ["opakeVersion", "name", "blob", "encryption", "createdAt"],
         "properties": {
-          "version": {
+          "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.cloud.* namespace. Clients should reject records with a version they do not understand.",
+            "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
           },
           "name": {
@@ -57,7 +57,7 @@
           },
           "visibility": {
             "type": "ref",
-            "ref": "app.opake.cloud.defs#visibility"
+            "ref": "app.opake.defs#visibility"
           },
           "createdAt": {
             "type": "string",
@@ -78,7 +78,7 @@
       "properties": {
         "envelope": {
           "type": "ref",
-          "ref": "app.opake.cloud.defs#encryptionEnvelope"
+          "ref": "app.opake.defs#encryptionEnvelope"
         }
       }
     },
@@ -90,7 +90,7 @@
       "properties": {
         "keyringRef": {
           "type": "ref",
-          "ref": "app.opake.cloud.defs#keyringRef"
+          "ref": "app.opake.defs#keyringRef"
         },
         "algo": {
           "type": "string",

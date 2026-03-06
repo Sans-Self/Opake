@@ -29,7 +29,7 @@ sequenceDiagram
     CLI->>PDS: com.atproto.repo.createRecord (document)
     PDS-->>CLI: { uri, cid }
 
-    CLI->>User: Uploaded: at://did/app.opake.cloud.document/<tid>
+    CLI->>User: Uploaded: at://did/app.opake.document/<tid>
 ```
 
 ## Download (Own Files)

@@ -135,4 +135,4 @@ sequenceDiagram
     AppView-->>OwnerPDS: [{ revision_uri, proposer, created_at }, ...]
 ```
 
-Without the AppView, `opake revisions <document>` can fall back to polling each keyring member's PDS for `app.opake.cloud.revision` records whose `origin` matches the document URI. Slow but functional, and zero-trust — no intermediary needed.
+Without the AppView, `opake revisions <document>` can fall back to polling each keyring member's PDS for `app.opake.revision` records whose `origin` matches the document URI. Slow but functional, and zero-trust — no intermediary needed.

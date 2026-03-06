@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{default_version, WrappedKey};
 use crate::atproto::AtBytes;
 
-pub const PAIR_RESPONSE_COLLECTION: &str = "app.opake.cloud.pairResponse";
+pub const PAIR_RESPONSE_COLLECTION: &str = "app.opake.pairResponse";
 
 /// A device pairing response. The existing device encrypts its identity
 /// to the requesting device's ephemeral key and writes this record.
@@ -11,7 +11,7 @@ pub const PAIR_RESPONSE_COLLECTION: &str = "app.opake.cloud.pairResponse";
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
     #[serde(default = "default_version")]
-    pub version: u32,
+    pub opake_version: u32,
     pub request: String,
     pub wrapped_key: WrappedKey,
     pub ciphertext: AtBytes,

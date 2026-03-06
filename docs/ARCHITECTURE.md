@@ -246,7 +246,7 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 
 ### Public Key Discovery
 
-AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.cloud.publicKey/self` singleton records on each user's PDS containing:
+AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.publicKey/self` singleton records on each user's PDS containing:
 
 - **X25519 encryption public key** — used for key wrapping (sharing)
 - **Ed25519 signing public key** — used for AppView authentication
@@ -255,7 +255,7 @@ Key discovery is an unauthenticated `getRecord` call — no auth needed to look 
 
 ## Data Model
 
-All records live under the `app.opake.cloud.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
+All records live under the `app.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
 
 ```mermaid
 erDiagram

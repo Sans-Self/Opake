@@ -1,7 +1,7 @@
 // AT Protocol primitives: URIs, binary data wrappers, blob references.
 //
 // These types mirror atproto's JSON serialization conventions and are used
-// across both the XRPC client and the app.opake.cloud.* lexicon records.
+// across both the XRPC client and the app.opake.* lexicon records.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use crate::error::Error;
 /// Parsed components of an `at://` URI.
 ///
 /// Format: `at://<authority>/<collection>/<rkey>`
-/// Example: `at://did:plc:abc123/app.opake.cloud.document/3abc`
+/// Example: `at://did:plc:abc123/app.opake.document/3abc`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtUri {
     pub authority: String,
@@ -109,18 +109,17 @@ mod tests {
 
     #[test]
     fn parse_valid_document_uri() {
-        let uri =
-            parse_at_uri("at://did:plc:abc123/app.opake.cloud.document/3jui2v6cv2a2w").unwrap();
+        let uri = parse_at_uri("at://did:plc:abc123/app.opake.document/3jui2v6cv2a2w").unwrap();
         assert_eq!(uri.authority, "did:plc:abc123");
-        assert_eq!(uri.collection, "app.opake.cloud.document");
+        assert_eq!(uri.collection, "app.opake.document");
         assert_eq!(uri.rkey, "3jui2v6cv2a2w");
     }
 
     #[test]
     fn parse_valid_grant_uri() {
-        let uri = parse_at_uri("at://did:web:example.com/app.opake.cloud.grant/tid123").unwrap();
+        let uri = parse_at_uri("at://did:web:example.com/app.opake.grant/tid123").unwrap();
         assert_eq!(uri.authority, "did:web:example.com");
-        assert_eq!(uri.collection, "app.opake.cloud.grant");
+        assert_eq!(uri.collection, "app.opake.grant");
         assert_eq!(uri.rkey, "tid123");
     }
 

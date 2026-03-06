@@ -20,8 +20,8 @@ pub struct CommitEvent {
 }
 
 /// Collections we index.
-pub const COLLECTION_GRANT: &str = "app.opake.cloud.grant";
-pub const COLLECTION_KEYRING: &str = "app.opake.cloud.keyring";
+pub const COLLECTION_GRANT: &str = "app.opake.grant";
+pub const COLLECTION_KEYRING: &str = "app.opake.keyring";
 
 /// Parsed event ready for indexing.
 #[derive(Debug)]

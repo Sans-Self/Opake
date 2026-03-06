@@ -33,7 +33,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path() {
-        let uri = format!("at://{TEST_DID}/app.opake.cloud.directory/tid123");
+        let uri = format!("at://{TEST_DID}/app.opake.directory/tid123");
         let mock = MockTransport::new();
         mock.enqueue(create_record_response(&uri));
 
@@ -50,7 +50,7 @@ mod tests {
 
         match &reqs[0].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.cloud.directory");
+                assert_eq!(v["collection"], "app.opake.directory");
                 let record: Directory = serde_json::from_value(v["record"].clone()).unwrap();
                 assert_eq!(record.name, "Photos");
                 assert!(record.entries.is_empty());

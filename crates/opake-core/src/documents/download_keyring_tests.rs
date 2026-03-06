@@ -9,8 +9,8 @@ const OWNER_DID: &str = "did:plc:owner";
 const OWNER_PDS: &str = "https://pds.owner.example.com";
 const MEMBER_DID: &str = "did:plc:member";
 const KR_RKEY: &str = "kr1";
-const DOC_URI: &str = "at://did:plc:owner/app.opake.cloud.document/doc1";
-const KR_URI: &str = "at://did:plc:owner/app.opake.cloud.keyring/kr1";
+const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
+const KR_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
 
 fn did_document_response() -> HttpResponse {
     let body = serde_json::json!({
@@ -188,7 +188,7 @@ async fn rejects_non_document_uri() {
         &mock,
         MEMBER_DID,
         &[0u8; 32],
-        "at://did:plc:x/app.opake.cloud.grant/abc",
+        "at://did:plc:x/app.opake.grant/abc",
     )
     .await
     .unwrap_err();
