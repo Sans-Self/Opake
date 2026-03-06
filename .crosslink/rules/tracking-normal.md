@@ -55,13 +55,13 @@ End sessions when: context is getting long, user indicates stopping, or you've c
 
 Handoff notes should include: what was accomplished, what's in progress, what's next.
 
-### Typed Comments (medium+ priority)
+### Typed Comments (REQUIRED)
 
-For issues at medium priority or above, use `--kind` on comments to categorize them.
+Every `crosslink comment` MUST include `--kind` to categorize the comment for audit trails. This is not optional.
 
 **Kinds**: `plan`, `decision`, `observation`, `blocker`, `resolution`, `result`, `handoff`
 
-**Minimum required comments per medium+ issue:**
+**Minimum required comments per issue:**
 1. `--kind plan` — before writing code (what you intend to do)
 2. `--kind result` — before closing (what you delivered)
 
@@ -76,9 +76,7 @@ crosslink comment <id> "Chose middleware over decorator — matches existing pat
 crosslink comment <id> "Auth module refactored, 12 tests pass" --kind result
 ```
 
-Low priority issues don't need typed comments — the diff tells the story.
-
-Use markdown in comment content — comments are rendered as HTML in the issue tracker.
+**You cannot omit `--kind`.** Even for brief comments, categorize them. The audit trail depends on it.
 
 ### Priority Guide
 - `critical`: Blocking other work, security issue, production down
