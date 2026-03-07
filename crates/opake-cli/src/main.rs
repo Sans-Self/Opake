@@ -42,6 +42,7 @@ enum Command {
     Cat(commands::cat::CatCommand),
     Inbox(commands::inbox::InboxCommand),
     Ls(commands::ls::LsCommand),
+    Metadata(commands::metadata::MetadataCommand),
     Mkdir(commands::mkdir::MkdirCommand),
     /// Moves a file to another directory. Use the metadata command for that.
     Move(commands::move_cmd::MoveCommand),
@@ -110,6 +111,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Cat(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Inbox(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Ls(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Metadata(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Mkdir(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Move(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Rm(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,

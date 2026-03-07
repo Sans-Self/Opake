@@ -133,6 +133,7 @@ crates/
         upload.rs      File → encrypt → upload (direct or --keyring)
         download.rs    Download + decrypt (direct, keyring, or --grant)
         ls.rs          List documents
+        metadata.rs    View/edit document metadata (rename, tags, description)
         mkdir.rs       Create directory
         rm.rs          Path-aware delete (documents, directories, recursive)
         resolve.rs     Identity resolution display

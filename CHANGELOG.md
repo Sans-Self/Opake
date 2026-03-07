@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
 
 ### Added
+- Add metadata CLI command for rename, tag, and description management [#190](https://issues.opake.app/issues/190.html)
 - Consolidate DNS and transport into opake-core, unify handle resolution [#185](https://issues.opake.app/issues/185.html)
 - Build web login, callback, setup, and recover routes [#173](https://issues.opake.app/issues/173.html)
 - Add device-to-device key pairing via PDS [#183](https://issues.opake.app/issues/183.html)

@@ -98,9 +98,16 @@ opake rm photo.jpg
 opake rm Photos/photo.jpg
 opake rm -r Photos
 
-# move and rename
-opake mv photo.jpg Photos/
-opake mv photo.jpg vacation-photo.jpg
+# move a file to another directory
+opake move photo.jpg Photos/
+
+# view or edit document metadata
+opake metadata show photo.jpg
+opake metadata rename photo.jpg vacation-photo.jpg
+opake metadata tag add photo.jpg travel
+opake metadata tag remove photo.jpg travel
+opake metadata describe photo.jpg "Beach sunset from last summer"
+opake metadata describe photo.jpg --clear
 
 # resolve a handle or DID to see their public key
 opake resolve alice.example.com
@@ -138,7 +145,7 @@ opake logout bob.other.com
 
 Commands accept a filename, a path (`Photos/beach.jpg`), or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
 
-The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `mv`, `cat`, `tree`, `share`, `shared`, `revoke`) and accepts a handle or DID.
+The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `move`, `cat`, `tree`, `metadata`, `share`, `shared`, `revoke`) and accepts a handle or DID.
 
 ## AppView
 

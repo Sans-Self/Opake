@@ -370,6 +370,61 @@ B$ opake download --grant $GRANT_URI -o /tmp/should-fail.txt
 
 ---
 
+## 5b. Metadata Management
+
+### 5b.1 Show metadata
+
+```bash
+A$ opake metadata show $FILENAME
+# prints: Name, MIME type, Size, Tags, Description
+```
+
+### 5b.2 Rename
+
+```bash
+A$ opake metadata rename $FILENAME new-name.txt
+# prints: Renamed to: new-name.txt
+A$ opake ls
+# verify: old name gone, new-name.txt present
+```
+
+### 5b.3 Add and remove tags
+
+```bash
+A$ opake metadata tag add new-name.txt finance
+# prints: Tags: finance
+A$ opake metadata tag add new-name.txt 2025
+# prints: Tags: finance, 2025
+A$ opake metadata tag remove new-name.txt finance
+# prints: Tags: 2025
+A$ opake metadata show new-name.txt
+# verify: Tags line shows "2025" only
+```
+
+### 5b.4 Set and clear description
+
+```bash
+A$ opake metadata describe new-name.txt "Annual tax return"
+# prints: Description updated.
+A$ opake metadata show new-name.txt
+# verify: Description: Annual tax return
+A$ opake metadata describe new-name.txt --clear
+# prints: Description cleared.
+A$ opake metadata show new-name.txt
+# verify: no Description line
+```
+
+### 5b.5 Duplicate tag is idempotent
+
+```bash
+A$ opake metadata tag add new-name.txt 2025
+A$ opake metadata tag add new-name.txt 2025
+A$ opake metadata show new-name.txt
+# verify: Tags shows "2025" once, not twice
+```
+
+---
+
 ## 6. Keyrings
 
 ### 6.1 Create a keyring

@@ -6,6 +6,7 @@ pub mod keyring;
 pub mod login;
 pub mod logout;
 pub mod ls;
+pub mod metadata;
 pub mod mkdir;
 pub mod move_cmd;
 pub mod pair;
