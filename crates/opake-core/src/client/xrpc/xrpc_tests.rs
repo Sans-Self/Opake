@@ -259,10 +259,20 @@ async fn non_expired_error_passes_through() {
 }
 
 #[test]
-fn is_expired_token_detects_correctly() {
+fn is_expired_token_detects_400() {
     assert!(XrpcClient::<MockTransport>::is_expired_token(
         &expired_token_response()
     ));
+}
+
+#[test]
+fn is_expired_token_detects_401() {
+    let r = HttpResponse {
+        status: 401,
+        headers: vec![],
+        body: br#"{"error":"ExpiredToken","message":"Token has expired"}"#.to_vec(),
+    };
+    assert!(XrpcClient::<MockTransport>::is_expired_token(&r));
 }
 
 #[test]

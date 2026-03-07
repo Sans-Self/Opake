@@ -63,6 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin [#112](https://issues.opake.app/issues/112.html)
 
 ### Fixed
+- Fix token refresh not triggering on HTTP 401 ExpiredToken responses [#197](https://issues.opake.app/issues/197.html)
 - Require directory on upload, default to root when --dir is omitted [#192](https://issues.opake.app/issues/192.html)
 - Fix bugs found during black-box integration testing of sharing workflow [#70](https://issues.opake.app/issues/70.html)
 - Fix base64 padding mismatch when decoding PDS $bytes fields [#68](https://issues.opake.app/issues/68.html)

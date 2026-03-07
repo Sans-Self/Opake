@@ -291,8 +291,9 @@ impl<T: Transport> XrpcClient<T> {
     }
 
     /// Check whether a PDS response is an expired-token error.
+    /// The AT Protocol PDS may return ExpiredToken on either 400 or 401.
     fn is_expired_token(response: &HttpResponse) -> bool {
-        if response.status != 400 {
+        if response.status != 400 && response.status != 401 {
             return false;
         }
 
