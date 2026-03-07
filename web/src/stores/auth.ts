@@ -277,8 +277,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await publishPublicKey(
           pending.pdsUrl,
           did,
-          identity.publicKey,
-          identity.verifyKey,
+          identity.public_key,
+          identity.verify_key,
           session.accessToken,
           session.dpopKey,
           session.dpopNonce,

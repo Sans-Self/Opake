@@ -21,10 +21,10 @@ const testConfig: Config = {
 
 const testIdentity: Identity = {
   did: "did:plc:alice",
-  publicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-  privateKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
-  signingKey: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
-  verifyKey: "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+  public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  private_key: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+  signing_key: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+  verify_key: "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
 };
 
 const testSession: Session = {
@@ -98,10 +98,10 @@ describe("identity", () => {
 
   it("overwrite preserves latest", async () => {
     await storage.saveIdentity("did:plc:alice", testIdentity);
-    const updated: Identity = { ...testIdentity, publicKey: "NEWKEY=" };
+    const updated: Identity = { ...testIdentity, public_key: "NEWKEY=" };
     await storage.saveIdentity("did:plc:alice", updated);
     const loaded = await storage.loadIdentity("did:plc:alice");
-    expect(loaded.publicKey).toBe("NEWKEY=");
+    expect(loaded.public_key).toBe("NEWKEY=");
   });
 
   it("different DIDs are independent", async () => {

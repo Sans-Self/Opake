@@ -16,10 +16,10 @@ export interface AccountConfig {
 
 export interface Identity {
   did: string;
-  publicKey: string; // base64 X25519
-  privateKey: string; // base64 X25519
-  signingKey: string | null; // base64 Ed25519
-  verifyKey: string | null; // base64 Ed25519
+  public_key: string; // base64 X25519
+  private_key: string; // base64 X25519
+  signing_key: string | null; // base64 Ed25519
+  verify_key: string | null; // base64 Ed25519
 }
 
 // Mirrors: opake-core Session enum (client/xrpc/mod.rs)
