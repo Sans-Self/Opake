@@ -53,6 +53,8 @@ enum Command {
     Revoke(commands::revoke::RevokeCommand),
     Keyring(commands::keyring::KeyringCommand),
     Pair(commands::pair::PairCommand),
+    /// Delete all Opake data from the PDS
+    Purge(commands::purge::PurgeCommand),
     Tree(commands::tree::TreeCommand),
 }
 
@@ -121,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Revoke(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Purge(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
     }
 

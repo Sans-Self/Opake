@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod mkdir;
 pub mod move_cmd;
 pub mod pair;
+pub mod purge;
 pub mod resolve;
 pub mod revoke;
 pub mod rm;

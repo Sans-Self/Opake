@@ -138,6 +138,15 @@ opake keyring remove-member family-photos alice.example.com
 opake pair request              # on the NEW device (polls for approval)
 opake pair approve              # on the EXISTING device (select + approve)
 
+# delete all Opake data from PDS (see what would go)
+opake purge --dry-run
+
+# delete everything (prompts for confirmation phrase)
+opake purge
+
+# skip confirmation and also remove local identity
+opake purge --force
+
 # remove an account (defaults to only account if just one)
 opake logout
 opake logout bob.other.com
