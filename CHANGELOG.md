@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Security
 - Fix ContentKey Debug impl to redact secret bytes [#49](https://issues.opake.app/issues/49.html)
 - Add file permission hardening for sensitive config and key files [#8](https://issues.opake.app/issues/8.html)
-- Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)
+- Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
 - Add metadata CLI command for rename, tag, and description management [#190](https://issues.opake.app/issues/190.html)
@@ -62,11 +62,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin [#112](https://issues.opake.app/issues/112.html)
 
 ### Fixed
+- Require directory on upload, default to root when --dir is omitted [#192](https://issues.opake.app/issues/192.html)
 - Fix bugs found during black-box integration testing of sharing workflow [#70](https://issues.opake.app/issues/70.html)
 - Fix base64 padding mismatch when decoding PDS $bytes fields [#68](https://issues.opake.app/issues/68.html)
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Add metadata CLI command with tag and description subcommands [#190](https://issues.opake.app/issues/190.html)
 - Encrypt directory metadata (add encryption envelope to directory records) [#189](https://issues.opake.app/issues/189.html)
 - Encrypt keyring and grant metadata [#188](https://issues.opake.app/issues/188.html)
 - Encrypt document metadata (name, mimeType, tags, description) [#187](https://issues.opake.app/issues/187.html)
