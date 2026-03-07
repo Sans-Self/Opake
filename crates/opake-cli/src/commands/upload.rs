@@ -12,7 +12,7 @@ use opake_core::keyrings;
 
 use opake_core::client::Session;
 
-use crate::commands::Execute;
+use crate::commands::{encrypt_directory, Execute};
 use crate::identity;
 use crate::keyring_store;
 use crate::session::{self, CommandContext};
@@ -31,7 +31,7 @@ pub struct UploadCommand {
     #[arg(long)]
     description: Option<String>,
 
-    /// Place the uploaded document into a directory
+    /// Directory to place the document in (defaults to root "/")
     #[arg(long)]
     dir: Option<String>,
 }
@@ -39,6 +39,7 @@ pub struct UploadCommand {
 impl Execute for UploadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
 
         let plaintext =
             fs::read(&self.path).context(format!("failed to read {}", self.path.display()))?;
@@ -56,7 +57,6 @@ impl Execute for UploadCommand {
         let now = Utc::now().to_rfc3339();
 
         let uri = if let Some(keyring_name) = &self.keyring {
-            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
             let private_key = id.private_key_bytes()?;
             let entry =
                 keyrings::resolve_keyring_uri(&mut client, keyring_name, &id.did, &private_key)
@@ -82,7 +82,6 @@ impl Execute for UploadCommand {
 
             documents::encrypt_and_upload_keyring(&mut client, &params, &mut OsRng).await?
         } else {
-            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
             let owner_pubkey = id.public_key_bytes()?;
 
             let params = UploadParams {
@@ -98,8 +97,7 @@ impl Execute for UploadCommand {
             documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?
         };
 
-        if let Some(dir_path) = &self.dir {
-            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+        let (directory_uri, dir_label) = if let Some(dir_path) = &self.dir {
             let private_key = id.private_key_bytes()?;
             let mut tree = DirectoryTree::load(&mut client).await?;
             tree.decrypt_names(&ctx.did, &private_key);
@@ -109,11 +107,18 @@ impl Execute for UploadCommand {
                 anyhow::bail!("{dir_path:?} is not a directory");
             }
 
-            directories::add_entry(&mut client, &resolved.uri, &uri, &now).await?;
-            println!("{} → {} (in {})", filename, uri, dir_path);
+            (resolved.uri, dir_path.clone())
         } else {
-            println!("{} → {}", filename, uri);
-        }
+            let pubkey = id.public_key_bytes()?;
+            let (root_enc, root_meta) = encrypt_directory("/", &ctx.did, &pubkey, &mut OsRng)?;
+            let root_uri =
+                directories::get_or_create_root(&mut client, &ctx.did, root_enc, root_meta, &now)
+                    .await?;
+            (root_uri, "/".into())
+        };
+
+        directories::add_entry(&mut client, &directory_uri, &uri, &now).await?;
+        println!("{} → {} (in {})", filename, uri, dir_label);
 
         Ok(session::refreshed_session(&client))
     }
