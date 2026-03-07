@@ -5,5 +5,5 @@ export function PanelSkeleton() {
         <div key={i} className="skeleton h-12 w-full rounded-xl" />
       ))}
     </div>
-  );
+  )
 }

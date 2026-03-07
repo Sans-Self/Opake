@@ -1,79 +1,95 @@
 import {
-  Sparkle,
-  Lock,
-  ShareNetwork,
-  Graph,
-  Question,
-  ArrowSquareOut,
-  User,
-  ShieldCheck,
-  Bell,
-  CaretRight,
-  Trash,
-  Folder,
-} from "@phosphor-icons/react";
-import { FileListRow } from "./FileListRow";
-import { FileGridCard } from "./FileGridCard";
-import type { FileItem, Panel } from "./types";
-import {
-  ROOT_ITEMS,
-  SHARED_ITEMS,
-  DOCUMENTS_ITEMS,
-} from "./mock-data";
+  SparkleIcon,
+  LockIcon,
+  ShareNetworkIcon,
+  GraphIcon,
+  QuestionIcon,
+  ArrowSquareOutIcon,
+  UserIcon,
+  ShieldCheckIcon,
+  BellIcon,
+  CaretRightIcon,
+  TrashIcon,
+  FolderIcon,
+} from "@phosphor-icons/react"
+import { FileListRow } from "./FileListRow"
+import { FileGridCard } from "./FileGridCard"
+import type { FileItem, Panel } from "./types"
+import { ROOT_ITEMS, SHARED_ITEMS, DOCUMENTS_ITEMS } from "./mock-data"
 
 const DOCS_SECTIONS = [
-  { id: "getting-started", title: "Getting Started", icon: Sparkle, desc: "Set up your cabinet, create your first encrypted file, and explore the interface." },
-  { id: "encryption", title: "Encryption & Keys", icon: Lock, desc: "How end-to-end encryption works in Opake and how your keys are managed." },
-  { id: "sharing", title: "Sharing & DIDs", icon: ShareNetwork, desc: "Share files using decentralised identifiers without a central authority." },
-  { id: "at-protocol", title: "AT Protocol", icon: Graph, desc: "The open standard powering Opake — identity, data portability, and federation." },
-  { id: "faq", title: "FAQ", icon: Question, desc: "Common questions about privacy, security, and how Opake compares to alternatives." },
-];
+  {
+    id: "getting-started",
+    title: "Getting Started",
+    icon: SparkleIcon,
+    desc: "Set up your cabinet, create your first encrypted file, and explore the interface.",
+  },
+  {
+    id: "encryption",
+    title: "Encryption & Keys",
+    icon: LockIcon,
+    desc: "How end-to-end encryption works in Opake and how your keys are managed.",
+  },
+  {
+    id: "sharing",
+    title: "Sharing & DIDs",
+    icon: ShareNetworkIcon,
+    desc: "Share files using decentralised identifiers without a central authority.",
+  },
+  {
+    id: "at-protocol",
+    title: "AT Protocol",
+    icon: GraphIcon,
+    desc: "The open standard powering Opake — identity, data portability, and federation.",
+  },
+  {
+    id: "faq",
+    title: "FAQ",
+    icon: QuestionIcon,
+    desc: "Common questions about privacy, security, and how Opake compares to alternatives.",
+  },
+]
 
 const SETTINGS_SECTIONS = [
-  { label: "Account & Identity", desc: "DID: did:plc:7f2ab3c4d…8e91f0", icon: User },
-  { label: "Encryption Keys", desc: "Last rotated 14 days ago · Active", icon: Lock },
-  { label: "Sharing & Permissions", desc: "3 active collaborators", icon: ShareNetwork },
-  { label: "Connected Devices", desc: "2 devices linked", icon: ShieldCheck },
-  { label: "Notifications", desc: "Email & in-app alerts", icon: Bell },
-];
+  { label: "Account & Identity", desc: "DID: did:plc:7f2ab3c4d…8e91f0", icon: UserIcon },
+  { label: "Encryption Keys", desc: "Last rotated 14 days ago · Active", icon: LockIcon },
+  { label: "Sharing & Permissions", desc: "3 active collaborators", icon: ShareNetworkIcon },
+  { label: "Connected Devices", desc: "2 devices linked", icon: ShieldCheckIcon },
+  { label: "Notifications", desc: "Email & in-app alerts", icon: BellIcon },
+]
 
-const ALL_ITEMS = [...ROOT_ITEMS, ...SHARED_ITEMS, ...DOCUMENTS_ITEMS];
+const ALL_ITEMS = [...ROOT_ITEMS, ...SHARED_ITEMS, ...DOCUMENTS_ITEMS]
 
-function getItemsForPanel(
-  panel: Panel,
-  starredIds: ReadonlySet<string>,
-): FileItem[] {
+function getItemsForPanel(panel: Panel, starredIds: ReadonlySet<string>): FileItem[] {
   const baseItems = (() => {
     switch (panel.type) {
       case "root":
-        return ROOT_ITEMS;
+        return ROOT_ITEMS
       case "shared":
-        return SHARED_ITEMS;
+        return SHARED_ITEMS
       case "starred":
-        return ALL_ITEMS.filter((i) => starredIds.has(i.id));
+        return ALL_ITEMS.filter((i) => starredIds.has(i.id))
       case "encrypted":
-        return ROOT_ITEMS.filter((i) => i.status === "private");
+        return ROOT_ITEMS.filter((i) => i.status === "private")
       case "folder":
-        return panel.folderId === "f-documents"
-          ? DOCUMENTS_ITEMS
-          : ROOT_ITEMS.slice(5);
+        return panel.folderId === "f-documents" ? DOCUMENTS_ITEMS : ROOT_ITEMS.slice(5)
       default:
-        return [];
+        return []
     }
-  })();
+  })()
 
   return baseItems.map((item) => ({
     ...item,
     starred: starredIds.has(item.id),
-  }));
+  }))
 }
 
 interface PanelContentProps {
-  panel: Panel;
-  viewMode: "list" | "grid";
-  starredIds: ReadonlySet<string>;
-  onOpen: (item: FileItem) => void;
-  onStar: (id: string) => void;
+  panel: Panel
+  viewMode: "list" | "grid"
+  starredIds: ReadonlySet<string>
+  onOpen: (item: FileItem) => void
+  onStar: (id: string) => void
 }
 
 export function PanelContent({
@@ -82,16 +98,14 @@ export function PanelContent({
   starredIds,
   onOpen,
   onStar,
-}: PanelContentProps) {
+}: Readonly<PanelContentProps>) {
   // Docs
   if (panel.type === "docs") {
     return (
       <div className="p-5">
         <div className="mb-5">
-          <div className="mb-1 text-ui font-medium text-base-content">
-            Documentation
-          </div>
-          <div className="text-xs text-text-muted">
+          <div className="text-ui text-base-content mb-1 font-medium">Documentation</div>
+          <div className="text-text-muted text-xs">
             Everything you need to get the most out of Opake.
           </div>
         </div>
@@ -99,28 +113,21 @@ export function PanelContent({
           {DOCS_SECTIONS.map((s) => (
             <div
               key={s.id}
-              className="card card-bordered cursor-pointer border-base-300/50 bg-base-100 p-3.5"
+              className="card card-bordered border-base-300/50 bg-base-100 cursor-pointer p-3.5"
             >
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent">
+              <div className="bg-accent flex size-8 shrink-0 items-center justify-center rounded-lg">
                 <s.icon size={14} className="text-primary" />
               </div>
               <div className="flex-1">
-                <div className="mb-0.5 text-ui font-medium text-base-content">
-                  {s.title}
-                </div>
-                <div className="text-caption leading-relaxed text-text-muted">
-                  {s.desc}
-                </div>
+                <div className="text-ui text-base-content mb-0.5 font-medium">{s.title}</div>
+                <div className="text-caption text-text-muted leading-relaxed">{s.desc}</div>
               </div>
-              <ArrowSquareOut
-                size={12}
-                className="mt-0.5 shrink-0 text-text-faint"
-              />
+              <ArrowSquareOutIcon size={12} className="text-text-faint mt-0.5 shrink-0" />
             </div>
           ))}
         </div>
       </div>
-    );
+    )
   }
 
   // Settings
@@ -128,68 +135,62 @@ export function PanelContent({
     return (
       <div className="p-5">
         <div className="mb-5">
-          <div className="mb-1 text-ui font-medium text-base-content">
-            Settings
-          </div>
-          <div className="text-xs text-text-muted">
-            Manage your account, keys, and preferences.
-          </div>
+          <div className="text-ui text-base-content mb-1 font-medium">Settings</div>
+          <div className="text-text-muted text-xs">Manage your account, keys, and preferences.</div>
         </div>
         <div className="divider mt-0 mb-4" />
         <div className="flex flex-col gap-1.5">
           {SETTINGS_SECTIONS.map(({ label, desc, icon: Icon }) => (
             <div
               key={label}
-              className="card card-bordered cursor-pointer border-base-300/50 bg-base-100 p-3.5"
+              className="card card-bordered border-base-300/50 bg-base-100 cursor-pointer p-3.5"
             >
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-bg-stone">
+              <div className="bg-bg-stone flex size-8 shrink-0 items-center justify-center rounded-lg">
                 <Icon size={14} className="text-text-muted" />
               </div>
               <div className="flex-1">
-                <div className="text-ui font-medium text-base-content">
-                  {label}
-                </div>
+                <div className="text-ui text-base-content font-medium">{label}</div>
                 <div className="text-caption text-text-muted">{desc}</div>
               </div>
-              <CaretRight size={13} className="text-text-faint" />
+              <CaretRightIcon size={13} className="text-text-faint" />
             </div>
           ))}
         </div>
       </div>
-    );
+    )
   }
 
-  // Trash
+  // TrashIcon
   if (panel.type === "trash") {
     return (
       <div className="hero py-16">
         <div className="hero-content flex-col text-center">
-          <div className="flex size-13 items-center justify-center rounded-[14px] bg-bg-stone">
-            <Trash size={22} className="text-text-faint" />
+          <div className="bg-bg-stone flex size-13 items-center justify-center rounded-[14px]">
+            <TrashIcon size={22} className="text-text-faint" />
           </div>
-          <div className="text-ui text-text-muted">Trash is empty</div>
-          <div className="max-w-60 text-xs leading-relaxed text-text-faint">
+          <div className="text-ui text-text-muted">TrashIcon is empty</div>
+          <div className="text-text-faint max-w-60 text-xs leading-relaxed">
             Deleted files appear here for 30 days before permanent removal.
           </div>
         </div>
       </div>
-    );
+    )
   }
 
-  // File browser (list / grid)
-  const items = getItemsForPanel(panel, starredIds);
+  // FileIcon browser (list / grid)
+  const items = getItemsForPanel(panel, starredIds)
 
   if (items.length === 0) {
     return (
       <div className="hero py-16">
         <div className="hero-content flex-col text-center">
-          <div className="flex size-13 items-center justify-center rounded-[14px] bg-accent">
-            <Folder size={22} className="text-text-faint" />
+          <div className="bg-accent flex size-13 items-center justify-center rounded-[14px]">
+            <FolderIcon size={22} className="text-text-faint" />
           </div>
           <div className="text-ui text-text-muted">Nothing here yet</div>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -217,5 +218,5 @@ export function PanelContent({
         </div>
       )}
     </div>
-  );
+  )
 }

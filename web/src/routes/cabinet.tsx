@@ -1,43 +1,37 @@
-import { useState } from "react";
-import { createFileRoute, redirect, Outlet, useMatch } from "@tanstack/react-router";
-import { Sidebar } from "@/components/cabinet/Sidebar";
-import { TopBar } from "@/components/cabinet/TopBar";
-import { PanelStack } from "@/components/cabinet/PanelStack";
-import { useAuthStore } from "@/stores/auth";
-import type {
-  FileItem,
-  Panel,
-  SectionType,
-} from "@/components/cabinet/types";
+import { useState } from "react"
+import { createFileRoute, redirect, Outlet, useMatch } from "@tanstack/react-router"
+import { Sidebar } from "@/components/cabinet/Sidebar"
+import { TopBar } from "@/components/cabinet/TopBar"
+import { PanelStack } from "@/components/cabinet/PanelStack"
+import { useAuthStore } from "@/stores/auth"
+import type { FileItem, Panel, SectionType } from "@/components/cabinet/types"
 
 function CabinetLayout() {
   // If a child route matched (e.g. /cabinet/devices), render it instead of the cabinet UI
-  const devicesMatch = useMatch({ from: "/cabinet/devices/", shouldThrow: false });
-  const pairMatch = useMatch({ from: "/cabinet/devices/pair", shouldThrow: false });
+  const devicesMatch = useMatch({ from: "/cabinet/devices/", shouldThrow: false })
+  const pairMatch = useMatch({ from: "/cabinet/devices/pair", shouldThrow: false })
 
   if (devicesMatch || pairMatch) {
-    return <Outlet />;
+    return <Outlet />
   }
 
-  return <CabinetPage />;
+  return <CabinetPage />
 }
 
 function CabinetPage() {
-  const [panels, setPanels] = useState<Panel[]>([
-    { type: "root", title: "The Cabinet" },
-  ]);
-  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [panels, setPanels] = useState<Panel[]>([{ type: "root", title: "The Cabinet" }])
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list")
+  const [searchQuery, setSearchQuery] = useState("")
   const [starredIds, setStarredIds] = useState(
     new Set(["fi-strategy", "fi-brief", "f-projects", "sh-2", "d-thesis"]),
-  );
-  const [loading, setLoading] = useState(false);
+  )
+  const [loading] = useState(false)
 
-  const currentPanel = panels[panels.length - 1];
+  const currentPanel = panels[panels.length - 1]
 
   const openSection = (type: SectionType, title: string) => {
-    setPanels([{ type, title }]);
-  };
+    setPanels([{ type, title }])
+  }
 
   const openItem = (item: FileItem) => {
     if (item.kind === "folder") {
@@ -49,35 +43,33 @@ function CabinetPage() {
           title: item.name,
           itemCount: item.items,
         },
-      ]);
+      ])
     }
-  };
+  }
 
   const goToPanel = (index: number) => {
-    setPanels((prev) => prev.slice(0, index + 1));
-  };
+    setPanels((prev) => prev.slice(0, index + 1))
+  }
 
   const closePanel = () => {
-    setPanels((prev) => prev.slice(0, -1));
-  };
+    setPanels((prev) => prev.slice(0, -1))
+  }
 
   // TODO (#3): toggleStar and other callbacks are prop-drilled 4 levels deep
   // (cabinet → PanelStack → PanelContent → FileListRow). Extract a
   // CabinetContext to provide actions + starredIds via context instead.
   const toggleStar = (id: string) => {
-    setStarredIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
+    setStarredIds((prev) =>
+      prev.has(id) ? new Set([...prev].filter((x) => x !== id)) : new Set([...prev, id]),
+    )
+  }
 
   // TODO (#4): toggleStar, openItem, goToPanel, closePanel are all redefined
   // every render — wrap in useCallback so leaf components can be memoized
   // with React.memo(). Alternatively, CabinetContext eliminates the issue.
 
   return (
-    <div className="flex h-screen overflow-hidden bg-base-300 font-sans">
+    <div className="bg-base-300 flex h-screen overflow-hidden font-sans">
       <Sidebar
         activePanelType={currentPanel.type}
         panelDepth={panels.length}
@@ -102,15 +94,15 @@ function CabinetPage() {
         />
       </main>
     </div>
-  );
+  )
 }
 
 export const Route = createFileRoute("/cabinet")({
   beforeLoad: () => {
-    const state = useAuthStore.getState();
+    const state = useAuthStore.getState()
     if (state.phase !== "ready" && state.phase !== "awaiting_identity") {
-      throw redirect({ to: "/login" });
+      throw redirect({ to: "/login" })
     }
   },
   component: CabinetLayout,
-});
+})

@@ -1,11 +1,11 @@
-import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
+import type { Icon as PhosphorIcon } from "@phosphor-icons/react"
 
 interface SidebarItemProps {
-  icon: PhosphorIcon;
-  label: string;
-  active: boolean;
-  badge?: string | number;
-  onClick: () => void;
+  icon: PhosphorIcon
+  label: string
+  active: boolean
+  badge?: string | number
+  onClick: () => void
 }
 
 export function SidebarItem({
@@ -14,32 +14,25 @@ export function SidebarItem({
   active,
   badge,
   onClick,
-}: SidebarItemProps) {
+}: Readonly<SidebarItemProps>) {
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-ui transition-colors ${
-        active
-          ? "bg-accent text-primary"
-          : "text-text-muted hover:bg-bg-hover"
+      className={`text-ui flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left transition-colors ${
+        active ? "bg-accent text-primary" : "text-text-muted hover:bg-bg-hover"
       }`}
     >
-      <Icon
-        size={14}
-        weight={active ? "fill" : "regular"}
-      />
+      <Icon size={14} weight={active ? "fill" : "regular"} />
       <span className="flex-1">{label}</span>
       {badge !== undefined && (
         <span
           className={`badge badge-xs rounded-md ${
-            active
-              ? "bg-primary/20 text-primary"
-              : "bg-primary/10 text-text-muted"
+            active ? "bg-primary/20 text-primary" : "bg-primary/10 text-text-muted"
           }`}
         >
           {badge}
         </span>
       )}
     </button>
-  );
+  )
 }

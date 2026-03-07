@@ -1,48 +1,44 @@
 import {
-  Folder,
-  Lock,
-  Users,
-  Star,
-  BookOpen,
-  Trash,
-  Gear,
-} from "@phosphor-icons/react";
-import { Link } from "@tanstack/react-router";
-import { OpakeLogo } from "../OpakeLogo";
-import { SidebarItem } from "./SidebarItem";
-import type { PanelType, SectionType } from "./types";
+  FolderIcon,
+  LockIcon,
+  UsersIcon,
+  StarIcon,
+  BookOpenIcon,
+  TrashIcon,
+  GearIcon,
+} from "@phosphor-icons/react"
+import { Link } from "@tanstack/react-router"
+import { OpakeLogo } from "../OpakeLogo"
+import { SidebarItem } from "./SidebarItem"
+import type { PanelType, SectionType } from "./types"
 
 const MAIN_NAV = [
-  { type: "root" as const, icon: Folder, label: "The Cabinet" },
-  { type: "encrypted" as const, icon: Lock, label: "Encrypted" },
-  { type: "shared" as const, icon: Users, label: "Shared with me", badge: "4" },
-  { type: "starred" as const, icon: Star, label: "Starred" },
-];
+  { type: "root" as const, icon: FolderIcon, label: "The Cabinet" },
+  { type: "encrypted" as const, icon: LockIcon, label: "Encrypted" },
+  { type: "shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
+  { type: "starred" as const, icon: StarIcon, label: "Starred" },
+]
 
 const BOTTOM_NAV = [
-  { type: "docs" as const, icon: BookOpen, label: "Docs & Help" },
-  { type: "trash" as const, icon: Trash, label: "Trash" },
-  { type: "settings" as const, icon: Gear, label: "Settings" },
-];
+  { type: "docs" as const, icon: BookOpenIcon, label: "Docs & Help" },
+  { type: "trash" as const, icon: TrashIcon, label: "TrashIcon" },
+  { type: "settings" as const, icon: GearIcon, label: "Settings" },
+]
 
 const WORKSPACES = [
   { id: "ws-personal", name: "Personal", count: 3 },
   { id: "ws-team", name: "Team Alpha", count: 2 },
-];
+]
 
 interface SidebarProps {
-  activePanelType: PanelType;
-  panelDepth: number;
-  onOpenSection: (type: SectionType, title: string) => void;
+  activePanelType: PanelType
+  panelDepth: number
+  onOpenSection: (type: SectionType, title: string) => void
 }
 
-export function Sidebar({
-  activePanelType,
-  panelDepth,
-  onOpenSection,
-}: SidebarProps) {
+export function Sidebar({ activePanelType, panelDepth, onOpenSection }: Readonly<SidebarProps>) {
   return (
-    <aside className="flex w-[212px] shrink-0 flex-col border-r border-base-300/50 bg-base-200 px-3 py-4">
+    <aside className="border-base-300/50 bg-base-200 flex w-53 shrink-0 flex-col border-r px-3 py-4">
       {/* Logo */}
       <div className="mb-5 px-0.5">
         <Link to="/" className="inline-block">
@@ -52,18 +48,14 @@ export function Sidebar({
 
       {/* Storage */}
       <div className="mb-5 px-1">
-        <div className="mb-1.5 flex justify-between text-caption text-text-faint">
+        <div className="text-caption text-text-faint mb-1.5 flex justify-between">
           <span>Storage</span>
           <span>3.1 / 10 GB</span>
         </div>
-        <progress
-          className="progress progress-primary h-[3px] w-full"
-          value={31}
-          max={100}
-        />
+        <progress className="progress progress-primary h-0.75 w-full" value={31} max={100} />
       </div>
 
-      <div className="divider my-0 mx-1" />
+      <div className="divider mx-1 my-0" />
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
@@ -79,15 +71,15 @@ export function Sidebar({
         ))}
 
         {/* Workspaces */}
-        <div className="mt-3.5 mb-1.5 ml-1 text-label uppercase tracking-[0.1em] text-text-faint">
+        <div className="text-label text-text-faint mt-3.5 mb-1.5 ml-1 tracking-widest uppercase">
           Workspaces
         </div>
         {WORKSPACES.map((ws) => (
           <button
             key={ws.id}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-ui text-text-muted hover:bg-bg-hover"
+            className="text-ui text-text-muted hover:bg-bg-hover flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left"
           >
-            <div className="flex size-5 shrink-0 items-center justify-center rounded-md bg-accent text-micro font-semibold text-primary">
+            <div className="bg-accent text-micro text-primary flex size-5 shrink-0 items-center justify-center rounded-md font-semibold">
               {ws.name[0]}
             </div>
             <span className="flex-1">{ws.name}</span>
@@ -98,7 +90,7 @@ export function Sidebar({
 
       {/* Bottom nav */}
       <div>
-        <div className="divider my-0 mx-1" />
+        <div className="divider mx-1 my-0" />
         <div className="flex flex-col gap-0.5">
           {BOTTOM_NAV.map(({ type, icon, label }) => (
             <SidebarItem
@@ -112,5 +104,5 @@ export function Sidebar({
         </div>
       </div>
     </aside>
-  );
+  )
 }

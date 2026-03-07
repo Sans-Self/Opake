@@ -3,69 +3,67 @@
 // HTTP calls use plain fetch. Crypto (DPoP proofs, PKCE, keypair gen) is
 // delegated to the WASM worker via the CryptoWorker type.
 
-import type { Remote } from "comlink";
-import type { CryptoApi } from "@/workers/crypto.worker";
-import type { DpopKeyPair } from "@/lib/crypto-types";
+import type { Remote } from "comlink"
+import type { CryptoApi } from "@/workers/crypto.worker"
+import type { DpopKeyPair } from "@/lib/crypto-types"
 
-type CryptoWorker = Remote<CryptoApi>;
+type CryptoWorker = Remote<CryptoApi>
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface AuthorizationServerMetadata {
-  issuer: string;
-  authorization_endpoint: string;
-  token_endpoint: string;
-  pushed_authorization_request_endpoint?: string;
-  scopes_supported: string[];
-  response_types_supported: string[];
-  grant_types_supported: string[];
-  code_challenge_methods_supported: string[];
-  dpop_signing_alg_values_supported: string[];
-  token_endpoint_auth_methods_supported: string[];
-  require_pushed_authorization_requests: boolean;
+  issuer: string
+  authorization_endpoint: string
+  token_endpoint: string
+  pushed_authorization_request_endpoint?: string
+  scopes_supported: string[]
+  response_types_supported: string[]
+  grant_types_supported: string[]
+  code_challenge_methods_supported: string[]
+  dpop_signing_alg_values_supported: string[]
+  token_endpoint_auth_methods_supported: string[]
+  require_pushed_authorization_requests: boolean
 }
 
 export interface TokenResponse {
-  access_token: string;
-  token_type: string;
-  refresh_token?: string;
-  expires_in?: number;
-  scope?: string;
-  sub?: string;
+  access_token: string
+  token_type: string
+  refresh_token?: string
+  expires_in?: number
+  scope?: string
+  sub?: string
 }
 
 export interface OAuthPendingState {
-  pdsUrl: string;
-  handle: string;
-  dpopKey: DpopKeyPair;
-  pkceVerifier: string;
-  csrfState: string;
-  tokenEndpoint: string;
-  clientId: string;
-  dpopNonce: string | null;
+  pdsUrl: string
+  handle: string
+  dpopKey: DpopKeyPair
+  pkceVerifier: string
+  csrfState: string
+  tokenEndpoint: string
+  clientId: string
+  dpopNonce: string | null
 }
 
-const PENDING_STATE_KEY = "opake:oauth_pending";
-const BSKY_PUBLIC_API = "https://public.api.bsky.app";
+const PENDING_STATE_KEY = "opake:oauth_pending"
+const BSKY_PUBLIC_API = "https://public.api.bsky.app"
 
 // ---------------------------------------------------------------------------
 // Handle → PDS resolution
 // ---------------------------------------------------------------------------
 
-export async function resolveHandleToPds(
-  handle: string,
-): Promise<{ did: string; pdsUrl: string }> {
-  const resolveUrl = `${BSKY_PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`;
-  const response = await fetch(resolveUrl);
+export async function resolveHandleToPds(handle: string): Promise<{ did: string; pdsUrl: string }> {
+  const resolveUrl = `${BSKY_PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
+  const response = await fetch(resolveUrl)
   if (!response.ok) {
-    throw new Error(`Failed to resolve handle "${handle}": HTTP ${response.status}`);
+    throw new Error(`Failed to resolve handle "${handle}": HTTP ${response.status}`)
   }
-  const { did } = (await response.json()) as { did: string };
+  const { did } = (await response.json()) as { did: string }
 
-  const pdsUrl = await pdsUrlFromDid(did);
-  return { did, pdsUrl };
+  const pdsUrl = await pdsUrlFromDid(did)
+  return { did, pdsUrl }
 }
 
 async function pdsUrlFromDid(did: string): Promise<string> {
@@ -73,23 +71,23 @@ async function pdsUrlFromDid(did: string): Promise<string> {
     ? `https://plc.directory/${did}`
     : did.startsWith("did:web:")
       ? `https://${did.slice("did:web:".length)}/.well-known/did.json`
-      : null;
+      : null
 
-  if (!docUrl) throw new Error(`Unsupported DID method: ${did}`);
+  if (!docUrl) throw new Error(`Unsupported DID method: ${did}`)
 
-  const response = await fetch(docUrl);
+  const response = await fetch(docUrl)
   if (!response.ok) {
-    throw new Error(`Failed to fetch DID document for ${did}: HTTP ${response.status}`);
+    throw new Error(`Failed to fetch DID document for ${did}: HTTP ${response.status}`)
   }
 
   const doc = (await response.json()) as {
-    service?: Array<{ id: string; serviceEndpoint: string }>;
-  };
+    service?: { id: string; serviceEndpoint: string }[]
+  }
 
-  const pds = doc.service?.find((s) => s.id === "#atproto_pds");
-  if (!pds) throw new Error(`No #atproto_pds service in DID document for ${did}`);
+  const pds = doc.service?.find((s) => s.id === "#atproto_pds")
+  if (!pds) throw new Error(`No #atproto_pds service in DID document for ${did}`)
 
-  return pds.serviceEndpoint;
+  return pds.serviceEndpoint
 }
 
 // ---------------------------------------------------------------------------
@@ -99,26 +97,26 @@ async function pdsUrlFromDid(did: string): Promise<string> {
 export async function discoverAuthorizationServer(
   pdsUrl: string,
 ): Promise<AuthorizationServerMetadata> {
-  const base = pdsUrl.replace(/\/$/, "");
+  const base = pdsUrl.replace(/\/$/, "")
 
-  const prmResponse = await fetch(`${base}/.well-known/oauth-protected-resource`);
+  const prmResponse = await fetch(`${base}/.well-known/oauth-protected-resource`)
   if (!prmResponse.ok) {
-    throw new Error(`PDS does not support OAuth (HTTP ${prmResponse.status})`);
+    throw new Error(`PDS does not support OAuth (HTTP ${prmResponse.status})`)
   }
   const prm = (await prmResponse.json()) as {
-    authorization_servers?: string[];
-  };
-
-  const asUrl = prm.authorization_servers?.[0];
-  if (!asUrl) throw new Error("No authorization servers in protected resource metadata");
-
-  const asBase = asUrl.replace(/\/$/, "");
-  const asmResponse = await fetch(`${asBase}/.well-known/oauth-authorization-server`);
-  if (!asmResponse.ok) {
-    throw new Error(`Failed to fetch AS metadata: HTTP ${asmResponse.status}`);
+    authorization_servers?: string[]
   }
 
-  return (await asmResponse.json()) as AuthorizationServerMetadata;
+  const asUrl = prm.authorization_servers?.[0]
+  if (!asUrl) throw new Error("No authorization servers in protected resource metadata")
+
+  const asBase = asUrl.replace(/\/$/, "")
+  const asmResponse = await fetch(`${asBase}/.well-known/oauth-authorization-server`)
+  if (!asmResponse.ok) {
+    throw new Error(`Failed to fetch AS metadata: HTTP ${asmResponse.status}`)
+  }
+
+  return (await asmResponse.json()) as AuthorizationServerMetadata
 }
 
 // ---------------------------------------------------------------------------
@@ -126,11 +124,11 @@ export async function discoverAuthorizationServer(
 // ---------------------------------------------------------------------------
 
 export function buildClientId(redirectUri: string): string {
-  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}`
 }
 
 export function buildRedirectUri(): string {
-  return `${window.location.origin}/oauth/callback`;
+  return `${window.location.origin}/oauth/callback`
 }
 
 // ---------------------------------------------------------------------------
@@ -146,46 +144,59 @@ async function fetchWithDpop(
   accessToken: string | null,
   worker: CryptoWorker,
 ): Promise<{ response: Response; dpopNonce: string | null }> {
-  console.debug("[dpop] creating proof for", method, url);
-  const timestamp = Math.floor(Date.now() / 1000);
+  console.debug("[dpop] creating proof for", method, url)
+  const timestamp = Math.floor(Date.now() / 1000)
   const proof = await worker.createDpopProof(
-    dpopKey, method, url, timestamp, dpopNonce, accessToken,
-  );
-  console.debug("[dpop] proof created, sending request");
+    dpopKey,
+    method,
+    url,
+    timestamp,
+    dpopNonce,
+    accessToken,
+  )
+  console.debug("[dpop] proof created, sending request")
 
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
     DPoP: proof,
-  };
+  }
   if (accessToken) {
-    headers.Authorization = `DPoP ${accessToken}`;
+    headers.Authorization = `DPoP ${accessToken}`
   }
 
-  let response = await fetch(url, { method, headers, body: body.toString() });
-  console.debug("[dpop] response:", response.status);
-  let nonce = response.headers.get("dpop-nonce") ?? dpopNonce;
+  let response = await fetch(url, { method, headers, body: body.toString() })
+  console.debug("[dpop] response:", response.status)
+  let nonce = response.headers.get("dpop-nonce") ?? dpopNonce
 
   // Retry on use_dpop_nonce
   if (response.status === 400) {
-    const errorBody = await response.clone().json().catch(() => null) as {
-      error?: string;
-      error_description?: string;
-    } | null;
-    console.debug("[dpop] 400 error body:", errorBody);
+    const errorBody = (await response
+      .clone()
+      .json()
+      .catch(() => null)) as {
+      error?: string
+      error_description?: string
+    } | null
+    console.debug("[dpop] 400 error body:", errorBody)
 
     if (errorBody?.error === "use_dpop_nonce" && nonce) {
-      console.debug("[dpop] retrying with server nonce");
+      console.debug("[dpop] retrying with server nonce")
       const retryProof = await worker.createDpopProof(
-        dpopKey, method, url, timestamp, nonce, accessToken,
-      );
-      headers.DPoP = retryProof;
-      response = await fetch(url, { method, headers, body: body.toString() });
-      console.debug("[dpop] retry response:", response.status);
-      nonce = response.headers.get("dpop-nonce") ?? nonce;
+        dpopKey,
+        method,
+        url,
+        timestamp,
+        nonce,
+        accessToken,
+      )
+      headers.DPoP = retryProof
+      response = await fetch(url, { method, headers, body: body.toString() })
+      console.debug("[dpop] retry response:", response.status)
+      nonce = response.headers.get("dpop-nonce") ?? nonce
     }
   }
 
-  return { response, dpopNonce: nonce };
+  return { response, dpopNonce: nonce }
 }
 
 // ---------------------------------------------------------------------------
@@ -210,24 +221,30 @@ export async function pushedAuthorizationRequest(
     state,
     code_challenge: pkceChallenge,
     code_challenge_method: "S256",
-  });
+  })
 
   const { response, dpopNonce: nonce } = await fetchWithDpop(
-    parEndpoint, "POST", body, dpopKey, dpopNonce, null, worker,
-  );
+    parEndpoint,
+    "POST",
+    body,
+    dpopKey,
+    dpopNonce,
+    null,
+    worker,
+  )
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({})) as {
-      error?: string;
-      error_description?: string;
-    };
+    const err = (await response.json().catch(() => ({}))) as {
+      error?: string
+      error_description?: string
+    }
     throw new Error(
       `PAR failed: ${err.error ?? "unknown"}: ${err.error_description ?? `HTTP ${response.status}`}`,
-    );
+    )
   }
 
-  const par = (await response.json()) as { request_uri: string; expires_in: number };
-  return { requestUri: par.request_uri, expiresIn: par.expires_in, dpopNonce: nonce };
+  const par = (await response.json()) as { request_uri: string; expires_in: number }
+  return { requestUri: par.request_uri, expiresIn: par.expires_in, dpopNonce: nonce }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +256,7 @@ export function buildAuthorizationUrl(
   clientId: string,
   requestUri: string,
 ): string {
-  return `${authorizationEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(requestUri)}`;
+  return `${authorizationEndpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(requestUri)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -262,29 +279,35 @@ export async function exchangeCode(
     code,
     redirect_uri: redirectUri,
     code_verifier: pkceVerifier,
-  });
+  })
 
   const { response, dpopNonce: nonce } = await fetchWithDpop(
-    tokenEndpoint, "POST", body, dpopKey, dpopNonce, null, worker,
-  );
+    tokenEndpoint,
+    "POST",
+    body,
+    dpopKey,
+    dpopNonce,
+    null,
+    worker,
+  )
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({})) as {
-      error?: string;
-      error_description?: string;
-    };
+    const err = (await response.json().catch(() => ({}))) as {
+      error?: string
+      error_description?: string
+    }
     throw new Error(
       `Token exchange failed: ${err.error ?? "unknown"}: ${err.error_description ?? `HTTP ${response.status}`}`,
-    );
+    )
   }
 
-  const tokenResponse = (await response.json()) as TokenResponse;
+  const tokenResponse = (await response.json()) as TokenResponse
 
   if (tokenResponse.token_type.toLowerCase() !== "dpop") {
-    throw new Error(`Expected token_type "DPoP", got "${tokenResponse.token_type}"`);
+    throw new Error(`Expected token_type "DPoP", got "${tokenResponse.token_type}"`)
   }
 
-  return { tokenResponse, dpopNonce: nonce };
+  return { tokenResponse, dpopNonce: nonce }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,19 +324,16 @@ export async function publishPublicKey(
   dpopNonce: string | null,
   worker: CryptoWorker,
 ): Promise<void> {
-  const base = pdsUrl.replace(/\/$/, "");
-  const url = `${base}/xrpc/com.atproto.repo.putRecord`;
+  const base = pdsUrl.replace(/\/$/, "")
+  const url = `${base}/xrpc/com.atproto.repo.putRecord`
 
-  const record: Record<string, unknown> = {
+  const record: Readonly<Record<string, unknown>> = {
     $type: "app.opake.publicKey",
     opakeVersion: 1,
     algo: "x25519",
     publicKey: { $bytes: publicKey },
     createdAt: new Date().toISOString(),
-  };
-  if (verifyKey) {
-    record.signingKey = { $bytes: verifyKey };
-    record.signingAlgo = "ed25519";
+    ...(verifyKey ? { signingKey: { $bytes: verifyKey }, signingAlgo: "ed25519" } : {}),
   }
 
   const jsonBody = JSON.stringify({
@@ -321,33 +341,31 @@ export async function publishPublicKey(
     collection: "app.opake.publicKey",
     rkey: "self",
     record,
-  });
+  })
 
   const makeHeaders = async (nonce: string | null): Promise<Record<string, string>> => {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const proof = await worker.createDpopProof(
-      dpopKey, "POST", url, timestamp, nonce, accessToken,
-    );
+    const timestamp = Math.floor(Date.now() / 1000)
+    const proof = await worker.createDpopProof(dpopKey, "POST", url, timestamp, nonce, accessToken)
     return {
       "Content-Type": "application/json",
       Authorization: `DPoP ${accessToken}`,
       DPoP: proof,
-    };
-  };
+    }
+  }
 
-  let headers = await makeHeaders(dpopNonce);
-  let response = await fetch(url, { method: "POST", headers, body: jsonBody });
+  let headers = await makeHeaders(dpopNonce)
+  let response = await fetch(url, { method: "POST", headers, body: jsonBody })
 
   // DPoP nonce retry — PDS nonce differs from AS nonce
   if ((response.status === 401 || response.status === 400) && response.headers.has("dpop-nonce")) {
-    const nonce = response.headers.get("dpop-nonce");
-    headers = await makeHeaders(nonce);
-    response = await fetch(url, { method: "POST", headers, body: jsonBody });
+    const nonce = response.headers.get("dpop-nonce")
+    headers = await makeHeaders(nonce)
+    response = await fetch(url, { method: "POST", headers, body: jsonBody })
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Failed to publish public key: HTTP ${response.status} ${body}`);
+    const body = await response.text().catch(() => "")
+    throw new Error(`Failed to publish public key: HTTP ${response.status} ${body}`)
   }
 }
 
@@ -356,17 +374,17 @@ export async function publishPublicKey(
 // ---------------------------------------------------------------------------
 
 export function savePendingState(state: OAuthPendingState): void {
-  sessionStorage.setItem(PENDING_STATE_KEY, JSON.stringify(state));
+  sessionStorage.setItem(PENDING_STATE_KEY, JSON.stringify(state))
 }
 
 export function loadPendingState(): OAuthPendingState | null {
-  const raw = sessionStorage.getItem(PENDING_STATE_KEY);
-  if (!raw) return null;
-  return JSON.parse(raw) as OAuthPendingState;
+  const raw = sessionStorage.getItem(PENDING_STATE_KEY)
+  if (!raw) return null
+  return JSON.parse(raw) as OAuthPendingState
 }
 
 export function clearPendingState(): void {
-  sessionStorage.removeItem(PENDING_STATE_KEY);
+  sessionStorage.removeItem(PENDING_STATE_KEY)
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +392,10 @@ export function clearPendingState(): void {
 // ---------------------------------------------------------------------------
 
 export function generateCsrfState(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
   return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "")
 }

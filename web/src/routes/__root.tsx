@@ -1,38 +1,38 @@
-import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router";
-import { useAuthStore } from "@/stores/auth";
+import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router"
+import { useAuthStore } from "@/stores/auth"
 
 function RootLayout() {
-  return <Outlet />;
+  return <Outlet />
 }
 
-function RootError({ error }: { error: Error }) {
-  const router = useRouter();
+function RootError({ error }: Readonly<{ error: Error }>) {
+  const router = useRouter()
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base-300 font-sans">
-      <div className="card card-bordered max-w-md bg-base-100 p-8 text-center">
-        <h1 className="mb-2 text-lg font-medium text-error">
-          Something went wrong
-        </h1>
-        <p className="mb-6 text-sm text-text-muted">{error.message}</p>
+    <div className="bg-base-300 flex min-h-screen items-center justify-center font-sans">
+      <div className="card card-bordered bg-base-100 max-w-md p-8 text-center">
+        <h1 className="text-error mb-2 text-lg font-medium">Something went wrong</h1>
+        <p className="text-text-muted mb-6 text-sm">{error.message}</p>
         <button
-          onClick={() => router.invalidate()}
+          onClick={() => {
+            void router.invalidate()
+          }}
           className="btn btn-neutral btn-sm"
         >
           Try again
         </button>
       </div>
     </div>
-  );
+  )
 }
 
 export const Route = createRootRoute({
   beforeLoad: async () => {
-    const state = useAuthStore.getState();
+    const state = useAuthStore.getState()
     if (state.phase === "initializing") {
-      await state.boot();
+      await state.boot()
     }
   },
   component: RootLayout,
   errorComponent: RootError,
-});
+})
