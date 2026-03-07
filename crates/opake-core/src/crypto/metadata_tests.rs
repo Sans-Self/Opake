@@ -141,3 +141,33 @@ fn grant_metadata_minimal() {
     assert!(decrypted.permissions.is_none());
     assert!(decrypted.note.is_none());
 }
+
+#[test]
+fn directory_metadata_roundtrip() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = DirectoryMetadata {
+        name: "Photos".into(),
+        description: Some("Vacation photos".into()),
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: DirectoryMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert_eq!(decrypted.name, "Photos");
+    assert_eq!(decrypted.description.as_deref(), Some("Vacation photos"));
+}
+
+#[test]
+fn directory_metadata_minimal() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = DirectoryMetadata {
+        name: "/".into(),
+        description: None,
+    };
+
+    let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
+    let decrypted: DirectoryMetadata = decrypt_metadata(&key, &encrypted).unwrap();
+
+    assert_eq!(decrypted.name, "/");
+    assert!(decrypted.description.is_none());
+}

@@ -2,17 +2,22 @@ use log::debug;
 
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::Directory;
+use crate::records::{Directory, EncryptedMetadata, Encryption};
 
-use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};
+use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
 
 /// Get the root directory's AT-URI, creating it if it doesn't exist.
 ///
 /// The root directory is a singleton at rkey "self" with name "/".
 /// Uses `put_record` for creation (idempotent upsert with explicit rkey).
+///
+/// Callers provide the pre-encrypted metadata and encryption envelope for
+/// root creation. If the root already exists, these are unused.
 pub async fn get_or_create_root(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
+    encryption: Encryption,
+    encrypted_metadata: EncryptedMetadata,
     created_at: &str,
 ) -> Result<String, Error> {
     debug!("checking for root directory");
@@ -26,7 +31,7 @@ pub async fn get_or_create_root(
         }
         Err(Error::NotFound(_)) => {
             debug!("root directory not found, creating");
-            let root = Directory::new(ROOT_DIRECTORY_NAME.to_string(), created_at.to_string());
+            let root = Directory::new(encryption, encrypted_metadata, created_at.to_string());
             let record_ref = client
                 .put_record(DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY, &root)
                 .await?;
@@ -56,10 +61,17 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(ROOT_URI, &root));
 
+        let dir = dummy_directory("/");
         let mut client = mock_client(mock.clone());
-        let uri = get_or_create_root(&mut client, TEST_DID, "2026-03-01T00:00:00Z")
-            .await
-            .unwrap();
+        let uri = get_or_create_root(
+            &mut client,
+            TEST_DID,
+            dir.encryption,
+            dir.encrypted_metadata,
+            "2026-03-01T00:00:00Z",
+        )
+        .await
+        .unwrap();
 
         assert_eq!(uri, ROOT_URI);
 
@@ -74,10 +86,17 @@ mod tests {
         mock.enqueue(not_found_response());
         mock.enqueue(put_record_response(ROOT_URI));
 
+        let dir = dummy_directory("/");
         let mut client = mock_client(mock.clone());
-        let uri = get_or_create_root(&mut client, TEST_DID, "2026-03-01T00:00:00Z")
-            .await
-            .unwrap();
+        let uri = get_or_create_root(
+            &mut client,
+            TEST_DID,
+            dir.encryption,
+            dir.encrypted_metadata,
+            "2026-03-01T00:00:00Z",
+        )
+        .await
+        .unwrap();
 
         assert_eq!(uri, ROOT_URI);
 
@@ -90,7 +109,7 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["rkey"], "self");
                 let record: Directory = serde_json::from_value(v["record"].clone()).unwrap();
-                assert_eq!(record.name, "/");
+                assert!(matches!(record.encryption, Encryption::Direct(_)));
                 assert!(record.entries.is_empty());
             }
             _ => panic!("expected JSON body"),
@@ -106,10 +125,17 @@ mod tests {
             body: br#"{"error":"InternalServerError","message":"boom"}"#.to_vec(),
         });
 
+        let dir = dummy_directory("/");
         let mut client = mock_client(mock);
-        let err = get_or_create_root(&mut client, TEST_DID, "2026-03-01T00:00:00Z")
-            .await
-            .unwrap_err();
+        let err = get_or_create_root(
+            &mut client,
+            TEST_DID,
+            dir.encryption,
+            dir.encrypted_metadata,
+            "2026-03-01T00:00:00Z",
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
     }
 }

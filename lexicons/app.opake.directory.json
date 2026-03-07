@@ -4,21 +4,28 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A directory in the personal cloud. Contains an ordered list of AT-URIs referencing documents or other directories. The root directory is a singleton at rkey 'self'.",
+      "description": "A directory in the personal cloud. Contains an ordered list of AT-URIs referencing documents or other directories. The root directory is a singleton at rkey 'self'. Directory name is encrypted in encryptedMetadata.",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "name", "createdAt"],
+        "required": ["opakeVersion", "encryption", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
             "description": "Schema version for the app.opake.* namespace.",
             "minimum": 1
           },
-          "name": {
-            "type": "string",
-            "description": "Human-readable directory name. '/' for root.",
-            "maxLength": 512
+          "encryption": {
+            "type": "union",
+            "description": "How to decrypt the directory metadata. Either a full encryption envelope (with per-directory wrapped keys) or a keyring reference (for group-based access).",
+            "refs": [
+              "app.opake.document#directEncryption",
+              "app.opake.document#keyringEncryption"
+            ]
+          },
+          "encryptedMetadata": {
+            "type": "ref",
+            "ref": "app.opake.defs#encryptedMetadata"
           },
           "entries": {
             "type": "array",

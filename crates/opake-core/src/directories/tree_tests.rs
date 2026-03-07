@@ -2,7 +2,9 @@ use super::*;
 use crate::client::HttpResponse;
 use crate::test_utils::MockTransport;
 
-use super::super::tests::{dummy_directory_with_entries, list_records_response, mock_client};
+use super::super::tests::{
+    dummy_directory_with_entries, list_records_response, mock_client, test_keypair, TEST_DID,
+};
 
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
@@ -50,7 +52,10 @@ async fn load_simple_tree(mock: &MockTransport) -> DirectoryTree {
     ));
 
     let mut client = mock_client(mock.clone());
-    DirectoryTree::load(&mut client).await.unwrap()
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
+    tree
 }
 
 /// Load a nested tree: / → Photos → [Vacation → [sunset.jpg], beach.jpg]
@@ -77,7 +82,10 @@ async fn load_nested_tree(mock: &MockTransport) -> DirectoryTree {
     ));
 
     let mut client = mock_client(mock.clone());
-    DirectoryTree::load(&mut client).await.unwrap()
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
+    tree
 }
 
 // -- load --
@@ -319,8 +327,11 @@ async fn resolve_bare_name_no_root_searches_directories() {
     ));
 
     let mut client = mock_client(mock.clone());
-    let tree = DirectoryTree::load(&mut client).await.unwrap();
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
     assert!(tree.root_uri.is_none());
+
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
 
     let mut client = mock_client(mock);
     let resolved = tree.resolve(&mut client, "Photos").await.unwrap();

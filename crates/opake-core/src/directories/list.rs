@@ -1,14 +1,16 @@
 use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::Directory;
+use crate::records::{Directory, EncryptedMetadata, Encryption};
 
 use super::DIRECTORY_COLLECTION;
 
-/// A directory listing entry with its AT-URI and parsed metadata.
+/// A directory listing entry with its AT-URI and encrypted metadata.
+/// Callers decrypt the name using the encryption envelope.
 #[derive(Debug)]
 pub struct DirectoryEntry {
     pub uri: String,
-    pub name: String,
+    pub encryption: Encryption,
+    pub encrypted_metadata: EncryptedMetadata,
     pub entry_count: usize,
     pub created_at: String,
 }
@@ -22,7 +24,8 @@ pub async fn list_directories(
     list_collection(client, DIRECTORY_COLLECTION, |uri, directory: Directory| {
         DirectoryEntry {
             uri: uri.to_owned(),
-            name: directory.name,
+            encryption: directory.encryption,
+            encrypted_metadata: directory.encrypted_metadata,
             entry_count: directory.entries.len(),
             created_at: directory.created_at,
         }
@@ -53,9 +56,9 @@ mod tests {
         let entries = list_directories(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "Photos");
         assert_eq!(entries[0].entry_count, 0);
         assert!(entries[0].uri.contains("dir1"));
+        assert!(matches!(entries[0].encryption, Encryption::Direct(_)));
 
         let reqs = mock.requests();
         assert!(reqs[0].url.contains("app.opake.directory"));
@@ -80,9 +83,7 @@ mod tests {
         let entries = list_directories(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "Photos");
         assert_eq!(entries[0].entry_count, 0);
-        assert_eq!(entries[1].name, "Documents");
         assert_eq!(entries[1].entry_count, 1);
     }
 
@@ -102,8 +103,6 @@ mod tests {
         let entries = list_directories(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "First");
-        assert_eq!(entries[1].name, "Second");
 
         let reqs = mock.requests();
         assert!(reqs[1].url.contains("cursor=cursor-1"));

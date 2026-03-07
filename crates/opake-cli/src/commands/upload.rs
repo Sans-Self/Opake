@@ -99,7 +99,10 @@ impl Execute for UploadCommand {
         };
 
         if let Some(dir_path) = &self.dir {
-            let tree = DirectoryTree::load(&mut client).await?;
+            let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+            let private_key = id.private_key_bytes()?;
+            let mut tree = DirectoryTree::load(&mut client).await?;
+            tree.decrypt_names(&ctx.did, &private_key);
             let resolved = tree.resolve(&mut client, dir_path).await?;
 
             if resolved.kind != EntryKind::Directory {

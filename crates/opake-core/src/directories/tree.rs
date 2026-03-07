@@ -14,9 +14,10 @@ use log::debug;
 
 use crate::atproto;
 use crate::client::{list_collection, Transport, XrpcClient};
+use crate::crypto::{self, DirectoryMetadata, X25519PrivateKey};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
-use crate::records::{self, Directory, Document};
+use crate::records::{self, Directory, Document, EncryptedMetadata, Encryption};
 
 use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};
 
@@ -38,7 +39,10 @@ pub struct ResolvedPath {
 
 #[derive(Debug)]
 struct DirectoryInfo {
+    /// Decrypted name. Empty until `decrypt_names()` is called.
     name: String,
+    encryption: Encryption,
+    encrypted_metadata: EncryptedMetadata,
     entries: Vec<String>,
 }
 
@@ -102,7 +106,9 @@ impl DirectoryTree {
                 (
                     uri.to_owned(),
                     DirectoryInfo {
-                        name: dir.name,
+                        name: String::new(),
+                        encryption: dir.encryption,
+                        encrypted_metadata: dir.encrypted_metadata,
                         entries: dir.entries,
                     },
                 )
@@ -131,6 +137,50 @@ impl DirectoryTree {
             directories,
             root_uri,
         })
+    }
+
+    /// Decrypt all directory names in-place.
+    ///
+    /// Unwraps each directory's content key from the encryption envelope,
+    /// then decrypts the metadata to recover the real name. Directories
+    /// whose keys can't be unwrapped (wrong DID, keyring not available)
+    /// get a fallback name of "?".
+    pub fn decrypt_names(&mut self, did: &str, private_key: &X25519PrivateKey) {
+        for info in self.directories.values_mut() {
+            let content_key = match &info.encryption {
+                Encryption::Direct(direct) => {
+                    let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
+                    match wrapped {
+                        Some(w) => crypto::unwrap_key(w, private_key).ok(),
+                        None => None,
+                    }
+                }
+                Encryption::Keyring(_) => {
+                    // Keyring-encrypted directories require a group key,
+                    // which isn't available here. Future: accept optional
+                    // group key map (#191).
+                    None
+                }
+            };
+
+            if let Some(key) = content_key {
+                if let Ok(metadata) =
+                    crypto::decrypt_metadata::<DirectoryMetadata>(&key, &info.encrypted_metadata)
+                {
+                    info.name = metadata.name;
+                    continue;
+                }
+            }
+
+            info.name = "?".into();
+        }
+
+        // The root directory is always named "/".
+        if let Some(root_uri) = &self.root_uri {
+            if let Some(info) = self.directories.get_mut(root_uri) {
+                info.name = ROOT_DIRECTORY_NAME.into();
+            }
+        }
     }
 
     /// Resolve a user-provided reference to an AT-URI with metadata.

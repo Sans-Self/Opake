@@ -4,7 +4,7 @@ use crate::test_utils::MockTransport;
 
 use super::super::tests::{
     dummy_directory_with_entries, get_record_response, list_records_response, mock_client,
-    put_record_response,
+    put_record_response, test_keypair, TEST_DID,
 };
 
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
@@ -59,7 +59,9 @@ async fn setup_simple(
     ));
 
     let mut client = mock_client(mock.clone());
-    let tree = DirectoryTree::load(&mut client).await.unwrap();
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
     (client, tree)
 }
 
@@ -89,7 +91,9 @@ async fn setup_nested(
     ));
 
     let mut client = mock_client(mock.clone());
-    let tree = DirectoryTree::load(&mut client).await.unwrap();
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
     (client, tree)
 }
 
@@ -164,7 +168,9 @@ async fn remove_empty_directory() {
     ));
 
     let mut client = mock_client(mock.clone());
-    let tree = DirectoryTree::load(&mut client).await.unwrap();
+    let mut tree = DirectoryTree::load(&mut client).await.unwrap();
+    let (_, private_key) = test_keypair();
+    tree.decrypt_names(TEST_DID, &private_key);
 
     let resolved = tree.resolve(&mut client, "Empty").await.unwrap();
 

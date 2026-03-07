@@ -125,22 +125,48 @@ mod tests {
         assert!(json["publicKey"]["$bytes"].is_string());
     }
 
+    fn dummy_encrypted_directory(created_at: &str) -> Directory {
+        let encryption = Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes::from_raw(&[0u8; 12]),
+                keys: vec![WrappedKey {
+                    did: "did:plc:test".into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-hkdf-a256kw".into(),
+                }],
+            },
+        });
+        let encrypted_metadata = EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: "BBBB".into(),
+            },
+            nonce: AtBytes {
+                encoded: "CCCC".into(),
+            },
+        };
+        Directory::new(encryption, encrypted_metadata, created_at.into())
+    }
+
     #[test]
     fn directory_roundtrips_through_json() {
-        let directory = Directory::new("/".into(), "2026-03-01T00:00:00Z".into());
+        let directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         let json = serde_json::to_string(&directory).unwrap();
         let parsed: Directory = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.opake_version, SCHEMA_VERSION);
-        assert_eq!(parsed.name, "/");
         assert!(parsed.entries.is_empty());
         assert_eq!(parsed.created_at, "2026-03-01T00:00:00Z");
         assert!(parsed.modified_at.is_none());
+        // Encryption envelope is present
+        assert!(matches!(parsed.encryption, Encryption::Direct(_)));
     }
 
     #[test]
     fn directory_entries_omitted_when_empty() {
-        let directory = Directory::new("Photos".into(), "2026-03-01T00:00:00Z".into());
+        let directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         let json = serde_json::to_value(&directory).unwrap();
         assert!(
             json.get("entries").is_none(),
@@ -150,7 +176,7 @@ mod tests {
 
     #[test]
     fn directory_with_entries_roundtrips() {
-        let mut directory = Directory::new("Photos".into(), "2026-03-01T00:00:00Z".into());
+        let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         directory.entries = vec![
             "at://did:plc:test/app.opake.document/abc".into(),
             "at://did:plc:test/app.opake.directory/def".into(),

@@ -49,6 +49,15 @@ pub struct GrantMetadata {
     pub note: Option<String>,
 }
 
+/// Plaintext directory metadata. Encrypted with the directory's content key.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryMetadata {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Generic encrypt / decrypt
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ use opake_core::client::Session;
 use opake_core::directories::{check_cycle, move_entry, DirectoryTree, EntryKind};
 
 use crate::commands::Execute;
+use crate::identity;
 use crate::session::{self, CommandContext};
 
 #[derive(Args)]
@@ -20,9 +21,12 @@ pub struct MoveCommand {
 impl Execute for MoveCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
+        let private_key = id.private_key_bytes()?;
         let now = Utc::now().to_rfc3339();
 
-        let tree = DirectoryTree::load(&mut client).await?;
+        let mut tree = DirectoryTree::load(&mut client).await?;
+        tree.decrypt_names(&ctx.did, &private_key);
         let source = tree.resolve(&mut client, &self.source).await?;
         let dest = tree.resolve(&mut client, &self.destination).await?;
 

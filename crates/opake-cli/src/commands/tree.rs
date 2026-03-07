@@ -18,11 +18,13 @@ pub struct TreeCommand;
 impl Execute for TreeCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let tree = DirectoryTree::load(&mut client).await?;
+        let mut tree = DirectoryTree::load(&mut client).await?;
 
         let entries = documents::list_documents(&mut client).await?;
         let id = identity::load_identity(&ctx.storage, &ctx.did)?;
         let private_key = id.private_key_bytes()?;
+
+        tree.decrypt_names(&ctx.did, &private_key);
 
         let documents: HashMap<String, String> = entries
             .iter()

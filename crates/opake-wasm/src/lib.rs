@@ -1,8 +1,8 @@
 use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
-    ContentKey, DocumentMetadata, EncryptedPayload, GrantMetadata, KeyringMetadata, OsRng,
-    X25519PrivateKey, X25519PublicKey,
+    ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
+    KeyringMetadata, OsRng, X25519PrivateKey, X25519PublicKey,
 };
 use opake_core::records::WrappedKey;
 use opake_core::storage::Identity;
@@ -343,5 +343,54 @@ pub fn decrypt_grant_metadata_js(
     };
     let metadata: GrantMetadata = opake_core::crypto::decrypt_metadata(&content_key, &encrypted)
         .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&metadata).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Directory metadata encryption exports
+// ---------------------------------------------------------------------------
+
+/// Encrypt directory metadata (name, description) with a content key.
+///
+/// `metadata` must be a JS object with fields: name (string), description? (string).
+/// Returns `{ ciphertext: Uint8Array, nonce: Uint8Array }`.
+#[wasm_bindgen(js_name = encryptDirectoryMetadata)]
+pub fn encrypt_directory_metadata_js(key: &[u8], metadata: JsValue) -> Result<JsValue, JsError> {
+    let content_key = content_key_from_slice(key)?;
+    let metadata: DirectoryMetadata =
+        serde_wasm_bindgen::from_value(metadata).map_err(|e| JsError::new(&e.to_string()))?;
+    let encrypted = opake_core::crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let ciphertext = encrypted
+        .ciphertext
+        .decode()
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let nonce = encrypted
+        .nonce
+        .decode()
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    let dto = EncryptedPayloadDto { ciphertext, nonce };
+    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Decrypt directory metadata back to a JS object.
+///
+/// Returns `{ name: string, description?: string }`.
+#[wasm_bindgen(js_name = decryptDirectoryMetadata)]
+pub fn decrypt_directory_metadata_js(
+    key: &[u8],
+    ciphertext: &[u8],
+    nonce: &[u8],
+) -> Result<JsValue, JsError> {
+    let content_key = content_key_from_slice(key)?;
+    let encrypted = opake_core::records::EncryptedMetadata {
+        ciphertext: opake_core::records::AtBytes::from_raw(ciphertext),
+        nonce: opake_core::records::AtBytes::from_raw(nonce),
+    };
+    let metadata: DirectoryMetadata =
+        opake_core::crypto::decrypt_metadata(&content_key, &encrypted)
+            .map_err(|e| JsError::new(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&metadata).map_err(|e| JsError::new(&e.to_string()))
 }

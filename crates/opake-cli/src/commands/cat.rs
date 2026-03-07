@@ -31,7 +31,8 @@ impl Execute for CatCommand {
             self.reference.clone()
         } else if self.reference.contains('/') {
             // Path — needs the directory tree.
-            let tree = DirectoryTree::load(&mut client).await?;
+            let mut tree = DirectoryTree::load(&mut client).await?;
+            tree.decrypt_names(&ctx.did, &private_key);
             let resolved = tree.resolve(&mut client, &self.reference).await?;
             resolved.uri
         } else {
