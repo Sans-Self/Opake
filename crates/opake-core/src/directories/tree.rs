@@ -199,6 +199,19 @@ impl DirectoryTree {
             return self.resolve_at_uri(client, reference).await;
         }
 
+        // "/" refers to the root directory.
+        if reference.chars().all(|c| c == '/') && !reference.is_empty() {
+            let root_uri = self.root_uri.as_ref().ok_or_else(|| {
+                Error::NotFound("no root directory — run `opake mkdir` first".into())
+            })?;
+            return Ok(ResolvedPath {
+                uri: root_uri.clone(),
+                kind: EntryKind::Directory,
+                name: ROOT_DIRECTORY_NAME.into(),
+                parent_uri: None,
+            });
+        }
+
         if reference.contains('/') {
             return self.resolve_path(client, reference).await;
         }

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add --dir flag to mkdir for nested directory creation [#198](https://issues.opake.app/issues/198.html)
 - Add purge command to delete all Opake data from PDS [#196](https://issues.opake.app/issues/196.html)
 - Add metadata CLI command for rename, tag, and description management [#190](https://issues.opake.app/issues/190.html)
 - Consolidate DNS and transport into opake-core, unify handle resolution [#185](https://issues.opake.app/issues/185.html)
@@ -63,6 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin [#112](https://issues.opake.app/issues/112.html)
 
 ### Fixed
+- Fix rm -yr / failing with empty path error on root directory [#202](https://issues.opake.app/issues/202.html)
+- Fix mkdir creating duplicate directories with the same name [#201](https://issues.opake.app/issues/201.html)
 - Fix token refresh not triggering on HTTP 401 ExpiredToken responses [#197](https://issues.opake.app/issues/197.html)
 - Require directory on upload, default to root when --dir is omitted [#192](https://issues.opake.app/issues/192.html)
 - Fix bugs found during black-box integration testing of sharing workflow [#70](https://issues.opake.app/issues/70.html)

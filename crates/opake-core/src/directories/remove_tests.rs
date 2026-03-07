@@ -264,18 +264,40 @@ async fn remove_recursive_nested() {
     assert_eq!(result.directories_deleted, 2); // Vacation + Photos
 }
 
-// -- root deletion guard --
+// -- root deletion --
 
 #[tokio::test]
-async fn remove_root_rejected() {
+async fn remove_root_without_recursive_rejected() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
     let resolved = tree.resolve_at_uri(&mut client, ROOT_URI).await.unwrap();
 
-    let err = remove(&mut client, &tree, &resolved, true, "2026-03-01T12:00:00Z")
+    let err = remove(&mut client, &tree, &resolved, false, "2026-03-01T12:00:00Z")
         .await
         .unwrap_err();
 
     assert!(err.to_string().contains("root directory"));
+    assert!(err.to_string().contains("-r"));
+}
+
+#[tokio::test]
+async fn remove_root_recursive_deletes_everything() {
+    let mock = MockTransport::new();
+    let (mut client, tree) = setup_simple(&mock).await;
+
+    let resolved = tree.resolve_at_uri(&mut client, ROOT_URI).await.unwrap();
+
+    // Post-order: beach.jpg (doc), Photos (dir), notes.txt (doc), then root itself
+    mock.enqueue(delete_ok()); // beach.jpg
+    mock.enqueue(delete_ok()); // Photos
+    mock.enqueue(delete_ok()); // notes.txt
+    mock.enqueue(delete_ok()); // root "self"
+
+    let result = remove(&mut client, &tree, &resolved, true, "2026-03-01T12:00:00Z")
+        .await
+        .unwrap();
+
+    assert_eq!(result.documents_deleted, 2); // beach.jpg + notes.txt
+    assert_eq!(result.directories_deleted, 2); // Photos + root
 }

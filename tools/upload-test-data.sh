@@ -2,13 +2,9 @@
 
 # upload-test-data.sh
 #
-# A script to populate your Opake vault with the sample data from test-data/.
-# Use this to quickly see how Opake handles nested structures and different
-# file types.
-#
-# NOTE: Currently, the Opake CLI's `mkdir` and `upload --dir` commands have
-# limited support for nested paths. This script works best with single-level
-# directories.
+# Populate your Opake vault with the sample data from test-data/.
+# Creates the full nested directory structure, then uploads all files
+# into their correct locations.
 
 set -e
 
@@ -44,7 +40,6 @@ if ! [ -d "$TEST_DATA_DIR" ]; then
     exit 1
 fi
 
-# Check if logged in by checking for a DID in the accounts list
 if ! $OPAKE_BIN accounts | grep -q "did:plc"; then
     echo -e "${YELLOW}No accounts found.${RESET} Please run 'opake login' first."
     exit 1
@@ -52,44 +47,42 @@ fi
 
 log "Starting test data upload..."
 
-# --- Create Top-Level Directories ---
+# --- Create Directories (depth-first, parents before children) ---
 
-# Find first-level directories in test-data/
-find "$TEST_DATA_DIR" -maxdepth 1 -type d -not -path "$TEST_DATA_DIR" | while read -r dir_path; do
-    rel_dir=$(basename "$dir_path")
-    log "Ensuring directory exists: /$rel_dir"
-    # mkdir might fail if it exists, so we ignore errors here
-    $OPAKE_BIN mkdir "$rel_dir" 2>/dev/null || warn "Directory '$rel_dir' might already exist."
+# Sort by depth so parent directories are created before their children.
+find "$TEST_DATA_DIR" -type d -not -path "$TEST_DATA_DIR" | awk -F/ '{print NF, $0}' | sort -n | cut -d' ' -f2- | while read -r dir_path; do
+    rel_path=${dir_path#$TEST_DATA_DIR/}
+    dir_name=$(basename "$rel_path")
+    parent_dir=$(dirname "$rel_path")
+
+    if [ "$parent_dir" = "." ]; then
+        log "Creating directory: /$dir_name"
+        $OPAKE_BIN mkdir "$dir_name" 2>/dev/null || warn "Directory '$dir_name' might already exist."
+    else
+        log "Creating directory: /$rel_path"
+        $OPAKE_BIN mkdir "$dir_name" --dir "$parent_dir" 2>/dev/null || warn "Directory '$rel_path' might already exist."
+    fi
 done
 
-# --- Upload Files ---
+# --- Upload Files (sequential — PDS uses repo-level optimistic locking) ---
 
-# Find all files in test-data/ and upload them
-# We use -mindepth 1 to avoid the test-data directory itself
-find "$TEST_DATA_DIR" -type f | while read -r file_path; do
-    # Get relative path within test-data/
+log "Uploading files..."
+
+find "$TEST_DATA_DIR" -type f -print0 | while IFS= read -r -d '' file_path; do
     rel_path=${file_path#$TEST_DATA_DIR/}
-    
-    # Extract filename and its parent directory
     filename=$(basename "$file_path")
     parent_dir=$(dirname "$rel_path")
-    
-    # If the file is in a nested directory (e.g., notes/anarchy-and-praxis),
-    # we currently upload it to the top-level parent because the CLI
-    # doesn't support recursive mkdir or nested --dir resolution well yet.
-    top_level_parent=$(echo "$parent_dir" | cut -d'/' -f1)
 
-    if [ "$parent_dir" == "." ]; then
-        log "Uploading $filename to root..."
-        $OPAKE_BIN upload "$file_path"
+    if [ "$parent_dir" = "." ]; then
+        $OPAKE_BIN upload "$file_path" && \
+            success "$filename → /" || \
+            warn "$filename (failed)"
     else
-        log "Uploading $filename to /$top_level_parent..."
-        # We use the top_level_parent to ensure it goes into an existing folder
-        $OPAKE_BIN upload "$file_path" --dir "$top_level_parent"
+        $OPAKE_BIN upload "$file_path" --dir "$parent_dir" && \
+            success "$filename → /$parent_dir" || \
+            warn "$filename (failed)"
     fi
-    
-    success "Uploaded $filename"
 done
 
-echo -e "\n${GREEN}${BOLD}All test data uploaded! ✨${RESET}"
+echo -e "\n${GREEN}${BOLD}All test data uploaded!${RESET}"
 echo -e "Try running ${BOLD}opake tree${RESET} to see your new files."

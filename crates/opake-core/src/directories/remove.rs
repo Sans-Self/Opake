@@ -70,14 +70,16 @@ async fn remove_directory(
 ) -> Result<RemoveResult, Error> {
     let at_uri = atproto::parse_at_uri(&target.uri)?;
 
-    if at_uri.rkey == ROOT_DIRECTORY_RKEY {
-        return Err(Error::InvalidRecord(
-            "cannot delete the root directory".into(),
-        ));
-    }
+    let is_root = at_uri.rkey == ROOT_DIRECTORY_RKEY;
 
     let (child_docs, child_dirs) = tree.count_descendants(&target.uri);
     let is_empty = child_docs == 0 && child_dirs == 0;
+
+    if is_root && !recursive {
+        return Err(Error::InvalidRecord(
+            "cannot delete the root directory — use -r to delete all contents".into(),
+        ));
+    }
 
     if !is_empty && !recursive {
         return Err(Error::InvalidRecord(format!(
