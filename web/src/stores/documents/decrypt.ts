@@ -20,7 +20,7 @@ interface ItemsDraft {
 
 export type SetFn = (fn: (draft: ItemsDraft) => void) => void;
 
-function decryptEnvelope(envelope: EncryptedMetadataEnvelope): {
+export function decryptEnvelope(envelope: EncryptedMetadataEnvelope): {
   readonly ciphertext: Uint8Array;
   readonly nonce: Uint8Array;
 } {
@@ -30,7 +30,7 @@ function decryptEnvelope(envelope: EncryptedMetadataEnvelope): {
   };
 }
 
-async function unwrapDirectContentKey(
+export async function unwrapDirectContentKey(
   encryption: Encryption & { readonly $type: "app.opake.document#directEncryption" },
   did: string,
   privateKey: Uint8Array,

@@ -1,4 +1,5 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
+import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
 import { fileIconElement, fileIconColors } from "./FileIcons";
 import type { FileItem } from "./types";
@@ -6,9 +7,11 @@ import type { FileItem } from "./types";
 interface FileListRowProps {
   readonly item: FileItem;
   readonly onClick: () => void;
+  readonly onDownload?: () => void;
+  readonly downloading?: boolean;
 }
 
-export function FileListRow({ item, onClick }: FileListRowProps) {
+export function FileListRow({ item, onClick, onDownload, downloading = false }: FileListRowProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
 
@@ -36,6 +39,11 @@ export function FileListRow({ item, onClick }: FileListRowProps) {
         isFolder ? "cursor-pointer" : ""
       }`}
     >
+      {/* Actions */}
+      <div className="w-6">
+        <FileActionMenu item={item} downloading={downloading} onDownload={onDownload} />
+      </div>
+
       {/* Icon */}
       <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${bg} ${text}`}>
         {fileIconElement(item, 15)}
@@ -82,7 +90,7 @@ export function FileListRow({ item, onClick }: FileListRowProps) {
         </div>
       )}
 
-      {/* Status + actions */}
+      {/* Status */}
       <div className="flex shrink-0 items-center gap-2">
         <StatusBadge status={item.status} />
       </div>

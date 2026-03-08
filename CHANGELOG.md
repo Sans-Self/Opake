@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add web file download with client-side decryption [#147](https://issues.opake.app/issues/147.html)
 - Add web file browser with tag filtering [#145](https://issues.opake.app/issues/145.html)
 - Add URL-based routing for cabinet directory navigation [#247](https://issues.opake.app/issues/247.html)
 - Add ESLint, Prettier, and Immer to web frontend [#207](https://issues.opake.app/issues/207.html)
@@ -75,6 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin [#112](https://issues.opake.app/issues/112.html)
 
 ### Fixed
+- Fix tag filter bar showing tags from all directories instead of current view [#250](https://issues.opake.app/issues/250.html)
 - Fix application startup to check account status [#194](https://issues.opake.app/issues/194.html)
 - Fix web login on new account creating publicKey record without $bytes [#195](https://issues.opake.app/issues/195.html)
 - Fix Identity type casing mismatch across WASM boundary [#203](https://issues.opake.app/issues/203.html)

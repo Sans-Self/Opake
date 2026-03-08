@@ -51,28 +51,25 @@ export async function xrpc(
 }
 
 // ---------------------------------------------------------------------------
-// Authenticated XRPC (DPoP or Legacy)
+// Authenticated requests (DPoP or Legacy) — shared retry core
 // ---------------------------------------------------------------------------
 
-interface AuthenticatedXrpcParams {
-  pdsUrl: string;
-  lexicon: string;
-  method?: "GET" | "POST";
-  body?: unknown;
+interface AuthenticatedRequestParams {
+  url: string;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+  label: string;
 }
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- legitimate retry/nonce dance with nested conditions; splitting would obscure the flow
-export async function authenticatedXrpc(
-  params: AuthenticatedXrpcParams,
+async function authenticatedRequest(
+  params: AuthenticatedRequestParams,
   session: Session,
-): Promise<unknown> {
-  const { pdsUrl, lexicon, method = "GET", body } = params;
-  const url = `${pdsUrl.replace(/\/$/, "")}/xrpc/${lexicon}`;
-  const jsonBody = body ? JSON.stringify(body) : undefined;
+): Promise<Response> {
+  const { url, method, body, label } = params;
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = { ...params.headers };
 
   if (session.type === "oauth") {
     await attachDpopAuth(headers, session, method, url);
@@ -80,7 +77,7 @@ export async function authenticatedXrpc(
     headers.Authorization = `Bearer ${session.accessJwt}`;
   }
 
-  let response = await fetch(url, { method, headers, body: jsonBody });
+  let response = await fetch(url, { method, headers, body });
 
   // DPoP nonce retry — the PDS has a different nonce than the AS.
   if (session.type === "oauth" && requiresNonceRetry(response)) {
@@ -88,7 +85,7 @@ export async function authenticatedXrpc(
     if (nonce) {
       session.dpopNonce = nonce;
       await attachDpopAuth(headers, session, method, url);
-      response = await fetch(url, { method, headers, body: jsonBody });
+      response = await fetch(url, { method, headers, body });
     }
   }
 
@@ -98,7 +95,7 @@ export async function authenticatedXrpc(
     const refreshed = await refreshAccessToken(session);
     if (refreshed) {
       await attachDpopAuth(headers, session, method, url);
-      response = await fetch(url, { method, headers, body: jsonBody });
+      response = await fetch(url, { method, headers, body });
 
       // The refreshed token might also need a nonce retry on the PDS
       if (requiresNonceRetry(response)) {
@@ -106,7 +103,7 @@ export async function authenticatedXrpc(
         if (nonce) {
           session.dpopNonce = nonce;
           await attachDpopAuth(headers, session, method, url);
-          response = await fetch(url, { method, headers, body: jsonBody });
+          response = await fetch(url, { method, headers, body });
         }
       }
     }
@@ -114,10 +111,67 @@ export async function authenticatedXrpc(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`XRPC ${lexicon}: ${response.status} ${detail}`.trim());
+    throw new Error(`${label}: ${response.status} ${detail}`.trim());
   }
 
+  return response;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated XRPC (JSON)
+// ---------------------------------------------------------------------------
+
+interface AuthenticatedXrpcParams {
+  pdsUrl: string;
+  lexicon: string;
+  method?: "GET" | "POST";
+  body?: unknown;
+}
+
+export async function authenticatedXrpc(
+  params: AuthenticatedXrpcParams,
+  session: Session,
+): Promise<unknown> {
+  const { pdsUrl, lexicon, method = "GET", body } = params;
+  const url = `${pdsUrl.replace(/\/$/, "")}/xrpc/${lexicon}`;
+
+  const response = await authenticatedRequest(
+    {
+      url,
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      label: `XRPC ${lexicon}`,
+    },
+    session,
+  );
+
   return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated blob fetch (raw bytes)
+// ---------------------------------------------------------------------------
+
+interface BlobFetchParams {
+  pdsUrl: string;
+  did: string;
+  cid: string;
+}
+
+export async function authenticatedBlobFetch(
+  params: BlobFetchParams,
+  session: Session,
+): Promise<ArrayBuffer> {
+  const { pdsUrl, did, cid } = params;
+  const url = `${pdsUrl.replace(/\/$/, "")}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(cid)}`;
+
+  const response = await authenticatedRequest(
+    { url, method: "GET", label: `getBlob ${cid}` },
+    session,
+  );
+
+  return response.arrayBuffer();
 }
 
 // ---------------------------------------------------------------------------

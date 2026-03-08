@@ -1,4 +1,5 @@
 import { LockIcon } from "@phosphor-icons/react";
+import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
 import { fileIconElement, fileIconColors } from "./FileIcons";
 import type { FileItem } from "./types";
@@ -6,9 +7,16 @@ import type { FileItem } from "./types";
 interface FileGridCardProps {
   readonly item: FileItem;
   readonly onClick: () => void;
+  readonly onDownload?: () => void;
+  readonly downloading?: boolean;
 }
 
-export function FileGridCard({ item, onClick }: FileGridCardProps) {
+export function FileGridCard({
+  item,
+  onClick,
+  onDownload,
+  downloading = false,
+}: FileGridCardProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
 
@@ -40,7 +48,10 @@ export function FileGridCard({ item, onClick }: FileGridCardProps) {
         <div className={`flex size-9.5 items-center justify-center rounded-[10px] ${bg} ${text}`}>
           {fileIconElement(item, 17)}
         </div>
-        <LockIcon size={11} className="text-text-faint" />
+        <div className="flex items-center gap-1">
+          <FileActionMenu item={item} downloading={downloading} onDownload={onDownload} />
+          <LockIcon size={11} className="text-text-faint" />
+        </div>
       </div>
 
       {/* Encrypted preview area */}

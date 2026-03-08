@@ -14,6 +14,7 @@ import type {
   DirectoryTreeSnapshot,
 } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
+import { downloadDocument } from "@/lib/download";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
@@ -36,6 +37,7 @@ interface DocumentsState {
   loading: boolean;
   error: string | null;
   activeTagFilters: string[];
+  downloadingUris: Set<string>;
   viewMode: "list" | "grid";
 
   readonly fetchAll: () => Promise<void>;
@@ -43,6 +45,7 @@ interface DocumentsState {
   readonly itemsForDirectory: (directoryUri: string | null) => FileItem[];
   readonly setTagFilters: (tags: string[]) => void;
   readonly setViewMode: (mode: "list" | "grid") => void;
+  readonly downloadFile: (documentUri: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
 }
 
@@ -59,6 +62,7 @@ export const useDocumentsStore = create<DocumentsState>()(
     loading: false,
     error: null,
     activeTagFilters: [],
+    downloadingUris: new Set<string>(),
     viewMode: "list",
 
     fetchAll: async () => {
@@ -221,6 +225,39 @@ export const useDocumentsStore = create<DocumentsState>()(
       set((draft) => {
         draft.viewMode = mode;
       });
+    },
+
+    downloadFile: async (documentUri: string) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const record = get().documentRecords[documentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+      if (!record) return;
+
+      if (record.value.encryption.$type !== "app.opake.document#directEncryption") {
+        console.warn("[documents] keyring-encrypted downloads not yet supported:", documentUri);
+        return;
+      }
+
+      set((draft) => {
+        draft.downloadingUris.add(documentUri);
+      });
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const privateKey = base64ToUint8Array(identity.private_key);
+
+        await downloadDocument(record, pdsUrl, did, privateKey, session);
+      } catch (error) {
+        console.error("[documents] download failed:", documentUri, error);
+      } finally {
+        set((draft) => {
+          draft.downloadingUris.delete(documentUri);
+        });
+      }
     },
 
     ancestorsOf: (directoryUri: string | null): readonly DirectoryAncestor[] => {
