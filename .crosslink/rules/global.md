@@ -40,19 +40,10 @@ Add labels to control CHANGELOG.md section:
 - `removed` → **Removed**
 - (no label) → **Changed** (default)
 
-### Task Breakdown Rules
+### Quick Reference
 ```bash
-# Single task — use quick for create + label + work in one step
+# Unblock yourself — create + start working in one step
 crosslink quick "Fix login validation error on empty email" -p medium -l bug
-
-# Or use create with flags
-crosslink create "Fix login validation error on empty email" -p medium --label bug --work
-
-# Multi-part feature → Epic with subissues
-crosslink create "Add user authentication system" -p high --label feature
-crosslink subissue 1 "Add user registration endpoint"
-crosslink subissue 1 "Add login endpoint with JWT tokens"
-crosslink subissue 1 "Add session middleware for protected routes"
 
 # Mark what you're working on
 crosslink session work 1
@@ -65,13 +56,9 @@ crosslink close 1
 
 # Skip changelog for internal/refactor work
 crosslink close 1 --no-changelog
-
-# Batch close
-crosslink close-all --no-changelog
-
-# Quiet mode for scripting
-crosslink -q create "Fix bug" -p high  # Outputs just the ID number
 ```
+
+For epics, subissues, milestones, and dependency management — delegate to the **product-owner** agent. See `.crosslink/rules/delegation.md`.
 
 ## Priority 1: Security
 
@@ -182,6 +169,8 @@ These rules keep work organized and enable context handoff between sessions.
 
 Tracking enforcement is controlled by `tracking_mode` in `.crosslink/hook-config.json` (strict/normal/relaxed).
 Detailed tracking instructions are loaded from `.crosslink/rules/tracking-{mode}.md` automatically.
+
+Agent delegation policy is defined in `.crosslink/rules/delegation.md`. In short: coding agents handle their own issue lifecycle (`quick`, `comment`, `close`) but delegate backlog management (epics, milestones, triage, dependencies) to the **product-owner** agent.
 
 ---
 
