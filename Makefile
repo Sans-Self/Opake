@@ -9,7 +9,7 @@ NVM = source "$${NVM_DIR:-$$HOME/.nvm}/nvm.sh" && nvm use --silent
 WASM_CRATE = crates/opake-wasm
 WASM_OUT   = web/src/wasm/opake-wasm
 
-.PHONY: build wasm wasm-dev install web-build
+.PHONY: build wasm wasm-dev install-web-devs web-build setup
 
 ## Build all Rust crates
 build:
@@ -30,3 +30,7 @@ install-web-devs:
 ## Production build (WASM + tsc + Vite)
 web-build: wasm
 	cd web && $(NVM) && bun run build
+
+## Set up dev environment (git hooks, dependencies)
+setup: install-web-devs
+	ln -sf ../../tools/pre-commit.sh .git/hooks/pre-commit
