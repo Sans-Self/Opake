@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add web file deletion [#148](https://issues.opake.app/issues/148.html)
 - Add web file upload with client-side encryption [#146](https://issues.opake.app/issues/146.html)
 - Integrate app store loading tracker into document fetching and downloads [#251](https://issues.opake.app/issues/251.html)
 - Add web file download with client-side decryption [#147](https://issues.opake.app/issues/147.html)

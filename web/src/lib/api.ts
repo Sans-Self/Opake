@@ -2,7 +2,7 @@
 
 import type { OAuthSession, Session } from "@/lib/storageTypes";
 import type { TokenResponse } from "@/lib/oauth";
-import type { BlobRef } from "@/lib/pdsTypes";
+import type { BlobRef, PdsRecord } from "@/lib/pdsTypes";
 import { getCryptoWorker } from "@/lib/worker";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 
@@ -267,6 +267,54 @@ export async function authenticatedPutRecord(
     },
     session,
   )) as RecordRef;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated record fetch + delete
+// ---------------------------------------------------------------------------
+
+interface GetRecordParams {
+  pdsUrl: string;
+  did: string;
+  collection: string;
+  rkey: string;
+}
+
+export async function authenticatedGetRecord<T>(
+  params: GetRecordParams,
+  session: Session,
+): Promise<PdsRecord<T>> {
+  const { pdsUrl, did, collection, rkey } = params;
+  return (await authenticatedXrpc(
+    {
+      pdsUrl,
+      lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`,
+    },
+    session,
+  )) as PdsRecord<T>;
+}
+
+interface DeleteRecordParams {
+  pdsUrl: string;
+  did: string;
+  collection: string;
+  rkey: string;
+}
+
+export async function authenticatedDeleteRecord(
+  params: DeleteRecordParams,
+  session: Session,
+): Promise<void> {
+  const { pdsUrl, did, collection, rkey } = params;
+  await authenticatedXrpc(
+    {
+      pdsUrl,
+      lexicon: "com.atproto.repo.deleteRecord",
+      method: "POST",
+      body: { repo: did, collection, rkey },
+    },
+    session,
+  );
 }
 
 // ---------------------------------------------------------------------------

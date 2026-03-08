@@ -1,6 +1,9 @@
+import { useRef } from "react";
 import { FolderIcon } from "@phosphor-icons/react";
 import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
+import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { FileItem } from "./types";
 
 interface PanelContentProps {
@@ -8,9 +11,12 @@ interface PanelContentProps {
   readonly viewMode: "list" | "grid";
   readonly onOpen: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
+  readonly onDelete: (uri: string) => void;
 }
 
-export function PanelContent({ items, viewMode, onOpen, onDownload }: PanelContentProps) {
+export function PanelContent({ items, viewMode, onOpen, onDownload, onDelete }: PanelContentProps) {
+  const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
+
   if (items.length === 0) {
     return (
       <div className="hero py-16">
@@ -34,6 +40,7 @@ export function PanelContent({ items, viewMode, onOpen, onDownload }: PanelConte
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
+              onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
             />
           ))}
         </div>
@@ -45,10 +52,13 @@ export function PanelContent({ items, viewMode, onOpen, onDownload }: PanelConte
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
+              onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
             />
           ))}
         </div>
       )}
+
+      <DeleteConfirmDialog ref={deleteDialogRef} onConfirm={onDelete} />
     </div>
   );
 }

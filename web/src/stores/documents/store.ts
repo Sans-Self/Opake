@@ -16,6 +16,7 @@ import type {
 } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
 import { downloadDocument } from "@/lib/download";
+import { deleteDocument } from "@/lib/delete";
 import { uploadDocument } from "@/lib/upload";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
@@ -46,6 +47,7 @@ interface DocumentsState {
   readonly setTagFilters: (tags: string[]) => void;
   readonly setViewMode: (mode: "list" | "grid") => void;
   readonly downloadFile: (documentUri: string) => Promise<void>;
+  readonly deleteFile: (documentUri: string) => Promise<void>;
   readonly uploadFile: (file: File, directoryUri: string | null) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
 }
@@ -254,6 +256,58 @@ export const useDocumentsStore = create<DocumentsState>()(
         await downloadDocument(record, pdsUrl, did, privateKey, session);
       } catch (error) {
         console.error("[documents] download failed:", documentUri, error);
+      } finally {
+        done();
+      }
+    },
+
+    deleteFile: async (documentUri: string) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const done = loading(`delete:${documentUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+
+        // Find parent directory from tree snapshot
+        const { treeSnapshot } = get();
+        const parentUri = treeSnapshot
+          ? Object.entries(treeSnapshot.directories).find(([, entry]) =>
+              entry.entries.includes(documentUri),
+            )?.[0]
+          : undefined;
+
+        const parentRkey = parentUri
+          ? parentUri === treeSnapshot?.rootUri
+            ? "self"
+            : rkeyFromUri(parentUri)
+          : "self";
+
+        await deleteDocument(documentUri, parentRkey, pdsUrl, did, session);
+
+        // Optimistic removal from store — reuse cached parentUri
+        set((draft) => {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+          delete draft.items[documentUri];
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+          delete draft.documentRecords[documentUri];
+
+          if (draft.treeSnapshot && parentUri) {
+            const parentDir = draft.treeSnapshot.directories[parentUri];
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+            if (parentDir) {
+              const index = parentDir.entries.indexOf(documentUri);
+              if (index !== -1) {
+                // eslint-disable-next-line functional/immutable-data -- immer draft mutation
+                parentDir.entries.splice(index, 1);
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error("[documents] delete failed:", documentUri, error);
       } finally {
         done();
       }

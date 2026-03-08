@@ -8,9 +8,10 @@ interface FileListRowProps {
   readonly item: FileItem;
   readonly onClick: () => void;
   readonly onDownload?: () => void;
+  readonly onDelete?: () => void;
 }
 
-export function FileListRow({ item, onClick, onDownload }: FileListRowProps) {
+export function FileListRow({ item, onClick, onDownload, onDelete }: FileListRowProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
 
@@ -40,7 +41,7 @@ export function FileListRow({ item, onClick, onDownload }: FileListRowProps) {
     >
       {/* Actions */}
       <div className="w-6">
-        <FileActionMenu item={item} onDownload={onDownload} />
+        <FileActionMenu item={item} onDownload={onDownload} onDelete={onDelete} />
       </div>
 
       {/* Icon */}

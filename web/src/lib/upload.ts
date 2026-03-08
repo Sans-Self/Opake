@@ -3,13 +3,13 @@
 import {
   authenticatedBlobUpload,
   authenticatedCreateRecord,
-  authenticatedXrpc,
+  authenticatedGetRecord,
   authenticatedPutRecord,
 } from "@/lib/api";
 import { uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
 import { getCryptoWorker } from "@/lib/worker";
-import type { DocumentRecord, DirectoryRecord, PdsRecord } from "@/lib/pdsTypes";
+import type { DocumentRecord, DirectoryRecord } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
 
 export async function uploadDocument(
@@ -86,13 +86,10 @@ async function addEntryToDirectory(
   const rkey = directoryUri ? rkeyFromUri(directoryUri) : "self";
 
   // Fetch current directory record
-  const response = (await authenticatedXrpc(
-    {
-      pdsUrl,
-      lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=app.opake.directory&rkey=${encodeURIComponent(rkey)}`,
-    },
+  const response = await authenticatedGetRecord<DirectoryRecord>(
+    { pdsUrl, did, collection: "app.opake.directory", rkey },
     session,
-  )) as PdsRecord<DirectoryRecord>;
+  );
 
   // Append new entry
   const updatedRecord: DirectoryRecord = {
