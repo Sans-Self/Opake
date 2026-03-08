@@ -7,20 +7,19 @@ import {
   LockIcon,
   GearIcon,
   SignOutIcon,
-} from "@phosphor-icons/react"
-import { Link } from "@tanstack/react-router"
+} from "@phosphor-icons/react";
+import { Link } from "@tanstack/react-router";
 
 interface TopBarProps {
-  searchQuery: string
-  onSearchChange: (query: string) => void
-  onOpenSettings: () => void
+  readonly searchQuery: string;
+  readonly onSearchChange: (query: string) => void;
 }
 
 function closeDropdown(e: React.MouseEvent) {
-  e.currentTarget.closest("details")?.removeAttribute("open")
+  e.currentTarget.closest("details")?.removeAttribute("open");
 }
 
-export function TopBar({ searchQuery, onSearchChange, onOpenSettings }: Readonly<TopBarProps>) {
+export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
   return (
     <header className="border-base-300/50 bg-base-300/90 flex shrink-0 items-center gap-3 border-b px-5 py-2.5 backdrop-blur-[10px]">
       {/* Search */}
@@ -28,7 +27,7 @@ export function TopBar({ searchQuery, onSearchChange, onOpenSettings }: Readonly
         <MagnifyingGlassIcon size={13} className="text-text-faint" />
         <input
           type="text"
-          placeholder="Search your cabinet…"
+          placeholder="Search your cabinet\u2026"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="text-secondary grow bg-transparent"
@@ -59,7 +58,7 @@ export function TopBar({ searchQuery, onSearchChange, onOpenSettings }: Readonly
         </button>
       </div>
 
-      {/* UserIcon menu */}
+      {/* User menu */}
       <details className="dropdown dropdown-end">
         <summary className="btn btn-ghost btn-sm gap-2 rounded-lg pl-1">
           <div className="bg-accent text-caption text-primary flex size-7 items-center justify-center rounded-full font-semibold">
@@ -70,25 +69,19 @@ export function TopBar({ searchQuery, onSearchChange, onOpenSettings }: Readonly
         <div className="dropdown-content border-base-300/50 bg-base-100 shadow-panel-lg z-50 w-52.5 rounded-xl border">
           <div className="border-base-300/50 border-b px-3.5 py-2.5">
             <div className="text-ui text-base-content font-medium">alice.bsky.social</div>
-            <div className="text-caption text-text-faint mt-0.5">did:plc:7f2ab3c4…8e91</div>
+            <div className="text-caption text-text-faint mt-0.5">did:plc:7f2ab3c4\u20268e91</div>
           </div>
           <ul className="menu p-1">
             {[
-              { icon: UserIcon, label: "Profile & DID" },
-              { icon: LockIcon, label: "Encryption Keys" },
-              { icon: GearIcon, label: "Settings" },
-            ].map(({ icon: Icon, label }) => (
+              { icon: UserIcon, label: "Profile & DID", to: "/cabinet/settings" as const },
+              { icon: LockIcon, label: "Encryption Keys", to: "/cabinet/settings" as const },
+              { icon: GearIcon, label: "Settings", to: "/cabinet/settings" as const },
+            ].map(({ icon: Icon, label, to }) => (
               <li key={label}>
-                <button
-                  onClick={(e) => {
-                    onOpenSettings()
-                    closeDropdown(e)
-                  }}
-                  className="text-secondary gap-2.5 text-xs"
-                >
+                <Link to={to} onClick={closeDropdown} className="text-secondary gap-2.5 text-xs">
                   <Icon size={13} />
                   {label}
-                </button>
+                </Link>
               </li>
             ))}
           </ul>
@@ -104,5 +97,5 @@ export function TopBar({ searchQuery, onSearchChange, onOpenSettings }: Readonly
         </div>
       </details>
     </header>
-  )
+  );
 }

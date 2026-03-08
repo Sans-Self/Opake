@@ -1,19 +1,19 @@
-import { useState } from "react"
-import { createFileRoute, redirect } from "@tanstack/react-router"
-import { useAuthStore } from "@/stores/auth"
+import { useState } from "react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useAuthStore } from "@/stores/auth";
 
 function LoginPage() {
-  const session = useAuthStore((s) => s.session)
-  const startLogin = useAuthStore((s) => s.startLogin)
-  const [handle, setHandle] = useState("")
-  const isLoading = session.status === "authenticating"
-  const errorMessage = session.status === "error" ? session.message : null
+  const session = useAuthStore((s) => s.session);
+  const startLogin = useAuthStore((s) => s.startLogin);
+  const [handle, setHandle] = useState("");
+  const isLoading = session.status === "authenticating";
+  const errorMessage = session.status === "error" ? session.message : null;
 
   const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!handle.trim()) return
-    void startLogin(handle.trim())
-  }
+    e.preventDefault();
+    if (!handle.trim()) return;
+    void startLogin(handle.trim());
+  };
 
   return (
     <form onSubmit={handleSubmit} className="card card-bordered bg-base-100 w-80 p-6">
@@ -42,12 +42,12 @@ function LoginPage() {
         {isLoading ? <span className="loading loading-spinner loading-sm" /> : "Sign in"}
       </button>
     </form>
-  )
+  );
 }
 
 export const Route = createFileRoute("/devices/login")({
   beforeLoad: ({ context }) => {
-    if (context.auth.session.status === "active") throw redirect({ to: "/devices" })
+    if (context.auth.session.status === "active") throw redirect({ to: "/devices" });
   },
   component: LoginPage,
-})
+});

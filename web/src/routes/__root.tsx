@@ -1,16 +1,16 @@
-import { createRootRouteWithContext, Outlet, useRouter } from "@tanstack/react-router"
-import type { AuthSnapshot } from "@/stores/auth"
+import { createRootRouteWithContext, Outlet, useRouter } from "@tanstack/react-router";
+import type { AuthSnapshot } from "@/stores/auth";
 
 export interface RouterContext {
-  auth: AuthSnapshot
+  auth: AuthSnapshot;
 }
 
 function RootLayout() {
-  return <Outlet />
+  return <Outlet />;
 }
 
 function RootError({ error }: Readonly<{ error: Error }>) {
-  const router = useRouter()
+  const router = useRouter();
 
   return (
     <div className="bg-base-300 flex min-h-screen items-center justify-center font-sans">
@@ -19,7 +19,7 @@ function RootError({ error }: Readonly<{ error: Error }>) {
         <p className="text-text-muted mb-6 text-sm">{error.message}</p>
         <button
           onClick={() => {
-            void router.invalidate()
+            void router.invalidate();
           }}
           className="btn btn-neutral btn-sm"
         >
@@ -27,10 +27,10 @@ function RootError({ error }: Readonly<{ error: Error }>) {
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
   errorComponent: RootError,
-})
+});

@@ -12,6 +12,7 @@ issues.db
 .opencode/
 driver-key.pub
 .vscode/
+.vite/
 
 # === Crosslink managed (do not edit between markers) ===
 # .crosslink/ — machine-local state (never commit)

@@ -84,5 +84,55 @@ find "$TEST_DATA_DIR" -type f -print0 | while IFS= read -r -d '' file_path; do
     fi
 done
 
-echo -e "\n${GREEN}${BOLD}All test data uploaded!${RESET}"
+# --- Tag Files ---
+
+log "Tagging files..."
+
+tag() {
+    local doc="$1" tag="$2"
+    $OPAKE_BIN metadata tag add "$doc" "$tag" 2>/dev/null && \
+        success "$doc +$tag" || \
+        warn "$doc +$tag (failed)"
+}
+
+# Grocery lists
+tag "grocery-lists/week-10.md" "groceries"
+tag "grocery-lists/week-10.md" "lists"
+tag "grocery-lists/week-11.md" "groceries"
+tag "grocery-lists/week-11.md" "lists"
+
+# Anarchy & praxis
+for f in notes/anarchy-and-praxis/anti-luddism.md notes/anarchy-and-praxis/manifesto.md notes/anarchy-and-praxis/praxis-todo.md; do
+    tag "$f" "politics"
+    tag "$f" "theory"
+done
+
+# Fantasy creatures — text files
+for creature_dir in dragon griffin phoenix roly-poly; do
+    find "$TEST_DATA_DIR/notes/fantasy-creatures/$creature_dir" -name "*.md" -print0 | while IFS= read -r -d '' f; do
+        rel=${f#$TEST_DATA_DIR/}
+        tag "$rel" "creatures"
+        tag "$rel" "worldbuilding"
+    done
+done
+
+# Fantasy creatures — images (roly-poly)
+find "$TEST_DATA_DIR/notes/fantasy-creatures/roly-poly" \( -name "*.jpg" -o -name "*.JPG" -o -name "*.png" \) -print0 | while IFS= read -r -d '' f; do
+    rel=${f#$TEST_DATA_DIR/}
+    tag "$rel" "creatures"
+    tag "$rel" "images"
+done
+
+# Top-level notes
+for f in notes/architecture-ideas.md notes/css-todo.md notes/queer-theory-reading-list.md notes/todo-list.md; do
+    tag "$f" "notes"
+done
+
+# Poetry
+for f in poetry/null-pointer.md poetry/quinn-swoop.md poetry/roly-poly.md poetry/the-void.md; do
+    tag "$f" "poetry"
+    tag "$f" "writing"
+done
+
+echo -e "\n${GREEN}${BOLD}All test data uploaded and tagged!${RESET}"
 echo -e "Try running ${BOLD}opake tree${RESET} to see your new files."

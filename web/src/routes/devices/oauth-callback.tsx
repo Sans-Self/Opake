@@ -1,40 +1,43 @@
-import { useEffect, useRef } from "react"
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
-import { useAuthStore } from "@/stores/auth"
+import { useEffect, useRef } from "react";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { useAuthStore } from "@/stores/auth";
 
 function OAuthCallbackPage() {
-  const navigate = useNavigate()
-  const session = useAuthStore((s) => s.session)
-  const completeLogin = useAuthStore((s) => s.completeLogin)
-  const errorMessage = session.status === "error" ? session.message : null
+  const navigate = useNavigate();
+  const session = useAuthStore((s) => s.session);
+  const completeLogin = useAuthStore((s) => s.completeLogin);
+  const errorMessage = session.status === "error" ? session.message : null;
 
-  const hasStartedRef = useRef(false)
+  const hasStartedRef = useRef(false);
 
   useEffect(() => {
-    if (hasStartedRef.current) return
-    hasStartedRef.current = true
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
 
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get("code")
-    const state = params.get("state")
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
 
-    window.history.replaceState({}, "", window.location.pathname)
+    window.history.replaceState({}, "", window.location.pathname);
 
     if (!code || !state) {
       useAuthStore.setState((draft) => {
-        draft.session = { status: "error", message: "Missing authorization code or state parameter." }
-      })
-      return
+        draft.session = {
+          status: "error",
+          message: "Missing authorization code or state parameter.",
+        };
+      });
+      return;
     }
 
-    void completeLogin(code, state)
-  }, [completeLogin])
+    void completeLogin(code, state);
+  }, [completeLogin]);
 
   useEffect(() => {
     if (session.status === "active") {
-      void navigate({ to: "/devices" })
+      void navigate({ to: "/devices" });
     }
-  }, [session.status, navigate])
+  }, [session.status, navigate]);
 
   return (
     <>
@@ -71,12 +74,12 @@ function OAuthCallbackPage() {
         </div>
       )}
     </>
-  )
+  );
 }
 
 export const Route = createFileRoute("/devices/oauth-callback")({
   beforeLoad: ({ context }) => {
-    if (context.auth.session.status === "active") throw redirect({ to: "/devices" })
+    if (context.auth.session.status === "active") throw redirect({ to: "/devices" });
   },
   component: OAuthCallbackPage,
-})
+});

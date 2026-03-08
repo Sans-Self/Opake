@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
 import { getCryptoWorker } from "@/lib/worker";
-import { IndexedDbStorage } from "@/lib/indexeddb-storage";
+import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { formatFingerprint, rkeyFromUri } from "@/lib/encoding";
 import {
   createPairRequest,

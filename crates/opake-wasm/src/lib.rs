@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
     ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
     KeyringMetadata, OsRng, X25519PrivateKey, X25519PublicKey,
 };
-use opake_core::records::WrappedKey;
+use opake_core::directories::{DirectoryTree, EntryKind};
+use opake_core::records::{Directory, WrappedKey};
 use opake_core::storage::Identity;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -393,4 +396,148 @@ pub fn decrypt_directory_metadata_js(
         opake_core::crypto::decrypt_metadata(&content_key, &encrypted)
             .map_err(|e| JsError::new(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&metadata).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// DirectoryTree handle (stateful WASM export)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct DirectoryRecordInput {
+    uri: String,
+    value: Directory,
+}
+
+#[derive(Serialize)]
+struct DirectorySnapshotEntry {
+    name: String,
+    entries: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryTreeSnapshot {
+    root_uri: Option<String>,
+    directories: HashMap<String, DirectorySnapshotEntry>,
+}
+
+#[derive(Serialize)]
+struct DescendantCount {
+    documents: usize,
+    directories: usize,
+}
+
+#[derive(Serialize)]
+struct DescendantEntry {
+    uri: String,
+    kind: String,
+}
+
+#[wasm_bindgen]
+pub struct DirectoryTreeHandle {
+    inner: DirectoryTree,
+}
+
+#[wasm_bindgen]
+impl DirectoryTreeHandle {
+    /// Build a tree from PDS directory records, decrypt all directory names.
+    ///
+    /// `records_js` is `Array<{ uri: string, value: DirectoryRecord }>`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        records_js: JsValue,
+        did: &str,
+        private_key: &[u8],
+    ) -> Result<DirectoryTreeHandle, JsError> {
+        let inputs: Vec<DirectoryRecordInput> =
+            serde_wasm_bindgen::from_value(records_js).map_err(|e| JsError::new(&e.to_string()))?;
+
+        let records = inputs.into_iter().map(|r| (r.uri, r.value));
+        let mut tree = DirectoryTree::from_records(records);
+
+        let priv_key: &X25519PrivateKey = private_key
+            .try_into()
+            .map_err(|_| JsError::new("private key must be exactly 32 bytes"))?;
+        tree.decrypt_names(did, priv_key);
+
+        Ok(Self { inner: tree })
+    }
+
+    /// Bulk-transfer the entire tree state to JS as a single object.
+    #[wasm_bindgen(js_name = snapshot)]
+    pub fn snapshot(&self) -> Result<JsValue, JsError> {
+        let mut directories = HashMap::new();
+        for uri in self.inner.all_directory_uris() {
+            let name = self.inner.directory_name(uri).unwrap_or("?").to_owned();
+            let entries = self
+                .inner
+                .entries_for(uri)
+                .map(|e| e.to_vec())
+                .unwrap_or_default();
+            directories.insert(uri.to_owned(), DirectorySnapshotEntry { name, entries });
+        }
+
+        let snap = DirectoryTreeSnapshot {
+            root_uri: self.inner.root_uri().map(str::to_owned),
+            directories,
+        };
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        snap.serialize(&serializer)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = rootUri)]
+    pub fn root_uri(&self) -> Option<String> {
+        self.inner.root_uri().map(str::to_owned)
+    }
+
+    #[wasm_bindgen(js_name = entriesFor)]
+    pub fn entries_for(&self, uri: &str) -> JsValue {
+        match self.inner.entries_for(uri) {
+            Some(entries) => serde_wasm_bindgen::to_value(entries).unwrap_or(JsValue::NULL),
+            None => JsValue::NULL,
+        }
+    }
+
+    #[wasm_bindgen(js_name = directoryName)]
+    pub fn directory_name(&self, uri: &str) -> Option<String> {
+        self.inner.directory_name(uri).map(str::to_owned)
+    }
+
+    #[wasm_bindgen(js_name = isDirectory)]
+    pub fn is_directory(&self, uri: &str) -> bool {
+        self.inner.is_directory(uri)
+    }
+
+    #[wasm_bindgen(js_name = findParent)]
+    pub fn find_parent(&self, uri: &str) -> Option<String> {
+        self.inner.find_parent(uri)
+    }
+
+    #[wasm_bindgen(js_name = countDescendants)]
+    pub fn count_descendants(&self, uri: &str) -> JsValue {
+        let (documents, directories) = self.inner.count_descendants(uri);
+        serde_wasm_bindgen::to_value(&DescendantCount {
+            documents,
+            directories,
+        })
+        .unwrap_or(JsValue::NULL)
+    }
+
+    #[wasm_bindgen(js_name = collectDescendants)]
+    pub fn collect_descendants(&self, uri: &str) -> JsValue {
+        let descendants: Vec<DescendantEntry> = self
+            .inner
+            .collect_descendants(uri)
+            .into_iter()
+            .map(|(uri, kind)| DescendantEntry {
+                uri,
+                kind: match kind {
+                    EntryKind::Document => "document".into(),
+                    EntryKind::Directory => "directory".into(),
+                },
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&descendants).unwrap_or(JsValue::NULL)
+    }
 }

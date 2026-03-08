@@ -71,16 +71,16 @@ fn entry_kind_from_uri(uri: &str) -> Option<EntryKind> {
 }
 
 impl DirectoryTree {
-    /// Load the directory hierarchy from the PDS.
+    /// Build a tree from pre-fetched directory records.
     ///
-    /// Makes one paginated API call (all directories). Documents are NOT
-    /// loaded — callers provide document names separately via `resolve()`.
-    /// The root is detected from the listing by its rkey ("self").
-    pub async fn load(client: &mut XrpcClient<impl Transport>) -> Result<Self, Error> {
-        let dir_entries: Vec<(String, DirectoryInfo)> =
-            list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
+    /// Accepts (AT-URI, Directory) pairs — the same shape returned by
+    /// `listRecords`. The root is detected by rkey `"self"`.
+    pub fn from_records(records: impl IntoIterator<Item = (String, Directory)>) -> Self {
+        let directories: HashMap<String, DirectoryInfo> = records
+            .into_iter()
+            .map(|(uri, dir)| {
                 (
-                    uri.to_owned(),
+                    uri,
                     DirectoryInfo {
                         name: String::new(),
                         encryption: dir.encryption,
@@ -89,11 +89,8 @@ impl DirectoryTree {
                     },
                 )
             })
-            .await?;
+            .collect();
 
-        let directories: HashMap<String, DirectoryInfo> = dir_entries.into_iter().collect();
-
-        // Find root by rkey — it's the singleton at rkey "self".
         let root_uri = directories
             .keys()
             .find(|uri| {
@@ -104,15 +101,30 @@ impl DirectoryTree {
             .cloned();
 
         debug!(
-            "loaded tree: {} directories, root={}",
+            "built tree: {} directories, root={}",
             directories.len(),
             root_uri.as_deref().unwrap_or("none"),
         );
 
-        Ok(Self {
+        Self {
             directories,
             root_uri,
-        })
+        }
+    }
+
+    /// Load the directory hierarchy from the PDS.
+    ///
+    /// Makes one paginated API call (all directories). Documents are NOT
+    /// loaded — callers provide document names separately via `resolve()`.
+    /// The root is detected from the listing by its rkey ("self").
+    pub async fn load(client: &mut XrpcClient<impl Transport>) -> Result<Self, Error> {
+        let dir_entries: Vec<(String, Directory)> =
+            list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
+                (uri.to_owned(), dir)
+            })
+            .await?;
+
+        Ok(Self::from_records(dir_entries))
     }
 
     /// Decrypt all directory names in-place.
@@ -336,6 +348,37 @@ impl DirectoryTree {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Public getters (used by WASM handle + CLI)
+    // -----------------------------------------------------------------------
+
+    pub fn root_uri(&self) -> Option<&str> {
+        self.root_uri.as_deref()
+    }
+
+    /// Returns the child entry URIs for a directory, or None if the URI
+    /// is not a known directory.
+    pub fn entries_for(&self, uri: &str) -> Option<&[String]> {
+        self.directories
+            .get(uri)
+            .map(|info| info.entries.as_slice())
+    }
+
+    /// Returns the decrypted name for a directory URI.
+    pub fn directory_name(&self, uri: &str) -> Option<&str> {
+        self.directories.get(uri).map(|info| info.name.as_str())
+    }
+
+    /// Whether the given URI is a known directory in this tree.
+    pub fn is_directory(&self, uri: &str) -> bool {
+        self.directories.contains_key(uri)
+    }
+
+    /// Iterate over all directory URIs in the tree.
+    pub fn all_directory_uris(&self) -> impl Iterator<Item = &str> {
+        self.directories.keys().map(String::as_str)
+    }
+
     /// Count descendant documents and directories under a directory URI.
     pub fn count_descendants(&self, uri: &str) -> (usize, usize) {
         let mut documents = 0usize;
@@ -544,7 +587,7 @@ impl DirectoryTree {
     }
 
     /// Scan all directories to find which one contains the given URI as an entry.
-    fn find_parent(&self, child_uri: &str) -> Option<String> {
+    pub fn find_parent(&self, child_uri: &str) -> Option<String> {
         for (dir_uri, info) in &self.directories {
             if info.entries.iter().any(|e| e == child_uri) {
                 return Some(dir_uri.clone());

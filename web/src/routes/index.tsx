@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowRightIcon } from "@phosphor-icons/react"
-import { OpakeLogo } from "@/components/OpakeLogo"
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowRightIcon } from "@phosphor-icons/react";
+import { OpakeLogo } from "@/components/OpakeLogo";
 
 function LandingPage() {
   return (
@@ -50,9 +50,9 @@ function LandingPage() {
         </div>
       </section>
     </div>
-  )
+  );
 }
 
 export const Route = createFileRoute("/")({
   component: LandingPage,
-})
+});

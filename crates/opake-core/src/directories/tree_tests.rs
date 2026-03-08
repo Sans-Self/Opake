@@ -388,3 +388,79 @@ async fn collect_descendants_empty() {
     let descendants = tree.collect_descendants("at://did:plc:test/app.opake.directory/empty");
     assert!(descendants.is_empty());
 }
+
+// -- from_records --
+
+#[test]
+fn from_records_detects_root() {
+    let (_, private_key) = test_keypair();
+    let records = vec![
+        (
+            ROOT_URI.to_owned(),
+            dummy_directory_with_entries("/", vec![DIR_PHOTOS_URI.into()]),
+        ),
+        (
+            DIR_PHOTOS_URI.to_owned(),
+            dummy_directory_with_entries("Photos", vec![]),
+        ),
+    ];
+
+    let mut tree = DirectoryTree::from_records(records);
+    tree.decrypt_names(TEST_DID, &private_key);
+
+    assert_eq!(tree.root_uri(), Some(ROOT_URI));
+    assert_eq!(tree.directory_name(ROOT_URI), Some("/"));
+    assert_eq!(tree.directory_name(DIR_PHOTOS_URI), Some("Photos"));
+}
+
+#[test]
+fn from_records_empty() {
+    let tree = DirectoryTree::from_records(std::iter::empty());
+    assert!(tree.root_uri().is_none());
+}
+
+// -- public getters --
+
+#[tokio::test]
+async fn getters_return_expected_values() {
+    let mock = MockTransport::new();
+    let tree = load_simple_tree(&mock).await;
+
+    // root_uri
+    assert_eq!(tree.root_uri(), Some(ROOT_URI));
+
+    // entries_for
+    let root_entries = tree.entries_for(ROOT_URI).unwrap();
+    assert!(root_entries.contains(&DIR_PHOTOS_URI.to_owned()));
+    assert!(root_entries.contains(&DOC_NOTES_URI.to_owned()));
+
+    let photos_entries = tree.entries_for(DIR_PHOTOS_URI).unwrap();
+    assert_eq!(photos_entries, &[DOC_BEACH_URI.to_owned()]);
+
+    assert!(tree.entries_for("at://nonexistent").is_none());
+
+    // directory_name
+    assert_eq!(tree.directory_name(ROOT_URI), Some("/"));
+    assert_eq!(tree.directory_name(DIR_PHOTOS_URI), Some("Photos"));
+    assert!(tree.directory_name(DOC_BEACH_URI).is_none());
+
+    // is_directory
+    assert!(tree.is_directory(ROOT_URI));
+    assert!(tree.is_directory(DIR_PHOTOS_URI));
+    assert!(!tree.is_directory(DOC_BEACH_URI));
+
+    // all_directory_uris
+    let all_uris: Vec<&str> = tree.all_directory_uris().collect();
+    assert_eq!(all_uris.len(), 2);
+    assert!(all_uris.contains(&ROOT_URI));
+    assert!(all_uris.contains(&DIR_PHOTOS_URI));
+
+    // find_parent
+    assert_eq!(tree.find_parent(DIR_PHOTOS_URI).as_deref(), Some(ROOT_URI));
+    assert_eq!(tree.find_parent(DOC_NOTES_URI).as_deref(), Some(ROOT_URI));
+    assert_eq!(
+        tree.find_parent(DOC_BEACH_URI).as_deref(),
+        Some(DIR_PHOTOS_URI)
+    );
+    assert!(tree.find_parent(ROOT_URI).is_none());
+}

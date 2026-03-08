@@ -9,8 +9,8 @@
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { OAuthSession, Config } from "@/lib/storage-types";
-import { IndexedDbStorage } from "@/lib/indexeddb-storage";
+import type { OAuthSession, Config } from "@/lib/storageTypes";
+import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { getCryptoWorker } from "@/lib/worker";
 import { authenticatedXrpc } from "@/lib/api";
 import { useAppStore } from "@/stores/app";
@@ -132,7 +132,7 @@ export const useAuthStore = create<AuthState>()(
 
         const did = config.defaultDid;
         const account = config.accounts[did] as
-          | import("@/lib/storage-types").AccountConfig
+          | import("@/lib/storageTypes").AccountConfig
           | undefined;
         if (!account) {
           set((draft) => {

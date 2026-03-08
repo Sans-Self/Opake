@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
 import { getCryptoWorker } from "@/lib/worker";
-import { IndexedDbStorage } from "@/lib/indexeddb-storage";
+import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { listPairRequests, approvePairRequest, type PendingPairRequest } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
@@ -72,7 +72,8 @@ function PairAcceptPage() {
       .finally(() => removeLoading("pair-accept-fetch"));
   }, [addLoading, removeLoading]);
 
-  const shouldPoll = state.step === "loading" || state.step === "empty" || state.step === "selecting";
+  const shouldPoll =
+    state.step === "loading" || state.step === "empty" || state.step === "selecting";
 
   useEffect(() => {
     if (!shouldPoll) return;

@@ -83,11 +83,7 @@ export function OpakeLogo({ size = "md", loading = false }: Props) {
   return (
     <div className="flex items-center gap-2.5">
       <div className="relative shrink-0" style={{ width: wrap, height: wrap }}>
-        <div
-          className="absolute top-0 left-0 rounded-sm"
-          ref={square1Ref}
-          style={square1Style}
-        />
+        <div className="absolute top-0 left-0 rounded-sm" ref={square1Ref} style={square1Style} />
         <div
           className="absolute right-0 bottom-0 rounded-sm"
           ref={square2Ref}

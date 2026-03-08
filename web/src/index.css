@@ -115,6 +115,14 @@
       box-shadow: var(--shadow-panel-sm);
     }
   }
+
+  --animate-ghost-panel: ghost-panel 0.3s ease-out both;
+  @keyframes ghost-panel {
+    from {
+      opacity: 0;
+      translate: 0 0;
+    }
+  }
 }
 
 /* ─── Utilities ──────────────────────────────────────────────────────────── */

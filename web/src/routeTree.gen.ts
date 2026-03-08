@@ -9,24 +9,33 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as CabinetRouteImport } from './routes/cabinet'
 import { Route as DevicesRouteRouteImport } from './routes/devices/route'
+import { Route as CabinetRouteRouteImport } from './routes/cabinet/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevicesIndexRouteImport } from './routes/devices/index'
+import { Route as CabinetIndexRouteImport } from './routes/cabinet/index'
 import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
 import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-callback'
+import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
+import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
+import { Route as CabinetSettingsRouteImport } from './routes/cabinet/settings'
+import { Route as CabinetEncryptedRouteImport } from './routes/cabinet/encrypted'
+import { Route as CabinetDocsRouteImport } from './routes/cabinet/docs'
+import { Route as CabinetFilesRouteRouteImport } from './routes/cabinet/files/route'
+import { Route as CabinetFilesIndexRouteImport } from './routes/cabinet/files/index'
 import { Route as DevicesPairRequestRouteImport } from './routes/devices/pair.request'
 import { Route as DevicesPairAcceptRouteImport } from './routes/devices/pair.accept'
+import { Route as CabinetFilesSplatRouteImport } from './routes/cabinet/files/$'
 
-const CabinetRoute = CabinetRouteImport.update({
-  id: '/cabinet',
-  path: '/cabinet',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DevicesRouteRoute = DevicesRouteRouteImport.update({
   id: '/devices',
   path: '/devices',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CabinetRouteRoute = CabinetRouteRouteImport.update({
+  id: '/cabinet',
+  path: '/cabinet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -38,6 +47,11 @@ const DevicesIndexRoute = DevicesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => DevicesRouteRoute,
+} as any)
+const CabinetIndexRoute = CabinetIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CabinetRouteRoute,
 } as any)
 const DevicesOauthCallbackRoute = DevicesOauthCallbackRouteImport.update({
   id: '/oauth-callback',
@@ -54,6 +68,41 @@ const DevicesCliCallbackRoute = DevicesCliCallbackRouteImport.update({
   path: '/cli-callback',
   getParentRoute: () => DevicesRouteRoute,
 } as any)
+const CabinetTrashRoute = CabinetTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetSharedRoute = CabinetSharedRouteImport.update({
+  id: '/shared',
+  path: '/shared',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetSettingsRoute = CabinetSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetEncryptedRoute = CabinetEncryptedRouteImport.update({
+  id: '/encrypted',
+  path: '/encrypted',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetDocsRoute = CabinetDocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetFilesRouteRoute = CabinetFilesRouteRouteImport.update({
+  id: '/files',
+  path: '/files',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetFilesIndexRoute = CabinetFilesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CabinetFilesRouteRoute,
+} as any)
 const DevicesPairRequestRoute = DevicesPairRequestRouteImport.update({
   id: '/pair/request',
   path: '/pair/request',
@@ -64,95 +113,150 @@ const DevicesPairAcceptRoute = DevicesPairAcceptRouteImport.update({
   path: '/pair/accept',
   getParentRoute: () => DevicesRouteRoute,
 } as any)
+const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => CabinetFilesRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cabinet': typeof CabinetRouteRouteWithChildren
   '/devices': typeof DevicesRouteRouteWithChildren
-  '/cabinet': typeof CabinetRoute
+  '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
+  '/cabinet/docs': typeof CabinetDocsRoute
+  '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/settings': typeof CabinetSettingsRoute
+  '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/cabinet/files/': typeof CabinetFilesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRoute
+  '/cabinet/docs': typeof CabinetDocsRoute
+  '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/settings': typeof CabinetSettingsRoute
+  '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/cabinet': typeof CabinetIndexRoute
   '/devices': typeof DevicesIndexRoute
+  '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/cabinet/files': typeof CabinetFilesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cabinet': typeof CabinetRouteRouteWithChildren
   '/devices': typeof DevicesRouteRouteWithChildren
-  '/cabinet': typeof CabinetRoute
+  '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
+  '/cabinet/docs': typeof CabinetDocsRoute
+  '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/settings': typeof CabinetSettingsRoute
+  '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/cabinet/files/': typeof CabinetFilesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/devices'
     | '/cabinet'
+    | '/devices'
+    | '/cabinet/files'
+    | '/cabinet/docs'
+    | '/cabinet/encrypted'
+    | '/cabinet/settings'
+    | '/cabinet/shared'
+    | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/cabinet/'
     | '/devices/'
+    | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/cabinet/files/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/cabinet'
+    | '/cabinet/docs'
+    | '/cabinet/encrypted'
+    | '/cabinet/settings'
+    | '/cabinet/shared'
+    | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/cabinet'
     | '/devices'
+    | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/cabinet/files'
   id:
     | '__root__'
     | '/'
-    | '/devices'
     | '/cabinet'
+    | '/devices'
+    | '/cabinet/files'
+    | '/cabinet/docs'
+    | '/cabinet/encrypted'
+    | '/cabinet/settings'
+    | '/cabinet/shared'
+    | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/cabinet/'
     | '/devices/'
+    | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/cabinet/files/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CabinetRouteRoute: typeof CabinetRouteRouteWithChildren
   DevicesRouteRoute: typeof DevicesRouteRouteWithChildren
-  CabinetRoute: typeof CabinetRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/cabinet': {
-      id: '/cabinet'
-      path: '/cabinet'
-      fullPath: '/cabinet'
-      preLoaderRoute: typeof CabinetRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/devices': {
       id: '/devices'
       path: '/devices'
       fullPath: '/devices'
       preLoaderRoute: typeof DevicesRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cabinet': {
+      id: '/cabinet'
+      path: '/cabinet'
+      fullPath: '/cabinet'
+      preLoaderRoute: typeof CabinetRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -168,6 +272,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/devices/'
       preLoaderRoute: typeof DevicesIndexRouteImport
       parentRoute: typeof DevicesRouteRoute
+    }
+    '/cabinet/': {
+      id: '/cabinet/'
+      path: '/'
+      fullPath: '/cabinet/'
+      preLoaderRoute: typeof CabinetIndexRouteImport
+      parentRoute: typeof CabinetRouteRoute
     }
     '/devices/oauth-callback': {
       id: '/devices/oauth-callback'
@@ -190,6 +301,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevicesCliCallbackRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
+    '/cabinet/trash': {
+      id: '/cabinet/trash'
+      path: '/trash'
+      fullPath: '/cabinet/trash'
+      preLoaderRoute: typeof CabinetTrashRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/shared': {
+      id: '/cabinet/shared'
+      path: '/shared'
+      fullPath: '/cabinet/shared'
+      preLoaderRoute: typeof CabinetSharedRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/settings': {
+      id: '/cabinet/settings'
+      path: '/settings'
+      fullPath: '/cabinet/settings'
+      preLoaderRoute: typeof CabinetSettingsRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/encrypted': {
+      id: '/cabinet/encrypted'
+      path: '/encrypted'
+      fullPath: '/cabinet/encrypted'
+      preLoaderRoute: typeof CabinetEncryptedRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/docs': {
+      id: '/cabinet/docs'
+      path: '/docs'
+      fullPath: '/cabinet/docs'
+      preLoaderRoute: typeof CabinetDocsRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/files': {
+      id: '/cabinet/files'
+      path: '/files'
+      fullPath: '/cabinet/files'
+      preLoaderRoute: typeof CabinetFilesRouteRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/files/': {
+      id: '/cabinet/files/'
+      path: '/'
+      fullPath: '/cabinet/files/'
+      preLoaderRoute: typeof CabinetFilesIndexRouteImport
+      parentRoute: typeof CabinetFilesRouteRoute
+    }
     '/devices/pair/request': {
       id: '/devices/pair/request'
       path: '/pair/request'
@@ -204,8 +364,52 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevicesPairAcceptRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
+    '/cabinet/files/$': {
+      id: '/cabinet/files/$'
+      path: '/$'
+      fullPath: '/cabinet/files/$'
+      preLoaderRoute: typeof CabinetFilesSplatRouteImport
+      parentRoute: typeof CabinetFilesRouteRoute
+    }
   }
 }
+
+interface CabinetFilesRouteRouteChildren {
+  CabinetFilesSplatRoute: typeof CabinetFilesSplatRoute
+  CabinetFilesIndexRoute: typeof CabinetFilesIndexRoute
+}
+
+const CabinetFilesRouteRouteChildren: CabinetFilesRouteRouteChildren = {
+  CabinetFilesSplatRoute: CabinetFilesSplatRoute,
+  CabinetFilesIndexRoute: CabinetFilesIndexRoute,
+}
+
+const CabinetFilesRouteRouteWithChildren =
+  CabinetFilesRouteRoute._addFileChildren(CabinetFilesRouteRouteChildren)
+
+interface CabinetRouteRouteChildren {
+  CabinetFilesRouteRoute: typeof CabinetFilesRouteRouteWithChildren
+  CabinetDocsRoute: typeof CabinetDocsRoute
+  CabinetEncryptedRoute: typeof CabinetEncryptedRoute
+  CabinetSettingsRoute: typeof CabinetSettingsRoute
+  CabinetSharedRoute: typeof CabinetSharedRoute
+  CabinetTrashRoute: typeof CabinetTrashRoute
+  CabinetIndexRoute: typeof CabinetIndexRoute
+}
+
+const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
+  CabinetFilesRouteRoute: CabinetFilesRouteRouteWithChildren,
+  CabinetDocsRoute: CabinetDocsRoute,
+  CabinetEncryptedRoute: CabinetEncryptedRoute,
+  CabinetSettingsRoute: CabinetSettingsRoute,
+  CabinetSharedRoute: CabinetSharedRoute,
+  CabinetTrashRoute: CabinetTrashRoute,
+  CabinetIndexRoute: CabinetIndexRoute,
+}
+
+const CabinetRouteRouteWithChildren = CabinetRouteRoute._addFileChildren(
+  CabinetRouteRouteChildren,
+)
 
 interface DevicesRouteRouteChildren {
   DevicesCliCallbackRoute: typeof DevicesCliCallbackRoute
@@ -231,8 +435,8 @@ const DevicesRouteRouteWithChildren = DevicesRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CabinetRouteRoute: CabinetRouteRouteWithChildren,
   DevicesRouteRoute: DevicesRouteRouteWithChildren,
-  CabinetRoute: CabinetRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

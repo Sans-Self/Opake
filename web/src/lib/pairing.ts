@@ -3,8 +3,8 @@
 
 import type { Remote } from "comlink";
 import type { CryptoApi } from "@/workers/crypto.worker";
-import type { WrappedKey, AtBytes } from "@/lib/crypto-types";
-import type { Identity, Session } from "@/lib/storage-types";
+import type { WrappedKey, AtBytes } from "@/lib/cryptoTypes";
+import type { Identity, Session } from "@/lib/storageTypes";
 import { authenticatedXrpc } from "@/lib/api";
 import {
   uint8ArrayToBase64,

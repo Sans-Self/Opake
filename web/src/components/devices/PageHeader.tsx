@@ -7,7 +7,12 @@ interface PageHeaderProps {
   readonly iconClassName?: string;
 }
 
-export function PageHeader({ title, description, icon: IconComponent, iconClassName }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  description,
+  icon: IconComponent,
+  iconClassName,
+}: PageHeaderProps) {
   return (
     <>
       {IconComponent && (

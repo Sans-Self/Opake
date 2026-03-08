@@ -1,24 +1,24 @@
-import { CheckIcon } from "@phosphor-icons/react"
-import { useMemo, useEffect } from "react"
-import { createFileRoute } from "@tanstack/react-router"
+import { CheckIcon } from "@phosphor-icons/react";
+import { useMemo, useEffect } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 
 type CallbackResult =
   | { state: "success"; errorMessage: "" }
-  | { state: "error"; errorMessage: string }
+  | { state: "error"; errorMessage: string };
 
 function CliCallbackPage() {
   const { state, errorMessage } = useMemo<CallbackResult>(() => {
-    const params = new URLSearchParams(window.location.search)
-    const error = params.get("error")
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
     if (error) {
-      return { state: "error", errorMessage: error }
+      return { state: "error", errorMessage: error };
     }
-    return { state: "success", errorMessage: "" }
-  }, [])
+    return { state: "success", errorMessage: "" };
+  }, []);
 
   useEffect(() => {
-    window.history.replaceState({}, "", window.location.pathname)
-  }, [])
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   return (
     <>
@@ -35,8 +35,8 @@ function CliCallbackPage() {
           <div className="text-base-content/50 mt-2 flex flex-col gap-3 text-sm">
             <p>You can close this tab and return to your terminal.</p>
             <p>
-              <span className="text-base-content/70 font-medium">Note:</span> This logs you into
-              the CLI only. The web app requires a separate login.
+              <span className="text-base-content/70 font-medium">Note:</span> This logs you into the
+              CLI only. The web app requires a separate login.
             </p>
           </div>
         </div>
@@ -68,9 +68,9 @@ function CliCallbackPage() {
         </div>
       )}
     </>
-  )
+  );
 }
 
 export const Route = createFileRoute("/devices/cli-callback")({
   component: CliCallbackPage,
-})
+});

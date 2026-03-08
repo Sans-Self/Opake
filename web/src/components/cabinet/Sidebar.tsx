@@ -2,41 +2,32 @@ import {
   FolderIcon,
   LockIcon,
   UsersIcon,
-  StarIcon,
   BookOpenIcon,
   TrashIcon,
   GearIcon,
-} from "@phosphor-icons/react"
-import { Link } from "@tanstack/react-router"
-import { OpakeLogo } from "../OpakeLogo"
-import { SidebarItem } from "./SidebarItem"
-import type { PanelType, SectionType } from "./types"
+} from "@phosphor-icons/react";
+import { Link } from "@tanstack/react-router";
+import { OpakeLogo } from "../OpakeLogo";
+import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
-  { type: "root" as const, icon: FolderIcon, label: "The Cabinet" },
-  { type: "encrypted" as const, icon: LockIcon, label: "Encrypted" },
-  { type: "shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
-  { type: "starred" as const, icon: StarIcon, label: "Starred" },
-]
+  { to: "/cabinet/files" as const, icon: FolderIcon, label: "The Cabinet" },
+  { to: "/cabinet/encrypted" as const, icon: LockIcon, label: "Encrypted" },
+  { to: "/cabinet/shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
+];
 
 const BOTTOM_NAV = [
-  { type: "docs" as const, icon: BookOpenIcon, label: "Docs & Help" },
-  { type: "trash" as const, icon: TrashIcon, label: "TrashIcon" },
-  { type: "settings" as const, icon: GearIcon, label: "Settings" },
-]
+  { to: "/cabinet/docs" as const, icon: BookOpenIcon, label: "Docs & Help" },
+  { to: "/cabinet/trash" as const, icon: TrashIcon, label: "Trash" },
+  { to: "/cabinet/settings" as const, icon: GearIcon, label: "Settings" },
+];
 
 const WORKSPACES = [
   { id: "ws-personal", name: "Personal", count: 3 },
   { id: "ws-team", name: "Team Alpha", count: 2 },
-]
+];
 
-interface SidebarProps {
-  activePanelType: PanelType
-  panelDepth: number
-  onOpenSection: (type: SectionType, title: string) => void
-}
-
-export function Sidebar({ activePanelType, panelDepth, onOpenSection }: Readonly<SidebarProps>) {
+export function Sidebar() {
   return (
     <aside className="border-base-300/50 bg-base-200 flex w-53 shrink-0 flex-col border-r px-3 py-4">
       {/* Logo */}
@@ -59,15 +50,8 @@ export function Sidebar({ activePanelType, panelDepth, onOpenSection }: Readonly
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-        {MAIN_NAV.map(({ type, icon, label, badge }) => (
-          <SidebarItem
-            key={type}
-            icon={icon}
-            label={label}
-            badge={badge}
-            active={activePanelType === type && panelDepth === 1}
-            onClick={() => onOpenSection(type, label)}
-          />
+        {MAIN_NAV.map(({ to, icon, label, badge }) => (
+          <SidebarItem key={to} to={to} icon={icon} label={label} badge={badge} />
         ))}
 
         {/* Workspaces */}
@@ -92,17 +76,11 @@ export function Sidebar({ activePanelType, panelDepth, onOpenSection }: Readonly
       <div>
         <div className="divider mx-1 my-0" />
         <div className="flex flex-col gap-0.5">
-          {BOTTOM_NAV.map(({ type, icon, label }) => (
-            <SidebarItem
-              key={type}
-              icon={icon}
-              label={label}
-              active={activePanelType === type}
-              onClick={() => onOpenSection(type, label)}
-            />
+          {BOTTOM_NAV.map(({ to, icon, label }) => (
+            <SidebarItem key={to} to={to} icon={icon} label={label} />
           ))}
         </div>
       </div>
     </aside>
-  )
+  );
 }

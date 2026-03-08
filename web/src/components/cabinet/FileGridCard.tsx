@@ -1,16 +1,16 @@
-import { LockIcon } from "@phosphor-icons/react"
-import { StatusBadge } from "./StatusBadge"
-import { fileIconElement, fileIconColors } from "./file-icons"
-import type { FileItem } from "./types"
+import { LockIcon } from "@phosphor-icons/react";
+import { StatusBadge } from "./StatusBadge";
+import { fileIconElement, fileIconColors } from "./FileIcons";
+import type { FileItem } from "./types";
 
 interface FileGridCardProps {
-  item: FileItem
-  onClick: () => void
+  readonly item: FileItem;
+  readonly onClick: () => void;
 }
 
-export function FileGridCard({ item, onClick }: Readonly<FileGridCardProps>) {
-  const { bg, text } = fileIconColors(item)
-  const isFolder = item.kind === "folder"
+export function FileGridCard({ item, onClick }: FileGridCardProps) {
+  const { bg, text } = fileIconColors(item);
+  const isFolder = item.kind === "folder";
 
   return (
     <div
@@ -19,23 +19,25 @@ export function FileGridCard({ item, onClick }: Readonly<FileGridCardProps>) {
         isFolder
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault()
-                onClick()
+                e.preventDefault();
+                onClick();
               }
             }
           : undefined
       }
       role={isFolder ? "button" : "article"}
       tabIndex={isFolder ? 0 : undefined}
-      aria-label={`${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`}
+      aria-label={
+        item.decrypted
+          ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
+          : "Decrypting…"
+      }
       className={`card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all ${
         isFolder ? "cursor-pointer" : ""
       }`}
     >
       <div className="mb-3 flex items-start justify-between">
-        <div
-          className={`flex size-9.5 items-center justify-center rounded-[10px] ${bg} ${text}`}
-        >
+        <div className={`flex size-9.5 items-center justify-center rounded-[10px] ${bg} ${text}`}>
           {fileIconElement(item, 17)}
         </div>
         <LockIcon size={11} className="text-text-faint" />
@@ -47,11 +49,15 @@ export function FileGridCard({ item, onClick }: Readonly<FileGridCardProps>) {
         <LockIcon size={13} className="text-text-faint relative z-10" />
       </div>
 
-      <div className="text-base-content mb-1.5 truncate text-xs">{item.name}</div>
+      {item.decrypted ? (
+        <div className="text-base-content mb-1.5 truncate text-xs">{item.name}</div>
+      ) : (
+        <div className="skeleton mb-1.5 h-4 w-24 rounded" />
+      )}
       <div className="flex items-center justify-between">
         <span className="text-caption text-text-faint">{item.modified}</span>
         <StatusBadge status={item.status} />
       </div>
     </div>
-  )
+  );
 }

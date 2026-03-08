@@ -1,23 +1,20 @@
-import type { Icon as PhosphorIcon } from "@phosphor-icons/react"
+import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 
 interface SidebarItemProps {
-  icon: PhosphorIcon
-  label: string
-  active: boolean
-  badge?: string | number
-  onClick: () => void
+  readonly to: string;
+  readonly icon: PhosphorIcon;
+  readonly label: string;
+  readonly badge?: string | number;
 }
 
-export function SidebarItem({
-  icon: Icon,
-  label,
-  active,
-  badge,
-  onClick,
-}: Readonly<SidebarItemProps>) {
+export function SidebarItem({ to, icon: Icon, label, badge }: SidebarItemProps) {
+  const matchRoute = useMatchRoute();
+  const active = Boolean(matchRoute({ to, fuzzy: true }));
+
   return (
-    <button
-      onClick={onClick}
+    <Link
+      to={to}
       className={`text-ui flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left transition-colors ${
         active ? "bg-accent text-primary" : "text-text-muted hover:bg-bg-hover"
       }`}
@@ -33,6 +30,6 @@ export function SidebarItem({
           {badge}
         </span>
       )}
-    </button>
-  )
+    </Link>
+  );
 }

@@ -1,18 +1,16 @@
-import { StarIcon, CaretRightIcon } from "@phosphor-icons/react"
-import { StatusBadge } from "./StatusBadge"
-import { fileIconElement, fileIconColors } from "./file-icons"
-import type { FileItem } from "./types"
+import { CaretRightIcon } from "@phosphor-icons/react";
+import { StatusBadge } from "./StatusBadge";
+import { fileIconElement, fileIconColors } from "./FileIcons";
+import type { FileItem } from "./types";
 
 interface FileListRowProps {
-  item: FileItem
-  onClick: () => void
-  onStar: () => void
+  readonly item: FileItem;
+  readonly onClick: () => void;
 }
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- single-component render with conditional attributes; splitting would fragment the layout
-export function FileListRow({ item, onClick, onStar }: Readonly<FileListRowProps>) {
-  const { bg, text } = fileIconColors(item)
-  const isFolder = item.kind === "folder"
+export function FileListRow({ item, onClick }: FileListRowProps) {
+  const { bg, text } = fileIconColors(item);
+  const isFolder = item.kind === "folder";
 
   return (
     <div
@@ -21,15 +19,19 @@ export function FileListRow({ item, onClick, onStar }: Readonly<FileListRowProps
         isFolder
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault()
-                onClick()
+                e.preventDefault();
+                onClick();
               }
             }
           : undefined
       }
       role={isFolder ? "button" : "row"}
       tabIndex={isFolder ? 0 : undefined}
-      aria-label={`${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`}
+      aria-label={
+        item.decrypted
+          ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
+          : "Decrypting…"
+      }
       className={`hover:bg-bg-hover flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors ${
         isFolder ? "cursor-pointer" : ""
       }`}
@@ -41,10 +43,17 @@ export function FileListRow({ item, onClick, onStar }: Readonly<FileListRowProps
 
       {/* Name + meta */}
       <div className="min-w-0 flex-1">
-        <div className="text-ui text-base-content truncate">{item.name}</div>
+        {item.decrypted ? (
+          <div className="text-ui text-base-content flex items-center truncate">
+            {item.name}&nbsp;&nbsp;
+            {isFolder && <CaretRightIcon size={13} className="text-text-faint" />}
+          </div>
+        ) : (
+          <div className="skeleton h-4 w-36 rounded" />
+        )}
         <div className="text-caption text-text-faint mt-0.5 flex items-center gap-1.5">
           <span>{item.modified}</span>
-          {item.size && (
+          {item.decrypted && item.size && (
             <>
               <span>·</span>
               <span>{item.size}</span>
@@ -59,23 +68,24 @@ export function FileListRow({ item, onClick, onStar }: Readonly<FileListRowProps
         </div>
       </div>
 
+      {/* Tags */}
+      {item.decrypted && item.tags.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1">
+          {item.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="badge badge-xs badge-ghost text-text-faint border-base-300/50 border"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Status + actions */}
       <div className="flex shrink-0 items-center gap-2">
         <StatusBadge status={item.status} />
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onStar()
-          }}
-          aria-label={item.starred ? "Unstar" : "StarIcon"}
-          className={`btn btn-ghost btn-xs p-0.5 ${
-            item.starred ? "text-warning" : "text-text-faint"
-          }`}
-        >
-          <StarIcon size={13} weight={item.starred ? "fill" : "regular"} />
-        </button>
-        {isFolder && <CaretRightIcon size={13} className="text-text-faint" />}
       </div>
     </div>
-  )
+  );
 }

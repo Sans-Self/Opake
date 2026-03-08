@@ -1,8 +1,8 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { IndexedDbStorage } from "../../src/lib/indexeddb-storage";
+import { IndexedDbStorage } from "../../src/lib/indexeddbStorage";
 import { StorageError } from "../../src/lib/storage";
-import type { Config, Identity, Session } from "../../src/lib/storage-types";
+import type { Config, Identity, Session } from "../../src/lib/storageTypes";
 
 let storage: IndexedDbStorage;
 let dbCounter = 0;

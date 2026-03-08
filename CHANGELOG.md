@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add web file browser with tag filtering [#145](https://issues.opake.app/issues/145.html)
+- Add URL-based routing for cabinet directory navigation [#247](https://issues.opake.app/issues/247.html)
 - Add ESLint, Prettier, and Immer to web frontend [#207](https://issues.opake.app/issues/207.html)
 - Refactor auth store into session + identity state, non-blocking boot [#209](https://issues.opake.app/issues/209.html)
 - Add destructive action confirmation component with ghost-text typing [#218](https://issues.opake.app/issues/218.html)
