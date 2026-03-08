@@ -128,7 +128,7 @@ export function buildClientId(redirectUri: string): string {
 }
 
 export function buildRedirectUri(): string {
-  return `${window.location.origin}/oauth/callback`
+  return `${window.location.origin}/devices/oauth-callback`
 }
 
 // ---------------------------------------------------------------------------

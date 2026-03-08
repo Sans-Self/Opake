@@ -113,10 +113,10 @@ pub async fn try_oauth_login(
     let frontend_callback_url = if no_redirect {
         None
     } else {
-        Some(
-            std::env::var("OPAKE_FRONTEND_URL")
-                .unwrap_or_else(|_| "https://app.opake.app/oauth/cli-callback".to_string()),
-        )
+        let prefix =
+            std::env::var("OPAKE_FRONTEND_URL").unwrap_or_else(|_| "https://opake.app".to_string());
+
+        Some(format!("{}/devices/cli-callback", prefix))
     };
 
     // Step 6: Wait for the callback (PAR request_uri expires)

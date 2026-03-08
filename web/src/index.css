@@ -8,35 +8,35 @@
   default: true;
 
   /* Surfaces */
-  --color-base-100: oklch(0.985 0.005 85);   /* #FDFAF5 — panel bg */
-  --color-base-200: oklch(0.957 0.012 85);   /* #F5F1E8 — sidebar bg */
-  --color-base-300: oklch(0.930 0.015 85);   /* #EDE8DC — page bg */
+  --color-base-100: oklch(0.985 0.005 85); /* #FDFAF5 — panel bg */
+  --color-base-200: oklch(0.957 0.012 85); /* #F5F1E8 — sidebar bg */
+  --color-base-300: oklch(0.93 0.015 85); /* #EDE8DC — page bg */
   --color-base-content: oklch(0.155 0.035 70); /* #1C1408 — primary text */
 
   /* Accent gold */
-  --color-primary: oklch(0.580 0.095 75);     /* #9A7840 */
+  --color-primary: oklch(0.58 0.095 75); /* #9A7840 */
   --color-primary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
 
   /* Muted text / secondary */
-  --color-secondary: oklch(0.390 0.055 65);   /* #5C4A2E */
+  --color-secondary: oklch(0.39 0.055 65); /* #5C4A2E */
   --color-secondary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
 
   /* Accent light bg */
-  --color-accent: oklch(0.940 0.035 85);      /* #F5E9D0 */
-  --color-accent-content: oklch(0.490 0.080 70); /* #7D6230 */
+  --color-accent: oklch(0.94 0.035 85); /* #F5E9D0 */
+  --color-accent-content: oklch(0.49 0.08 70); /* #7D6230 */
 
   /* Dark UI */
-  --color-neutral: oklch(0.155 0.035 70);     /* #1C1408 */
+  --color-neutral: oklch(0.155 0.035 70); /* #1C1408 */
   --color-neutral-content: oklch(0.976 0.008 85); /* #FAF7F1 */
 
   /* Semantic */
-  --color-success: oklch(0.530 0.065 145);    /* #5C7A54 — shared/sage */
+  --color-success: oklch(0.53 0.065 145); /* #5C7A54 — shared/sage */
   --color-success-content: oklch(0.976 0.008 85);
-  --color-warning: oklch(0.680 0.135 75);     /* #C4952A — gold star */
+  --color-warning: oklch(0.68 0.135 75); /* #C4952A — gold star */
   --color-warning-content: oklch(0.155 0.035 70);
-  --color-error: oklch(0.450 0.110 25);       /* #A04840 — destructive */
+  --color-error: oklch(0.45 0.11 25); /* #A04840 — destructive */
   --color-error-content: oklch(0.976 0.008 85);
-  --color-info: oklch(0.580 0.095 75);
+  --color-info: oklch(0.58 0.095 75);
   --color-info-content: oklch(0.976 0.008 85);
 
   /* Shape */
@@ -55,36 +55,66 @@
   --font-sans: "Inter", sans-serif;
 
   /* Text scale */
-  --text-ui: 0.8125rem;      /* 13px — primary UI text */
-  --text-caption: 0.6875rem;  /* 11px — meta/caption */
-  --text-label: 0.625rem;     /* 10px — small labels */
-  --text-micro: 0.5625rem;    /* 9px — tiny text */
+  --text-ui: 0.8125rem; /* 13px — primary UI text */
+  --text-caption: 0.6875rem; /* 11px — meta/caption */
+  --text-label: 0.625rem; /* 10px — small labels */
+  --text-micro: 0.5625rem; /* 9px — tiny text */
 
   /* Custom colours */
-  --color-border-accent: oklch(0.790 0.060 80);   /* #D4BC96 */
-  --color-text-faint: oklch(0.760 0.035 75);       /* #C4B09A */
-  --color-text-muted: oklch(0.620 0.040 70);       /* #9A8768 */
-  --color-bg-hover: oklch(0.580 0.095 75 / 0.055); /* gold hover */
-  --color-bg-ghost-1: oklch(0.940 0.025 80);       /* #F5EDDB */
-  --color-bg-ghost-2: oklch(0.965 0.015 80);       /* #FAF5EC */
-  --color-bg-sage: oklch(0.940 0.020 140);         /* #EEF2E8 */
-  --color-bg-stone: oklch(0.950 0.010 80);         /* #F4F1EC */
+  --color-border-accent: oklch(0.79 0.06 80); /* #D4BC96 */
+  --color-text-faint: oklch(0.76 0.035 75); /* #C4B09A */
+  --color-text-muted: oklch(0.62 0.04 70); /* #9A8768 */
+  --color-bg-hover: oklch(0.58 0.095 75 / 0.055); /* gold hover */
+  --color-bg-ghost-1: oklch(0.94 0.025 80); /* #F5EDDB */
+  --color-bg-ghost-2: oklch(0.965 0.015 80); /* #FAF5EC */
+  --color-bg-sage: oklch(0.94 0.02 140); /* #EEF2E8 */
+  --color-bg-stone: oklch(0.95 0.01 80); /* #F4F1EC */
 
   /* File-type icon colours */
-  --color-file-doc: #6676A8;
-  --color-file-doc-bg: #EEF0F8;
-  --color-file-sheet: #5C8A5C;
-  --color-file-sheet-bg: #EEF4EE;
-  --color-file-pdf: #A05040;
-  --color-file-pdf-bg: #F5EEEC;
-  --color-file-note: #8A6A30;
-  --color-file-code: #7A6A98;
-  --color-file-code-bg: #F0EEF5;
+  --color-file-doc: #6676a8;
+  --color-file-doc-bg: #eef0f8;
+  --color-file-sheet: #5c8a5c;
+  --color-file-sheet-bg: #eef4ee;
+  --color-file-pdf: #a05040;
+  --color-file-pdf-bg: #f5eeec;
+  --color-file-note: #8a6a30;
+  --color-file-code: #7a6a98;
+  --color-file-code-bg: #f0eef5;
 
   /* Elevation */
   --shadow-panel-sm: 0 1px 8px oklch(0.35 0.05 60 / 0.07);
   --shadow-panel-md: 0 2px 16px oklch(0.35 0.05 60 / 0.09);
   --shadow-panel-lg: 0 6px 32px oklch(0.35 0.05 60 / 0.12);
+
+  /* Keyframes */
+  --animate-logo-square: logo-square 2s linear infinite;
+  @keyframes logo-square {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      background: var(--sq-from);
+      border: var(--sq-border-from);
+    }
+    25% {
+      transform: translate(calc(var(--sq-dir) * var(--space)), 0);
+    }
+    50% {
+      transform: translate(calc(var(--sq-dir) * var(--space)), calc(var(--sq-dir) * var(--space)));
+      background: var(--sq-to);
+      border: var(--sq-border-to);
+    }
+    75% {
+      transform: translate(0, calc(var(--sq-dir) * var(--space)));
+    }
+  }
+
+  --animate-hover-lift: hover-lift 0.2s ease-out forwards;
+  @keyframes hover-lift {
+    to {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-panel-sm);
+    }
+  }
 }
 
 /* ─── Utilities ──────────────────────────────────────────────────────────── */
@@ -94,8 +124,8 @@
     0deg,
     transparent,
     transparent 13px,
-    oklch(0.580 0.095 75 / 0.04) 13px,
-    oklch(0.580 0.095 75 / 0.04) 14px
+    oklch(0.58 0.095 75 / 0.04) 13px,
+    oklch(0.58 0.095 75 / 0.04) 14px
   );
 }
 

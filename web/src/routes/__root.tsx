@@ -1,5 +1,9 @@
-import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router"
-import { useAuthStore } from "@/stores/auth"
+import { createRootRouteWithContext, Outlet, useRouter } from "@tanstack/react-router"
+import type { AuthSnapshot } from "@/stores/auth"
+
+export interface RouterContext {
+  auth: AuthSnapshot
+}
 
 function RootLayout() {
   return <Outlet />
@@ -26,13 +30,7 @@ function RootError({ error }: Readonly<{ error: Error }>) {
   )
 }
 
-export const Route = createRootRoute({
-  beforeLoad: async () => {
-    const state = useAuthStore.getState()
-    if (state.phase === "initializing") {
-      await state.boot()
-    }
-  },
+export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
   errorComponent: RootError,
 })

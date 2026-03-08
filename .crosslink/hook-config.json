@@ -17,10 +17,12 @@
     "tsc",
     "node ",
     "python ",
+    "python3 ",
     "ls",
     "dir",
     "pwd",
-    "echo"
+    "echo",
+    "cd "
   ],
   "blocked_git_commands": [
     "git push",

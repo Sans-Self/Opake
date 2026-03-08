@@ -1,22 +1,9 @@
 import { useState } from "react"
-import { createFileRoute, redirect, Outlet, useMatch } from "@tanstack/react-router"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 import { Sidebar } from "@/components/cabinet/Sidebar"
 import { TopBar } from "@/components/cabinet/TopBar"
 import { PanelStack } from "@/components/cabinet/PanelStack"
-import { useAuthStore } from "@/stores/auth"
 import type { FileItem, Panel, SectionType } from "@/components/cabinet/types"
-
-function CabinetLayout() {
-  // If a child route matched (e.g. /cabinet/devices), render it instead of the cabinet UI
-  const devicesMatch = useMatch({ from: "/cabinet/devices/", shouldThrow: false })
-  const pairMatch = useMatch({ from: "/cabinet/devices/pair", shouldThrow: false })
-
-  if (devicesMatch || pairMatch) {
-    return <Outlet />
-  }
-
-  return <CabinetPage />
-}
 
 function CabinetPage() {
   const [panels, setPanels] = useState<Panel[]>([{ type: "root", title: "The Cabinet" }])
@@ -98,11 +85,10 @@ function CabinetPage() {
 }
 
 export const Route = createFileRoute("/cabinet")({
-  beforeLoad: () => {
-    const state = useAuthStore.getState()
-    if (state.phase !== "ready" && state.phase !== "awaiting_identity") {
-      throw redirect({ to: "/login" })
+  beforeLoad: ({ context }) => {
+    if (context.auth.session.status !== "active") {
+      throw redirect({ to: "/devices/login" })
     }
   },
-  component: CabinetLayout,
+  component: CabinetPage,
 })

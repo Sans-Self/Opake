@@ -12,6 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add ESLint, Prettier, and Immer to web frontend [#207](https://issues.opake.app/issues/207.html)
+- Refactor auth store into session + identity state, non-blocking boot [#209](https://issues.opake.app/issues/209.html)
+- Add destructive action confirmation component with ghost-text typing [#218](https://issues.opake.app/issues/218.html)
+- Add loading state tracking to device pairing pages [#225](https://issues.opake.app/issues/225.html)
+- Add ESLint, Prettier, and Immer to web frontend [#207](https://issues.opake.app/issues/207.html)
+- Refactor auth store into session + identity state, non-blocking boot [#209](https://issues.opake.app/issues/209.html)
+- Add destructive action confirmation component with ghost-text typing [#218](https://issues.opake.app/issues/218.html)
+- Add loading state tracking to device pairing pages [#225](https://issues.opake.app/issues/225.html)
+- Move device pairing into devices route folder as pair.request and pair.accept [#220](https://issues.opake.app/issues/220.html)
 - Add --dir flag to mkdir for nested directory creation [#198](https://issues.opake.app/issues/198.html)
 - Add purge command to delete all Opake data from PDS [#196](https://issues.opake.app/issues/196.html)
 - Add metadata CLI command for rename, tag, and description management [#190](https://issues.opake.app/issues/190.html)
@@ -64,6 +73,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Update login command to read password from stdin [#112](https://issues.opake.app/issues/112.html)
 
 ### Fixed
+- Fix application startup to check account status [#194](https://issues.opake.app/issues/194.html)
+- Fix web login on new account creating publicKey record without $bytes [#195](https://issues.opake.app/issues/195.html)
+- Fix Identity type casing mismatch across WASM boundary [#203](https://issues.opake.app/issues/203.html)
+- Fix application startup to check account status [#194](https://issues.opake.app/issues/194.html)
+- Fix web login on new account creating publicKey record without $bytes [#195](https://issues.opake.app/issues/195.html)
+- Fix session restore on page reload by deferring router until boot completes [#210](https://issues.opake.app/issues/210.html)
+- Fix Identity type casing mismatch across WASM boundary [#203](https://issues.opake.app/issues/203.html)
+- Fix OpakeLogo loading animation not completing at least one full cycle [#226](https://issues.opake.app/issues/226.html)
+- Fix review findings from web frontend restructure [#227](https://issues.opake.app/issues/227.html)
+- Fix session restore on page reload by deferring router until boot completes [#210](https://issues.opake.app/issues/210.html)
+- Fix OpakeLogo loading animation not completing at least one full cycle [#226](https://issues.opake.app/issues/226.html)
+- Fix review findings from web frontend restructure [#227](https://issues.opake.app/issues/227.html)
+- Fix identity conflict false positive caused by AT Protocol bytes encoding [#224](https://issues.opake.app/issues/224.html)
 - Fix rm -yr / failing with empty path error on root directory [#202](https://issues.opake.app/issues/202.html)
 - Fix mkdir creating duplicate directories with the same name [#201](https://issues.opake.app/issues/201.html)
 - Fix token refresh not triggering on HTTP 401 ExpiredToken responses [#197](https://issues.opake.app/issues/197.html)
@@ -73,6 +95,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Add cn() utility (clsx + tailwind-merge) [#208](https://issues.opake.app/issues/208.html)
+- Add cn() utility (clsx + tailwind-merge) [#208](https://issues.opake.app/issues/208.html)
 - Add metadata CLI command with tag and description subcommands [#190](https://issues.opake.app/issues/190.html)
 - Encrypt directory metadata (add encryption envelope to directory records) [#189](https://issues.opake.app/issues/189.html)
 - Encrypt keyring and grant metadata [#188](https://issues.opake.app/issues/188.html)

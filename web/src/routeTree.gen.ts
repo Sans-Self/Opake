@@ -9,22 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as CabinetRouteImport } from './routes/cabinet'
+import { Route as DevicesRouteRouteImport } from './routes/devices/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as OauthCliCallbackRouteImport } from './routes/oauth.cli-callback'
-import { Route as OauthCallbackRouteImport } from './routes/oauth.callback'
-import { Route as CabinetDevicesIndexRouteImport } from './routes/cabinet.devices.index'
-import { Route as CabinetDevicesPairRouteImport } from './routes/cabinet.devices.pair'
+import { Route as DevicesIndexRouteImport } from './routes/devices/index'
+import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
+import { Route as DevicesLoginRouteImport } from './routes/devices/login'
+import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-callback'
+import { Route as DevicesPairRequestRouteImport } from './routes/devices/pair.request'
+import { Route as DevicesPairAcceptRouteImport } from './routes/devices/pair.accept'
 
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CabinetRoute = CabinetRouteImport.update({
   id: '/cabinet',
   path: '/cabinet',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevicesRouteRoute = DevicesRouteRouteImport.update({
+  id: '/devices',
+  path: '/devices',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -32,107 +34,125 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OauthCliCallbackRoute = OauthCliCallbackRouteImport.update({
-  id: '/oauth/cli-callback',
-  path: '/oauth/cli-callback',
-  getParentRoute: () => rootRouteImport,
+const DevicesIndexRoute = DevicesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DevicesRouteRoute,
 } as any)
-const OauthCallbackRoute = OauthCallbackRouteImport.update({
-  id: '/oauth/callback',
-  path: '/oauth/callback',
-  getParentRoute: () => rootRouteImport,
+const DevicesOauthCallbackRoute = DevicesOauthCallbackRouteImport.update({
+  id: '/oauth-callback',
+  path: '/oauth-callback',
+  getParentRoute: () => DevicesRouteRoute,
 } as any)
-const CabinetDevicesIndexRoute = CabinetDevicesIndexRouteImport.update({
-  id: '/devices/',
-  path: '/devices/',
-  getParentRoute: () => CabinetRoute,
+const DevicesLoginRoute = DevicesLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => DevicesRouteRoute,
 } as any)
-const CabinetDevicesPairRoute = CabinetDevicesPairRouteImport.update({
-  id: '/devices/pair',
-  path: '/devices/pair',
-  getParentRoute: () => CabinetRoute,
+const DevicesCliCallbackRoute = DevicesCliCallbackRouteImport.update({
+  id: '/cli-callback',
+  path: '/cli-callback',
+  getParentRoute: () => DevicesRouteRoute,
+} as any)
+const DevicesPairRequestRoute = DevicesPairRequestRouteImport.update({
+  id: '/pair/request',
+  path: '/pair/request',
+  getParentRoute: () => DevicesRouteRoute,
+} as any)
+const DevicesPairAcceptRoute = DevicesPairAcceptRouteImport.update({
+  id: '/pair/accept',
+  path: '/pair/accept',
+  getParentRoute: () => DevicesRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRouteWithChildren
-  '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
-  '/oauth/cli-callback': typeof OauthCliCallbackRoute
-  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
-  '/cabinet/devices/': typeof CabinetDevicesIndexRoute
+  '/devices': typeof DevicesRouteRouteWithChildren
+  '/cabinet': typeof CabinetRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackRoute
+  '/devices/login': typeof DevicesLoginRoute
+  '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/': typeof DevicesIndexRoute
+  '/devices/pair/accept': typeof DevicesPairAcceptRoute
+  '/devices/pair/request': typeof DevicesPairRequestRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRouteWithChildren
-  '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
-  '/oauth/cli-callback': typeof OauthCliCallbackRoute
-  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
-  '/cabinet/devices': typeof CabinetDevicesIndexRoute
+  '/cabinet': typeof CabinetRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackRoute
+  '/devices/login': typeof DevicesLoginRoute
+  '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices': typeof DevicesIndexRoute
+  '/devices/pair/accept': typeof DevicesPairAcceptRoute
+  '/devices/pair/request': typeof DevicesPairRequestRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/cabinet': typeof CabinetRouteWithChildren
-  '/login': typeof LoginRoute
-  '/oauth/callback': typeof OauthCallbackRoute
-  '/oauth/cli-callback': typeof OauthCliCallbackRoute
-  '/cabinet/devices/pair': typeof CabinetDevicesPairRoute
-  '/cabinet/devices/': typeof CabinetDevicesIndexRoute
+  '/devices': typeof DevicesRouteRouteWithChildren
+  '/cabinet': typeof CabinetRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackRoute
+  '/devices/login': typeof DevicesLoginRoute
+  '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/': typeof DevicesIndexRoute
+  '/devices/pair/accept': typeof DevicesPairAcceptRoute
+  '/devices/pair/request': typeof DevicesPairRequestRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/devices'
     | '/cabinet'
-    | '/login'
-    | '/oauth/callback'
-    | '/oauth/cli-callback'
-    | '/cabinet/devices/pair'
-    | '/cabinet/devices/'
+    | '/devices/cli-callback'
+    | '/devices/login'
+    | '/devices/oauth-callback'
+    | '/devices/'
+    | '/devices/pair/accept'
+    | '/devices/pair/request'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/cabinet'
-    | '/login'
-    | '/oauth/callback'
-    | '/oauth/cli-callback'
-    | '/cabinet/devices/pair'
-    | '/cabinet/devices'
+    | '/devices/cli-callback'
+    | '/devices/login'
+    | '/devices/oauth-callback'
+    | '/devices'
+    | '/devices/pair/accept'
+    | '/devices/pair/request'
   id:
     | '__root__'
     | '/'
+    | '/devices'
     | '/cabinet'
-    | '/login'
-    | '/oauth/callback'
-    | '/oauth/cli-callback'
-    | '/cabinet/devices/pair'
-    | '/cabinet/devices/'
+    | '/devices/cli-callback'
+    | '/devices/login'
+    | '/devices/oauth-callback'
+    | '/devices/'
+    | '/devices/pair/accept'
+    | '/devices/pair/request'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CabinetRoute: typeof CabinetRouteWithChildren
-  LoginRoute: typeof LoginRoute
-  OauthCallbackRoute: typeof OauthCallbackRoute
-  OauthCliCallbackRoute: typeof OauthCliCallbackRoute
+  DevicesRouteRoute: typeof DevicesRouteRouteWithChildren
+  CabinetRoute: typeof CabinetRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/cabinet': {
       id: '/cabinet'
       path: '/cabinet'
       fullPath: '/cabinet'
       preLoaderRoute: typeof CabinetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/devices': {
+      id: '/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof DevicesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -142,56 +162,77 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/oauth/cli-callback': {
-      id: '/oauth/cli-callback'
-      path: '/oauth/cli-callback'
-      fullPath: '/oauth/cli-callback'
-      preLoaderRoute: typeof OauthCliCallbackRouteImport
-      parentRoute: typeof rootRouteImport
+    '/devices/': {
+      id: '/devices/'
+      path: '/'
+      fullPath: '/devices/'
+      preLoaderRoute: typeof DevicesIndexRouteImport
+      parentRoute: typeof DevicesRouteRoute
     }
-    '/oauth/callback': {
-      id: '/oauth/callback'
-      path: '/oauth/callback'
-      fullPath: '/oauth/callback'
-      preLoaderRoute: typeof OauthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
+    '/devices/oauth-callback': {
+      id: '/devices/oauth-callback'
+      path: '/oauth-callback'
+      fullPath: '/devices/oauth-callback'
+      preLoaderRoute: typeof DevicesOauthCallbackRouteImport
+      parentRoute: typeof DevicesRouteRoute
     }
-    '/cabinet/devices/': {
-      id: '/cabinet/devices/'
-      path: '/devices'
-      fullPath: '/cabinet/devices/'
-      preLoaderRoute: typeof CabinetDevicesIndexRouteImport
-      parentRoute: typeof CabinetRoute
+    '/devices/login': {
+      id: '/devices/login'
+      path: '/login'
+      fullPath: '/devices/login'
+      preLoaderRoute: typeof DevicesLoginRouteImport
+      parentRoute: typeof DevicesRouteRoute
     }
-    '/cabinet/devices/pair': {
-      id: '/cabinet/devices/pair'
-      path: '/devices/pair'
-      fullPath: '/cabinet/devices/pair'
-      preLoaderRoute: typeof CabinetDevicesPairRouteImport
-      parentRoute: typeof CabinetRoute
+    '/devices/cli-callback': {
+      id: '/devices/cli-callback'
+      path: '/cli-callback'
+      fullPath: '/devices/cli-callback'
+      preLoaderRoute: typeof DevicesCliCallbackRouteImport
+      parentRoute: typeof DevicesRouteRoute
+    }
+    '/devices/pair/request': {
+      id: '/devices/pair/request'
+      path: '/pair/request'
+      fullPath: '/devices/pair/request'
+      preLoaderRoute: typeof DevicesPairRequestRouteImport
+      parentRoute: typeof DevicesRouteRoute
+    }
+    '/devices/pair/accept': {
+      id: '/devices/pair/accept'
+      path: '/pair/accept'
+      fullPath: '/devices/pair/accept'
+      preLoaderRoute: typeof DevicesPairAcceptRouteImport
+      parentRoute: typeof DevicesRouteRoute
     }
   }
 }
 
-interface CabinetRouteChildren {
-  CabinetDevicesPairRoute: typeof CabinetDevicesPairRoute
-  CabinetDevicesIndexRoute: typeof CabinetDevicesIndexRoute
+interface DevicesRouteRouteChildren {
+  DevicesCliCallbackRoute: typeof DevicesCliCallbackRoute
+  DevicesLoginRoute: typeof DevicesLoginRoute
+  DevicesOauthCallbackRoute: typeof DevicesOauthCallbackRoute
+  DevicesIndexRoute: typeof DevicesIndexRoute
+  DevicesPairAcceptRoute: typeof DevicesPairAcceptRoute
+  DevicesPairRequestRoute: typeof DevicesPairRequestRoute
 }
 
-const CabinetRouteChildren: CabinetRouteChildren = {
-  CabinetDevicesPairRoute: CabinetDevicesPairRoute,
-  CabinetDevicesIndexRoute: CabinetDevicesIndexRoute,
+const DevicesRouteRouteChildren: DevicesRouteRouteChildren = {
+  DevicesCliCallbackRoute: DevicesCliCallbackRoute,
+  DevicesLoginRoute: DevicesLoginRoute,
+  DevicesOauthCallbackRoute: DevicesOauthCallbackRoute,
+  DevicesIndexRoute: DevicesIndexRoute,
+  DevicesPairAcceptRoute: DevicesPairAcceptRoute,
+  DevicesPairRequestRoute: DevicesPairRequestRoute,
 }
 
-const CabinetRouteWithChildren =
-  CabinetRoute._addFileChildren(CabinetRouteChildren)
+const DevicesRouteRouteWithChildren = DevicesRouteRoute._addFileChildren(
+  DevicesRouteRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CabinetRoute: CabinetRouteWithChildren,
-  LoginRoute: LoginRoute,
-  OauthCallbackRoute: OauthCallbackRoute,
-  OauthCliCallbackRoute: OauthCliCallbackRoute,
+  DevicesRouteRoute: DevicesRouteRouteWithChildren,
+  CabinetRoute: CabinetRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
