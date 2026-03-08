@@ -33,17 +33,8 @@ pub enum Encryption {
 pub struct Document {
     #[serde(default = "default_version")]
     pub opake_version: u32,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<u64>,
     pub blob: BlobRef,
     pub encryption: Encryption,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     pub encrypted_metadata: EncryptedMetadata,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
@@ -53,11 +44,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// Construct a new document with the current schema version and sensible
-    /// defaults for optional fields. Callers set tags/description/etc. via
-    /// struct update syntax: `Document::new(..) { tags, ..Document::new(..) }`
     pub fn new(
-        name: String,
         blob: BlobRef,
         encryption: Encryption,
         encrypted_metadata: EncryptedMetadata,
@@ -65,13 +52,8 @@ impl Document {
     ) -> Self {
         Self {
             opake_version: SCHEMA_VERSION,
-            name,
-            mime_type: None,
-            size: None,
             blob,
             encryption,
-            tags: Vec::new(),
-            description: None,
             encrypted_metadata,
             visibility: None,
             created_at,

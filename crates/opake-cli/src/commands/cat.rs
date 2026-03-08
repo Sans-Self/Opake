@@ -8,6 +8,7 @@ use opake_core::directories::DirectoryTree;
 use opake_core::documents;
 
 use crate::commands::Execute;
+use crate::document_resolve;
 use crate::identity;
 use crate::keyring_store;
 use crate::session::{self, CommandContext};
@@ -26,19 +27,16 @@ impl Execute for CatCommand {
         let private_key = id.private_key_bytes()?;
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
-        // Resolve the reference to an AT-URI.
-        let uri = if self.reference.starts_with("at://") {
-            self.reference.clone()
-        } else if self.reference.contains('/') {
-            // Path — needs the directory tree.
-            let mut tree = DirectoryTree::load(&mut client).await?;
-            tree.decrypt_names(&ctx.did, &private_key);
-            let resolved = tree.resolve(&mut client, &self.reference).await?;
-            resolved.uri
-        } else {
-            // Bare name — lightweight document resolution.
-            documents::resolve_uri(&mut client, &self.reference).await?
-        };
+        let mut tree = DirectoryTree::load(&mut client).await?;
+        tree.decrypt_names(&ctx.did, &private_key);
+        let mut resolver = document_resolve::CliDocumentNameResolver::new(
+            &mut client,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        );
+        let resolved = tree.resolve(&mut resolver, &self.reference).await?;
+        let uri = resolved.uri;
 
         // Peek at the document to check for keyring encryption.
         let at_uri = atproto::parse_at_uri(&uri)?;

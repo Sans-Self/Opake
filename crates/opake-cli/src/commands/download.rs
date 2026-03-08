@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::Args;
 use opake_core::atproto;
+use opake_core::directories::DirectoryTree;
 use opake_core::documents;
 
 use opake_core::client::Session;
@@ -90,14 +91,17 @@ impl Execute for DownloadCommand {
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
             let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-            let uri = document_resolve::resolve_uri(
+
+            let mut tree = DirectoryTree::load(&mut client).await?;
+            tree.decrypt_names(&id.did, &private_key);
+            let mut resolver = document_resolve::CliDocumentNameResolver::new(
                 &mut client,
-                reference,
                 &id.did,
                 &private_key,
                 &ctx.storage,
-            )
-            .await?;
+            );
+            let resolved = tree.resolve(&mut resolver, reference).await?;
+            let uri = resolved.uri;
 
             // Peek at the document to check if it uses keyring encryption.
             // If so, load the local group key before attempting decryption.

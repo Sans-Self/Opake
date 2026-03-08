@@ -1,12 +1,8 @@
 // In-memory snapshot of the directory hierarchy for path resolution.
 //
-// Loads only directory records (one paginated API call). Document names
-// are resolved on demand via individual getRecord calls against the
-// entries of the relevant directory. This avoids fetching the entire
-// document collection for every path-based operation.
-//
-// Designed for reuse across rm, mv, and any future command that needs
-// to resolve user-facing paths to AT-URIs.
+// Loads directory records in one paginated API call. Document names are
+// resolved lazily during path resolution via an async callback trait,
+// so only documents in the target directory need to be fetched.
 
 use std::collections::HashMap;
 
@@ -17,9 +13,19 @@ use crate::client::{list_collection, Transport, XrpcClient};
 use crate::crypto::{self, DirectoryMetadata, X25519PrivateKey};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
-use crate::records::{self, Directory, Document, EncryptedMetadata, Encryption};
+use crate::records::{Directory, Document, EncryptedMetadata, Encryption};
 
 use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};
+
+/// Resolves a document AT-URI to its decrypted name on demand.
+///
+/// Called lazily during tree path resolution — only for document
+/// children of directories actually being searched. Implementations
+/// should cache results to avoid repeated PDS fetches.
+#[allow(async_fn_in_trait)] // no Send bound needed — used via generics, not dyn; WASM-safe
+pub trait DocumentNameResolver {
+    async fn resolve_name(&mut self, uri: &str) -> Result<Option<String>, Error>;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -64,42 +70,12 @@ fn entry_kind_from_uri(uri: &str) -> Option<EntryKind> {
     }
 }
 
-/// Fetch a single document record and return its name.
-///
-/// Returns None for 404s, unparseable records, and future schema versions
-/// (same tolerance as list_collection).
-async fn fetch_document_name(
-    client: &mut XrpcClient<impl Transport>,
-    uri: &str,
-) -> Result<Option<String>, Error> {
-    let at_uri = atproto::parse_at_uri(uri)?;
-    let entry = match client
-        .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-        .await
-    {
-        Ok(e) => e,
-        Err(Error::NotFound(_)) => return Ok(None),
-        Err(e) => return Err(e),
-    };
-
-    let doc: Document = match serde_json::from_value(entry.value) {
-        Ok(d) => d,
-        Err(_) => return Ok(None),
-    };
-
-    if records::check_version(doc.opake_version).is_err() {
-        return Ok(None);
-    }
-
-    Ok(Some(doc.name))
-}
-
 impl DirectoryTree {
     /// Load the directory hierarchy from the PDS.
     ///
     /// Makes one paginated API call (all directories). Documents are NOT
-    /// loaded — they're fetched on demand during resolution. The root is
-    /// detected from the listing by its rkey ("self").
+    /// loaded — callers provide document names separately via `resolve()`.
+    /// The root is detected from the listing by its rkey ("self").
     pub async fn load(client: &mut XrpcClient<impl Transport>) -> Result<Self, Error> {
         let dir_entries: Vec<(String, DirectoryInfo)> =
             list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
@@ -185,18 +161,42 @@ impl DirectoryTree {
 
     /// Resolve a user-provided reference to an AT-URI with metadata.
     ///
+    /// Document names are resolved lazily via the `resolver` callback —
+    /// only documents in the target directory are fetched and decrypted.
+    ///
     /// Accepts three forms:
-    /// - `at://` URI — directories resolved from memory, documents via getRecord
+    /// - `at://` URI — directories resolved from memory, documents via resolver
     /// - Path with `/` — walked segment by segment from root
-    /// - Bare name — searched in root's direct children (directories in memory,
-    ///   documents via getRecord). Without a root, only directories are searched.
+    /// - Bare name — searched in root's direct children
     pub async fn resolve(
         &self,
-        client: &mut XrpcClient<impl Transport>,
+        resolver: &mut impl DocumentNameResolver,
         reference: &str,
     ) -> Result<ResolvedPath, Error> {
         if reference.starts_with("at://") {
-            return self.resolve_at_uri(client, reference).await;
+            // Directories are in memory.
+            if let Some(info) = self.directories.get(reference) {
+                return Ok(ResolvedPath {
+                    uri: reference.to_owned(),
+                    kind: EntryKind::Directory,
+                    name: info.name.clone(),
+                    parent_uri: self.find_parent(reference),
+                });
+            }
+
+            // Document URIs — use the rkey as the display name. The caller
+            // already has the URI; no PDS fetch needed.
+            let at_uri = atproto::parse_at_uri(reference)?;
+            if at_uri.collection == DOCUMENT_COLLECTION {
+                return Ok(ResolvedPath {
+                    uri: reference.to_owned(),
+                    kind: EntryKind::Document,
+                    name: at_uri.rkey.clone(),
+                    parent_uri: self.find_parent(reference),
+                });
+            }
+
+            return Err(Error::NotFound(format!("URI not found: {reference}")));
         }
 
         // "/" refers to the root directory.
@@ -213,38 +213,37 @@ impl DirectoryTree {
         }
 
         if reference.contains('/') {
-            return self.resolve_path(client, reference).await;
+            return self.resolve_path(resolver, reference).await;
         }
 
-        self.resolve_bare_name(client, reference).await
+        self.resolve_bare_name(resolver, reference).await
     }
 
-    /// Load the full directory hierarchy including document names.
+    /// Load the full directory hierarchy including document URIs.
     ///
     /// Makes two paginated API calls: one for all directories, one for all
-    /// documents. Returns a tree that can render without additional API calls.
+    /// documents. Returns a tree and a set of document URIs. Callers must
+    /// build the name map separately by decrypting metadata.
     pub async fn load_full(
         client: &mut XrpcClient<impl Transport>,
-    ) -> Result<(Self, HashMap<String, String>), Error> {
+    ) -> Result<(Self, Vec<String>), Error> {
         let tree = Self::load(client).await?;
 
-        let doc_entries: Vec<(String, String)> =
-            list_collection(client, DOCUMENT_COLLECTION, |uri, doc: Document| {
-                (uri.to_owned(), doc.name)
+        let doc_uris: Vec<String> =
+            list_collection(client, DOCUMENT_COLLECTION, |uri, _doc: Document| {
+                uri.to_owned()
             })
             .await?;
 
-        let documents: HashMap<String, String> = doc_entries.into_iter().collect();
+        debug!("loaded {} document URIs for full tree", doc_uris.len());
 
-        debug!("loaded {} documents for full tree", documents.len());
-
-        Ok((tree, documents))
+        Ok((tree, doc_uris))
     }
 
     /// Build a tree-formatted string of the entire hierarchy.
     ///
-    /// Requires the document name map from `load_full`. Entries within each
-    /// directory are sorted: directories first (alphabetical), then documents
+    /// Requires a URI → decrypted name map. Entries within each directory
+    /// are sorted: directories first (alphabetical), then documents
     /// (alphabetical).
     pub fn render(&self, documents: &HashMap<String, String>) -> String {
         let mut output = String::from(ROOT_DIRECTORY_NAME);
@@ -338,9 +337,6 @@ impl DirectoryTree {
     }
 
     /// Count descendant documents and directories under a directory URI.
-    ///
-    /// Infers entry kind from the collection segment in each child URI.
-    /// No API calls — works entirely from the loaded directory data.
     pub fn count_descendants(&self, uri: &str) -> (usize, usize) {
         let mut documents = 0usize;
         let mut directories = 0usize;
@@ -368,8 +364,6 @@ impl DirectoryTree {
 
     /// Collect all descendant URIs in post-order (children before parents)
     /// for correct deletion ordering.
-    ///
-    /// No API calls — kind is inferred from the URI collection segment.
     pub fn collect_descendants(&self, uri: &str) -> Vec<(String, EntryKind)> {
         let mut result = Vec::new();
         self.collect_descendants_recursive(uri, &mut result);
@@ -395,37 +389,9 @@ impl DirectoryTree {
         }
     }
 
-    pub async fn resolve_at_uri(
-        &self,
-        client: &mut XrpcClient<impl Transport>,
-        uri: &str,
-    ) -> Result<ResolvedPath, Error> {
-        // Directories are in memory.
-        if let Some(info) = self.directories.get(uri) {
-            return Ok(ResolvedPath {
-                uri: uri.to_owned(),
-                kind: EntryKind::Directory,
-                name: info.name.clone(),
-                parent_uri: self.find_parent(uri),
-            });
-        }
-
-        // Documents need a getRecord for the name.
-        if let Some(name) = fetch_document_name(client, uri).await? {
-            return Ok(ResolvedPath {
-                uri: uri.to_owned(),
-                kind: EntryKind::Document,
-                name,
-                parent_uri: self.find_parent(uri),
-            });
-        }
-
-        Err(Error::NotFound(format!("URI not found: {uri}")))
-    }
-
     async fn resolve_path(
         &self,
-        client: &mut XrpcClient<impl Transport>,
+        resolver: &mut impl DocumentNameResolver,
         path: &str,
     ) -> Result<ResolvedPath, Error> {
         let root_uri = self
@@ -447,19 +413,18 @@ impl DirectoryTree {
 
         // Last segment can be either a document or a directory.
         let last = segments[segments.len() - 1];
-        self.find_child_any(client, &current_uri, last).await
+        self.find_child_any(resolver, &current_uri, last).await
     }
 
     async fn resolve_bare_name(
         &self,
-        client: &mut XrpcClient<impl Transport>,
+        resolver: &mut impl DocumentNameResolver,
         name: &str,
     ) -> Result<ResolvedPath, Error> {
         match &self.root_uri {
-            Some(root_uri) => self.find_child_any(client, root_uri, name).await,
+            Some(root_uri) => self.find_child_any(resolver, root_uri, name).await,
             None => {
-                // No root — search directories only. Documents should be
-                // resolved via documents::resolve_uri before reaching the tree.
+                // No root — search directories only.
                 let mut matches = Vec::new();
 
                 for (uri, info) in &self.directories {
@@ -514,11 +479,11 @@ impl DirectoryTree {
 
     /// Find a child by name in a directory.
     ///
-    /// Checks directory children in memory first, then fetches document
-    /// children individually via getRecord.
+    /// Checks directory children in memory, then resolves document
+    /// children lazily via the resolver callback.
     async fn find_child_any(
         &self,
-        client: &mut XrpcClient<impl Transport>,
+        resolver: &mut impl DocumentNameResolver,
         parent_uri: &str,
         name: &str,
     ) -> Result<ResolvedPath, Error> {
@@ -543,13 +508,13 @@ impl DirectoryTree {
             }
         }
 
-        // Document children: fetched individually.
+        // Document children: resolved lazily via the callback.
         for entry_uri in &parent.entries {
             if entry_kind_from_uri(entry_uri) != Some(EntryKind::Document) {
                 continue;
             }
 
-            if let Some(doc_name) = fetch_document_name(client, entry_uri).await? {
+            if let Some(doc_name) = resolver.resolve_name(entry_uri).await? {
                 if doc_name == name {
                     matches.push(ResolvedPath {
                         uri: entry_uri.clone(),

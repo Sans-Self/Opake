@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use opake_core::atproto;
 use opake_core::client::Session;
-use opake_core::crypto::{ContentKey, OsRng, X25519PrivateKey};
+use opake_core::crypto::{ContentKey, OsRng};
+use opake_core::directories::DirectoryTree;
 use opake_core::metadata;
 
 use crate::commands::Execute;
@@ -211,17 +212,20 @@ impl Execute for MetadataCommand {
     }
 }
 
-/// Resolve a document reference to an AT-URI.
+/// Resolve a document reference to an AT-URI via the directory tree.
 async fn resolve(
     client: &mut opake_core::client::XrpcClient<impl opake_core::client::Transport>,
     reference: &str,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_key: &opake_core::crypto::X25519PrivateKey,
     ctx: &CommandContext,
 ) -> Result<String> {
-    let uri =
-        document_resolve::resolve_uri(client, reference, did, private_key, &ctx.storage).await?;
-    Ok(uri)
+    let mut tree = DirectoryTree::load(client).await?;
+    tree.decrypt_names(did, private_key);
+    let mut resolver =
+        document_resolve::CliDocumentNameResolver::new(client, did, private_key, &ctx.storage);
+    let resolved = tree.resolve(&mut resolver, reference).await?;
+    Ok(resolved.uri)
 }
 
 /// Peek at a document's encryption type and load the group key if keyring-encrypted.

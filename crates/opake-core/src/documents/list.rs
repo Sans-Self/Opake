@@ -1,26 +1,30 @@
 use crate::client::{list_collection, Transport, XrpcClient};
+use crate::crypto::DocumentMetadata;
 use crate::error::Error;
 use crate::records::{Document, EncryptedMetadata, Encryption};
 
 use super::DOCUMENT_COLLECTION;
 
-/// A document listing entry with its AT-URI and parsed metadata.
+/// A raw document listing entry from the PDS.
 ///
-/// A document listing entry with its AT-URI and parsed metadata.
-///
-/// The `name`/`size`/`mime_type`/`tags` fields contain dummy placeholder
-/// values. Callers must decrypt `encrypted_metadata` using the content key
-/// (unwrapped from `encryption`) to get real values.
+/// Contains only wire-format data: AT-URI, timestamps, encryption envelope,
+/// and the encrypted metadata blob. Callers must decrypt `encrypted_metadata`
+/// to obtain the document's name, MIME type, size, tags, and description.
 #[derive(Debug)]
 pub struct DocumentEntry {
     pub uri: String,
-    pub name: String,
-    pub size: Option<u64>,
-    pub mime_type: Option<String>,
-    pub tags: Vec<String>,
     pub created_at: String,
     pub encrypted_metadata: EncryptedMetadata,
     pub encryption: Encryption,
+}
+
+/// A document entry with its metadata decrypted.
+#[derive(Debug)]
+pub struct DecryptedDocumentEntry {
+    pub uri: String,
+    pub created_at: String,
+    pub encryption: Encryption,
+    pub metadata: DocumentMetadata,
 }
 
 /// Fetch all document records, paginating through the full collection.
@@ -32,10 +36,6 @@ pub async fn list_documents(
     list_collection(client, DOCUMENT_COLLECTION, |uri, doc: Document| {
         DocumentEntry {
             uri: uri.to_owned(),
-            name: doc.name,
-            size: doc.size,
-            mime_type: doc.mime_type,
-            tags: doc.tags,
             created_at: doc.created_at,
             encrypted_metadata: doc.encrypted_metadata,
             encryption: doc.encryption,
@@ -55,7 +55,7 @@ mod tests {
 
     #[tokio::test]
     async fn single_document() {
-        let doc = dummy_document("notes.txt", 1024, vec![]);
+        let doc = dummy_document();
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&[("abc", doc)], None));
 
@@ -63,8 +63,6 @@ mod tests {
         let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "notes.txt");
-        assert_eq!(entries[0].size, Some(1024));
         assert!(entries[0].uri.contains("abc"));
 
         let requests = mock.requests();
@@ -76,15 +74,9 @@ mod tests {
     #[tokio::test]
     async fn multiple_documents() {
         let docs = vec![
-            (
-                "a1",
-                dummy_document("photo.jpg", 2_000_000, vec!["photos".into()]),
-            ),
-            ("a2", dummy_document("resume.pdf", 50_000, vec![])),
-            (
-                "a3",
-                dummy_document("secret.key", 256, vec!["crypto".into(), "keys".into()]),
-            ),
+            ("a1", dummy_document()),
+            ("a2", dummy_document()),
+            ("a3", dummy_document()),
         ];
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(&docs, None));
@@ -93,30 +85,21 @@ mod tests {
         let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].name, "photo.jpg");
-        assert_eq!(entries[1].name, "resume.pdf");
-        assert_eq!(entries[2].name, "secret.key");
-        assert_eq!(entries[2].tags, vec!["crypto", "keys"]);
     }
 
     #[tokio::test]
     async fn paginates_through_multiple_pages() {
         let mock = MockTransport::new();
         mock.enqueue(list_records_response(
-            &[("a1", dummy_document("file1.txt", 100, vec![]))],
+            &[("a1", dummy_document())],
             Some("cursor-abc"),
         ));
-        mock.enqueue(list_records_response(
-            &[("a2", dummy_document("file2.txt", 200, vec![]))],
-            None,
-        ));
+        mock.enqueue(list_records_response(&[("a2", dummy_document())], None));
 
         let mut client = mock_client(mock.clone());
         let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "file1.txt");
-        assert_eq!(entries[1].name, "file2.txt");
 
         let requests = mock.requests();
         assert_eq!(requests.len(), 2);
@@ -145,7 +128,7 @@ mod tests {
                 {
                     "uri": "at://did:plc:test/app.opake.document/good1",
                     "cid": "bafygood",
-                    "value": dummy_document("good.txt", 42, vec![]),
+                    "value": dummy_document(),
                 },
             ]
         });
@@ -161,12 +144,11 @@ mod tests {
         let entries = list_documents(&mut client).await.unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "good.txt");
     }
 
     #[tokio::test]
     async fn skips_future_schema_version() {
-        let mut doc = dummy_document("future.txt", 100, vec![]);
+        let mut doc = dummy_document();
         doc.opake_version = records::SCHEMA_VERSION + 1;
 
         let mock = MockTransport::new();

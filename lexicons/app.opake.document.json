@@ -4,31 +4,16 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "An encrypted file or document stored in the personal cloud. The actual content is an encrypted blob; this record holds the metadata, encryption envelope, and optional plaintext metadata for discoverability.",
+      "description": "An encrypted file or document stored in the personal cloud. The actual content is an encrypted blob; this record holds the encryption envelope and encrypted metadata. All document metadata (name, MIME type, size, tags, description) is encrypted inside encryptedMetadata using the same content key as the blob.",
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "name", "blob", "encryption", "encryptedMetadata", "createdAt"],
+        "required": ["opakeVersion", "blob", "encryption", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
             "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "description": "Human-readable filename or title. Plaintext — intentionally unencrypted for indexing/search by your own AppView.",
-            "maxLength": 512
-          },
-          "mimeType": {
-            "type": "string",
-            "description": "Original MIME type of the unencrypted content (e.g. 'application/pdf', 'image/png'). Plaintext metadata.",
-            "maxLength": 128
-          },
-          "size": {
-            "type": "integer",
-            "description": "Size of the original unencrypted content in bytes.",
-            "minimum": 0
           },
           "blob": {
             "type": "blob",
@@ -43,17 +28,6 @@
               "#directEncryption",
               "#keyringEncryption"
             ]
-          },
-          "tags": {
-            "type": "array",
-            "description": "Optional plaintext tags for categorization and search. Keep these non-sensitive — they're public.",
-            "items": { "type": "string", "maxLength": 128 },
-            "maxLength": 32
-          },
-          "description": {
-            "type": "string",
-            "description": "Optional plaintext description or summary.",
-            "maxLength": 1024
           },
           "encryptedMetadata": {
             "type": "ref",

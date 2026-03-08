@@ -5,6 +5,7 @@ use opake_core::client::Session;
 use opake_core::directories::{check_cycle, move_entry, DirectoryTree, EntryKind};
 
 use crate::commands::Execute;
+use crate::document_resolve;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
@@ -27,8 +28,16 @@ impl Execute for MoveCommand {
 
         let mut tree = DirectoryTree::load(&mut client).await?;
         tree.decrypt_names(&ctx.did, &private_key);
-        let source = tree.resolve(&mut client, &self.source).await?;
-        let dest = tree.resolve(&mut client, &self.destination).await?;
+
+        let mut resolver = document_resolve::CliDocumentNameResolver::new(
+            &mut client,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        );
+
+        let source = tree.resolve(&mut resolver, &self.source).await?;
+        let dest = tree.resolve(&mut resolver, &self.destination).await?;
 
         if dest.kind != EntryKind::Directory {
             anyhow::bail!("{:?} is not a directory", self.destination);

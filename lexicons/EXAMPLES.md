@@ -60,9 +60,6 @@ This directory contains two documents and a subdirectory. Non-root directories u
 {
   "$type": "app.opake.document",
   "opakeVersion": 1,
-  "name": "tax-return-2025.pdf",
-  "mimeType": "application/pdf",
-  "size": 284619,
   "blob": {
     "$type": "blob",
     "ref": { "$link": "bafkrei..." },
@@ -83,15 +80,19 @@ This directory contains two documents and a subdirectory. Non-root directories u
       ]
     }
   },
-  "tags": ["tax", "finance", "2025"],
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "visibility": "private",
   "createdAt": "2026-02-27T10:30:00.000Z"
 }
 ```
 
-**What the PDS sees:** a record with some plaintext metadata (name, tags, timestamps)
-and an opaque blob. The `keys` array only contains Alice's wrapped key — only she
-can decrypt.
+**What the PDS sees:** a record with an opaque blob and opaque encrypted metadata.
+The real filename ("tax-return-2025.pdf"), MIME type, size, and tags are all inside
+`encryptedMetadata`, encrypted with the same content key as the blob. The `keys`
+array only contains Alice's wrapped key — only she can decrypt.
 
 
 ## 4. Alice shares the document with Bob via a grant
@@ -164,9 +165,6 @@ the document with a fresh content key.
 {
   "$type": "app.opake.document",
   "opakeVersion": 1,
-  "name": "beach-sunset.jpg",
-  "mimeType": "image/jpeg",
-  "size": 3841029,
   "blob": {
     "$type": "blob",
     "ref": { "$link": "bafkrei..." },
@@ -183,7 +181,10 @@ the document with a fresh content key.
     "algo": "aes-256-gcm",
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "tags": ["family", "vacation", "beach"],
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "visibility": "shared",
   "createdAt": "2026-02-20T16:45:00.000Z"
 }
@@ -257,16 +258,11 @@ Both records are deleted after successful transfer. The ephemeral keypair is nev
 
 ## Design Decisions & Notes
 
-### Why plaintext metadata?
-The `name`, `tags`, `mimeType`, and `description` fields are intentionally unencrypted.
-This allows your personal AppView to index and search your files server-side without
-needing access to the content encryption keys. It's a conscious tradeoff: someone
-inspecting your repo can see *that* you have a file called "tax-return-2025.pdf" tagged
-with "finance", but they can't read the actual PDF.
-
-If you want fully opaque storage, you can encrypt the name/tags too and handle
-search purely client-side. The schema supports this — just put garbage/generic
-strings in the plaintext fields and store the real metadata inside the encrypted blob.
+### Why encrypted metadata?
+All document metadata — name, MIME type, size, tags, description — is encrypted
+inside `encryptedMetadata` using the same content key as the blob. The PDS never
+sees real filenames or tags. This means server-side search and indexing require
+client-side decryption, but no metadata is ever leaked to the storage layer.
 
 ### Why separate grant records?
 Instead of adding recipients directly to the document record (like adding to the

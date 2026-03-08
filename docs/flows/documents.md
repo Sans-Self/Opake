@@ -11,7 +11,7 @@ sequenceDiagram
     participant Crypto
     participant PDS
 
-    User->>CLI: opake upload photo.jpg --tags vacation
+    User->>CLI: opake upload photo.jpg
 
     CLI->>CLI: Read file from disk, detect MIME type
     CLI->>Crypto: generate_content_key()
@@ -25,6 +25,9 @@ sequenceDiagram
 
     CLI->>Crypto: wrap_key(K, owner_pubkey, owner_did)
     Crypto-->>CLI: wrappedKey (x25519-hkdf-a256kw)
+
+    CLI->>Crypto: encrypt_metadata(K, {name, mimeType, size, tags, ...})
+    Crypto-->>CLI: encryptedMetadata { ciphertext, nonce }
 
     CLI->>PDS: com.atproto.repo.createRecord (document)
     PDS-->>CLI: { uri, cid }
@@ -121,7 +124,11 @@ sequenceDiagram
         PDS-->>CLI: { records: [...], cursor? }
     end
 
-    CLI->>CLI: Parse documents, filter by tag
+    CLI->>CLI: For each document, unwrap content key
+    CLI->>Crypto: decrypt_metadata(K, encryptedMetadata)
+    Crypto-->>CLI: { name, mimeType, size, tags, description }
+
+    CLI->>CLI: Filter by tag, format output
     CLI->>User: Display table (name, size, tags, URI)
 ```
 

@@ -214,32 +214,27 @@ mod tests {
         let encrypted_metadata =
             crypto::encrypt_metadata(content_key, &metadata, &mut OsRng).unwrap();
 
-        Document {
-            mime_type: Some("text/plain".into()),
-            size: Some(42),
-            ..Document::new(
-                "encrypted".into(),
-                BlobRef {
-                    blob_type: "blob".into(),
-                    reference: CidLink {
-                        cid: "bafyblob".into(),
-                    },
-                    mime_type: "application/octet-stream".into(),
-                    size: ciphertext_len as u64,
+        Document::new(
+            BlobRef {
+                blob_type: "blob".into(),
+                reference: CidLink {
+                    cid: "bafyblob".into(),
                 },
-                Encryption::Direct(DirectEncryption {
-                    envelope: EncryptionEnvelope {
-                        algo: "aes-256-gcm".into(),
-                        nonce: AtBytes {
-                            encoded: BASE64.encode(nonce),
-                        },
-                        keys: vec![owner_wrapped],
+                mime_type: "application/octet-stream".into(),
+                size: ciphertext_len as u64,
+            },
+            Encryption::Direct(DirectEncryption {
+                envelope: EncryptionEnvelope {
+                    algo: "aes-256-gcm".into(),
+                    nonce: AtBytes {
+                        encoded: BASE64.encode(nonce),
                     },
-                }),
-                encrypted_metadata,
-                "2026-03-01T00:00:00Z".into(),
-            )
-        }
+                    keys: vec![owner_wrapped],
+                },
+            }),
+            encrypted_metadata,
+            "2026-03-01T00:00:00Z".into(),
+        )
     }
 
     #[tokio::test]

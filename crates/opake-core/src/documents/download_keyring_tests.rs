@@ -104,36 +104,31 @@ fn keyring_document_at_rotation(fixture: &KeyringFixture, rotation: u64) -> Docu
     let encrypted_metadata =
         crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
 
-    Document {
-        mime_type: Some("text/plain".into()),
-        size: Some(42),
-        ..Document::new(
-            "encrypted".into(),
-            BlobRef {
-                blob_type: "blob".into(),
-                reference: CidLink {
-                    cid: "bafyblob".into(),
-                },
-                mime_type: "application/octet-stream".into(),
-                size: fixture.ciphertext.len() as u64,
+    Document::new(
+        BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink {
+                cid: "bafyblob".into(),
             },
-            Encryption::Keyring(KeyringEncryption {
-                keyring_ref: KeyringRef {
-                    keyring: KR_URI.into(),
-                    wrapped_content_key: AtBytes {
-                        encoded: BASE64.encode(&fixture.wrapped_content_key_bytes),
-                    },
-                    rotation,
+            mime_type: "application/octet-stream".into(),
+            size: fixture.ciphertext.len() as u64,
+        },
+        Encryption::Keyring(KeyringEncryption {
+            keyring_ref: KeyringRef {
+                keyring: KR_URI.into(),
+                wrapped_content_key: AtBytes {
+                    encoded: BASE64.encode(&fixture.wrapped_content_key_bytes),
                 },
-                algo: "aes-256-gcm".into(),
-                nonce: AtBytes {
-                    encoded: BASE64.encode(fixture.nonce),
-                },
-            }),
-            encrypted_metadata,
-            "2026-03-01T00:00:00Z".into(),
-        )
-    }
+                rotation,
+            },
+            algo: "aes-256-gcm".into(),
+            nonce: AtBytes {
+                encoded: BASE64.encode(fixture.nonce),
+            },
+        }),
+        encrypted_metadata,
+        "2026-03-01T00:00:00Z".into(),
+    )
 }
 
 fn keyring_document(fixture: &KeyringFixture) -> Document {
@@ -231,32 +226,27 @@ async fn rejects_direct_encrypted_document() {
     };
     let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng).unwrap();
 
-    let doc = Document {
-        mime_type: Some("text/plain".into()),
-        size: Some(4),
-        ..Document::new(
-            "encrypted".into(),
-            BlobRef {
-                blob_type: "blob".into(),
-                reference: CidLink {
-                    cid: "bafyblob".into(),
-                },
-                mime_type: "application/octet-stream".into(),
-                size: payload.ciphertext.len() as u64,
+    let doc = Document::new(
+        BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink {
+                cid: "bafyblob".into(),
             },
-            Encryption::Direct(records::DirectEncryption {
-                envelope: records::EncryptionEnvelope {
-                    algo: "aes-256-gcm".into(),
-                    nonce: AtBytes {
-                        encoded: BASE64.encode(payload.nonce),
-                    },
-                    keys: vec![wrapped],
+            mime_type: "application/octet-stream".into(),
+            size: payload.ciphertext.len() as u64,
+        },
+        Encryption::Direct(records::DirectEncryption {
+            envelope: records::EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: BASE64.encode(payload.nonce),
                 },
-            }),
-            encrypted_metadata,
-            "2026-03-01T00:00:00Z".into(),
-        )
-    };
+                keys: vec![wrapped],
+            },
+        }),
+        encrypted_metadata,
+        "2026-03-01T00:00:00Z".into(),
+    );
 
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::client::HttpResponse;
 use crate::test_utils::MockTransport;
@@ -6,6 +8,30 @@ use super::super::tests::{
     dummy_directory_with_entries, get_record_response, list_records_response, mock_client,
     put_record_response, test_keypair, TEST_DID,
 };
+
+use super::super::tree::DocumentNameResolver;
+
+/// Test resolver that returns names from a pre-built map.
+struct MockNameResolver {
+    names: HashMap<String, String>,
+}
+
+impl MockNameResolver {
+    fn new(pairs: &[(&str, &str)]) -> Self {
+        Self {
+            names: pairs
+                .iter()
+                .map(|(uri, name)| (uri.to_string(), name.to_string()))
+                .collect(),
+        }
+    }
+}
+
+impl DocumentNameResolver for MockNameResolver {
+    async fn resolve_name(&mut self, uri: &str) -> Result<Option<String>, crate::error::Error> {
+        Ok(self.names.get(uri).cloned())
+    }
+}
 
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
@@ -19,21 +45,6 @@ fn delete_ok() -> HttpResponse {
         status: 200,
         headers: vec![],
         body: b"{}".to_vec(),
-    }
-}
-
-fn doc_record_response(uri: &str, name: &str) -> HttpResponse {
-    use crate::documents::tests::dummy_document;
-    let doc = dummy_document(name, 100, vec![]);
-    HttpResponse {
-        status: 200,
-        headers: vec![],
-        body: serde_json::to_vec(&serde_json::json!({
-            "uri": uri,
-            "cid": "bafydocument",
-            "value": doc,
-        }))
-        .unwrap(),
     }
 }
 
@@ -104,9 +115,12 @@ async fn remove_document_with_parent() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
-    // resolve "Photos/beach.jpg": getRecord for beach.jpg
-    mock.enqueue(doc_record_response(DOC_BEACH_URI, "beach.jpg"));
-    let resolved = tree.resolve(&mut client, "Photos/beach.jpg").await.unwrap();
+    let mut resolver =
+        MockNameResolver::new(&[(DOC_BEACH_URI, "beach.jpg"), (DOC_NOTES_URI, "notes.txt")]);
+    let resolved = tree
+        .resolve(&mut resolver, "Photos/beach.jpg")
+        .await
+        .unwrap();
 
     // delete_record for the document
     mock.enqueue(delete_ok());
@@ -172,7 +186,8 @@ async fn remove_empty_directory() {
     let (_, private_key) = test_keypair();
     tree.decrypt_names(TEST_DID, &private_key);
 
-    let resolved = tree.resolve(&mut client, "Empty").await.unwrap();
+    let mut resolver = MockNameResolver::new(&[]);
+    let resolved = tree.resolve(&mut resolver, "Empty").await.unwrap();
 
     // delete_record for the directory
     mock.enqueue(delete_ok());
@@ -195,10 +210,8 @@ async fn remove_nonempty_without_recursive_errors() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
-    // resolve "Photos": directory, found in memory. But find_child_any
-    // also scans document children for ambiguity.
-    mock.enqueue(doc_record_response(DOC_NOTES_URI, "notes.txt"));
-    let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
+    let mut resolver = MockNameResolver::new(&[(DOC_NOTES_URI, "notes.txt")]);
+    let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
 
     let err = remove(&mut client, &tree, &resolved, false, "2026-03-01T12:00:00Z")
         .await
@@ -216,9 +229,8 @@ async fn remove_recursive_flat() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
-    // resolve "Photos"
-    mock.enqueue(doc_record_response(DOC_NOTES_URI, "notes.txt"));
-    let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
+    let mut resolver = MockNameResolver::new(&[(DOC_NOTES_URI, "notes.txt")]);
+    let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
 
     // delete beach.jpg (descendant document)
     mock.enqueue(delete_ok());
@@ -242,9 +254,8 @@ async fn remove_recursive_nested() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_nested(&mock).await;
 
-    // resolve "Photos": directory, found in memory.
-    // find_child_any scans root's document children — but root has none.
-    let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
+    let mut resolver = MockNameResolver::new(&[]);
+    let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
 
     // Post-order: sunset.jpg, Vacation, beach.jpg, then Photos itself
     mock.enqueue(delete_ok()); // sunset.jpg
@@ -271,7 +282,8 @@ async fn remove_root_without_recursive_rejected() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
-    let resolved = tree.resolve_at_uri(&mut client, ROOT_URI).await.unwrap();
+    let mut resolver = MockNameResolver::new(&[]);
+    let resolved = tree.resolve(&mut resolver, ROOT_URI).await.unwrap();
 
     let err = remove(&mut client, &tree, &resolved, false, "2026-03-01T12:00:00Z")
         .await
@@ -286,7 +298,8 @@ async fn remove_root_recursive_deletes_everything() {
     let mock = MockTransport::new();
     let (mut client, tree) = setup_simple(&mock).await;
 
-    let resolved = tree.resolve_at_uri(&mut client, ROOT_URI).await.unwrap();
+    let mut resolver = MockNameResolver::new(&[]);
+    let resolved = tree.resolve(&mut resolver, ROOT_URI).await.unwrap();
 
     // Post-order: beach.jpg (doc), Photos (dir), notes.txt (doc), then root itself
     mock.enqueue(delete_ok()); // beach.jpg

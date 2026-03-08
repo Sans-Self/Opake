@@ -3,11 +3,13 @@ use chrono::Utc;
 use clap::Args;
 use opake_core::client::Session;
 use opake_core::crypto::OsRng;
+use opake_core::directories::DirectoryTree;
 use opake_core::documents;
 use opake_core::resolve;
 use opake_core::sharing::{self, GrantParams};
 
 use crate::commands::Execute;
+use crate::document_resolve;
 use crate::identity;
 use crate::session::{self, CommandContext};
 use opake_core::client::ReqwestTransport;
@@ -33,7 +35,16 @@ impl Execute for ShareCommand {
             identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
         let private_key = id.private_key_bytes()?;
 
-        let uri = documents::resolve_uri(&mut client, &self.document).await?;
+        let mut tree = DirectoryTree::load(&mut client).await?;
+        tree.decrypt_names(&ctx.did, &private_key);
+        let mut resolver = document_resolve::CliDocumentNameResolver::new(
+            &mut client,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        );
+        let resolved = tree.resolve(&mut resolver, &self.document).await?;
+        let uri = resolved.uri;
 
         let content_key =
             documents::fetch_content_key(&mut client, &id.did, &private_key, &uri).await?;

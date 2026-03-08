@@ -265,10 +265,9 @@ erDiagram
     PUBLICKEY ||--|| ACCOUNT : "one per"
 
     DOCUMENT {
-        string name
         blob encrypted_content
         union encryption "direct or keyring"
-        string[] tags
+        ref encryptedMetadata "name, type, size, tags, description"
         string visibility
     }
 
@@ -292,11 +291,9 @@ erDiagram
     }
 ```
 
-### Plaintext Metadata Tradeoff
+### Encrypted Metadata
 
-File names, tags, MIME types, and descriptions are stored unencrypted in the document record. This allows a personal AppView to index and search files server-side without access to encryption keys.
-
-For full opacity, set these fields to generic values and embed real metadata inside the encrypted blob. The schema supports both approaches.
+All document metadata (name, MIME type, size, tags, description) is encrypted inside `encryptedMetadata` using the same content key as the blob. The PDS never sees real filenames or tags. This means server-side search/indexing requires client-side decryption — a deliberate tradeoff for privacy.
 
 ## Cross-PDS Access
 

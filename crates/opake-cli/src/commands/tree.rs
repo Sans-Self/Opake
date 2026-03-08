@@ -26,13 +26,11 @@ impl Execute for TreeCommand {
 
         tree.decrypt_names(&ctx.did, &private_key);
 
-        let documents: HashMap<String, String> = entries
-            .iter()
-            .map(|e| {
-                let name =
-                    document_resolve::decrypt_entry_name(e, &ctx.did, &private_key, &ctx.storage);
-                (e.uri.clone(), name)
-            })
+        let decrypted =
+            document_resolve::decrypt_entries(&entries, &ctx.did, &private_key, &ctx.storage);
+        let documents: HashMap<String, String> = decrypted
+            .into_iter()
+            .map(|d| (d.uri, d.metadata.name))
             .collect();
 
         println!("{}", tree.render(&documents));

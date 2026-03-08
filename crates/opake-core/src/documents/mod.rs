@@ -10,18 +10,15 @@ mod download;
 mod download_grant;
 mod download_keyring;
 mod list;
-mod resolve;
 mod upload;
 
 pub use delete::delete_document;
 pub use download::{download, download_with_group_key, fetch_content_key};
 pub use download_grant::download_from_grant;
 pub use download_keyring::{download_from_keyring_member, KeyringDownloadResult};
-pub use list::{list_documents, DocumentEntry};
-pub use resolve::resolve_uri;
+pub use list::{list_documents, DecryptedDocumentEntry, DocumentEntry};
 pub use upload::{
     encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
-    OPAQUE_PLACEHOLDER_NAME,
 };
 
 pub const DOCUMENT_COLLECTION: &str = "app.opake.document";
@@ -61,21 +58,17 @@ pub(crate) mod tests {
         }
     }
 
-    pub fn dummy_document(name: &str, size: u64, tags: Vec<String>) -> Document {
+    pub fn dummy_document() -> Document {
         Document {
-            mime_type: Some("text/plain".into()),
-            size: Some(size),
-            tags,
             visibility: Some("private".into()),
             ..Document::new(
-                name.into(),
                 BlobRef {
                     blob_type: "blob".into(),
                     reference: CidLink {
                         cid: "bafytest".into(),
                     },
                     mime_type: "application/octet-stream".into(),
-                    size,
+                    size: 1024,
                 },
                 Encryption::Direct(DirectEncryption {
                     envelope: EncryptionEnvelope {

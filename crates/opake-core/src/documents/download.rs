@@ -221,11 +221,8 @@ mod tests {
             crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
 
         Document {
-            mime_type: Some("text/plain".into()),
-            size: Some(42),
             visibility: Some("private".into()),
             ..Document::new(
-                "encrypted".into(),
                 BlobRef {
                     blob_type: "blob".into(),
                     reference: CidLink {

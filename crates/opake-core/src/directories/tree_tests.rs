@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::client::HttpResponse;
 use crate::test_utils::MockTransport;
@@ -13,26 +15,29 @@ const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
 const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.document/notes";
 const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.document/sunset";
 
-/// getRecord response for a document — minimal but parseable.
-fn doc_record_response(uri: &str, name: &str) -> HttpResponse {
-    use crate::documents::tests::dummy_document;
-    let doc = dummy_document(name, 100, vec![]);
-    HttpResponse {
-        status: 200,
-        headers: vec![],
-        body: serde_json::to_vec(&serde_json::json!({
-            "uri": uri,
-            "cid": "bafydocument",
-            "value": doc,
-        }))
-        .unwrap(),
+/// Test resolver that returns names from a pre-built map.
+struct MockNameResolver {
+    names: HashMap<String, String>,
+}
+
+impl MockNameResolver {
+    fn new(pairs: &[(&str, &str)]) -> Self {
+        Self {
+            names: pairs
+                .iter()
+                .map(|(uri, name)| (uri.to_string(), name.to_string()))
+                .collect(),
+        }
+    }
+}
+
+impl DocumentNameResolver for MockNameResolver {
+    async fn resolve_name(&mut self, uri: &str) -> Result<Option<String>, crate::error::Error> {
+        Ok(self.names.get(uri).cloned())
     }
 }
 
 /// Load a simple tree: / → [Photos → [beach.jpg], notes.txt]
-///
-/// Only enqueues the directory listing. Document getRecord calls are
-/// enqueued by individual tests as needed for resolve.
 async fn load_simple_tree(mock: &MockTransport) -> DirectoryTree {
     mock.enqueue(list_records_response(
         &[
@@ -133,9 +138,9 @@ async fn load_detects_root_from_listing() {
 async fn resolve_at_uri_directory() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[]);
 
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, DIR_PHOTOS_URI).await.unwrap();
+    let resolved = tree.resolve(&mut resolver, DIR_PHOTOS_URI).await.unwrap();
     assert_eq!(resolved.kind, EntryKind::Directory);
     assert_eq!(resolved.name, "Photos");
     assert_eq!(resolved.parent_uri.as_deref(), Some(ROOT_URI));
@@ -145,33 +150,24 @@ async fn resolve_at_uri_directory() {
 async fn resolve_at_uri_document() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[]);
 
-    // getRecord for the document to fetch its name
-    mock.enqueue(doc_record_response(DOC_BEACH_URI, "beach.jpg"));
-
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, DOC_BEACH_URI).await.unwrap();
+    // AT-URI resolution uses rkey as name — no resolver call.
+    let resolved = tree.resolve(&mut resolver, DOC_BEACH_URI).await.unwrap();
     assert_eq!(resolved.uri, DOC_BEACH_URI);
     assert_eq!(resolved.kind, EntryKind::Document);
-    assert_eq!(resolved.name, "beach.jpg");
+    assert_eq!(resolved.name, "beach");
     assert_eq!(resolved.parent_uri.as_deref(), Some(DIR_PHOTOS_URI));
 }
 
 #[tokio::test]
-async fn resolve_at_uri_not_found() {
+async fn resolve_at_uri_unknown_collection() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[]);
 
-    // getRecord 404 for unknown document
-    mock.enqueue(HttpResponse {
-        status: 404,
-        headers: vec![],
-        body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
-    });
-
-    let mut client = mock_client(mock);
     let err = tree
-        .resolve(&mut client, "at://did:plc:test/app.opake.document/nope")
+        .resolve(&mut resolver, "at://did:plc:test/app.opake.grant/nope")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -183,12 +179,12 @@ async fn resolve_at_uri_not_found() {
 async fn resolve_path_document_in_subdirectory() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_BEACH_URI, "beach.jpg")]);
 
-    // getRecord for beach.jpg (document child of Photos)
-    mock.enqueue(doc_record_response(DOC_BEACH_URI, "beach.jpg"));
-
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, "Photos/beach.jpg").await.unwrap();
+    let resolved = tree
+        .resolve(&mut resolver, "Photos/beach.jpg")
+        .await
+        .unwrap();
     assert_eq!(resolved.uri, DOC_BEACH_URI);
     assert_eq!(resolved.kind, EntryKind::Document);
     assert_eq!(resolved.parent_uri.as_deref(), Some(DIR_PHOTOS_URI));
@@ -198,13 +194,10 @@ async fn resolve_path_document_in_subdirectory() {
 async fn resolve_path_nested() {
     let mock = MockTransport::new();
     let tree = load_nested_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_SUNSET_URI, "sunset.jpg")]);
 
-    // getRecord for sunset.jpg (document child of Vacation)
-    mock.enqueue(doc_record_response(DOC_SUNSET_URI, "sunset.jpg"));
-
-    let mut client = mock_client(mock);
     let resolved = tree
-        .resolve(&mut client, "Photos/Vacation/sunset.jpg")
+        .resolve(&mut resolver, "Photos/Vacation/sunset.jpg")
         .await
         .unwrap();
     assert_eq!(resolved.uri, DOC_SUNSET_URI);
@@ -215,13 +208,12 @@ async fn resolve_path_nested() {
 async fn resolve_path_directory_target() {
     let mock = MockTransport::new();
     let tree = load_nested_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_BEACH_URI, "beach.jpg")]);
 
-    // Vacation found in memory, but find_child_any still scans document
-    // children of Photos for ambiguity.
-    mock.enqueue(doc_record_response(DOC_BEACH_URI, "beach.jpg"));
-
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, "Photos/Vacation").await.unwrap();
+    let resolved = tree
+        .resolve(&mut resolver, "Photos/Vacation")
+        .await
+        .unwrap();
     assert_eq!(resolved.uri, DIR_VACATION_URI);
     assert_eq!(resolved.kind, EntryKind::Directory);
 }
@@ -230,13 +222,10 @@ async fn resolve_path_directory_target() {
 async fn resolve_path_not_found_segment() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_BEACH_URI, "beach.jpg")]);
 
-    // getRecord for the one document child of Photos — no match
-    mock.enqueue(doc_record_response(DOC_BEACH_URI, "beach.jpg"));
-
-    let mut client = mock_client(mock);
     let err = tree
-        .resolve(&mut client, "Photos/missing.txt")
+        .resolve(&mut resolver, "Photos/missing.txt")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -246,10 +235,10 @@ async fn resolve_path_not_found_segment() {
 async fn resolve_path_missing_intermediate_directory() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[]);
 
-    let mut client = mock_client(mock);
     let err = tree
-        .resolve(&mut client, "Nope/beach.jpg")
+        .resolve(&mut resolver, "Nope/beach.jpg")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -260,12 +249,12 @@ async fn resolve_path_no_root_errors() {
     let mock = MockTransport::new();
     mock.enqueue(list_records_response(&[], None));
 
-    let mut client = mock_client(mock.clone());
-    let tree = DirectoryTree::load(&mut client).await.unwrap();
-
     let mut client = mock_client(mock);
+    let tree = DirectoryTree::load(&mut client).await.unwrap();
+    let mut resolver = MockNameResolver::new(&[]);
+
     let err = tree
-        .resolve(&mut client, "Photos/beach.jpg")
+        .resolve(&mut resolver, "Photos/beach.jpg")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -277,13 +266,9 @@ async fn resolve_path_no_root_errors() {
 async fn resolve_bare_name_document() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_NOTES_URI, "notes.txt")]);
 
-    // Root has 2 entries: DIR_PHOTOS_URI (directory, checked in memory)
-    // and DOC_NOTES_URI (document, needs getRecord).
-    mock.enqueue(doc_record_response(DOC_NOTES_URI, "notes.txt"));
-
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, "notes.txt").await.unwrap();
+    let resolved = tree.resolve(&mut resolver, "notes.txt").await.unwrap();
     assert_eq!(resolved.uri, DOC_NOTES_URI);
     assert_eq!(resolved.kind, EntryKind::Document);
 }
@@ -292,14 +277,9 @@ async fn resolve_bare_name_document() {
 async fn resolve_bare_name_directory() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_NOTES_URI, "notes.txt")]);
 
-    // Photos is a directory — found in memory, no document getRecords needed
-    // because directory match is found first.
-    // But find_child_any still scans document children for ambiguity.
-    mock.enqueue(doc_record_response(DOC_NOTES_URI, "notes.txt"));
-
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
+    let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
     assert_eq!(resolved.uri, DIR_PHOTOS_URI);
     assert_eq!(resolved.kind, EntryKind::Directory);
 }
@@ -308,33 +288,32 @@ async fn resolve_bare_name_directory() {
 async fn resolve_bare_name_not_found() {
     let mock = MockTransport::new();
     let tree = load_simple_tree(&mock).await;
+    let mut resolver = MockNameResolver::new(&[(DOC_NOTES_URI, "notes.txt")]);
 
-    // Scans root's document children (notes.txt) — no match.
-    mock.enqueue(doc_record_response(DOC_NOTES_URI, "notes.txt"));
-
-    let mut client = mock_client(mock);
-    let err = tree.resolve(&mut client, "missing.txt").await.unwrap_err();
+    let err = tree
+        .resolve(&mut resolver, "missing.txt")
+        .await
+        .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
 }
 
 #[tokio::test]
 async fn resolve_bare_name_no_root_searches_directories() {
     let mock = MockTransport::new();
-    // No root, but a directory named "Photos" exists.
     mock.enqueue(list_records_response(
         &[("photos", dummy_directory_with_entries("Photos", vec![]))],
         None,
     ));
 
-    let mut client = mock_client(mock.clone());
+    let mut client = mock_client(mock);
     let mut tree = DirectoryTree::load(&mut client).await.unwrap();
     assert!(tree.root_uri.is_none());
 
     let (_, private_key) = test_keypair();
     tree.decrypt_names(TEST_DID, &private_key);
+    let mut resolver = MockNameResolver::new(&[]);
 
-    let mut client = mock_client(mock);
-    let resolved = tree.resolve(&mut client, "Photos").await.unwrap();
+    let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
     assert_eq!(resolved.uri, "at://did:plc:test/app.opake.directory/photos");
     assert_eq!(resolved.kind, EntryKind::Directory);
 }

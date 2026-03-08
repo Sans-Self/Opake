@@ -14,12 +14,6 @@ use super::DOCUMENT_COLLECTION;
 /// Maximum blob size accepted by a standard PDS (50 MB).
 const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
 
-/// Plaintext name written to the record when metadata is encrypted.
-pub const OPAQUE_PLACEHOLDER_NAME: &str = "encrypted";
-
-/// Plaintext MIME type written to the record when metadata is encrypted.
-pub const OPAQUE_PLACEHOLDER_MIME: &str = "application/octet-stream";
-
 /// Build a `DocumentMetadata` from upload parameters and encrypt it.
 fn build_encrypted_metadata(
     content_key: &crypto::ContentKey,
@@ -102,10 +96,8 @@ pub async fn encrypt_and_upload(
     )?;
 
     let document = Document {
-        mime_type: Some(OPAQUE_PLACEHOLDER_MIME.into()),
         visibility: Some("private".into()),
         ..Document::new(
-            OPAQUE_PLACEHOLDER_NAME.into(),
             blob_ref,
             Encryption::Direct(DirectEncryption {
                 envelope: EncryptionEnvelope {
@@ -184,10 +176,8 @@ pub async fn encrypt_and_upload_keyring(
     )?;
 
     let document = Document {
-        mime_type: Some(OPAQUE_PLACEHOLDER_MIME.into()),
         visibility: Some("private".into()),
         ..Document::new(
-            OPAQUE_PLACEHOLDER_NAME.into(),
             blob_ref,
             Encryption::Keyring(KeyringEncryption {
                 keyring_ref: KeyringRef {
@@ -301,10 +291,10 @@ mod tests {
                 assert_eq!(v["collection"], "app.opake.document");
                 let record = &v["record"];
 
-                // Plaintext fields are dummies
-                assert_eq!(record["name"], OPAQUE_PLACEHOLDER_NAME);
-                assert_eq!(record["mimeType"], OPAQUE_PLACEHOLDER_MIME);
-                assert!(record.get("size").is_none() || record["size"].is_null());
+                // No plaintext metadata fields on the record
+                assert!(record.get("name").is_none());
+                assert!(record.get("mimeType").is_none());
+                assert!(record.get("size").is_none());
                 assert!(record.get("tags").is_none());
                 assert_eq!(record["visibility"], "private");
 

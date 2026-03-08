@@ -13,9 +13,8 @@ use opake_core::keyrings;
 use opake_core::client::Session;
 
 use crate::commands::{encrypt_directory, Execute};
-use crate::identity;
-use crate::keyring_store;
 use crate::session::{self, CommandContext};
+use crate::{document_resolve, identity, keyring_store};
 
 #[derive(Args)]
 /// Upload and encrypt a file
@@ -101,7 +100,13 @@ impl Execute for UploadCommand {
             let private_key = id.private_key_bytes()?;
             let mut tree = DirectoryTree::load(&mut client).await?;
             tree.decrypt_names(&ctx.did, &private_key);
-            let resolved = tree.resolve(&mut client, dir_path).await?;
+            let mut resolver = document_resolve::CliDocumentNameResolver::new(
+                &mut client,
+                &ctx.did,
+                &private_key,
+                &ctx.storage,
+            );
+            let resolved = tree.resolve(&mut resolver, dir_path).await?;
 
             if resolved.kind != EntryKind::Directory {
                 anyhow::bail!("{dir_path:?} is not a directory");

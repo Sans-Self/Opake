@@ -7,6 +7,7 @@ use opake_core::directories::{self, DirectoryTree, EntryKind};
 use opake_core::error::Error;
 
 use crate::commands::{encrypt_directory, Execute};
+use crate::document_resolve;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
@@ -37,8 +38,15 @@ impl Execute for MkdirCommand {
         let mut tree = DirectoryTree::load(&mut client).await?;
         tree.decrypt_names(&ctx.did, &private_key);
 
+        let mut resolver = document_resolve::CliDocumentNameResolver::new(
+            &mut client,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        );
+
         let (parent_uri, parent_label) = if let Some(dir_path) = &self.dir {
-            let resolved = tree.resolve(&mut client, dir_path).await?;
+            let resolved = tree.resolve(&mut resolver, dir_path).await?;
 
             if resolved.kind != EntryKind::Directory {
                 anyhow::bail!("{dir_path:?} is not a directory");
@@ -49,13 +57,12 @@ impl Execute for MkdirCommand {
         };
 
         // Check for existing child directory with the same name.
-        // Only NotFound means the name is free — AmbiguousName or Ok both mean it's taken.
         let full_path = if parent_label == "/" {
             self.name.clone()
         } else {
             format!("{}/{}", parent_label, self.name)
         };
-        match tree.resolve(&mut client, &full_path).await {
+        match tree.resolve(&mut resolver, &full_path).await {
             Err(Error::NotFound(_)) => {}
             Ok(_) | Err(Error::AmbiguousName { .. }) => {
                 anyhow::bail!(

@@ -3,7 +3,6 @@ use chrono::Utc;
 use clap::Args;
 use opake_core::client::Session;
 use opake_core::directories::{self, DirectoryTree, EntryKind, ResolvedPath};
-use opake_core::error::Error as CoreError;
 use opake_core::{atproto, documents};
 
 use crate::commands::Execute;
@@ -26,58 +25,27 @@ pub struct RmCommand {
     yes: bool,
 }
 
-/// Determine whether a reference needs the full directory tree or can use
-/// the lightweight document-only resolver.
+/// Check if a reference is a document AT-URI that can skip tree loading.
 ///
-/// Paths with `/` always need the tree. AT-URIs targeting directories need
-/// the tree. Bare names try document resolution first, falling back to the
-/// tree only when no document matches.
-enum Resolution {
-    /// Resolved cheaply without building the full tree.
-    Fast(ResolvedPath),
-    /// Needs the full directory tree (path resolution, directory target, etc).
-    NeedsTree,
-}
-
-async fn try_fast_resolve(
-    client: &mut opake_core::client::XrpcClient<impl opake_core::client::Transport>,
-    reference: &str,
-    did: &str,
-    private_key: &opake_core::crypto::X25519PrivateKey,
-    storage: &crate::config::FileStorage,
-) -> Result<Resolution, CoreError> {
-    // Paths always need the tree.
-    if reference.contains('/') {
-        return Ok(Resolution::NeedsTree);
+/// Document AT-URIs don't need the tree — no parent cleanup on fast-path
+/// deletion. Everything else (paths, bare names, directory URIs) goes
+/// through the tree with lazy document name resolution.
+fn try_fast_resolve(reference: &str) -> Option<ResolvedPath> {
+    if !reference.starts_with("at://") {
+        return None;
     }
 
-    // AT-URIs targeting directories need the tree for emptiness checks / recursion.
-    if reference.starts_with("at://") {
-        let at_uri = atproto::parse_at_uri(reference)?;
-        if at_uri.collection == directories::DIRECTORY_COLLECTION {
-            return Ok(Resolution::NeedsTree);
-        }
-        // Document AT-URI — no tree needed, no parent cleanup.
-        return Ok(Resolution::Fast(ResolvedPath {
-            uri: reference.to_owned(),
-            kind: EntryKind::Document,
-            name: at_uri.rkey.clone(),
-            parent_uri: None,
-        }));
+    let at_uri = atproto::parse_at_uri(reference).ok()?;
+    if at_uri.collection == directories::DIRECTORY_COLLECTION {
+        return None;
     }
 
-    // Bare name — try document-only resolution with metadata decryption.
-    match document_resolve::resolve_uri(client, reference, did, private_key, storage).await {
-        Ok(uri) => Ok(Resolution::Fast(ResolvedPath {
-            uri,
-            kind: EntryKind::Document,
-            name: reference.to_owned(),
-            parent_uri: None,
-        })),
-        // No document match — might be a directory name. Need the tree.
-        Err(CoreError::NotFound(_)) => Ok(Resolution::NeedsTree),
-        Err(e) => Err(e),
-    }
+    Some(ResolvedPath {
+        uri: reference.to_owned(),
+        kind: EntryKind::Document,
+        name: at_uri.rkey.clone(),
+        parent_uri: None,
+    })
 }
 
 impl Execute for RmCommand {
@@ -88,17 +56,8 @@ impl Execute for RmCommand {
         let id = identity::load_identity(&ctx.storage, &ctx.did)?;
         let private_key = id.private_key_bytes()?;
 
-        let resolution = try_fast_resolve(
-            &mut client,
-            &self.reference,
-            &ctx.did,
-            &private_key,
-            &ctx.storage,
-        )
-        .await?;
-
-        // Fast path: document by bare name or AT-URI, no tree needed.
-        if let Resolution::Fast(resolved) = resolution {
+        // Fast path: document AT-URI — no tree needed, no parent cleanup.
+        if let Some(resolved) = try_fast_resolve(&self.reference) {
             if !self.yes {
                 eprint!("delete {}? [y/N] ", resolved.name);
                 let mut answer = String::new();
@@ -119,7 +78,13 @@ impl Execute for RmCommand {
         // Full tree path: paths, directories, recursive deletion.
         let mut tree = DirectoryTree::load(&mut client).await?;
         tree.decrypt_names(&ctx.did, &private_key);
-        let resolved = tree.resolve(&mut client, &self.reference).await?;
+        let mut resolver = document_resolve::CliDocumentNameResolver::new(
+            &mut client,
+            &ctx.did,
+            &private_key,
+            &ctx.storage,
+        );
+        let resolved = tree.resolve(&mut resolver, &self.reference).await?;
 
         if !self.yes {
             let prompt = match resolved.kind {

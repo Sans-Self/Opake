@@ -3,123 +3,59 @@
 // Provides shared helpers for all CLI commands that need to read
 // document names from encrypted metadata: ls, tree, download, rm, mv.
 
+use std::collections::HashMap;
+
 use log::warn;
+use opake_core::atproto;
 use opake_core::client::{Transport, XrpcClient};
 use opake_core::crypto::{self, X25519PrivateKey};
-use opake_core::documents::{self, DocumentEntry};
+use opake_core::directories::DocumentNameResolver;
+use opake_core::documents::{DecryptedDocumentEntry, DocumentEntry};
 use opake_core::error::Error;
-use opake_core::records::Encryption;
+use opake_core::records::{Document, Encryption};
 
 use crate::config::FileStorage;
 use crate::keyring_store;
 
-/// Resolve a user-provided reference to an AT-URI, decrypting metadata
-/// to match document names.
-///
-/// If `reference` is already an `at://` URI, it's returned as-is.
-/// Otherwise, lists all documents, decrypts their metadata, and matches
-/// by name.
-pub async fn resolve_uri(
-    client: &mut XrpcClient<impl Transport>,
-    reference: &str,
+/// Decrypt all document entries, skipping any that fail decryption.
+pub fn decrypt_entries(
+    entries: &[DocumentEntry],
     did: &str,
     private_key: &X25519PrivateKey,
     storage: &FileStorage,
-) -> Result<String, Error> {
-    if reference.starts_with("at://") {
-        return Ok(reference.to_string());
-    }
-
-    let entries = documents::list_documents(client).await?;
-    let matches: Vec<(&DocumentEntry, String)> = entries
+) -> Vec<DecryptedDocumentEntry> {
+    entries
         .iter()
-        .filter_map(|e| {
-            let name = decrypt_entry_name(e, did, private_key, storage);
-            if name == reference {
-                Some((e, name))
-            } else {
+        .filter_map(|e| match decrypt_entry(e, did, private_key, storage) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                warn!("{e}");
                 None
             }
         })
-        .collect();
-
-    match matches.len() {
-        0 => Err(Error::NotFound(format!(
-            "no document named {:?} — use `opake ls` to see your documents",
-            reference
-        ))),
-        1 => Ok(matches[0].0.uri.clone()),
-        n => {
-            let uris: Vec<String> = matches.iter().map(|(e, _)| e.uri.clone()).collect();
-            Err(Error::AmbiguousName {
-                name: reference.to_string(),
-                count: n,
-                uris,
-            })
-        }
-    }
+        .collect()
 }
 
-/// Decrypt the name from a document entry's encrypted metadata.
-/// Falls back to the plaintext name field for old records or on failure.
-pub fn decrypt_entry_name(
+/// Decrypt a single document entry into a `DecryptedDocumentEntry`.
+pub fn decrypt_entry(
     entry: &DocumentEntry,
     did: &str,
     private_key: &X25519PrivateKey,
     storage: &FileStorage,
-) -> String {
-    let content_key = match unwrap_entry_content_key(entry, did, private_key, storage) {
-        Ok(key) => key,
-        Err(e) => {
-            warn!("could not unwrap key for {}: {e}", entry.uri);
-            return entry.name.clone();
-        }
-    };
+) -> anyhow::Result<DecryptedDocumentEntry> {
+    let content_key = unwrap_entry_content_key(entry, did, private_key, storage)?;
 
-    match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
+    let metadata = crypto::decrypt_metadata::<crypto::DocumentMetadata>(
         &content_key,
         &entry.encrypted_metadata,
-    ) {
-        Ok(metadata) => metadata.name,
-        Err(e) => {
-            warn!("metadata decryption failed for {}: {e}", entry.uri);
-            entry.name.clone()
-        }
-    }
-}
+    )?;
 
-/// Decrypt encrypted metadata on a document entry in place, replacing
-/// the dummy plaintext fields with real values.
-///
-/// Silently falls back to plaintext fields if decryption fails.
-pub fn decrypt_entry_in_place(
-    entry: &mut DocumentEntry,
-    did: &str,
-    private_key: &X25519PrivateKey,
-    storage: &FileStorage,
-) {
-    let content_key = match unwrap_entry_content_key(entry, did, private_key, storage) {
-        Ok(key) => key,
-        Err(e) => {
-            warn!("could not decrypt metadata for {}: {e}", entry.uri);
-            return;
-        }
-    };
-
-    match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
-        &content_key,
-        &entry.encrypted_metadata,
-    ) {
-        Ok(metadata) => {
-            entry.name = metadata.name;
-            entry.mime_type = metadata.mime_type;
-            entry.size = metadata.size;
-            entry.tags = metadata.tags;
-        }
-        Err(e) => {
-            warn!("metadata decryption failed for {}: {e}", entry.uri);
-        }
-    }
+    Ok(DecryptedDocumentEntry {
+        uri: entry.uri.clone(),
+        created_at: entry.created_at.clone(),
+        encryption: entry.encryption.clone(),
+        metadata,
+    })
 }
 
 /// Unwrap the content key from an entry's encryption envelope.
@@ -153,5 +89,93 @@ fn unwrap_entry_content_key(
                 &group_key,
             )?)
         }
+    }
+}
+
+/// Lazy document name resolver for the CLI.
+///
+/// Fetches and decrypts individual document records on demand, caching
+/// results so repeated lookups for the same URI don't hit the PDS.
+pub struct CliDocumentNameResolver<'a, T: Transport> {
+    client: &'a mut XrpcClient<T>,
+    did: &'a str,
+    private_key: &'a X25519PrivateKey,
+    storage: &'a FileStorage,
+    cache: HashMap<String, String>,
+}
+
+impl<'a, T: Transport> CliDocumentNameResolver<'a, T> {
+    pub fn new(
+        client: &'a mut XrpcClient<T>,
+        did: &'a str,
+        private_key: &'a X25519PrivateKey,
+        storage: &'a FileStorage,
+    ) -> Self {
+        Self {
+            client,
+            did,
+            private_key,
+            storage,
+            cache: HashMap::new(),
+        }
+    }
+}
+
+impl<T: Transport> DocumentNameResolver for CliDocumentNameResolver<'_, T> {
+    async fn resolve_name(&mut self, uri: &str) -> Result<Option<String>, Error> {
+        if let Some(name) = self.cache.get(uri) {
+            return Ok(Some(name.clone()));
+        }
+
+        let at_uri = atproto::parse_at_uri(uri)?;
+        let record = match self
+            .client
+            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+            .await
+        {
+            Ok(r) => r,
+            Err(Error::Xrpc { status: 404, .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+
+        let doc: Document = serde_json::from_value(record.value)
+            .map_err(|e| Error::InvalidRecord(e.to_string()))?;
+
+        let content_key = match &doc.encryption {
+            Encryption::Direct(direct) => {
+                let wrapped = direct.envelope.keys.iter().find(|k| k.did == self.did);
+                match wrapped {
+                    Some(w) => crypto::unwrap_key(w, self.private_key)
+                        .map_err(|e| Error::KeyWrap(e.to_string()))?,
+                    None => return Ok(None),
+                }
+            }
+            Encryption::Keyring(kr_enc) => {
+                let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
+                let group_key = keyring_store::load_group_key(
+                    self.storage,
+                    self.did,
+                    &kr_uri.rkey,
+                    kr_enc.keyring_ref.rotation,
+                )
+                .map_err(|e| Error::KeyWrap(e.to_string()))?;
+                let wrapped_bytes = kr_enc
+                    .keyring_ref
+                    .wrapped_content_key
+                    .decode()
+                    .map_err(|e| Error::Decryption(e.to_string()))?;
+                crypto::unwrap_content_key_from_keyring(&wrapped_bytes, &group_key)
+                    .map_err(|e| Error::KeyWrap(e.to_string()))?
+            }
+        };
+
+        let metadata = crypto::decrypt_metadata::<crypto::DocumentMetadata>(
+            &content_key,
+            &doc.encrypted_metadata,
+        )
+        .map_err(|e| Error::Decryption(e.to_string()))?;
+
+        self.cache.insert(uri.to_owned(), metadata.name.clone());
+        Ok(Some(metadata.name))
     }
 }
