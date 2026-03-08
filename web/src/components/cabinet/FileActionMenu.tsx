@@ -1,10 +1,19 @@
-import { DotsThreeVerticalIcon, DownloadSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import {
+  ArrowBendUpRightIcon,
+  DotsThreeVerticalIcon,
+  DownloadSimpleIcon,
+  PencilSimpleIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { useAppStore } from "@/stores/app";
 import type { FileItem } from "./types";
 
 interface FileActionMenuProps {
   readonly item: FileItem;
+  readonly onEditMetadata?: () => void;
+  readonly onRename?: () => void;
+  readonly onMove?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -12,6 +21,9 @@ interface FileActionMenuProps {
 
 export function FileActionMenu({
   item,
+  onEditMetadata,
+  onRename,
+  onMove,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -33,8 +45,14 @@ export function FileActionMenu({
   }
 
   const items = isFolder
-    ? [{ icon: TrashIcon, label: "Delete", onClick: onDeleteFolder }]
+    ? [
+        { icon: PencilSimpleIcon, label: "Rename", onClick: onRename },
+        { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
+        { icon: TrashIcon, label: "Delete", onClick: onDeleteFolder },
+      ]
     : [
+        { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
+        { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
         { icon: DownloadSimpleIcon, label: "Download", onClick: onDownload },
         { icon: TrashIcon, label: "Delete", onClick: onDelete },
       ];

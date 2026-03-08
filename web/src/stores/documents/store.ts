@@ -18,7 +18,15 @@ import { rkeyFromUri } from "@/lib/atUri";
 import { downloadDocument } from "@/lib/download";
 import { deleteDocument } from "@/lib/delete";
 import { uploadDocument } from "@/lib/upload";
-import { createDirectory, deleteDirectory } from "@/lib/directory";
+import {
+  createDirectory,
+  deleteDirectory,
+  renameDirectory as renameDirectoryOnPds,
+} from "@/lib/directory";
+import { moveEntry as moveEntryOnPds } from "@/lib/move";
+import { updateDocumentMetadata } from "@/lib/metadata";
+import type { MetadataChanges } from "@/lib/metadata";
+import { toastSuccess, toastError, toastInfo } from "@/stores/toast";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
@@ -52,6 +60,9 @@ interface DocumentsState {
   readonly uploadFile: (file: File, directoryUri: string | null) => Promise<void>;
   readonly createFolder: (name: string, directoryUri: string | null) => Promise<void>;
   readonly deleteFolder: (directoryUri: string) => Promise<void>;
+  readonly updateMetadata: (documentUri: string, changes: MetadataChanges) => Promise<void>;
+  readonly moveEntry: (entryUri: string, targetDirectoryUri: string | null) => Promise<void>;
+  readonly renameDirectory: (directoryUri: string, newName: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
 }
 
@@ -137,14 +148,13 @@ export const useDocumentsStore = create<DocumentsState>()(
         // Create placeholder FileItems for all documents
         const documentItems = documentRecords.map((r) => [r.uri, documentPlaceholder(r)] as const);
 
-        const items: Record<string, FileItem> = Object.fromEntries([
+        const items: Readonly<Record<string, FileItem>> = Object.fromEntries([
           ...directoryItems,
           ...documentItems,
         ]);
 
-        const docRecordsMap: Record<string, PdsRecord<DocumentRecord>> = Object.fromEntries(
-          documentRecords.map((r) => [r.uri, r] as const),
-        );
+        const docRecordsMap: Readonly<Record<string, PdsRecord<DocumentRecord>>> =
+          Object.fromEntries(documentRecords.map((r) => [r.uri, r] as const));
 
         set((draft) => {
           draft.items = items;
@@ -158,6 +168,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         await get().ensureDirectoryDecrypted(null);
       } catch (error) {
         console.error("[documents] fetchAll failed:", error);
+        toastError("Failed to load documents");
         done();
         set((draft) => {
           draft.error = error instanceof Error ? error.message : String(error);
@@ -272,8 +283,10 @@ export const useDocumentsStore = create<DocumentsState>()(
         const privateKey = base64ToUint8Array(identity.private_key);
 
         await downloadDocument(record, pdsUrl, did, privateKey, session);
+        toastSuccess("Download started");
       } catch (error) {
         console.error("[documents] download failed:", documentUri, error);
+        toastError("Download failed");
       } finally {
         done();
       }
@@ -294,6 +307,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         const parentUri = findParentUri(treeSnapshot, documentUri);
 
         await deleteDocument(documentUri, parentUri ?? null, pdsUrl, did, session);
+        toastSuccess("File deleted");
 
         // Optimistic removal from store — reuse cached parentUri
         set((draft) => {
@@ -316,6 +330,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         });
       } catch (error) {
         console.error("[documents] delete failed:", documentUri, error);
+        toastError("Failed to delete file");
       } finally {
         done();
       }
@@ -336,10 +351,12 @@ export const useDocumentsStore = create<DocumentsState>()(
         await uploadDocument(file, directoryUri, pdsUrl, did, publicKey, session);
 
         // Refresh the entire tree so the new file appears
-        done();
         await get().fetchAll();
+        toastSuccess("File uploaded");
       } catch (error) {
         console.error("[documents] upload failed:", error);
+        toastError("Upload failed");
+      } finally {
         done();
       }
     },
@@ -358,10 +375,12 @@ export const useDocumentsStore = create<DocumentsState>()(
 
         await createDirectory(name, directoryUri, pdsUrl, did, publicKey, session);
 
-        done();
         await get().fetchAll();
+        toastSuccess("Folder created");
       } catch (error) {
         console.error("[documents] createFolder failed:", error);
+        toastError("Failed to create folder");
+      } finally {
         done();
       }
     },
@@ -423,8 +442,145 @@ export const useDocumentsStore = create<DocumentsState>()(
             }
           }
         });
+        toastSuccess("Folder deleted");
       } catch (error) {
         console.error("[documents] deleteFolder failed:", folderUri, error);
+        toastError("Failed to delete folder");
+      } finally {
+        done();
+      }
+    },
+
+    updateMetadata: async (documentUri: string, changes: MetadataChanges) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const record = get().documentRecords[documentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+      if (!record) return;
+
+      if (record.value.encryption.$type !== "app.opake.document#directEncryption") {
+        toastError("Cannot edit keyring-encrypted documents yet");
+        return;
+      }
+
+      const done = loading(`metadata:${documentUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const privateKey = base64ToUint8Array(identity.private_key);
+
+        const updatedRecord = await updateDocumentMetadata(
+          record,
+          changes,
+          pdsUrl,
+          did,
+          privateKey,
+          session,
+        );
+
+        // Update store item + cached record in place
+        set((draft) => {
+          const item = draft.items[documentUri];
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+          if (item) {
+            /* eslint-disable functional/immutable-data -- immer draft mutation */
+            item.name = changes.name;
+            item.tags = changes.tags ?? [];
+            item.description = changes.description;
+            /* eslint-enable functional/immutable-data */
+          }
+          const storedRecord = draft.documentRecords[documentUri];
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+          if (storedRecord) {
+            // eslint-disable-next-line functional/immutable-data -- immer draft mutation
+            storedRecord.value = castDraft(updatedRecord);
+          }
+        });
+
+        toastSuccess("Metadata updated");
+      } catch (error) {
+        console.error("[documents] updateMetadata failed:", documentUri, error);
+        toastError("Failed to update metadata");
+      } finally {
+        done();
+      }
+    },
+
+    moveEntry: async (entryUri: string, targetDirectoryUri: string | null) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const { treeSnapshot, items } = get();
+      const currentParentUri = findParentUri(treeSnapshot, entryUri) ?? null;
+
+      // Noop if already in target
+      if (currentParentUri === targetDirectoryUri) {
+        toastInfo("Already in that folder");
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+      const entryName = items[entryUri]?.name ?? "item";
+      const done = loading(`move:${entryUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+
+        await moveEntryOnPds(entryUri, currentParentUri, targetDirectoryUri, pdsUrl, did, session);
+
+        // Rebuild tree to reflect the move
+        await get().fetchAll();
+        toastSuccess(`Moved "${entryName}"`);
+      } catch (error) {
+        console.error("[documents] moveEntry failed:", entryUri, error);
+        toastError(`Failed to move "${entryName}"`);
+        // Rebuild tree to recover from potential partial state
+        await get().fetchAll();
+      } finally {
+        done();
+      }
+    },
+
+    renameDirectory: async (directoryUri: string, newName: string) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const done = loading(`rename:${directoryUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const privateKey = base64ToUint8Array(identity.private_key);
+
+        await renameDirectoryOnPds(directoryUri, newName, pdsUrl, did, privateKey, session);
+
+        // Update store item + tree snapshot in place
+        set((draft) => {
+          const item = draft.items[directoryUri];
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+          if (item) {
+            // eslint-disable-next-line functional/immutable-data -- immer draft mutation
+            item.name = newName;
+          }
+          if (draft.treeSnapshot) {
+            const dirEntry = draft.treeSnapshot.directories[directoryUri];
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+            if (dirEntry) {
+              // eslint-disable-next-line functional/immutable-data -- immer draft mutation
+              dirEntry.name = newName;
+            }
+          }
+        });
+
+        toastSuccess("Folder renamed");
+      } catch (error) {
+        console.error("[documents] renameDirectory failed:", directoryUri, error);
+        toastError("Failed to rename folder");
       } finally {
         done();
       }
@@ -449,7 +605,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         const parentUri = findParent(current);
         if (!parentUri) return acc;
 
-        // Stop before adding root — root is always rendered as "The Cabinet"
+        // Stop before adding root — root is always rendered as "Your Cabinet"
         if (parentUri === treeSnapshot.rootUri) return acc;
 
         const parentEntry = treeSnapshot.directories[parentUri];

@@ -7,6 +7,9 @@ import type { FileItem } from "./types";
 interface FileListRowProps {
   readonly item: FileItem;
   readonly onClick: () => void;
+  readonly onEditMetadata?: () => void;
+  readonly onRename?: () => void;
+  readonly onMove?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -15,6 +18,9 @@ interface FileListRowProps {
 export function FileListRow({
   item,
   onClick,
+  onEditMetadata,
+  onRename,
+  onMove,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -50,6 +56,9 @@ export function FileListRow({
       <div className="w-6">
         <FileActionMenu
           item={item}
+          onEditMetadata={onEditMetadata}
+          onRename={onRename}
+          onMove={onMove}
           onDownload={onDownload}
           onDelete={onDelete}
           onDeleteFolder={onDeleteFolder}

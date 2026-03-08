@@ -8,6 +8,14 @@ import {
   DeleteFolderConfirmDialog,
   type DeleteFolderDialogHandle,
 } from "./DeleteFolderConfirmDialog";
+import {
+  MetadataEditDialog,
+  type MetadataEditDialogHandle,
+  type MetadataChanges,
+} from "./MetadataEditDialog";
+import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
+import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
+import { useDocumentsStore } from "@/stores/documents";
 import { getCryptoWorker } from "@/lib/worker";
 import type { FileItem } from "./types";
 
@@ -18,6 +26,9 @@ interface PanelContentProps {
   readonly onDownload: (uri: string) => void;
   readonly onDelete: (uri: string) => void;
   readonly onDeleteFolder: (uri: string) => void;
+  readonly onUpdateMetadata: (uri: string, changes: MetadataChanges) => void;
+  readonly onMoveEntry: (entryUri: string, targetDirectoryUri: string | null) => void;
+  readonly onRenameDirectory: (directoryUri: string, newName: string) => void;
 }
 
 export function PanelContent({
@@ -27,14 +38,39 @@ export function PanelContent({
   onDownload,
   onDelete,
   onDeleteFolder,
+  onUpdateMetadata,
+  onMoveEntry,
+  onRenameDirectory,
 }: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
+  const metadataDialogRef = useRef<MetadataEditDialogHandle>(null);
+  const moveDialogRef = useRef<MoveDialogHandle>(null);
+  const renameDialogRef = useRef<RenameDialogHandle>(null);
 
   const handleDeleteFolderClick = async (item: FileItem) => {
     const worker = getCryptoWorker();
     const counts = await worker.treeCountDescendants(item.uri);
     deleteFolderDialogRef.current?.show(item.uri, item.name, counts.documents, counts.directories);
+  };
+
+  const handleMoveClick = async (item: FileItem) => {
+    const snapshot = useDocumentsStore.getState().treeSnapshot;
+    const currentParent = snapshot
+      ? (Object.entries(snapshot.directories).find(([, entry]) =>
+          entry.entries.includes(item.uri),
+        )?.[0] ?? null)
+      : null;
+
+    const disabled: ReadonlySet<string> =
+      item.kind === "folder"
+        ? new Set([
+            item.uri,
+            ...(await getCryptoWorker().treeCollectDescendants(item.uri)).map((d) => d.uri),
+          ])
+        : new Set();
+
+    moveDialogRef.current?.show(item.uri, item.name, item.kind, currentParent, disabled);
   };
 
   if (items.length === 0) {
@@ -59,6 +95,9 @@ export function PanelContent({
               key={item.id}
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
+              onEditMetadata={() => metadataDialogRef.current?.show(item)}
+              onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
+              onMove={() => void handleMoveClick(item)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
               onDeleteFolder={() => void handleDeleteFolderClick(item)}
@@ -72,6 +111,9 @@ export function PanelContent({
               key={item.id}
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
+              onEditMetadata={() => metadataDialogRef.current?.show(item)}
+              onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
+              onMove={() => void handleMoveClick(item)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
               onDeleteFolder={() => void handleDeleteFolderClick(item)}
@@ -82,6 +124,9 @@ export function PanelContent({
 
       <DeleteConfirmDialog ref={deleteDialogRef} onConfirm={onDelete} />
       <DeleteFolderConfirmDialog ref={deleteFolderDialogRef} onConfirm={onDeleteFolder} />
+      <MetadataEditDialog ref={metadataDialogRef} onSave={onUpdateMetadata} />
+      <MoveDialog ref={moveDialogRef} onMove={onMoveEntry} />
+      <RenameDialog ref={renameDialogRef} onSave={onRenameDirectory} />
     </div>
   );
 }

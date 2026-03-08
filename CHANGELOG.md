@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add web file and directory moving [#253](https://issues.opake.app/issues/253.html)
+- Add web metadata management for documents [#252](https://issues.opake.app/issues/252.html)
+- Add error toast notifications for user feedback [#266](https://issues.opake.app/issues/266.html)
+- Add distinct icons for image file types [#258](https://issues.opake.app/issues/258.html)
+- Add web directory creation and deletion [#254](https://issues.opake.app/issues/254.html)
 - Add web file deletion [#148](https://issues.opake.app/issues/148.html)
 - Add web file upload with client-side encryption [#146](https://issues.opake.app/issues/146.html)
 - Integrate app store loading tracker into document fetching and downloads [#251](https://issues.opake.app/issues/251.html)
@@ -102,6 +107,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fix missing HTTP status checks in XRPC client [#104](https://issues.opake.app/issues/104.html)
 
 ### Changed
+- Add web file deletion with confirmation dialog [#255](https://issues.opake.app/issues/255.html)
 - Add cn() utility (clsx + tailwind-merge) [#208](https://issues.opake.app/issues/208.html)
 - Add cn() utility (clsx + tailwind-merge) [#208](https://issues.opake.app/issues/208.html)
 - Add metadata CLI command with tag and description subcommands [#190](https://issues.opake.app/issues/190.html)

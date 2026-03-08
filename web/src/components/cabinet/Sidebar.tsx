@@ -12,7 +12,7 @@ import { useAppStore } from "@/stores/app";
 import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
-  { to: "/cabinet/files" as const, icon: FolderIcon, label: "The Cabinet" },
+  { to: "/cabinet/files" as const, icon: FolderIcon, label: "Your Cabinet" },
   { to: "/cabinet/encrypted" as const, icon: LockIcon, label: "Encrypted" },
   { to: "/cabinet/shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
 ];

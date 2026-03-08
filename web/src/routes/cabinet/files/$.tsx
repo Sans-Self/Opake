@@ -22,6 +22,9 @@ function SubdirectoryContent() {
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
   const deleteFolder = useDocumentsStore((s) => s.deleteFolder);
+  const updateMetadata = useDocumentsStore((s) => s.updateMetadata);
+  const moveEntry = useDocumentsStore((s) => s.moveEntry);
+  const renameDirectory = useDocumentsStore((s) => s.renameDirectory);
   const items = useDocumentsStore(useShallow((s) => s.itemsForDirectory(currentDirectoryUri)));
 
   useEffect(() => {
@@ -46,6 +49,9 @@ function SubdirectoryContent() {
       onDownload={(uri) => void downloadFile(uri)}
       onDelete={(uri) => void deleteFile(uri)}
       onDeleteFolder={(uri) => void deleteFolder(uri)}
+      onUpdateMetadata={(uri, changes) => void updateMetadata(uri, changes)}
+      onMoveEntry={(uri, target) => void moveEntry(uri, target)}
+      onRenameDirectory={(uri, name) => void renameDirectory(uri, name)}
     />
   );
 }

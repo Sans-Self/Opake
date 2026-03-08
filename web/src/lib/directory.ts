@@ -9,7 +9,8 @@ import {
 import { uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
 import { getCryptoWorker } from "@/lib/worker";
-import type { DirectoryRecord } from "@/lib/pdsTypes";
+import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
+import type { DirectoryRecord, DirectoryMetadata } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,59 @@ export async function createDirectory(
   await addEntryToDirectory(parentDirectoryUri, newDirectoryUri, now, pdsUrl, did, session);
 
   return newDirectoryUri;
+}
+
+// ---------------------------------------------------------------------------
+// Rename directory
+// ---------------------------------------------------------------------------
+
+export async function renameDirectory(
+  directoryUri: string,
+  newName: string,
+  pdsUrl: string,
+  did: string,
+  privateKey: Uint8Array,
+  session: Session,
+): Promise<void> {
+  const rkey = rkeyFromUri(directoryUri);
+
+  const record = await authenticatedGetRecord<DirectoryRecord>(
+    { pdsUrl, did, collection: "app.opake.directory", rkey },
+    session,
+  );
+
+  const encryption = record.value.encryption;
+  if (encryption.$type !== "app.opake.document#directEncryption") {
+    throw new Error("Renaming keyring-encrypted directories is not yet supported");
+  }
+
+  const worker = getCryptoWorker();
+  const contentKey = await unwrapDirectContentKey(encryption, did, privateKey);
+
+  // Decrypt existing metadata to preserve description
+  const { ciphertext, nonce } = decryptEnvelope(record.value.encryptedMetadata);
+  const existing: DirectoryMetadata = await worker.decryptDirectoryMetadata(
+    contentKey,
+    ciphertext,
+    nonce,
+  );
+
+  const updated: DirectoryMetadata = { ...existing, name: newName };
+  const encryptedMeta = await worker.encryptDirectoryMetadata(contentKey, updated);
+
+  const updatedRecord: DirectoryRecord = {
+    ...record.value,
+    encryptedMetadata: {
+      ciphertext: { $bytes: uint8ArrayToBase64(encryptedMeta.ciphertext) },
+      nonce: { $bytes: uint8ArrayToBase64(encryptedMeta.nonce) },
+    },
+    modifiedAt: new Date().toISOString(),
+  };
+
+  await authenticatedPutRecord(
+    { pdsUrl, did, collection: "app.opake.directory", rkey, record: updatedRecord },
+    session,
+  );
 }
 
 // ---------------------------------------------------------------------------

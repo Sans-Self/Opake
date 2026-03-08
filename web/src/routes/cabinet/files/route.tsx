@@ -178,11 +178,11 @@ function FileBrowserLayout() {
           {rkey ? (
             <li>
               <Link to="/cabinet/files" className="text-text-faint">
-                The Cabinet
+                Your Cabinet
               </Link>
             </li>
           ) : (
-            <BreadcrumbActive>The Cabinet</BreadcrumbActive>
+            <BreadcrumbActive>Your Cabinet</BreadcrumbActive>
           )}
           {ancestors.map((ancestor, index) => (
             <li key={ancestor.uri}>

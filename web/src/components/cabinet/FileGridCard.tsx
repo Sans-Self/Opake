@@ -7,6 +7,9 @@ import type { FileItem } from "./types";
 interface FileGridCardProps {
   readonly item: FileItem;
   readonly onClick: () => void;
+  readonly onEditMetadata?: () => void;
+  readonly onRename?: () => void;
+  readonly onMove?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -15,6 +18,9 @@ interface FileGridCardProps {
 export function FileGridCard({
   item,
   onClick,
+  onEditMetadata,
+  onRename,
+  onMove,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -53,6 +59,9 @@ export function FileGridCard({
         <div className="flex items-center gap-1">
           <FileActionMenu
             item={item}
+            onEditMetadata={onEditMetadata}
+            onRename={onRename}
+            onMove={onMove}
             onDownload={onDownload}
             onDelete={onDelete}
             onDeleteFolder={onDeleteFolder}

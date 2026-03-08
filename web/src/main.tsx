@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { RouterContext } from "@/routes/__root";
 import "./index.css";
 import { getCryptoWorker } from "@/lib/worker";
+import { ToastContainer } from "@/components/ToastContainer";
 
 enableMapSet();
 enableArrayMethods();
@@ -40,7 +41,12 @@ function App() {
     return null;
   }
 
-  return <RouterProvider router={router} context={{ auth: { session, identity } }} />;
+  return (
+    <>
+      <RouterProvider router={router} context={{ auth: { session, identity } }} />
+      <ToastContainer />
+    </>
+  );
 }
 
 const rootElement = document.getElementById("root");
