@@ -1,15 +1,10 @@
 // Upload orchestration — encrypt client-side, upload blob, create record, add to directory.
 
-import {
-  authenticatedBlobUpload,
-  authenticatedCreateRecord,
-  authenticatedGetRecord,
-  authenticatedPutRecord,
-} from "@/lib/api";
+import { authenticatedBlobUpload, authenticatedCreateRecord } from "@/lib/api";
 import { uint8ArrayToBase64 } from "@/lib/encoding";
-import { rkeyFromUri } from "@/lib/atUri";
 import { getCryptoWorker } from "@/lib/worker";
-import type { DocumentRecord, DirectoryRecord } from "@/lib/pdsTypes";
+import { addEntryToDirectory } from "@/lib/directory";
+import type { DocumentRecord } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
 
 export async function uploadDocument(
@@ -73,33 +68,4 @@ export async function uploadDocument(
   await addEntryToDirectory(directoryUri, documentUri, now, pdsUrl, did, session);
 
   return documentUri;
-}
-
-async function addEntryToDirectory(
-  directoryUri: string | null,
-  entryUri: string,
-  modifiedAt: string,
-  pdsUrl: string,
-  did: string,
-  session: Session,
-): Promise<void> {
-  const rkey = directoryUri ? rkeyFromUri(directoryUri) : "self";
-
-  // Fetch current directory record
-  const response = await authenticatedGetRecord<DirectoryRecord>(
-    { pdsUrl, did, collection: "app.opake.directory", rkey },
-    session,
-  );
-
-  // Append new entry
-  const updatedRecord: DirectoryRecord = {
-    ...response.value,
-    entries: [...response.value.entries, entryUri],
-    modifiedAt,
-  };
-
-  await authenticatedPutRecord(
-    { pdsUrl, did, collection: "app.opake.directory", rkey, record: updatedRecord },
-    session,
-  );
 }

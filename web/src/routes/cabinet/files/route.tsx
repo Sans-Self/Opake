@@ -20,6 +20,7 @@ import {
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { PanelSkeleton } from "@/components/cabinet/PanelSkeleton";
 import { TagFilterBar } from "@/components/cabinet/TagFilterBar";
+import { NewFolderDialog, type NewFolderDialogHandle } from "@/components/cabinet/NewFolderDialog";
 import { useDocumentsStore } from "@/stores/documents";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
@@ -28,7 +29,9 @@ import { directoryUri } from "@/lib/atUri";
 function FileBrowserLayout() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const newFolderDialogRef = useRef<NewFolderDialogHandle>(null);
   const uploadFile = useDocumentsStore((s) => s.uploadFile);
+  const createFolder = useDocumentsStore((s) => s.createFolder);
 
   // Determine current directory from child splat route params
   const splatMatch = useMatch({
@@ -149,7 +152,11 @@ function FileBrowserLayout() {
             label: "Upload file",
             onClick: () => fileInputRef.current?.click(),
           },
-          { icon: FolderIcon, label: "New folder" },
+          {
+            icon: FolderIcon,
+            label: "New folder",
+            onClick: () => newFolderDialogRef.current?.show(),
+          },
           { icon: FileTextIcon, label: "New document" },
           { icon: BookOpenIcon, label: "New note" },
         ]}
@@ -210,6 +217,10 @@ function FileBrowserLayout() {
         className="hidden"
         onChange={handleFileSelected}
         aria-hidden="true"
+      />
+      <NewFolderDialog
+        ref={newFolderDialogRef}
+        onConfirm={(name) => void createFolder(name, currentDirectoryUri)}
       />
     </PanelShell>
   );

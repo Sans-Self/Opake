@@ -2,6 +2,7 @@ import {
   FolderIcon,
   FileTextIcon,
   FileIcon,
+  FileImageIcon,
   BookOpenIcon,
   ArchiveIcon,
 } from "@phosphor-icons/react";
@@ -20,6 +21,7 @@ const FILE_TYPE_STYLES: Readonly<Record<string, IconStyle>> = {
   pdf: { bg: "bg-file-pdf-bg", text: "text-file-pdf" },
   note: { bg: "bg-accent", text: "text-file-note" },
   code: { bg: "bg-file-code-bg", text: "text-file-code" },
+  image: { bg: "bg-file-image-bg", text: "text-file-image" },
   archive: { bg: "bg-bg-stone", text: "text-text-muted" },
 };
 
@@ -37,6 +39,8 @@ export function fileIconElement(item: FileItem, size = 15) {
       return <FileTextIcon size={size} />;
     case "spreadsheet":
       return <FileIcon size={size} />;
+    case "image":
+      return <FileImageIcon size={size} />;
     case "note":
       return <BookOpenIcon size={size} />;
     case "archive":

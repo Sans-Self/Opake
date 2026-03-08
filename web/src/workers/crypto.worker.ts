@@ -11,6 +11,7 @@ import init, {
   unwrapContentKeyFromKeyring,
   encryptMetadata as wasmEncryptMetadata,
   decryptMetadata as wasmDecryptMetadata,
+  encryptDirectoryMetadata as wasmEncryptDirectoryMetadata,
   decryptDirectoryMetadata as wasmDecryptDirectoryMetadata,
   generateDpopKeyPair as wasmGenerateDpopKeyPair,
   createDpopProof as wasmCreateDpopProof,
@@ -97,6 +98,10 @@ const cryptoApi = {
     return wasmDecryptMetadata(key, ciphertext, nonce) as DocumentMetadata;
   },
 
+  encryptDirectoryMetadata(key: Uint8Array, metadata: DirectoryMetadata): EncryptedPayload {
+    return wasmEncryptDirectoryMetadata(key, metadata) as EncryptedPayload;
+  },
+
   decryptDirectoryMetadata(
     key: Uint8Array,
     ciphertext: Uint8Array,
@@ -178,6 +183,16 @@ const cryptoApi = {
 
   treeFindParent(uri: string): string | undefined {
     return directoryTree?.findParent(uri);
+  },
+
+  treeCountDescendants(uri: string): { documents: number; directories: number } {
+    if (!directoryTree) return { documents: 0, directories: 0 };
+    return directoryTree.countDescendants(uri) as { documents: number; directories: number };
+  },
+
+  treeCollectDescendants(uri: string): readonly { uri: string; kind: string }[] {
+    if (!directoryTree) return [];
+    return directoryTree.collectDescendants(uri) as { uri: string; kind: string }[];
   },
 
   destroyDirectoryTree(): void {

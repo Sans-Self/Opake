@@ -4,6 +4,11 @@ import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
 import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import {
+  DeleteFolderConfirmDialog,
+  type DeleteFolderDialogHandle,
+} from "./DeleteFolderConfirmDialog";
+import { getCryptoWorker } from "@/lib/worker";
 import type { FileItem } from "./types";
 
 interface PanelContentProps {
@@ -12,10 +17,25 @@ interface PanelContentProps {
   readonly onOpen: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
   readonly onDelete: (uri: string) => void;
+  readonly onDeleteFolder: (uri: string) => void;
 }
 
-export function PanelContent({ items, viewMode, onOpen, onDownload, onDelete }: PanelContentProps) {
+export function PanelContent({
+  items,
+  viewMode,
+  onOpen,
+  onDownload,
+  onDelete,
+  onDeleteFolder,
+}: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
+  const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
+
+  const handleDeleteFolderClick = async (item: FileItem) => {
+    const worker = getCryptoWorker();
+    const counts = await worker.treeCountDescendants(item.uri);
+    deleteFolderDialogRef.current?.show(item.uri, item.name, counts.documents, counts.directories);
+  };
 
   if (items.length === 0) {
     return (
@@ -41,6 +61,7 @@ export function PanelContent({ items, viewMode, onOpen, onDownload, onDelete }: 
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
+              onDeleteFolder={() => void handleDeleteFolderClick(item)}
             />
           ))}
         </div>
@@ -53,12 +74,14 @@ export function PanelContent({ items, viewMode, onOpen, onDownload, onDelete }: 
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
+              onDeleteFolder={() => void handleDeleteFolderClick(item)}
             />
           ))}
         </div>
       )}
 
       <DeleteConfirmDialog ref={deleteDialogRef} onConfirm={onDelete} />
+      <DeleteFolderConfirmDialog ref={deleteFolderDialogRef} onConfirm={onDeleteFolder} />
     </div>
   );
 }

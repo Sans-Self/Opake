@@ -21,6 +21,7 @@ function SubdirectoryContent() {
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
+  const deleteFolder = useDocumentsStore((s) => s.deleteFolder);
   const items = useDocumentsStore(useShallow((s) => s.itemsForDirectory(currentDirectoryUri)));
 
   useEffect(() => {
@@ -44,6 +45,7 @@ function SubdirectoryContent() {
       onOpen={handleOpen}
       onDownload={(uri) => void downloadFile(uri)}
       onDelete={(uri) => void deleteFile(uri)}
+      onDeleteFolder={(uri) => void deleteFolder(uri)}
     />
   );
 }

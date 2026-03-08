@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-const MODAL_TRANSITION_MS = 200;
+export const MODAL_TRANSITION_MS = 200;
 
 export interface ConfirmDialogHandle {
   /** Show the dialog. `key` is passed to onConfirm; `label` is passed to the render function. */

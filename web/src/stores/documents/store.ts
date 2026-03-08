@@ -18,6 +18,7 @@ import { rkeyFromUri } from "@/lib/atUri";
 import { downloadDocument } from "@/lib/download";
 import { deleteDocument } from "@/lib/delete";
 import { uploadDocument } from "@/lib/upload";
+import { createDirectory, deleteDirectory } from "@/lib/directory";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
@@ -49,7 +50,24 @@ interface DocumentsState {
   readonly downloadFile: (documentUri: string) => Promise<void>;
   readonly deleteFile: (documentUri: string) => Promise<void>;
   readonly uploadFile: (file: File, directoryUri: string | null) => Promise<void>;
+  readonly createFolder: (name: string, directoryUri: string | null) => Promise<void>;
+  readonly deleteFolder: (directoryUri: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Find the parent directory URI for a given entry URI within a tree snapshot. */
+function findParentUri(
+  snapshot: DirectoryTreeSnapshot | null,
+  entryUri: string,
+): string | undefined {
+  if (!snapshot) return undefined;
+  return Object.entries(snapshot.directories).find(([, entry]) =>
+    entry.entries.includes(entryUri),
+  )?.[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -273,19 +291,9 @@ export const useDocumentsStore = create<DocumentsState>()(
 
         // Find parent directory from tree snapshot
         const { treeSnapshot } = get();
-        const parentUri = treeSnapshot
-          ? Object.entries(treeSnapshot.directories).find(([, entry]) =>
-              entry.entries.includes(documentUri),
-            )?.[0]
-          : undefined;
+        const parentUri = findParentUri(treeSnapshot, documentUri);
 
-        const parentRkey = parentUri
-          ? parentUri === treeSnapshot?.rootUri
-            ? "self"
-            : rkeyFromUri(parentUri)
-          : "self";
-
-        await deleteDocument(documentUri, parentRkey, pdsUrl, did, session);
+        await deleteDocument(documentUri, parentUri ?? null, pdsUrl, did, session);
 
         // Optimistic removal from store — reuse cached parentUri
         set((draft) => {
@@ -332,6 +340,92 @@ export const useDocumentsStore = create<DocumentsState>()(
         await get().fetchAll();
       } catch (error) {
         console.error("[documents] upload failed:", error);
+        done();
+      }
+    },
+
+    createFolder: async (name: string, directoryUri: string | null) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const done = loading("create-folder");
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const publicKey = base64ToUint8Array(identity.public_key);
+
+        await createDirectory(name, directoryUri, pdsUrl, did, publicKey, session);
+
+        done();
+        await get().fetchAll();
+      } catch (error) {
+        console.error("[documents] createFolder failed:", error);
+        done();
+      }
+    },
+
+    deleteFolder: async (folderUri: string) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const done = loading(`delete:${folderUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+
+        // Find parent directory
+        const { treeSnapshot } = get();
+        const parentUri = findParentUri(treeSnapshot, folderUri);
+
+        // Collect all descendants from the WASM tree
+        const worker = getCryptoWorker();
+        const descendants = await worker.treeCollectDescendants(folderUri);
+
+        await deleteDirectory(folderUri, parentUri ?? null, descendants, pdsUrl, did, session);
+
+        // Optimistic removal — remove the folder + all descendants from store
+        const descendantUris = new Set(descendants.map((d) => d.uri));
+        set((draft) => {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+          delete draft.items[folderUri];
+          // eslint-disable-next-line functional/no-loop-statements -- immer draft mutation requires imperative delete
+          for (const uri of descendantUris) {
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+            delete draft.items[uri];
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+            delete draft.documentRecords[uri];
+          }
+
+          if (draft.treeSnapshot) {
+            // Remove from parent entries
+            if (parentUri) {
+              const parentDir = draft.treeSnapshot.directories[parentUri];
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+              if (parentDir) {
+                const index = parentDir.entries.indexOf(folderUri);
+                if (index !== -1) {
+                  // eslint-disable-next-line functional/immutable-data -- immer draft mutation
+                  parentDir.entries.splice(index, 1);
+                }
+              }
+            }
+
+            // Remove the directory + subdirectories from snapshot
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+            delete draft.treeSnapshot.directories[folderUri];
+            // eslint-disable-next-line functional/no-loop-statements -- immer draft mutation requires imperative delete
+            for (const uri of descendantUris) {
+              // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
+              delete draft.treeSnapshot.directories[uri];
+            }
+          }
+        });
+      } catch (error) {
+        console.error("[documents] deleteFolder failed:", folderUri, error);
+      } finally {
         done();
       }
     },
