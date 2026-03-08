@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
+import { useAppStore } from "@/stores/app";
 import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
@@ -28,12 +29,14 @@ const WORKSPACES = [
 ];
 
 export function Sidebar() {
+  const anyLoading = useAppStore((s) => s.anythingLoading());
+
   return (
     <aside className="border-base-300/50 bg-base-200 flex w-53 shrink-0 flex-col border-r px-3 py-4">
       {/* Logo */}
       <div className="mb-5 px-0.5">
         <Link to="/" className="inline-block">
-          <OpakeLogo />
+          <OpakeLogo loading={anyLoading} />
         </Link>
       </div>
 

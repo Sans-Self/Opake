@@ -8,15 +8,9 @@ interface FileGridCardProps {
   readonly item: FileItem;
   readonly onClick: () => void;
   readonly onDownload?: () => void;
-  readonly downloading?: boolean;
 }
 
-export function FileGridCard({
-  item,
-  onClick,
-  onDownload,
-  downloading = false,
-}: FileGridCardProps) {
+export function FileGridCard({ item, onClick, onDownload }: FileGridCardProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
 
@@ -49,7 +43,7 @@ export function FileGridCard({
           {fileIconElement(item, 17)}
         </div>
         <div className="flex items-center gap-1">
-          <FileActionMenu item={item} downloading={downloading} onDownload={onDownload} />
+          <FileActionMenu item={item} onDownload={onDownload} />
           <LockIcon size={11} className="text-text-faint" />
         </div>
       </div>

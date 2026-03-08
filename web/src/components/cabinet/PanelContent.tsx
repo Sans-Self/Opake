@@ -8,16 +8,9 @@ interface PanelContentProps {
   readonly viewMode: "list" | "grid";
   readonly onOpen: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
-  readonly downloadingUris: ReadonlySet<string>;
 }
 
-export function PanelContent({
-  items,
-  viewMode,
-  onOpen,
-  onDownload,
-  downloadingUris,
-}: PanelContentProps) {
+export function PanelContent({ items, viewMode, onOpen, onDownload }: PanelContentProps) {
   if (items.length === 0) {
     return (
       <div className="hero py-16">
@@ -41,7 +34,6 @@ export function PanelContent({
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
-              downloading={downloadingUris.has(item.uri)}
             />
           ))}
         </div>
@@ -53,7 +45,6 @@ export function PanelContent({
               item={item}
               onClick={() => item.kind === "folder" && onOpen(item)}
               onDownload={() => onDownload(item.uri)}
-              downloading={downloadingUris.has(item.uri)}
             />
           ))}
         </div>

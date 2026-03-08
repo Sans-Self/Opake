@@ -13,7 +13,7 @@ import type { OAuthSession, Config } from "@/lib/storageTypes";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { getCryptoWorker } from "@/lib/worker";
 import { authenticatedXrpc } from "@/lib/api";
-import { useAppStore } from "@/stores/app";
+import { loading } from "@/stores/app";
 import {
   resolveHandleToPds,
   discoverAuthorizationServer,
@@ -73,11 +73,6 @@ export interface AuthSnapshot {
 // ---------------------------------------------------------------------------
 
 const storage = new IndexedDbStorage();
-
-function loading(key: string) {
-  useAppStore.getState().addLoading(key);
-  return () => useAppStore.getState().removeLoading(key);
-}
 
 // ---------------------------------------------------------------------------
 // Helpers

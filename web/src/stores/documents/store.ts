@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { castDraft } from "immer";
 import { useAuthStore } from "@/stores/auth";
+import { loading } from "@/stores/app";
 import { getCryptoWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import type { FileItem } from "@/components/cabinet/types";
@@ -34,10 +35,8 @@ interface DocumentsState {
   treeSnapshot: DirectoryTreeSnapshot | null;
   documentRecords: Record<string, PdsRecord<DocumentRecord>>;
   decryptedDirectories: Set<string>;
-  loading: boolean;
   error: string | null;
   activeTagFilters: string[];
-  downloadingUris: Set<string>;
   viewMode: "list" | "grid";
 
   readonly fetchAll: () => Promise<void>;
@@ -59,10 +58,8 @@ export const useDocumentsStore = create<DocumentsState>()(
     treeSnapshot: null,
     documentRecords: {},
     decryptedDirectories: new Set<string>(),
-    loading: false,
     error: null,
     activeTagFilters: [],
-    downloadingUris: new Set<string>(),
     viewMode: "list",
 
     fetchAll: async () => {
@@ -70,9 +67,9 @@ export const useDocumentsStore = create<DocumentsState>()(
       if (authState.session.status !== "active") return;
 
       const { did, pdsUrl } = authState.session;
+      const done = loading("documents-fetch");
 
       set((draft) => {
-        draft.loading = true;
         draft.error = null;
         draft.items = {};
         draft.treeSnapshot = null;
@@ -131,15 +128,16 @@ export const useDocumentsStore = create<DocumentsState>()(
           draft.items = items;
           draft.treeSnapshot = castDraft(snapshot);
           draft.documentRecords = castDraft(docRecordsMap);
-          draft.loading = false;
         });
+
+        done();
 
         // Eagerly decrypt root directory's documents
         await get().ensureDirectoryDecrypted(null);
       } catch (error) {
         console.error("[documents] fetchAll failed:", error);
+        done();
         set((draft) => {
-          draft.loading = false;
           draft.error = error instanceof Error ? error.message : String(error);
         });
       }
@@ -173,6 +171,7 @@ export const useDocumentsStore = create<DocumentsState>()(
 
       // Filter to document entries (not in snapshot.directories = not a directory)
       const documentUris = dirEntry.entries.filter((uri) => !(uri in treeSnapshot.directories));
+      const done = loading("decrypt-directory");
 
       // Decrypt sequentially to avoid overwhelming the worker
       await documentUris.reduce(async (prev, uri) => {
@@ -188,6 +187,8 @@ export const useDocumentsStore = create<DocumentsState>()(
           markDecryptionFailed(uri, set);
         }
       }, Promise.resolve());
+
+      done();
     },
 
     itemsForDirectory: (directoryUri: string | null): FileItem[] => {
@@ -240,9 +241,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         return;
       }
 
-      set((draft) => {
-        draft.downloadingUris.add(documentUri);
-      });
+      const done = loading(`download:${documentUri}`);
 
       try {
         const { did, pdsUrl } = authState.session;
@@ -254,9 +253,7 @@ export const useDocumentsStore = create<DocumentsState>()(
       } catch (error) {
         console.error("[documents] download failed:", documentUri, error);
       } finally {
-        set((draft) => {
-          draft.downloadingUris.delete(documentUri);
-        });
+        done();
       }
     },
 

@@ -37,3 +37,9 @@ export const useAppStore = create<AppStore>()(
     anythingLoading: () => !!get().loadingItems.size,
   })),
 );
+
+/** Register a named loading operation. Returns a cleanup function to call when done. */
+export function loading(key: string): () => void {
+  useAppStore.getState().addLoading(key);
+  return () => useAppStore.getState().removeLoading(key);
+}

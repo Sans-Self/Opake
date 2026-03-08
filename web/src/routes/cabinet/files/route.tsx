@@ -22,6 +22,7 @@ import { PanelSkeleton } from "@/components/cabinet/PanelSkeleton";
 import { TagFilterBar } from "@/components/cabinet/TagFilterBar";
 import { useDocumentsStore } from "@/stores/documents";
 import { useAuthStore } from "@/stores/auth";
+import { useAppStore } from "@/stores/app";
 import { directoryUri } from "@/lib/atUri";
 
 function FileBrowserLayout() {
@@ -40,7 +41,7 @@ function FileBrowserLayout() {
   const did = session.status === "active" ? session.did : null;
   const currentDirectoryUri = rkey && did ? directoryUri(did, rkey) : null;
 
-  const loading = useDocumentsStore((s) => s.loading);
+  const documentsLoading = useAppStore((s) => s.isLoading("documents-fetch"));
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const setViewMode = useDocumentsStore((s) => s.setViewMode);
   const ancestorsOf = useDocumentsStore((s) => s.ancestorsOf);
@@ -188,7 +189,7 @@ function FileBrowserLayout() {
         onToggle={handleToggleTag}
         onClear={() => setTagFilters([])}
       />
-      {loading ? <PanelSkeleton /> : <Outlet />}
+      {documentsLoading ? <PanelSkeleton /> : <Outlet />}
     </PanelShell>
   );
 }

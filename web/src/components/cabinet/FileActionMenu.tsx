@@ -1,15 +1,17 @@
 import { DotsThreeVerticalIcon, DownloadSimpleIcon } from "@phosphor-icons/react";
 import { DropdownMenu } from "@/components/DropdownMenu";
+import { useAppStore } from "@/stores/app";
 import type { FileItem } from "./types";
 
 interface FileActionMenuProps {
   readonly item: FileItem;
-  readonly downloading: boolean;
   readonly onDownload?: () => void;
 }
 
-export function FileActionMenu({ item, downloading, onDownload }: FileActionMenuProps) {
+export function FileActionMenu({ item, onDownload }: FileActionMenuProps) {
   const isFolder = item.kind === "folder";
+  const downloading = useAppStore((s) => s.isLoading(`download:${item.uri}`));
+
   if (isFolder || !item.decrypted || item.name === "[Keyring encrypted]") return null;
 
   if (downloading) {

@@ -20,7 +20,6 @@ function SubdirectoryContent() {
   const ensureDirectoryDecrypted = useDocumentsStore((s) => s.ensureDirectoryDecrypted);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
-  const downloadingUris = useDocumentsStore((s) => s.downloadingUris);
   const items = useDocumentsStore(useShallow((s) => s.itemsForDirectory(currentDirectoryUri)));
 
   useEffect(() => {
@@ -43,7 +42,6 @@ function SubdirectoryContent() {
       viewMode={viewMode}
       onOpen={handleOpen}
       onDownload={(uri) => void downloadFile(uri)}
-      downloadingUris={downloadingUris}
     />
   );
 }
