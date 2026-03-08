@@ -74,7 +74,7 @@ mod tests {
 
     fn entry(recipient: &str, doc: &str) -> GrantEntry {
         GrantEntry {
-            uri: format!("at://did:plc:owner/app.opake.grant/g1"),
+            uri: "at://did:plc:owner/app.opake.grant/g1".to_string(),
             document: doc.into(),
             recipient: recipient.into(),
             encrypted_metadata: dummy_encrypted_metadata(),

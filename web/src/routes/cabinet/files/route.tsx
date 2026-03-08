@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
 import {
   ListBulletsIcon,
@@ -27,6 +27,8 @@ import { directoryUri } from "@/lib/atUri";
 
 function FileBrowserLayout() {
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadFile = useDocumentsStore((s) => s.uploadFile);
 
   // Determine current directory from child splat route params
   const splatMatch = useMatch({
@@ -103,6 +105,14 @@ function FileBrowserLayout() {
     setTagFilters(current);
   };
 
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    void uploadFile(file, currentDirectoryUri);
+    // Reset so re-selecting the same file triggers onChange again
+    e.target.value = "";
+  };
+
   const handleClose = () => {
     if (segments.length > 1) {
       void navigate({
@@ -134,7 +144,11 @@ function FileBrowserLayout() {
           </>
         }
         items={[
-          { icon: UploadSimpleIcon, label: "Upload file" },
+          {
+            icon: UploadSimpleIcon,
+            label: "Upload file",
+            onClick: () => fileInputRef.current?.click(),
+          },
           { icon: FolderIcon, label: "New folder" },
           { icon: FileTextIcon, label: "New document" },
           { icon: BookOpenIcon, label: "New note" },
@@ -190,6 +204,13 @@ function FileBrowserLayout() {
         onClear={() => setTagFilters([])}
       />
       {documentsLoading ? <PanelSkeleton /> : <Outlet />}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileSelected}
+        aria-hidden="true"
+      />
     </PanelShell>
   );
 }

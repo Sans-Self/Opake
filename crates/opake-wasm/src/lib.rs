@@ -41,6 +41,11 @@ impl From<EncryptedPayload> for EncryptedPayloadDto {
     }
 }
 
+#[wasm_bindgen(js_name = schemaVersion)]
+pub fn schema_version() -> u32 {
+    opake_core::records::SCHEMA_VERSION
+}
+
 #[wasm_bindgen(js_name = generateContentKey)]
 pub fn generate_content_key() -> Vec<u8> {
     let key = opake_core::crypto::generate_content_key(&mut OsRng);

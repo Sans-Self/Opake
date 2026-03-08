@@ -2,7 +2,7 @@ use super::*;
 use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
 use crate::crypto::{self, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
 use crate::records::{AtBytes, Keyring, WrappedKey};
-use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
+use crate::test_utils::MockTransport;
 
 const TEST_DID: &str = "did:plc:owner";
 const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
@@ -24,7 +24,7 @@ fn test_keypair() -> (X25519PublicKey, [u8; 32]) {
 }
 
 fn two_member_keyring() -> (Keyring, ContentKey) {
-    let members_keys = [
+    let _members_keys = [
         (TEST_DID, &test_keypair().0),
         ("did:plc:bob", &test_keypair().0),
     ];

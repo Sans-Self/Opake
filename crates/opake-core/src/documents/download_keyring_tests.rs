@@ -1,9 +1,7 @@
 use super::*;
 use crate::client::HttpResponse;
 use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-use crate::records::{
-    AtBytes, BlobRef, CidLink, EncryptedMetadata, KeyringEncryption, KeyringRef, WrappedKey,
-};
+use crate::records::{AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringRef, WrappedKey};
 use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 

@@ -2,6 +2,7 @@
 
 import type { OAuthSession, Session } from "@/lib/storageTypes";
 import type { TokenResponse } from "@/lib/oauth";
+import type { BlobRef } from "@/lib/pdsTypes";
 import { getCryptoWorker } from "@/lib/worker";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 
@@ -58,7 +59,7 @@ interface AuthenticatedRequestParams {
   url: string;
   method: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: BodyInit;
   label: string;
 }
 
@@ -79,14 +80,19 @@ async function authenticatedRequest(
 
   let response = await fetch(url, { method, headers, body });
 
-  // DPoP nonce retry — the PDS has a different nonce than the AS.
-  if (session.type === "oauth" && requiresNonceRetry(response)) {
+  // Always capture the latest PDS nonce — it may differ from the AS nonce.
+  if (session.type === "oauth") {
     const nonce = response.headers.get("dpop-nonce");
-    if (nonce) {
-      session.dpopNonce = nonce;
-      await attachDpopAuth(headers, session, method, url);
-      response = await fetch(url, { method, headers, body });
-    }
+    if (nonce) session.dpopNonce = nonce;
+  }
+
+  // DPoP nonce retry — the PDS explicitly challenged us for a nonce.
+  if (session.type === "oauth" && requiresNonceRetry(response)) {
+    await attachDpopAuth(headers, session, method, url);
+    response = await fetch(url, { method, headers, body });
+
+    const nonce = response.headers.get("dpop-nonce");
+    if (nonce) session.dpopNonce = nonce;
   }
 
   // Token expired — refresh and retry once.
@@ -97,14 +103,13 @@ async function authenticatedRequest(
       await attachDpopAuth(headers, session, method, url);
       response = await fetch(url, { method, headers, body });
 
+      const nonce = response.headers.get("dpop-nonce");
+      if (nonce) session.dpopNonce = nonce;
+
       // The refreshed token might also need a nonce retry on the PDS
       if (requiresNonceRetry(response)) {
-        const nonce = response.headers.get("dpop-nonce");
-        if (nonce) {
-          session.dpopNonce = nonce;
-          await attachDpopAuth(headers, session, method, url);
-          response = await fetch(url, { method, headers, body });
-        }
+        await attachDpopAuth(headers, session, method, url);
+        response = await fetch(url, { method, headers, body });
       }
     }
   }
@@ -172,6 +177,96 @@ export async function authenticatedBlobFetch(
   );
 
   return response.arrayBuffer();
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated blob upload (raw bytes → BlobRef)
+// ---------------------------------------------------------------------------
+
+interface BlobUploadParams {
+  pdsUrl: string;
+  data: Uint8Array;
+}
+
+export async function authenticatedBlobUpload(
+  params: BlobUploadParams,
+  session: Session,
+): Promise<BlobRef> {
+  const { pdsUrl, data } = params;
+  const url = `${pdsUrl.replace(/\/$/, "")}/xrpc/com.atproto.repo.uploadBlob`;
+
+  // Normalize to a real Uint8Array — Comlink may deliver typed arrays as plain Arrays
+  const bytes = new Uint8Array(data);
+
+  const response = await authenticatedRequest(
+    {
+      url,
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: new Blob([bytes]),
+      label: "uploadBlob",
+    },
+    session,
+  );
+
+  const result = (await response.json()) as { blob: BlobRef };
+  return result.blob;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated record creation + update
+// ---------------------------------------------------------------------------
+
+interface RecordRef {
+  uri: string;
+  cid: string;
+}
+
+interface CreateRecordParams {
+  pdsUrl: string;
+  did: string;
+  collection: string;
+  record: unknown;
+}
+
+export async function authenticatedCreateRecord(
+  params: CreateRecordParams,
+  session: Session,
+): Promise<RecordRef> {
+  const { pdsUrl, did, collection, record } = params;
+  return (await authenticatedXrpc(
+    {
+      pdsUrl,
+      lexicon: "com.atproto.repo.createRecord",
+      method: "POST",
+      body: { repo: did, collection, record: { $type: collection, ...(record as object) } },
+    },
+    session,
+  )) as RecordRef;
+}
+
+interface PutRecordParams {
+  pdsUrl: string;
+  did: string;
+  collection: string;
+  rkey: string;
+  record: unknown;
+}
+
+export async function authenticatedPutRecord(
+  params: PutRecordParams,
+  session: Session,
+): Promise<RecordRef> {
+  const { pdsUrl, did, collection, rkey, record } = params;
+  return (await authenticatedXrpc(
+    {
+      pdsUrl,
+      lexicon: "com.atproto.repo.putRecord",
+      method: "POST",
+      body: { repo: did, collection, rkey, record: { $type: collection, ...(record as object) } },
+    },
+    session,
+  )) as RecordRef;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,13 +349,13 @@ async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
   return true;
 }
 
-/** Check if a response is a DPoP nonce challenge (400 use_dpop_nonce or 401 with nonce header). */
+/** Check if a response is an explicit DPoP nonce challenge (WWW-Authenticate contains use_dpop_nonce). */
 function requiresNonceRetry(response: Response): boolean {
-  if (response.headers.has("dpop-nonce")) {
-    if (response.status === 401) return true;
-    if (response.status === 400) return true;
-  }
-  return false;
+  // The PDS always includes dpop-nonce on authenticated endpoints, so checking just
+  // header presence incorrectly treats expired-token 401s as nonce challenges.
+  // Only retry when the server explicitly says the nonce is the problem.
+  const wwwAuth = response.headers.get("www-authenticate") ?? "";
+  return wwwAuth.includes("use_dpop_nonce");
 }
 
 async function attachDpopAuth(

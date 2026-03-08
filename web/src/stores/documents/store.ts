@@ -16,6 +16,7 @@ import type {
 } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
 import { downloadDocument } from "@/lib/download";
+import { uploadDocument } from "@/lib/upload";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
@@ -45,6 +46,7 @@ interface DocumentsState {
   readonly setTagFilters: (tags: string[]) => void;
   readonly setViewMode: (mode: "list" | "grid") => void;
   readonly downloadFile: (documentUri: string) => Promise<void>;
+  readonly uploadFile: (file: File, directoryUri: string | null) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
 }
 
@@ -253,6 +255,29 @@ export const useDocumentsStore = create<DocumentsState>()(
       } catch (error) {
         console.error("[documents] download failed:", documentUri, error);
       } finally {
+        done();
+      }
+    },
+
+    uploadFile: async (file: File, directoryUri: string | null) => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") return;
+
+      const done = loading("upload");
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const publicKey = base64ToUint8Array(identity.public_key);
+
+        await uploadDocument(file, directoryUri, pdsUrl, did, publicKey, session);
+
+        // Refresh the entire tree so the new file appears
+        done();
+        await get().fetchAll();
+      } catch (error) {
+        console.error("[documents] upload failed:", error);
         done();
       }
     },

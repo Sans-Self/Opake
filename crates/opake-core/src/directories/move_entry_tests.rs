@@ -1,5 +1,5 @@
 use super::*;
-use crate::client::{HttpResponse, RequestBody};
+use crate::client::RequestBody;
 use crate::records::Directory;
 use crate::test_utils::MockTransport;
 
@@ -25,15 +25,6 @@ fn source_doc(parent_uri: Option<&str>) -> ResolvedPath {
         uri: DOC_URI.to_string(),
         kind: EntryKind::Document,
         name: "beach.jpg".to_string(),
-        parent_uri: parent_uri.map(String::from),
-    }
-}
-
-fn source_dir(uri: &str, name: &str, parent_uri: Option<&str>) -> ResolvedPath {
-    ResolvedPath {
-        uri: uri.to_string(),
-        kind: EntryKind::Directory,
-        name: name.to_string(),
         parent_uri: parent_uri.map(String::from),
     }
 }

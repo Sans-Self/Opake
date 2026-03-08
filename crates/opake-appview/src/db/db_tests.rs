@@ -216,18 +216,18 @@ fn cursor_roundtrip() {
     let db = test_db();
 
     // No cursor initially
-    let initial = db.with_conn(|c| cursor::load_cursor(c)).unwrap();
+    let initial = db.with_conn(cursor::load_cursor).unwrap();
     assert!(initial.is_none());
 
     // Save and load
     db.with_conn(|c| cursor::save_cursor(c, 1709330400000000))
         .unwrap();
-    let loaded = db.with_conn(|c| cursor::load_cursor(c)).unwrap();
+    let loaded = db.with_conn(cursor::load_cursor).unwrap();
     assert_eq!(loaded, Some(1709330400000000));
 
     // Update
     db.with_conn(|c| cursor::save_cursor(c, 1709330500000000))
         .unwrap();
-    let updated = db.with_conn(|c| cursor::load_cursor(c)).unwrap();
+    let updated = db.with_conn(cursor::load_cursor).unwrap();
     assert_eq!(updated, Some(1709330500000000));
 }

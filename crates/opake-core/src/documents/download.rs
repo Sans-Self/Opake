@@ -181,7 +181,7 @@ mod tests {
     use crate::test_utils::MockTransport;
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-    use super::super::tests::{dummy_encrypted_metadata, mock_client, TEST_DID, TEST_URI};
+    use super::super::tests::{mock_client, TEST_DID, TEST_URI};
 
     fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);

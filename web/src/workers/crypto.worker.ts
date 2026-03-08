@@ -1,6 +1,7 @@
 import * as Comlink from "comlink";
 import init, {
   bindingCheck,
+  schemaVersion as wasmSchemaVersion,
   generateContentKey,
   encryptBlob,
   decryptBlob,
@@ -8,6 +9,7 @@ import init, {
   unwrapKey,
   wrapContentKeyForKeyring,
   unwrapContentKeyFromKeyring,
+  encryptMetadata as wasmEncryptMetadata,
   decryptMetadata as wasmDecryptMetadata,
   decryptDirectoryMetadata as wasmDecryptDirectoryMetadata,
   generateDpopKeyPair as wasmGenerateDpopKeyPair,
@@ -53,6 +55,10 @@ const cryptoApi = {
     return bindingCheck();
   },
 
+  schemaVersion(): number {
+    return wasmSchemaVersion();
+  },
+
   generateContentKey(): Uint8Array {
     return generateContentKey();
   },
@@ -81,7 +87,11 @@ const cryptoApi = {
     return unwrapContentKeyFromKeyring(wrapped, groupKey);
   },
 
-  // Metadata decryption
+  // Metadata encryption / decryption
+
+  encryptMetadata(key: Uint8Array, metadata: DocumentMetadata): EncryptedPayload {
+    return wasmEncryptMetadata(key, metadata) as EncryptedPayload;
+  },
 
   decryptMetadata(key: Uint8Array, ciphertext: Uint8Array, nonce: Uint8Array): DocumentMetadata {
     return wasmDecryptMetadata(key, ciphertext, nonce) as DocumentMetadata;

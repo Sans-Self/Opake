@@ -107,8 +107,7 @@ mod tests {
     use crate::client::HttpResponse;
     use crate::crypto::{OsRng, X25519PublicKey};
     use crate::records::{
-        AtBytes, BlobRef, CidLink, DirectEncryption, EncryptedMetadata, Encryption,
-        EncryptionEnvelope,
+        AtBytes, BlobRef, CidLink, DirectEncryption, Encryption, EncryptionEnvelope,
     };
     use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
