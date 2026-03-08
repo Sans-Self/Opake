@@ -36,7 +36,6 @@ interface DocumentsState {
   loading: boolean;
   error: string | null;
   activeTagFilters: string[];
-  availableTags: string[];
   viewMode: "list" | "grid";
 
   readonly fetchAll: () => Promise<void>;
@@ -60,7 +59,6 @@ export const useDocumentsStore = create<DocumentsState>()(
     loading: false,
     error: null,
     activeTagFilters: [],
-    availableTags: [],
     viewMode: "list",
 
     fetchAll: async () => {
@@ -76,7 +74,6 @@ export const useDocumentsStore = create<DocumentsState>()(
         draft.treeSnapshot = null;
         draft.documentRecords = {};
         draft.decryptedDirectories = new Set();
-        draft.availableTags = [];
       });
 
       try {
@@ -174,31 +171,19 @@ export const useDocumentsStore = create<DocumentsState>()(
       const documentUris = dirEntry.entries.filter((uri) => !(uri in treeSnapshot.directories));
 
       // Decrypt sequentially to avoid overwhelming the worker
-      const collectedTags = await documentUris.reduce(
-        async (accPromise, uri) => {
-          const acc = await accPromise;
-          const record = documentRecords[uri];
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-          if (!record) return acc;
+      await documentUris.reduce(async (prev, uri) => {
+        await prev;
+        const record = documentRecords[uri];
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+        if (!record) return;
 
-          try {
-            const tags = await decryptDocumentRecord(record, did, privateKey, set);
-            return [...acc, ...tags];
-          } catch (error) {
-            console.warn("[documents] failed to decrypt document:", uri, error);
-            markDecryptionFailed(uri, set);
-            return acc;
-          }
-        },
-        Promise.resolve([] as string[]),
-      );
-
-      if (collectedTags.length > 0) {
-        set((draft) => {
-          const merged = new Set([...draft.availableTags, ...collectedTags]);
-          draft.availableTags = [...merged].sort((a, b) => a.localeCompare(b));
-        });
-      }
+        try {
+          await decryptDocumentRecord(record, did, privateKey, set);
+        } catch (error) {
+          console.warn("[documents] failed to decrypt document:", uri, error);
+          markDecryptionFailed(uri, set);
+        }
+      }, Promise.resolve());
     },
 
     itemsForDirectory: (directoryUri: string | null): FileItem[] => {

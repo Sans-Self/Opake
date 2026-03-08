@@ -46,7 +46,7 @@ export async function decryptDocumentRecord(
   did: string,
   privateKey: Uint8Array,
   set: SetFn,
-): Promise<string[]> {
+): Promise<void> {
   const encryption = record.value.encryption;
   if (encryption.$type !== "app.opake.document#directEncryption") {
     set((draft) => {
@@ -56,7 +56,7 @@ export async function decryptDocumentRecord(
         decrypted: true,
       };
     });
-    return [];
+    return;
   }
 
   const contentKey = await unwrapDirectContentKey(encryption, did, privateKey);
@@ -76,8 +76,6 @@ export async function decryptDocumentRecord(
       decrypted: true,
     };
   });
-
-  return metadata.tags ?? [];
 }
 
 export function markDecryptionFailed(uri: string, set: SetFn): void {

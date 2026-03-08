@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
 import {
   ListBulletsIcon,
@@ -45,7 +46,6 @@ function FileBrowserLayout() {
   const ancestorsOf = useDocumentsStore((s) => s.ancestorsOf);
   const items = useDocumentsStore((s) => s.items);
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
-  const availableTags = useDocumentsStore((s) => s.availableTags);
   const activeTagFilters = useDocumentsStore((s) => s.activeTagFilters);
   const setTagFilters = useDocumentsStore((s) => s.setTagFilters);
 
@@ -56,6 +56,29 @@ function FileBrowserLayout() {
   const currentDirectoryName = currentDirectoryItem?.name ?? null;
 
   const depth = segments.length > 0 ? segments.length + 1 : 1;
+
+  // Tags scoped to the current directory (unfiltered — shows all tags, not just active)
+  const availableTags = (() => {
+    if (!treeSnapshot) return [];
+    const targetUri = currentDirectoryUri ?? treeSnapshot.rootUri;
+    if (!targetUri) return [];
+    const dirEntry = treeSnapshot.directories[targetUri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+    if (!dirEntry) return [];
+    const tags = new Set(
+      dirEntry.entries
+        .map((uri) => items[uri])
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: items may not be populated yet
+        .filter((item): item is NonNullable<typeof item> => item != null)
+        .flatMap((item) => item.tags),
+    );
+    return [...tags].sort((a, b) => a.localeCompare(b));
+  })();
+
+  // Clear stale tag filters when navigating to a different directory
+  useEffect(() => {
+    setTagFilters([]);
+  }, [currentDirectoryUri, setTagFilters]);
 
   const footerText = (() => {
     const targetUri = currentDirectoryUri ?? treeSnapshot?.rootUri;
