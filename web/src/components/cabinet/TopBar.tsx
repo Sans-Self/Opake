@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   MagnifyingGlassIcon,
   XIcon,
@@ -9,17 +11,69 @@ import {
   SignOutIcon,
 } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
+import { useAuthStore } from "@/stores/auth";
+import { truncateDid } from "@/lib/format";
 
 interface TopBarProps {
   readonly searchQuery: string;
   readonly onSearchChange: (query: string) => void;
 }
 
-function closeDropdown(e: React.MouseEvent) {
-  e.currentTarget.closest("details")?.removeAttribute("open");
+/** Fetch the user's Bluesky profile avatar URL from their PDS. */
+function useAvatarUrl(pdsUrl: string | null, did: string | null): string | null {
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pdsUrl || !did) return;
+
+    const controller = new AbortController();
+
+    fetch(`${pdsUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`, {
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<{ avatar?: string }>) : null))
+      .then((profile) => setAvatarUrl(profile?.avatar ?? null))
+      .catch(() => setAvatarUrl(null));
+
+    return () => {
+      controller.abort();
+      setAvatarUrl(null);
+    };
+  }, [pdsUrl, did]);
+
+  return avatarUrl;
 }
 
 export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
+  const session = useAuthStore((s) => s.session);
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- Zustand actions don't use `this`
+  const logout = useAuthStore((s) => s.logout);
+
+  const handle = session.status === "active" ? session.handle : null;
+  const did = session.status === "active" ? session.did : null;
+  const pdsUrl = session.status === "active" ? session.pdsUrl : null;
+  const initial = handle?.[0]?.toUpperCase() ?? "?";
+  const avatarUrl = useAvatarUrl(pdsUrl, did);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+        return;
+      }
+      setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [menuOpen]);
+
   return (
     <header className="border-base-300/50 bg-base-300/90 flex shrink-0 items-center gap-3 border-b px-5 py-2.5 backdrop-blur-[10px]">
       {/* Search */}
@@ -27,7 +81,7 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
         <MagnifyingGlassIcon size={13} className="text-text-faint" />
         <input
           type="text"
-          placeholder="Search your cabinet\u2026"
+          placeholder="Search your cabinet…"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="text-secondary grow bg-transparent"
@@ -59,43 +113,74 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
       </div>
 
       {/* User menu */}
-      <details className="dropdown dropdown-end">
-        <summary className="btn btn-ghost btn-sm gap-2 rounded-lg pl-1">
-          <div className="bg-accent text-caption text-primary flex size-7 items-center justify-center rounded-full font-semibold">
-            A
+      <button
+        ref={triggerRef}
+        onClick={() => setMenuOpen((prev) => !prev)}
+        className="btn btn-ghost btn-sm gap-2 rounded-lg pl-1"
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+      >
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            className="size-7 shrink-0 rounded-full object-cover"
+            aria-hidden="true"
+          />
+        ) : (
+          <div
+            className="bg-accent text-caption text-primary flex size-7 items-center justify-center rounded-full font-semibold"
+            aria-hidden="true"
+          >
+            {initial}
           </div>
-          <span className="text-secondary text-xs font-normal">alice.bsky.social</span>
-        </summary>
-        <div className="dropdown-content border-base-300/50 bg-base-100 shadow-panel-lg z-50 w-52.5 rounded-xl border">
-          <div className="border-base-300/50 border-b px-3.5 py-2.5">
-            <div className="text-ui text-base-content font-medium">alice.bsky.social</div>
-            <div className="text-caption text-text-faint mt-0.5">did:plc:7f2ab3c4\u20268e91</div>
-          </div>
-          <ul className="menu p-1">
-            {[
-              { icon: UserIcon, label: "Profile & DID", to: "/cabinet/settings" as const },
-              { icon: LockIcon, label: "Encryption Keys", to: "/cabinet/settings" as const },
-              { icon: GearIcon, label: "Settings", to: "/cabinet/settings" as const },
-            ].map(({ icon: Icon, label, to }) => (
-              <li key={label}>
-                <Link to={to} onClick={closeDropdown} className="text-secondary gap-2.5 text-xs">
-                  <Icon size={13} />
-                  {label}
-                </Link>
+        )}
+        <span className="text-secondary text-xs font-normal">{handle ?? "Not signed in"}</span>
+      </button>
+      {menuOpen &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            className="border-base-300/50 bg-base-100 shadow-panel-lg fixed top-12 right-4 z-[9999] w-52.5 rounded-xl border"
+          >
+            {handle && did && (
+              <div className="border-base-300/50 border-b px-3.5 py-2.5">
+                <div className="text-ui text-base-content font-medium">{handle}</div>
+                <div className="text-caption text-text-faint mt-0.5">{truncateDid(did)}</div>
+              </div>
+            )}
+            <ul className="menu p-1">
+              {[
+                { icon: UserIcon, label: "Profile & DID", to: "/cabinet/settings" as const },
+                { icon: LockIcon, label: "Encryption Keys", to: "/cabinet/settings" as const },
+                { icon: GearIcon, label: "Settings", to: "/cabinet/settings" as const },
+              ].map(({ icon: Icon, label, to }) => (
+                <li key={label}>
+                  <Link to={to} onClick={closeMenu} className="text-secondary gap-2.5 text-xs">
+                    <Icon size={13} />
+                    {label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <div className="divider my-0.5" />
+            <ul className="menu p-1 pt-0">
+              <li>
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    void logout();
+                  }}
+                  className="text-error gap-2.5 text-xs"
+                >
+                  <SignOutIcon size={13} />
+                  Sign out
+                </button>
               </li>
-            ))}
-          </ul>
-          <div className="divider my-0.5" />
-          <ul className="menu p-1 pt-0">
-            <li>
-              <Link to="/" className="text-error gap-2.5 text-xs">
-                <SignOutIcon size={13} />
-                Sign out
-              </Link>
-            </li>
-          </ul>
-        </div>
-      </details>
+            </ul>
+          </div>,
+          document.body,
+        )}
     </header>
   );
 }

@@ -46,8 +46,14 @@ function LoginPage() {
 }
 
 export const Route = createFileRoute("/devices/login")({
-  beforeLoad: ({ context }) => {
-    if (context.auth.session.status === "active") throw redirect({ to: "/devices" });
+  beforeLoad: async () => {
+    const state = useAuthStore.getState();
+    if (state.session.status === "initializing") {
+      await state.boot();
+    }
+    if (useAuthStore.getState().session.status === "active") {
+      throw redirect({ to: "/devices" });
+    }
   },
   component: LoginPage,
 });

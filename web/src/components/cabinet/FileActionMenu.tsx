@@ -3,6 +3,7 @@ import {
   DotsThreeVerticalIcon,
   DownloadSimpleIcon,
   PencilSimpleIcon,
+  ShareNetworkIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { DropdownMenu } from "@/components/DropdownMenu";
@@ -14,6 +15,7 @@ interface FileActionMenuProps {
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
+  readonly onShare?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -24,6 +26,7 @@ export function FileActionMenu({
   onEditMetadata,
   onRename,
   onMove,
+  onShare,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -52,6 +55,7 @@ export function FileActionMenu({
       ]
     : [
         { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
+        { icon: ShareNetworkIcon, label: "Share\u2026", onClick: onShare },
         { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
         { icon: DownloadSimpleIcon, label: "Download", onClick: onDownload },
         { icon: TrashIcon, label: "Delete", onClick: onDelete },

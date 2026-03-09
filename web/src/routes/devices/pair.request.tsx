@@ -22,8 +22,12 @@ const storage = new IndexedDbStorage();
 // ---------------------------------------------------------------------------
 
 export const Route = createFileRoute("/devices/pair/request")({
-  beforeLoad: ({ context }) => {
-    if (context.auth.session.status !== "active") {
+  beforeLoad: async () => {
+    const state = useAuthStore.getState();
+    if (state.session.status === "initializing") {
+      await state.boot();
+    }
+    if (useAuthStore.getState().session.status !== "active") {
       throw redirect({ to: "/devices/login" });
     }
   },

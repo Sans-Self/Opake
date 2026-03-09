@@ -15,6 +15,8 @@ export default tseslint.config(
     ignores: [
       "src/routeTree.gen.ts",
       "src/wasm/**",
+      "src/content/**/*.mdx",
+      ".output/**",
       "dist/**",
       "node_modules/**",
     ],

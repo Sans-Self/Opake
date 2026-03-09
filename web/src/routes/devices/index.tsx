@@ -13,8 +13,12 @@ import { useMinimumDuration } from "@/utils";
 const MIN_CHECK_DISPLAY_MS = 2000;
 
 export const Route = createFileRoute("/devices/")({
-  beforeLoad: ({ context }) => {
-    if (context.auth.session.status !== "active") {
+  beforeLoad: async () => {
+    const state = useAuthStore.getState();
+    if (state.session.status === "initializing") {
+      await state.boot();
+    }
+    if (useAuthStore.getState().session.status !== "active") {
       throw redirect({ to: "/devices/login" });
     }
   },

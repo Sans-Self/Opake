@@ -8,6 +8,7 @@ import { createFileRoute, Outlet, useMatchRoute } from "@tanstack/react-router";
 const MIN_CHECK_DISPLAY_MS = 2000;
 
 export const Route = createFileRoute("/devices")({
+  ssr: false,
   component: View,
   errorComponent: ErrorView,
 });

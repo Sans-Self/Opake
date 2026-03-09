@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add web sharing UI with grant management [#149](https://issues.opake.app/issues/149.html)
+- Add settings page with AppView URL configuration [#277](https://issues.opake.app/issues/277.html)
+- Add device settings link in sidebar with account info [#276](https://issues.opake.app/issues/276.html)
 - Add web file and directory moving [#253](https://issues.opake.app/issues/253.html)
 - Add web metadata management for documents [#252](https://issues.opake.app/issues/252.html)
 - Add error toast notifications for user feedback [#266](https://issues.opake.app/issues/266.html)

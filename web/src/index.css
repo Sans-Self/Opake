@@ -154,4 +154,17 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
+
+  /* Scoped prose — for MDX content blocks */
+  .prose p {
+    margin-block: 0.75em;
+  }
+  .prose a {
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose strong {
+    font-weight: 600;
+  }
 }

@@ -84,6 +84,29 @@ export function formatRelativeDate(iso: string): string {
   return then.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+/** Truncate a DID for display, keeping prefix and abbreviated identifier. */
+export function truncateDid(did: string): string {
+  const lastColon = did.lastIndexOf(":");
+  if (lastColon === -1) return did;
+  const prefix = did.slice(0, lastColon + 1);
+  const id = did.slice(lastColon + 1);
+  if (id.length <= 8) return did;
+  return `${prefix}${id.slice(0, 4)}…${id.slice(-3)}`;
+}
+
+/** Format an ISO date as a short locale string (e.g. "Mar 8, 2026"). */
+export function formatShortDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 const DOCUMENT_COLLECTION = "app.opake.document";
 const DIRECTORY_COLLECTION = "app.opake.directory";
 

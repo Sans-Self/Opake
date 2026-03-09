@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "@phosphor-icons/react";
 import { OpakeLogo } from "@/components/OpakeLogo";
+import LandingContent from "@/content/landing.mdx";
 
 function LandingPage() {
   return (
@@ -27,11 +28,9 @@ function LandingPage() {
           privately kept.
         </h1>
 
-        <p className="text-secondary mb-10 max-w-130 text-center text-[1.05rem] leading-[1.75]">
-          Opake exists because privacy and collaboration should not be a tradeoff. Your files —
-          encrypted, owned, shared on your terms — through decentralised identity, with no central
-          authority in between.
-        </p>
+        <div className="prose text-secondary mb-10 max-w-130 text-center text-[1.05rem] leading-[1.75]">
+          <LandingContent />
+        </div>
 
         <div className="flex items-center gap-3.5">
           <Link
@@ -53,6 +52,19 @@ function LandingPage() {
   );
 }
 
+const DESCRIPTION =
+  "Encrypted personal cloud built on the AT Protocol. Your files — encrypted, owned, shared on your terms.";
+
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Opake — Your data, freely shared, privately kept" },
+      { name: "description", content: DESCRIPTION },
+      { name: "og:title", content: "Opake — Your data, freely shared, privately kept" },
+      { name: "og:description", content: DESCRIPTION },
+      { name: "twitter:title", content: "Opake — Your data, freely shared, privately kept" },
+      { name: "twitter:description", content: DESCRIPTION },
+    ],
+  }),
   component: LandingPage,
 });

@@ -13,12 +13,12 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write 'src/**/*.{ts,tsx}'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx}'"
+    "format": "prettier --write 'src/**/*.{ts,tsx,mdx}'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,mdx}'"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "@tanstack/react-router": "^1.163.3",
+    "@tanstack/react-start": "^1.166.3",
     "clsx": "^2.1.1",
     "comlink": "^4.4.2",
     "dexie": "^4.3.0",
@@ -29,13 +29,13 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@mdx-js/rollup": "^3.1.1",
     "@tailwindcss/vite": "^4.2.1",
-    "@tanstack/router-plugin": "^1.164.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.3.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.4",
     "daisyui": "^5.5.19",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
@@ -50,6 +50,7 @@
     "jiti": "^2.6.1",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",

@@ -15,6 +15,7 @@ import {
 } from "./MetadataEditDialog";
 import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
 import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
+import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { useDocumentsStore } from "@/stores/documents";
 import { getCryptoWorker } from "@/lib/worker";
 import type { FileItem } from "./types";
@@ -47,6 +48,7 @@ export function PanelContent({
   const metadataDialogRef = useRef<MetadataEditDialogHandle>(null);
   const moveDialogRef = useRef<MoveDialogHandle>(null);
   const renameDialogRef = useRef<RenameDialogHandle>(null);
+  const shareDialogRef = useRef<ShareDialogHandle>(null);
 
   const handleDeleteFolderClick = async (item: FileItem) => {
     const worker = getCryptoWorker();
@@ -98,6 +100,7 @@ export function PanelContent({
               onEditMetadata={() => metadataDialogRef.current?.show(item)}
               onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
               onMove={() => void handleMoveClick(item)}
+              onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
               onDeleteFolder={() => void handleDeleteFolderClick(item)}
@@ -114,6 +117,7 @@ export function PanelContent({
               onEditMetadata={() => metadataDialogRef.current?.show(item)}
               onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
               onMove={() => void handleMoveClick(item)}
+              onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
               onDownload={() => onDownload(item.uri)}
               onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
               onDeleteFolder={() => void handleDeleteFolderClick(item)}
@@ -127,6 +131,7 @@ export function PanelContent({
       <MetadataEditDialog ref={metadataDialogRef} onSave={onUpdateMetadata} />
       <MoveDialog ref={moveDialogRef} onMove={onMoveEntry} />
       <RenameDialog ref={renameDialogRef} onSave={onRenameDirectory} />
+      <ShareDialog ref={shareDialogRef} />
     </div>
   );
 }
