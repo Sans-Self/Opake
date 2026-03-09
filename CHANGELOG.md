@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add markdown renderer for document preview [#206](https://issues.opake.app/issues/206.html)
+- Add encrypted image viewer with client-side decryption [#204](https://issues.opake.app/issues/204.html)
 - Add README.md header sections for all crates [#264](https://issues.opake.app/issues/264.html)
 - Add web onboarding flow for first-time identity setup [#265](https://issues.opake.app/issues/265.html)
 - Add MDX rendering for docs and front page [#256](https://issues.opake.app/issues/256.html)
