@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add README.md header sections for all crates [#264](https://issues.opake.app/issues/264.html)
+- Add web onboarding flow for first-time identity setup [#265](https://issues.opake.app/issues/265.html)
+- Add MDX rendering for docs and front page [#256](https://issues.opake.app/issues/256.html)
 - Add web sharing UI with grant management [#149](https://issues.opake.app/issues/149.html)
 - Add settings page with AppView URL configuration [#277](https://issues.opake.app/issues/277.html)
 - Add device settings link in sidebar with account info [#276](https://issues.opake.app/issues/276.html)

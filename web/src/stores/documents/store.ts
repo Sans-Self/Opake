@@ -102,14 +102,6 @@ export const useDocumentsStore = create<DocumentsState>()(
       const { did, pdsUrl } = authState.session;
       const done = loading("documents-fetch");
 
-      set((draft) => {
-        draft.error = null;
-        draft.items = {};
-        draft.treeSnapshot = null;
-        draft.documentRecords = {};
-        draft.decryptedDirectories = new Set();
-      });
-
       try {
         const session = await storage.loadSession(did);
         const identity = await storage.loadIdentity(did);
@@ -156,10 +148,13 @@ export const useDocumentsStore = create<DocumentsState>()(
         const docRecordsMap: Readonly<Record<string, PdsRecord<DocumentRecord>>> =
           Object.fromEntries(documentRecords.map((r) => [r.uri, r] as const));
 
+        // Swap atomically — no intermediate empty state that causes skeleton flicker
         set((draft) => {
+          draft.error = null;
           draft.items = items;
           draft.treeSnapshot = castDraft(snapshot);
           draft.documentRecords = castDraft(docRecordsMap);
+          draft.decryptedDirectories = new Set();
         });
 
         done();

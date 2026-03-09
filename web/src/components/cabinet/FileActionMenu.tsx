@@ -2,6 +2,7 @@ import {
   ArrowBendUpRightIcon,
   DotsThreeVerticalIcon,
   DownloadSimpleIcon,
+  EyeIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
   TrashIcon,
@@ -12,6 +13,7 @@ import type { FileItem } from "./types";
 
 interface FileActionMenuProps {
   readonly item: FileItem;
+  readonly onPreview?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
@@ -23,6 +25,7 @@ interface FileActionMenuProps {
 
 export function FileActionMenu({
   item,
+  onPreview,
   onEditMetadata,
   onRename,
   onMove,
@@ -54,6 +57,7 @@ export function FileActionMenu({
         { icon: TrashIcon, label: "Delete", onClick: onDeleteFolder },
       ]
     : [
+        ...(onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: onPreview }] : []),
         { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
         { icon: ShareNetworkIcon, label: "Share\u2026", onClick: onShare },
         { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },

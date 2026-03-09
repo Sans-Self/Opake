@@ -1,7 +1,8 @@
-import { useRef } from "react";
+import { Suspense, useRef } from "react";
 import { FolderIcon } from "@phosphor-icons/react";
 import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
+import { DirectoryReadme, DirectoryReadmeSkeleton } from "./DirectoryReadme";
 import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import {
@@ -18,12 +19,14 @@ import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { useDocumentsStore } from "@/stores/documents";
 import { getCryptoWorker } from "@/lib/worker";
-import type { FileItem } from "./types";
+import { isPreviewable, type FileItem } from "./types";
 
 interface PanelContentProps {
   readonly items: readonly FileItem[];
   readonly viewMode: "list" | "grid";
+  readonly activeUri?: string;
   readonly onOpen: (item: FileItem) => void;
+  readonly onPreview?: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
   readonly onDelete: (uri: string) => void;
   readonly onDeleteFolder: (uri: string) => void;
@@ -35,7 +38,9 @@ interface PanelContentProps {
 export function PanelContent({
   items,
   viewMode,
+  activeUri,
   onOpen,
+  onPreview,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -75,6 +80,15 @@ export function PanelContent({
     moveDialogRef.current?.show(item.uri, item.name, item.kind, currentParent, disabled);
   };
 
+  const handleItemClick = (item: FileItem) => {
+    if (item.kind === "folder") onOpen(item);
+    else if (onPreview && isPreviewable(item)) onPreview(item);
+    else onDownload(item.uri);
+  };
+
+  const previewHandler = (item: FileItem) =>
+    onPreview && isPreviewable(item) ? () => onPreview(item) : undefined;
+
   if (items.length === 0) {
     return (
       <div className="hero py-16">
@@ -88,42 +102,42 @@ export function PanelContent({
     );
   }
 
+  const readmeItem = items.find(
+    (item) => item.kind === "file" && item.decrypted && /^readme\.md$/i.test(item.name),
+  );
+
+  const FileListComponent = viewMode === "list" ? FileListRow : FileGridCard;
+  const fileList = items.map((item) => (
+    <FileListComponent
+      key={item.id}
+      item={item}
+      isActive={item.uri === activeUri}
+      onClick={() => handleItemClick(item)}
+      onPreview={previewHandler(item)}
+      onEditMetadata={() => metadataDialogRef.current?.show(item)}
+      onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
+      onMove={() => void handleMoveClick(item)}
+      onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
+      onDownload={() => onDownload(item.uri)}
+      onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
+      onDeleteFolder={() => void handleDeleteFolderClick(item)}
+    />
+  ));
+
   return (
     <div className="p-3">
+      {readmeItem && (
+        <div className="mb-3">
+          <Suspense key={readmeItem.uri} fallback={<DirectoryReadmeSkeleton />}>
+            <DirectoryReadme documentUri={readmeItem.uri} />
+          </Suspense>
+        </div>
+      )}
+
       {viewMode === "list" ? (
-        <div className="flex flex-col gap-px">
-          {items.map((item) => (
-            <FileListRow
-              key={item.id}
-              item={item}
-              onClick={() => item.kind === "folder" && onOpen(item)}
-              onEditMetadata={() => metadataDialogRef.current?.show(item)}
-              onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
-              onMove={() => void handleMoveClick(item)}
-              onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
-              onDownload={() => onDownload(item.uri)}
-              onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
-              onDeleteFolder={() => void handleDeleteFolderClick(item)}
-            />
-          ))}
-        </div>
+        <div className="flex flex-col gap-px">{fileList}</div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {items.map((item) => (
-            <FileGridCard
-              key={item.id}
-              item={item}
-              onClick={() => item.kind === "folder" && onOpen(item)}
-              onEditMetadata={() => metadataDialogRef.current?.show(item)}
-              onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
-              onMove={() => void handleMoveClick(item)}
-              onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
-              onDownload={() => onDownload(item.uri)}
-              onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
-              onDeleteFolder={() => void handleDeleteFolderClick(item)}
-            />
-          ))}
-        </div>
+        <div className="grid grid-cols-2 gap-3">{fileList}</div>
       )}
 
       <DeleteConfirmDialog ref={deleteDialogRef} onConfirm={onDelete} />

@@ -18,3 +18,15 @@ export interface FileItem {
   mimeType?: string;
   description?: string;
 }
+
+const PREVIEWABLE_FILE_TYPES: ReadonlySet<FileType> = new Set(["image", "note"]);
+
+/** Whether a file item can be previewed inline (images, markdown). */
+export function isPreviewable(item: FileItem): boolean {
+  return (
+    item.kind === "file" &&
+    item.decrypted &&
+    !!item.fileType &&
+    PREVIEWABLE_FILE_TYPES.has(item.fileType)
+  );
+}

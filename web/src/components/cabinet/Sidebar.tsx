@@ -1,11 +1,4 @@
-import {
-  FolderIcon,
-  LockIcon,
-  UsersIcon,
-  BookOpenIcon,
-  TrashIcon,
-  GearIcon,
-} from "@phosphor-icons/react";
+import { FolderIcon, UsersIcon, BookOpenIcon, GearIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
@@ -13,13 +6,11 @@ import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
   { to: "/cabinet/files" as const, icon: FolderIcon, label: "Your Cabinet" },
-  { to: "/cabinet/encrypted" as const, icon: LockIcon, label: "Encrypted" },
   { to: "/cabinet/shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
 ];
 
 const BOTTOM_NAV = [
   { to: "/cabinet/docs" as const, icon: BookOpenIcon, label: "Docs & Help" },
-  { to: "/cabinet/trash" as const, icon: TrashIcon, label: "Trash" },
   { to: "/cabinet/settings" as const, icon: GearIcon, label: "Settings" },
 ];
 
@@ -39,17 +30,6 @@ export function Sidebar() {
           <OpakeLogo loading={anyLoading} />
         </Link>
       </div>
-
-      {/* Storage */}
-      <div className="mb-5 px-1">
-        <div className="text-caption text-text-faint mb-1.5 flex justify-between">
-          <span>Storage</span>
-          <span>3.1 / 10 GB</span>
-        </div>
-        <progress className="progress progress-primary h-0.75 w-full" value={31} max={100} />
-      </div>
-
-      <div className="divider mx-1 my-0" />
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">

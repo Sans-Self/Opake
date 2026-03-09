@@ -3,45 +3,19 @@ import { createPortal } from "react-dom";
 import {
   MagnifyingGlassIcon,
   XIcon,
-  ShieldCheckIcon,
   BellIcon,
-  UserIcon,
-  LockIcon,
+  KeyIcon,
   GearIcon,
   SignOutIcon,
 } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
+import { DropdownMenu } from "@/components/DropdownMenu";
 import { useAuthStore } from "@/stores/auth";
 import { truncateDid } from "@/lib/format";
 
 interface TopBarProps {
   readonly searchQuery: string;
   readonly onSearchChange: (query: string) => void;
-}
-
-/** Fetch the user's Bluesky profile avatar URL from their PDS. */
-function useAvatarUrl(pdsUrl: string | null, did: string | null): string | null {
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!pdsUrl || !did) return;
-
-    const controller = new AbortController();
-
-    fetch(`${pdsUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`, {
-      signal: controller.signal,
-    })
-      .then((res) => (res.ok ? (res.json() as Promise<{ avatar?: string }>) : null))
-      .then((profile) => setAvatarUrl(profile?.avatar ?? null))
-      .catch(() => setAvatarUrl(null));
-
-    return () => {
-      controller.abort();
-      setAvatarUrl(null);
-    };
-  }, [pdsUrl, did]);
-
-  return avatarUrl;
 }
 
 export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
@@ -51,9 +25,8 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
 
   const handle = session.status === "active" ? session.handle : null;
   const did = session.status === "active" ? session.did : null;
-  const pdsUrl = session.status === "active" ? session.pdsUrl : null;
+  const avatarUrl = session.status === "active" ? session.avatarUrl : null;
   const initial = handle?.[0]?.toUpperCase() ?? "?";
-  const avatarUrl = useAvatarUrl(pdsUrl, did);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -98,19 +71,13 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
 
       <div className="flex-1" />
 
-      {/* E2E badge */}
-      <div className="badge badge-outline border-border-accent bg-accent text-caption text-primary gap-1.5 py-3">
-        <ShieldCheckIcon size={12} weight="bold" />
-        End-to-end encrypted
-      </div>
-
       {/* Notifications */}
-      <div className="indicator">
-        <span className="indicator-item badge badge-primary badge-xs size-1.5 p-0" />
-        <button className="btn btn-ghost btn-sm btn-square rounded-lg">
-          <BellIcon size={15} className="text-text-muted" />
-        </button>
-      </div>
+      <DropdownMenu
+        trigger={<BellIcon size={15} className="text-text-muted" />}
+        triggerClassName="btn btn-ghost btn-sm btn-square rounded-lg"
+        items={[]}
+        emptyLabel="No notifications"
+      />
 
       {/* User menu */}
       <button
@@ -141,7 +108,7 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
         createPortal(
           <div
             ref={popoverRef}
-            className="border-base-300/50 bg-base-100 shadow-panel-lg fixed top-12 right-4 z-[9999] w-52.5 rounded-xl border"
+            className="border-base-300/50 bg-base-100 shadow-panel-lg fixed top-12 right-4 z-9999 w-52.5 rounded-xl border"
           >
             {handle && did && (
               <div className="border-base-300/50 border-b px-3.5 py-2.5">
@@ -149,10 +116,9 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
                 <div className="text-caption text-text-faint mt-0.5">{truncateDid(did)}</div>
               </div>
             )}
-            <ul className="menu p-1">
+            <ul className="menu w-full p-1">
               {[
-                { icon: UserIcon, label: "Profile & DID", to: "/cabinet/settings" as const },
-                { icon: LockIcon, label: "Encryption Keys", to: "/cabinet/settings" as const },
+                { icon: KeyIcon, label: "Encryption Keys", to: "/devices" as const },
                 { icon: GearIcon, label: "Settings", to: "/cabinet/settings" as const },
               ].map(({ icon: Icon, label, to }) => (
                 <li key={label}>
@@ -164,7 +130,7 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
               ))}
             </ul>
             <div className="divider my-0.5" />
-            <ul className="menu p-1 pt-0">
+            <ul className="menu w-full p-1 pt-0">
               <li>
                 <button
                   onClick={() => {

@@ -37,7 +37,7 @@ export type SessionState =
   | { status: "initializing" }
   | { status: "none" }
   | { status: "authenticating" }
-  | { status: "active"; did: string; handle: string; pdsUrl: string }
+  | { status: "active"; did: string; handle: string; pdsUrl: string; avatarUrl: string | null }
   | { status: "error"; message: string };
 
 export type IdentityState =
@@ -77,6 +77,21 @@ const storage = new IndexedDbStorage();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Fetch the user's Bluesky profile avatar URL via the PDS proxy. */
+async function fetchAvatarUrl(pdsUrl: string, did: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${pdsUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`,
+      { headers: { "atproto-proxy": "did:web:api.bsky.app#bsky_appview" } },
+    );
+    if (!res.ok) return null;
+    const profile = (await res.json()) as { avatar?: string };
+    return profile.avatar ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Check if publicKey/self already exists on the PDS. */
 async function fetchUpstreamPublicKey(
@@ -140,7 +155,22 @@ export const useAuthStore = create<AuthState>()(
         await storage.loadSession(did);
 
         set((draft) => {
-          draft.session = { status: "active", did, handle: account.handle, pdsUrl: account.pdsUrl };
+          draft.session = {
+            status: "active",
+            did,
+            handle: account.handle,
+            pdsUrl: account.pdsUrl,
+            avatarUrl: null,
+          };
+        });
+
+        // Fire-and-forget — don't block boot on a profile picture
+        void fetchAvatarUrl(account.pdsUrl, did).then((avatarUrl) => {
+          set((draft) => {
+            if (draft.session.status === "active") {
+              draft.session.avatarUrl = avatarUrl;
+            }
+          });
         });
       } catch {
         set((draft) => {
@@ -360,8 +390,22 @@ export const useAuthStore = create<AuthState>()(
         clearPendingState();
 
         set((draft) => {
-          draft.session = { status: "active", did, handle: pending.handle, pdsUrl: pending.pdsUrl };
+          draft.session = {
+            status: "active",
+            did,
+            handle: pending.handle,
+            pdsUrl: pending.pdsUrl,
+            avatarUrl: null,
+          };
           draft.identity = { status: "unchecked" };
+        });
+
+        void fetchAvatarUrl(pending.pdsUrl, did).then((avatarUrl) => {
+          set((draft) => {
+            if (draft.session.status === "active") {
+              draft.session.avatarUrl = avatarUrl;
+            }
+          });
         });
       } catch (error) {
         console.error("[auth] completeLogin failed:", error);

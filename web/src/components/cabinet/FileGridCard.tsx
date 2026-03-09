@@ -6,7 +6,9 @@ import type { FileItem } from "./types";
 
 interface FileGridCardProps {
   readonly item: FileItem;
+  readonly isActive?: boolean;
   readonly onClick: () => void;
+  readonly onPreview?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
@@ -18,7 +20,9 @@ interface FileGridCardProps {
 
 export function FileGridCard({
   item,
+  isActive,
   onClick,
+  onPreview,
   onEditMetadata,
   onRename,
   onMove,
@@ -29,12 +33,19 @@ export function FileGridCard({
 }: FileGridCardProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
+  const isClickable = isFolder || item.decrypted;
+
+  const cardClassName = [
+    "card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all",
+    isClickable ? "cursor-pointer" : "",
+    isActive ? "border-primary/30 shadow-panel-md" : "",
+  ].join(" ");
 
   return (
     <div
-      onClick={isFolder ? onClick : undefined}
+      onClick={isClickable ? onClick : undefined}
       onKeyDown={
-        isFolder
+        isClickable
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -43,16 +54,14 @@ export function FileGridCard({
             }
           : undefined
       }
-      role={isFolder ? "button" : "article"}
-      tabIndex={isFolder ? 0 : undefined}
+      role={isClickable ? "button" : "article"}
+      tabIndex={isClickable ? 0 : undefined}
       aria-label={
         item.decrypted
           ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
           : "Decrypting…"
       }
-      className={`card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all ${
-        isFolder ? "cursor-pointer" : ""
-      }`}
+      className={cardClassName}
     >
       <div className="mb-3 flex items-start justify-between">
         <div className={`flex size-9.5 items-center justify-center rounded-[10px] ${bg} ${text}`}>
@@ -61,6 +70,7 @@ export function FileGridCard({
         <div className="flex items-center gap-1">
           <FileActionMenu
             item={item}
+            onPreview={onPreview}
             onEditMetadata={onEditMetadata}
             onRename={onRename}
             onMove={onMove}

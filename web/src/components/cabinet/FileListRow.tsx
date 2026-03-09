@@ -6,7 +6,9 @@ import type { FileItem } from "./types";
 
 interface FileListRowProps {
   readonly item: FileItem;
+  readonly isActive?: boolean;
   readonly onClick: () => void;
+  readonly onPreview?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
@@ -18,7 +20,9 @@ interface FileListRowProps {
 
 export function FileListRow({
   item,
+  isActive,
   onClick,
+  onPreview,
   onEditMetadata,
   onRename,
   onMove,
@@ -29,12 +33,19 @@ export function FileListRow({
 }: FileListRowProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
+  const isClickable = isFolder || item.decrypted;
+
+  const rowClassName = [
+    "hover:bg-bg-hover flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors",
+    isClickable ? "cursor-pointer" : "",
+    isActive ? "bg-bg-hover ring-1 ring-primary/20" : "",
+  ].join(" ");
 
   return (
     <div
-      onClick={isFolder ? onClick : undefined}
+      onClick={isClickable ? onClick : undefined}
       onKeyDown={
-        isFolder
+        isClickable
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -43,21 +54,20 @@ export function FileListRow({
             }
           : undefined
       }
-      role={isFolder ? "button" : "row"}
-      tabIndex={isFolder ? 0 : undefined}
+      role={isClickable ? "button" : "row"}
+      tabIndex={isClickable ? 0 : undefined}
       aria-label={
         item.decrypted
           ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
           : "Decrypting…"
       }
-      className={`hover:bg-bg-hover flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors ${
-        isFolder ? "cursor-pointer" : ""
-      }`}
+      className={rowClassName}
     >
       {/* Actions */}
       <div className="w-6">
         <FileActionMenu
           item={item}
+          onPreview={onPreview}
           onEditMetadata={onEditMetadata}
           onRename={onRename}
           onMove={onMove}

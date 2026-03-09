@@ -8,3 +8,8 @@ export function rkeyFromUri(uri: string): string {
 export function directoryUri(did: string, rkey: string): string {
   return `at://${did}/app.opake.directory/${rkey}`;
 }
+
+/** Build a full AT URI for a document record. */
+export function documentUri(did: string, rkey: string): string {
+  return `at://${did}/app.opake.document/${rkey}`;
+}

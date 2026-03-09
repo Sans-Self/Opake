@@ -1,10 +1,7 @@
-// Download orchestration — fetch encrypted blob, decrypt client-side, trigger browser save.
+// Download orchestration — decrypt blob client-side, trigger browser save.
 
-import { authenticatedBlobFetch } from "@/lib/api";
-import { base64ToUint8Array } from "@/lib/encoding";
-import { getCryptoWorker } from "@/lib/worker";
-import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
-import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
+import { decryptDocumentBlob } from "@/lib/preview";
+import type { PdsRecord, DocumentRecord } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
 
 export async function downloadDocument(
@@ -14,30 +11,12 @@ export async function downloadDocument(
   privateKey: Uint8Array,
   session: Session,
 ): Promise<void> {
-  const { encryption } = record.value;
-  if (encryption.$type !== "app.opake.document#directEncryption") {
-    throw new Error("Keyring-encrypted downloads are not yet supported");
-  }
-
-  const contentKey = await unwrapDirectContentKey(encryption, did, privateKey);
-
-  // Fetch encrypted blob from PDS
-  const cid = record.value.blob.ref.$link;
-  const encryptedBlob = await authenticatedBlobFetch({ pdsUrl, did, cid }, session);
-
-  // Decrypt the blob
-  const worker = getCryptoWorker();
-  const blobNonce = base64ToUint8Array(encryption.envelope.nonce.$bytes);
-  const plaintext = await worker.decryptBlob(contentKey, new Uint8Array(encryptedBlob), blobNonce);
-
-  // Decrypt metadata for filename
-  const { ciphertext: metaCiphertext, nonce: metaNonce } = decryptEnvelope(
-    record.value.encryptedMetadata,
-  );
-  const metadata: DocumentMetadata = await worker.decryptMetadata(
-    contentKey,
-    metaCiphertext,
-    metaNonce,
+  const { plaintext, metadata } = await decryptDocumentBlob(
+    record,
+    pdsUrl,
+    did,
+    privateKey,
+    session,
   );
 
   const filename = metadata.name;

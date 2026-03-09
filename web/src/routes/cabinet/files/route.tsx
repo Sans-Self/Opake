@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
 import {
   ListBulletsIcon,
@@ -19,19 +19,69 @@ import {
 } from "@/components/cabinet/Breadcrumbs";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { PanelSkeleton } from "@/components/cabinet/PanelSkeleton";
+import { PreviewPaneHeader } from "@/components/cabinet/PreviewPaneHeader";
+import { FilePreview, evictPreviewCache } from "@/components/cabinet/FilePreview";
 import { TagFilterBar } from "@/components/cabinet/TagFilterBar";
 import { NewFolderDialog, type NewFolderDialogHandle } from "@/components/cabinet/NewFolderDialog";
 import { useDocumentsStore } from "@/stores/documents";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
-import { directoryUri } from "@/lib/atUri";
+import { directoryUri, documentUri } from "@/lib/atUri";
+import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
+import type { FileItem } from "@/components/cabinet/types";
 
+// ---------------------------------------------------------------------------
+// Derived state helpers
+// ---------------------------------------------------------------------------
+
+function computeAvailableTags(
+  treeSnapshot: DirectoryTreeSnapshot | null,
+  contextDirectoryUri: string | null,
+  items: Readonly<Record<string, FileItem>>,
+): readonly string[] {
+  if (!treeSnapshot) return [];
+  const targetUri = contextDirectoryUri ?? treeSnapshot.rootUri;
+  if (!targetUri) return [];
+  const dirEntry = treeSnapshot.directories[targetUri];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+  if (!dirEntry) return [];
+  const tags = new Set(
+    dirEntry.entries
+      .map((uri) => items[uri])
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: items may not be populated yet
+      .filter((item): item is NonNullable<typeof item> => item != null)
+      .flatMap((item) => item.tags),
+  );
+  return [...tags].sort((a, b) => a.localeCompare(b));
+}
+
+function computeFooterText(
+  contextDirectoryUri: string | null,
+  contextRkey: string | undefined,
+  treeSnapshot: DirectoryTreeSnapshot | null,
+): string {
+  const targetUri = contextDirectoryUri ?? treeSnapshot?.rootUri;
+  if (!targetUri || !treeSnapshot) return "Loading\u2026";
+  const dirEntry = treeSnapshot.directories[targetUri];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+  if (!dirEntry) return "Encrypted";
+  return contextRkey
+    ? `${dirEntry.entries.length} items \u00b7 Encrypted`
+    : `${dirEntry.entries.length} items \u00b7 All encrypted \u00b7 AT Protocol`;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line sonarjs/cognitive-complexity -- layout component with split-panel preview; splitting further would obscure the routing logic
 function FileBrowserLayout() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newFolderDialogRef = useRef<NewFolderDialogHandle>(null);
   const uploadFile = useDocumentsStore((s) => s.uploadFile);
   const createFolder = useDocumentsStore((s) => s.createFolder);
+  const downloadFile = useDocumentsStore((s) => s.downloadFile);
 
   // Determine current directory from child splat route params
   const splatMatch = useMatch({
@@ -45,6 +95,7 @@ function FileBrowserLayout() {
   const session = useAuthStore((s) => s.session);
   const did = session.status === "active" ? session.did : null;
   const currentDirectoryUri = rkey && did ? directoryUri(did, rkey) : null;
+  const currentDocumentUri = rkey && did ? documentUri(did, rkey) : null;
 
   const documentsLoading = useAppStore((s) => s.isLoading("documents-fetch"));
   const viewMode = useDocumentsStore((s) => s.viewMode);
@@ -52,50 +103,50 @@ function FileBrowserLayout() {
   const ancestorsOf = useDocumentsStore((s) => s.ancestorsOf);
   const items = useDocumentsStore((s) => s.items);
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
+  const documentRecords = useDocumentsStore((s) => s.documentRecords);
   const activeTagFilters = useDocumentsStore((s) => s.activeTagFilters);
   const setTagFilters = useDocumentsStore((s) => s.setTagFilters);
 
-  // Derived values — computed during render, not inside selectors
-  const ancestors = ancestorsOf(currentDirectoryUri);
+  // Detect whether the last segment is a document (preview mode)
+  const isDirectory = !!(currentDirectoryUri && treeSnapshot?.directories[currentDirectoryUri]);
+  const isDocument = !!(currentDocumentUri && documentRecords[currentDocumentUri]);
+  const isPreviewMode = rkey != null && !isDirectory && isDocument;
 
-  const currentDirectoryItem = currentDirectoryUri ? items[currentDirectoryUri] : undefined;
+  // In preview mode, the directory context is the parent
+  const parentSegments = isPreviewMode ? segments.slice(0, -1) : segments;
+  const parentRkey =
+    parentSegments.length > 0 ? parentSegments[parentSegments.length - 1] : undefined;
+  const parentDirectoryUri = parentRkey && did ? directoryUri(did, parentRkey) : null;
+
+  // Effective directory context: parent when previewing, current when browsing
+  const contextDirectoryUri = isPreviewMode ? parentDirectoryUri : currentDirectoryUri;
+  const contextRkey = isPreviewMode ? parentRkey : rkey;
+
+  const ancestors = ancestorsOf(contextDirectoryUri);
+  const currentDirectoryItem = contextDirectoryUri ? items[contextDirectoryUri] : undefined;
   const currentDirectoryName = currentDirectoryItem?.name ?? null;
 
-  const depth = segments.length > 0 ? segments.length + 1 : 1;
+  // Preview document name for the preview pane header
+  const previewDocumentItem =
+    isPreviewMode && currentDocumentUri ? items[currentDocumentUri] : undefined;
+  const previewDocumentName = previewDocumentItem?.name ?? null;
 
-  // Tags scoped to the current directory (unfiltered — shows all tags, not just active)
-  const availableTags = (() => {
-    if (!treeSnapshot) return [];
-    const targetUri = currentDirectoryUri ?? treeSnapshot.rootUri;
-    if (!targetUri) return [];
-    const dirEntry = treeSnapshot.directories[targetUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
-    if (!dirEntry) return [];
-    const tags = new Set(
-      dirEntry.entries
-        .map((uri) => items[uri])
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: items may not be populated yet
-        .filter((item): item is NonNullable<typeof item> => item != null)
-        .flatMap((item) => item.tags),
-    );
-    return [...tags].sort((a, b) => a.localeCompare(b));
-  })();
+  // Depth is based on directory segments only — preview doesn't add depth
+  const effectiveSegments = isPreviewMode ? parentSegments : segments;
+  const depth = effectiveSegments.length > 0 ? effectiveSegments.length + 1 : 1;
 
-  // Clear stale tag filters when navigating to a different directory
+  const availableTags = computeAvailableTags(treeSnapshot, contextDirectoryUri, items);
+  const footerText = computeFooterText(contextDirectoryUri, contextRkey, treeSnapshot);
+
   useEffect(() => {
     setTagFilters([]);
-  }, [currentDirectoryUri, setTagFilters]);
+  }, [contextDirectoryUri, setTagFilters]);
 
-  const footerText = (() => {
-    const targetUri = currentDirectoryUri ?? treeSnapshot?.rootUri;
-    if (!targetUri || !treeSnapshot) return "Loading\u2026";
-    const dirEntry = treeSnapshot.directories[targetUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
-    if (!dirEntry) return "Encrypted";
-    return rkey
-      ? `${dirEntry.entries.length} items \u00b7 Encrypted`
-      : `${dirEntry.entries.length} items \u00b7 All encrypted \u00b7 AT Protocol`;
-  })();
+  // Evict preview cache when leaving preview mode
+  useEffect(() => {
+    if (!isPreviewMode || !currentDocumentUri) return undefined;
+    return () => evictPreviewCache(currentDocumentUri);
+  }, [isPreviewMode, currentDocumentUri]);
 
   const handleToggleTag = (tag: string) => {
     const current = [...activeTagFilters];
@@ -111,23 +162,66 @@ function FileBrowserLayout() {
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    void uploadFile(file, currentDirectoryUri);
-    // Reset so re-selecting the same file triggers onChange again
+    void uploadFile(file, contextDirectoryUri);
     e.target.value = "";
   };
 
+  // Panel close: navigate up from the directory context
   const handleClose = () => {
-    if (segments.length > 1) {
+    if (effectiveSegments.length > 1) {
       void navigate({
         to: "/cabinet/files/$",
-        params: { _splat: segments.slice(0, -1).join("/") },
+        params: { _splat: effectiveSegments.slice(0, -1).join("/") },
       });
     } else {
       void navigate({ to: "/cabinet/files" });
     }
   };
 
-  // -- Toolbar --
+  // Preview close: dismiss the preview, stay in the directory
+  const handleClosePreview = () => {
+    if (parentSegments.length > 0) {
+      void navigate({
+        to: "/cabinet/files/$",
+        params: { _splat: parentSegments.join("/") },
+      });
+    } else {
+      void navigate({ to: "/cabinet/files" });
+    }
+  };
+
+  // Breadcrumb always shows directory path — document name is in the preview pane header
+  const breadcrumbSegments = isPreviewMode ? parentSegments : segments;
+
+  const breadcrumbsContent = (
+    <Breadcrumbs>
+      {contextRkey ? (
+        <li>
+          <Link to="/cabinet/files" className="text-text-faint">
+            Your Cabinet
+          </Link>
+        </li>
+      ) : (
+        <BreadcrumbActive>Your Cabinet</BreadcrumbActive>
+      )}
+      {ancestors.map((ancestor, index) => (
+        <li key={ancestor.uri}>
+          <Link
+            to="/cabinet/files/$"
+            params={{ _splat: breadcrumbSegments.slice(0, index + 1).join("/") }}
+            className="text-text-faint"
+          >
+            {ancestor.name}
+          </Link>
+        </li>
+      ))}
+      {contextRkey && currentDirectoryName && (
+        <BreadcrumbActive>{currentDirectoryName}</BreadcrumbActive>
+      )}
+      {contextRkey && !currentDirectoryName && <BreadcrumbSkeleton />}
+    </Breadcrumbs>
+  );
+
   const toolbar = (
     <>
       <SegmentedToggle
@@ -170,47 +264,43 @@ function FileBrowserLayout() {
     </>
   );
 
+  const tagFilterBar = (
+    <TagFilterBar
+      availableTags={availableTags}
+      activeFilters={activeTagFilters}
+      onToggle={handleToggleTag}
+      onClear={() => setTagFilters([])}
+    />
+  );
+
+  const outletContent = documentsLoading ? <PanelSkeleton /> : <Outlet />;
+
+  const previewPanel =
+    isPreviewMode && currentDocumentUri ? (
+      <>
+        <PreviewPaneHeader
+          documentName={previewDocumentName}
+          onDownload={() => void downloadFile(currentDocumentUri)}
+          onClose={handleClosePreview}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <Suspense fallback={<PanelSkeleton />}>
+            <FilePreview documentUri={currentDocumentUri} />
+          </Suspense>
+        </div>
+      </>
+    ) : undefined;
+
   return (
     <PanelShell
       depth={depth}
-      breadcrumbs={
-        <Breadcrumbs>
-          {rkey ? (
-            <li>
-              <Link to="/cabinet/files" className="text-text-faint">
-                Your Cabinet
-              </Link>
-            </li>
-          ) : (
-            <BreadcrumbActive>Your Cabinet</BreadcrumbActive>
-          )}
-          {ancestors.map((ancestor, index) => (
-            <li key={ancestor.uri}>
-              <Link
-                to="/cabinet/files/$"
-                params={{ _splat: segments.slice(0, index + 1).join("/") }}
-                className="text-text-faint"
-              >
-                {ancestor.name}
-              </Link>
-            </li>
-          ))}
-          {rkey && currentDirectoryName && (
-            <BreadcrumbActive>{currentDirectoryName}</BreadcrumbActive>
-          )}
-          {rkey && !currentDirectoryName && <BreadcrumbSkeleton />}
-        </Breadcrumbs>
-      }
+      breadcrumbs={breadcrumbsContent}
       toolbar={toolbar}
       footer={footerText}
+      sidePanel={previewPanel}
     >
-      <TagFilterBar
-        availableTags={availableTags}
-        activeFilters={activeTagFilters}
-        onToggle={handleToggleTag}
-        onClear={() => setTagFilters([])}
-      />
-      {documentsLoading ? <PanelSkeleton /> : <Outlet />}
+      {tagFilterBar}
+      {outletContent}
       <input
         ref={fileInputRef}
         type="file"
@@ -220,7 +310,7 @@ function FileBrowserLayout() {
       />
       <NewFolderDialog
         ref={newFolderDialogRef}
-        onConfirm={(name) => void createFolder(name, currentDirectoryUri)}
+        onConfirm={(name) => void createFolder(name, contextDirectoryUri)}
       />
     </PanelShell>
   );

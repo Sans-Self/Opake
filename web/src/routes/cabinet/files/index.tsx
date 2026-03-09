@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { PanelContent } from "@/components/cabinet/PanelContent";
+import { evictReadmeCache } from "@/components/cabinet/DirectoryReadme";
 import { useDocumentsStore } from "@/stores/documents";
 import { rkeyFromUri } from "@/lib/atUri";
 import type { FileItem } from "@/components/cabinet/types";
@@ -18,11 +19,26 @@ function RootDirectoryContent() {
   const renameDirectory = useDocumentsStore((s) => s.renameDirectory);
   const items = useDocumentsStore(useShallow((s) => s.itemsForDirectory(null)));
 
+  const readmeUriRef = useRef<string | null>(null);
+  const readmeItem = items.find(
+    (item) => item.kind === "file" && item.decrypted && /^readme\.md$/i.test(item.name),
+  );
+  const readmeUri = readmeItem?.uri ?? null;
+
+  // Evict README cache only when the readme URI changes (not on unmount,
+  // since opening a preview unmounts this component but keeps the same directory)
+  useEffect(() => {
+    if (readmeUriRef.current && readmeUriRef.current !== readmeUri) {
+      evictReadmeCache(readmeUriRef.current);
+    }
+    readmeUriRef.current = readmeUri;
+  }, [readmeUri]);
+
   useEffect(() => {
     void ensureDirectoryDecrypted(null);
   }, [ensureDirectoryDecrypted]);
 
-  const handleOpen = (item: FileItem) => {
+  const navigateToChild = (item: FileItem) => {
     void navigate({
       to: "/cabinet/files/$",
       params: { _splat: rkeyFromUri(item.uri) },
@@ -33,7 +49,8 @@ function RootDirectoryContent() {
     <PanelContent
       items={items}
       viewMode={viewMode}
-      onOpen={handleOpen}
+      onOpen={navigateToChild}
+      onPreview={navigateToChild}
       onDownload={(uri) => void downloadFile(uri)}
       onDelete={(uri) => void deleteFile(uri)}
       onDeleteFolder={(uri) => void deleteFolder(uri)}
