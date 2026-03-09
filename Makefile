@@ -9,7 +9,9 @@ NVM = source "$${NVM_DIR:-$$HOME/.nvm}/nvm.sh" && nvm use --silent
 WASM_CRATE = crates/opake-wasm
 WASM_OUT   = web/src/wasm/opake-wasm
 
-.PHONY: build wasm wasm-dev install-web-devs web-build setup
+.PHONY: build wasm wasm-dev install-web-devs web-build setup \
+       validate lint test rust-test fmt clippy web-lint web-typecheck web-test \
+       images push-images
 
 ## Build all Rust crates
 build:
@@ -34,3 +36,63 @@ web-build: wasm
 ## Set up dev environment (git hooks, dependencies)
 setup: install-web-devs
 	ln -sf ../../tools/pre-commit.sh .git/hooks/pre-commit
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+REGISTRY ?= zot.sans-self.org
+TAG      ?= $(shell git rev-parse --short HEAD)
+
+## Run all checks (CI equivalent)
+validate: fmt clippy test web-lint web-typecheck wasm web-test web-build
+
+## Check Rust formatting
+fmt:
+	cargo fmt --check
+
+## Run clippy
+clippy:
+	cargo clippy --workspace --all-targets -- -D warnings
+
+## Run all tests (Rust + web)
+test: rust-test web-test
+
+## Run Rust tests
+rust-test:
+	cargo test --workspace
+
+## Lint frontend
+web-lint: install-web-devs
+	cd web && $(NVM) && bun run lint
+
+## Typecheck frontend
+web-typecheck: install-web-devs
+	cd web && $(NVM) && bun run tsc --noEmit
+
+## Run frontend tests
+web-test: install-web-devs
+	cd web && $(NVM) && bun run test
+
+## Run all lints (Rust + web)
+lint: fmt clippy web-lint web-typecheck
+
+# ---------------------------------------------------------------------------
+# Container images
+# ---------------------------------------------------------------------------
+
+## Build container images (appview + web)
+images:
+	docker build -f Containerfile.appview \
+		-t $(REGISTRY)/opake/appview:$(TAG) \
+		-t $(REGISTRY)/opake/appview:latest .
+	docker build -f Containerfile.web \
+		-t $(REGISTRY)/opake/web:$(TAG) \
+		-t $(REGISTRY)/opake/web:latest .
+
+## Push container images to registry
+push-images: images
+	docker push $(REGISTRY)/opake/appview:$(TAG)
+	docker push $(REGISTRY)/opake/appview:latest
+	docker push $(REGISTRY)/opake/web:$(TAG)
+	docker push $(REGISTRY)/opake/web:latest
