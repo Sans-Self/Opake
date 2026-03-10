@@ -15,7 +15,7 @@ Contributions welcome — from humans and AI agents alike.
 - `cargo fmt` before every commit (enforced by CI and pre-commit hook)
 - `cargo clippy -- -D warnings` must pass
 - No `unwrap()` in library code — use `?` and proper error types
-- `opake-core` uses `thiserror` for typed errors; `opake-cli` and `opake-appview` use `anyhow` for application errors
+- `opake-core` uses `thiserror` for typed errors; `opake-cli` uses `anyhow` for application errors
 - Prefer `&str` parameters, `String` for owned data
 - Avoid `.clone()` unless necessary
 
@@ -36,16 +36,16 @@ opake-cli       CLI binary wrapping opake-core
                 - FileStorage (impl Storage over filesystem, TOML + JSON)
                 - user interaction (prompts, formatting)
 
-opake-appview   indexer + REST API for grant/keyring discovery
-                - Jetstream firehose consumer
-                - SQLite storage (WAL mode)
-                - Axum API with DID-scoped Ed25519 auth
-                - rate limiting via tower_governor
-
 opake-derive    proc-macro crate
                 - #[derive(RedactedDebug)] with #[redact] field attribute
                 - generates Debug impls showing byte length instead of content
                 - used by opake-core (ContentKey, Session) and opake-cli (Identity)
+
+appview/        Elixir/Phoenix indexer + REST API for grant/keyring discovery
+                - Jetstream firehose consumer (WebSockex)
+                - PostgreSQL storage (Ecto)
+                - Phoenix API with DID-scoped Ed25519 auth (Erlang :crypto)
+                - rate limiting via Hammer
 
 web/            React SPA (Vite + TanStack Router + Tailwind/daisyUI)
                 - opake-core via WASM (wasm-pack build)
@@ -71,9 +71,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed crate structur
 cargo test                          # all Rust tests
 cargo test -p opake-core            # core only
 cargo test -p opake-cli             # CLI only
-cargo test -p opake-appview         # appview only
 cargo test -- --test-output         # show println output
 
+cd appview && mix test              # appview tests (Elixir/ExUnit)
 cd web && bun run test              # web frontend tests (Vitest + fake-indexeddb)
 ```
 

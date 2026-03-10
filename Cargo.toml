@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/opake-core", "crates/opake-cli", "crates/opake-appview", "crates/opake-derive", "crates/opake-wasm"]
+members = ["crates/opake-core", "crates/opake-cli", "crates/opake-derive", "crates/opake-wasm"]
 resolver = "2"
 
 [workspace.package]
