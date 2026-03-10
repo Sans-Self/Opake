@@ -590,42 +590,18 @@ B$ opake download --keyring-member $SHARED_URI -o /tmp/should-fail.txt
 
 ## 8. AppView
 
-The AppView is a separate binary (`opake-appview`) that indexes grants and keyrings from the AT Protocol firehose. These tests require a running Jetstream instance or network access to the public Jetstream relays.
+The AppView is an Elixir/Phoenix service (`appview/`) that indexes grants and keyrings from the AT Protocol firehose. These tests require Docker (for PostgreSQL) or a running Postgres instance.
 
-### 8.1 Configuration
-
-Create a minimal config:
+### 8.1 Start AppView (Docker)
 
 ```bash
-cat > /tmp/opake-appview-test/appview.toml <<EOF
-jetstream_url = "wss://jetstream2.us-east.bsky.network/subscribe"
-listen = "127.0.0.1:6100"
-db_path = "/tmp/opake-appview-test/appview.db"
-EOF
+cd appview
+docker compose --profile full up --build -d
+# Entrypoint auto-creates DB and runs migrations
+sleep 5
 ```
 
-### 8.2 Status (cold start)
-
-```bash
-opake-appview --config-dir /tmp/opake-appview-test status
-# Cursor:   (none — indexer has not run)
-# Grants:   0
-# Keyrings: 0
-```
-
-### 8.3 Start indexer + API
-
-```bash
-opake-appview --config-dir /tmp/opake-appview-test run -v &
-APPVIEW_PID=$!
-sleep 3
-```
-
-**Verify:**
-- Logs show "opake-appview listening on 127.0.0.1:6100"
-- Logs show Jetstream connection established
-
-### 8.4 Health endpoint
+### 8.2 Health endpoint
 
 ```bash
 curl -s http://127.0.0.1:6100/api/health | jq .
@@ -640,7 +616,7 @@ curl -s http://127.0.0.1:6100/api/health | jq .
 - `indexerConnected` is `true`
 - `cursorAgeSecs` is small (< 60)
 
-### 8.5 Inbox and keyrings require auth
+### 8.3 Inbox and keyrings require auth
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/api/inbox?did=did:plc:test
@@ -650,7 +626,7 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6100/api/keyrings?did=di
 # 401
 ```
 
-### 8.6 Share triggers indexing
+### 8.4 Share triggers indexing
 
 With the AppView still running, create a share grant using the CLI (from section 4.2):
 
@@ -660,39 +636,24 @@ A$ opake share shared-file.txt <B-handle>
 
 Wait a few seconds for the firehose to deliver the event.
 
+### 8.5 Status (after indexing)
+
 ```bash
-opake-appview --config-dir /tmp/opake-appview-test status
-# Grants: should be ≥ 1
+docker compose exec appview bin/opake_appview eval "OpakeAppview.Release.status()"
+# Cursor:
+#   Position: ...
+#   Time: 2026-...
+#   Lag: <small number>s
+# Counts:
+#   Grants: <non-zero>
+#   Keyrings: <number>
 ```
 
-### 8.7 Status (after indexing)
+### 8.6 Cleanup
 
 ```bash
-opake-appview --config-dir /tmp/opake-appview-test status
-# Cursor:   2026-03-02T...
-# Lag:      <small number>s
-# Grants:   <non-zero>
-# Keyrings: <number>
-```
-
-### 8.8 Config dir matches CLI
-
-Both binaries should resolve the same config directory:
-
-```bash
-# Both use OPAKE_DATA_DIR
-OPAKE_DATA_DIR=/tmp/opake-appview-test opake-appview status
-# should find /tmp/opake-appview-test/appview.toml
-
-# --config-dir flag works the same way
-opake-appview --config-dir /tmp/opake-appview-test status
-```
-
-### 8.9 Cleanup
-
-```bash
-kill $APPVIEW_PID 2>/dev/null
-rm -rf /tmp/opake-appview-test
+cd appview
+docker compose --profile full down -v
 ```
 
 ---

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Rewrite opake-appview in Elixir/Phoenix with PostgreSQL [#290](https://issues.opake.app/issues/290.html)
 - Add web sharing UI with grant management [#149](https://issues.opake.app/issues/149.html)
 - Add user banner to profile dropdown and cache profile images in IndexedDB [#288](https://issues.opake.app/issues/288.html)
 - Add split-panel preview, UI cleanup, and fix document name flicker [#286](https://issues.opake.app/issues/286.html)
