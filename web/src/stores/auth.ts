@@ -37,7 +37,14 @@ export type SessionState =
   | { status: "initializing" }
   | { status: "none" }
   | { status: "authenticating" }
-  | { status: "active"; did: string; handle: string; pdsUrl: string; avatarUrl: string | null }
+  | {
+      status: "active";
+      did: string;
+      handle: string;
+      pdsUrl: string;
+      avatarUrl: string | null;
+      bannerUrl: string | null;
+    }
   | { status: "error"; message: string };
 
 export type IdentityState =
@@ -78,19 +85,52 @@ const storage = new IndexedDbStorage();
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Fetch the user's Bluesky profile avatar URL via the PDS proxy. */
-async function fetchAvatarUrl(pdsUrl: string, did: string): Promise<string | null> {
+interface ProfileUrls {
+  readonly avatarUrl: string | null;
+  readonly bannerUrl: string | null;
+}
+
+/** Fetch the user's Bluesky profile avatar + banner URLs via the PDS proxy. */
+async function fetchProfileUrls(pdsUrl: string, did: string): Promise<ProfileUrls> {
   try {
     const res = await fetch(
       `${pdsUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`,
       { headers: { "atproto-proxy": "did:web:api.bsky.app#bsky_appview" } },
     );
-    if (!res.ok) return null;
-    const profile = (await res.json()) as { avatar?: string };
-    return profile.avatar ?? null;
+    if (!res.ok) return { avatarUrl: null, bannerUrl: null };
+    const profile = (await res.json()) as { avatar?: string; banner?: string };
+    return {
+      avatarUrl: profile.avatar ?? null,
+      bannerUrl: profile.banner ?? null,
+    };
   } catch {
-    return null;
+    return { avatarUrl: null, bannerUrl: null };
   }
+}
+
+/**
+ * Load cached profile, then refresh from the network in the background.
+ * Calls `applyProfile` immediately with cached data (if any) and again after the fetch.
+ */
+function loadAndRefreshProfile(
+  pdsUrl: string,
+  did: string,
+  applyProfile: (urls: ProfileUrls) => void,
+): void {
+  // Show cached data instantly
+  void storage.loadProfile(did).then((cached) => {
+    if (cached) applyProfile({ avatarUrl: cached.avatarUrl, bannerUrl: cached.bannerUrl });
+  });
+
+  // Then refresh from the network
+  void fetchProfileUrls(pdsUrl, did).then((urls) => {
+    applyProfile(urls);
+    void storage.saveProfile(did, {
+      avatarUrl: urls.avatarUrl,
+      bannerUrl: urls.bannerUrl,
+      fetchedAt: Date.now(),
+    });
+  });
 }
 
 /** Check if publicKey/self already exists on the PDS. */
@@ -161,14 +201,16 @@ export const useAuthStore = create<AuthState>()(
             handle: account.handle,
             pdsUrl: account.pdsUrl,
             avatarUrl: null,
+            bannerUrl: null,
           };
         });
 
-        // Fire-and-forget — don't block boot on a profile picture
-        void fetchAvatarUrl(account.pdsUrl, did).then((avatarUrl) => {
+        // Fire-and-forget — don't block boot on profile images
+        loadAndRefreshProfile(account.pdsUrl, did, ({ avatarUrl, bannerUrl }) => {
           set((draft) => {
             if (draft.session.status === "active") {
               draft.session.avatarUrl = avatarUrl;
+              draft.session.bannerUrl = bannerUrl;
             }
           });
         });
@@ -396,14 +438,16 @@ export const useAuthStore = create<AuthState>()(
             handle: pending.handle,
             pdsUrl: pending.pdsUrl,
             avatarUrl: null,
+            bannerUrl: null,
           };
           draft.identity = { status: "unchecked" };
         });
 
-        void fetchAvatarUrl(pending.pdsUrl, did).then((avatarUrl) => {
+        loadAndRefreshProfile(pending.pdsUrl, did, ({ avatarUrl, bannerUrl }) => {
           set((draft) => {
             if (draft.session.status === "active") {
               draft.session.avatarUrl = avatarUrl;
+              draft.session.bannerUrl = bannerUrl;
             }
           });
         });

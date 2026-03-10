@@ -22,10 +22,22 @@ interface SessionRow {
   value: Session;
 }
 
+export interface CachedProfile {
+  readonly avatarUrl: string | null;
+  readonly bannerUrl: string | null;
+  readonly fetchedAt: number;
+}
+
+interface ProfileRow {
+  did: string;
+  value: CachedProfile;
+}
+
 class OpakeDatabase extends Dexie {
   readonly configs!: Readonly<EntityTable<ConfigRow, "key">>;
   readonly identities!: Readonly<EntityTable<IdentityRow, "did">>;
   readonly sessions!: Readonly<EntityTable<SessionRow, "did">>;
+  readonly profiles!: Readonly<EntityTable<ProfileRow, "did">>;
 
   constructor(name = "opake") {
     super(name);
@@ -33,6 +45,12 @@ class OpakeDatabase extends Dexie {
       configs: "key",
       identities: "did",
       sessions: "did",
+    });
+    this.version(2).stores({
+      configs: "key",
+      identities: "did",
+      sessions: "did",
+      profiles: "did",
     });
   }
 }
@@ -84,6 +102,17 @@ export class IndexedDbStorage implements Storage {
     await this.db.sessions.put({ did: key, value: session });
   }
 
+  async loadProfile(did: string): Promise<CachedProfile | null> {
+    const key = sanitizeDid(did);
+    const row = await this.db.profiles.get(key);
+    return row?.value ?? null;
+  }
+
+  async saveProfile(did: string, profile: CachedProfile): Promise<void> {
+    const key = sanitizeDid(did);
+    await this.db.profiles.put({ did: key, value: profile });
+  }
+
   async removeAccount(did: string): Promise<void> {
     const config = await this.loadConfig();
     const remainingAccounts = Object.fromEntries(
@@ -103,11 +132,12 @@ export class IndexedDbStorage implements Storage {
     const key = sanitizeDid(did);
     await this.db.transaction(
       "rw",
-      [this.db.configs, this.db.identities, this.db.sessions],
+      [this.db.configs, this.db.identities, this.db.sessions, this.db.profiles],
       async () => {
         await this.db.configs.put({ key: CONFIG_KEY, value: updatedConfig });
         await this.db.identities.delete(key);
         await this.db.sessions.delete(key);
+        await this.db.profiles.delete(key);
       },
     );
   }
