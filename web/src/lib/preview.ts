@@ -4,8 +4,13 @@ import { authenticatedBlobFetch } from "@/lib/api";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { getCryptoWorker } from "@/lib/worker";
 import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
+import { useDocumentsStore } from "@/stores/documents";
+import { useAuthStore } from "@/stores/auth";
+import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
+
+const previewStorage = new IndexedDbStorage();
 
 export interface DecryptedBlob {
   readonly plaintext: Uint8Array;
@@ -56,4 +61,38 @@ export async function decryptDocumentBlob(
   );
 
   return { plaintext, metadata };
+}
+
+/**
+ * Create a decrypt function for a document owned by the current user.
+ * Pulls the record from the documents store, session + identity from IndexedDB.
+ * Suitable for passing directly to `<FilePreview decrypt={...} />`.
+ */
+export function decryptOwnDocument(documentUri: string): () => Promise<DecryptedBlob> {
+  return async () => {
+    const state = useDocumentsStore.getState();
+    const record = state.documentRecords[documentUri] as PdsRecord<DocumentRecord> | undefined;
+    if (!record) throw new Error("Document record not found");
+
+    const authState = useAuthStore.getState();
+    if (authState.session.status !== "active") throw new Error("Not authenticated");
+
+    const { did, pdsUrl } = authState.session;
+    const session = await previewStorage.loadSession(did);
+    const identity = await previewStorage.loadIdentity(did);
+    const privateKey = base64ToUint8Array(identity.private_key);
+
+    const storeItem = state.items[documentUri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+    const knownMetadata: DocumentMetadata | undefined = storeItem?.decrypted
+      ? {
+          name: storeItem.name,
+          mimeType: storeItem.mimeType,
+          tags: storeItem.tags,
+          description: storeItem.description,
+        }
+      : undefined;
+
+    return decryptDocumentBlob(record, pdsUrl, did, privateKey, session, knownMetadata);
+  };
 }

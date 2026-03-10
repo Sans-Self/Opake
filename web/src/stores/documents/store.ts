@@ -64,6 +64,8 @@ interface DocumentsState {
   readonly moveEntry: (entryUri: string, targetDirectoryUri: string | null) => Promise<void>;
   readonly renameDirectory: (directoryUri: string, newName: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
+  /** Build the cabinet files route splat path for a document URI, or null if not in the tree. */
+  readonly cabinetPathFor: (documentUri: string) => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,10 +109,14 @@ export const useDocumentsStore = create<DocumentsState>()(
         const identity = await storage.loadIdentity(did);
         const privateKey = base64ToUint8Array(identity.private_key);
 
-        const [documentRecords, directoryRecords] = await Promise.all([
+        const [documentRecords, directoryRecords, grantRecords] = await Promise.all([
           fetchAllRecords<DocumentRecord>(pdsUrl, did, "app.opake.document", session),
           fetchAllRecords<DirectoryRecord>(pdsUrl, did, "app.opake.directory", session),
+          fetchAllRecords<{ document: string }>(pdsUrl, did, "app.opake.grant", session),
         ]);
+
+        // Collect document URIs that have at least one outgoing grant
+        const sharedDocumentUris = new Set(grantRecords.map((r) => r.value.document));
 
         // Build directory tree in WASM — decrypts all directory names in one call
         const worker = getCryptoWorker();
@@ -138,7 +144,9 @@ export const useDocumentsStore = create<DocumentsState>()(
           );
 
         // Create placeholder FileItems for all documents
-        const documentItems = documentRecords.map((r) => [r.uri, documentPlaceholder(r)] as const);
+        const documentItems = documentRecords.map(
+          (r) => [r.uri, documentPlaceholder(r, sharedDocumentUris.has(r.uri))] as const,
+        );
 
         const items: Readonly<Record<string, FileItem>> = Object.fromEntries([
           ...directoryItems,
@@ -617,6 +625,28 @@ export const useDocumentsStore = create<DocumentsState>()(
       };
 
       return collectAncestors(directoryUri, []);
+    },
+
+    cabinetPathFor: (documentUri: string): string | null => {
+      const { treeSnapshot } = get();
+      if (!treeSnapshot) return null;
+
+      // Find the parent directory containing this document
+      const parentUri =
+        Object.entries(treeSnapshot.directories).find(([, entry]) =>
+          entry.entries.includes(documentUri),
+        )?.[0] ?? null;
+
+      const docRkey = rkeyFromUri(documentUri);
+
+      // Document is in the root directory — path is just the rkey
+      if (!parentUri || parentUri === treeSnapshot.rootUri) return docRkey;
+
+      // Build ancestor chain from root to parent directory
+      const ancestors = get().ancestorsOf(parentUri);
+      const parentRkey = rkeyFromUri(parentUri);
+      const segments = [...ancestors.map((a) => a.rkey), parentRkey, docRkey];
+      return segments.join("/");
     },
   })),
 );

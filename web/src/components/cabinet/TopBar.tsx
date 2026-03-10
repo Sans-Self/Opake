@@ -118,9 +118,9 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
                     className="bg-base-300/60 absolute inset-0 bg-cover bg-center"
                     style={bannerUrl ? { backgroundImage: `url(${bannerUrl})` } : undefined}
                   />
-                  <div className="from-base-100 absolute inset-0 bg-gradient-to-t to-transparent" />
+                  <div className="from-base-100 absolute inset-0 bg-linear-to-t to-transparent" />
                 </div>
-                <div className="border-base-300/50 border-b px-3.5 pb-2.5 pt-2">
+                <div className="border-base-300/50 border-b px-3.5 pt-2 pb-2.5">
                   <div className="text-ui text-base-content font-medium">{handle}</div>
                   <div className="text-caption text-text-faint mt-0.5">{truncateDid(did)}</div>
                 </div>

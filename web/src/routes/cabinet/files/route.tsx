@@ -21,6 +21,7 @@ import { PanelShell } from "@/components/cabinet/PanelShell";
 import { PanelSkeleton } from "@/components/cabinet/PanelSkeleton";
 import { PreviewPaneHeader } from "@/components/cabinet/PreviewPaneHeader";
 import { FilePreview, evictPreviewCache } from "@/components/cabinet/FilePreview";
+import { decryptOwnDocument } from "@/lib/preview";
 import { TagFilterBar } from "@/components/cabinet/TagFilterBar";
 import { NewFolderDialog, type NewFolderDialogHandle } from "@/components/cabinet/NewFolderDialog";
 import { useDocumentsStore } from "@/stores/documents";
@@ -285,7 +286,11 @@ function FileBrowserLayout() {
         />
         <div className="min-h-0 flex-1 overflow-hidden">
           <Suspense fallback={<PanelSkeleton />}>
-            <FilePreview documentUri={currentDocumentUri} />
+            <FilePreview
+              cacheKey={currentDocumentUri}
+              decrypt={decryptOwnDocument(currentDocumentUri)}
+              onDownload={() => void downloadFile(currentDocumentUri)}
+            />
           </Suspense>
         </div>
       </>

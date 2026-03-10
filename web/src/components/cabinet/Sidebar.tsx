@@ -6,7 +6,7 @@ import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
   { to: "/cabinet/files" as const, icon: FolderIcon, label: "Your Cabinet" },
-  { to: "/cabinet/shared" as const, icon: UsersIcon, label: "Shared with me", badge: "4" },
+  { to: "/cabinet/shared" as const, icon: UsersIcon, label: "Sharing" },
 ];
 
 const BOTTOM_NAV = [
@@ -33,8 +33,8 @@ export function Sidebar() {
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-        {MAIN_NAV.map(({ to, icon, label, badge }) => (
-          <SidebarItem key={to} to={to} icon={icon} label={label} badge={badge} />
+        {MAIN_NAV.map(({ to, icon, label }) => (
+          <SidebarItem key={to} to={to} icon={icon} label={label} />
         ))}
 
         {/* Workspaces */}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { LockIcon } from "@phosphor-icons/react";
 import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
@@ -8,6 +9,8 @@ interface FileGridCardProps {
   readonly item: FileItem;
   readonly isActive?: boolean;
   readonly onClick: () => void;
+  readonly renderActions?: () => ReactNode;
+  readonly hideStatus?: boolean;
   readonly onPreview?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
@@ -18,10 +21,13 @@ interface FileGridCardProps {
   readonly onDeleteFolder?: () => void;
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- flat component with conditional prop rendering
 export function FileGridCard({
   item,
   isActive,
   onClick,
+  renderActions,
+  hideStatus,
   onPreview,
   onEditMetadata,
   onRename,
@@ -68,17 +74,21 @@ export function FileGridCard({
           {fileIconElement(item, 17)}
         </div>
         <div className="flex items-center gap-1">
-          <FileActionMenu
-            item={item}
-            onPreview={onPreview}
-            onEditMetadata={onEditMetadata}
-            onRename={onRename}
-            onMove={onMove}
-            onShare={onShare}
-            onDownload={onDownload}
-            onDelete={onDelete}
-            onDeleteFolder={onDeleteFolder}
-          />
+          {renderActions ? (
+            renderActions()
+          ) : (
+            <FileActionMenu
+              item={item}
+              onPreview={onPreview}
+              onEditMetadata={onEditMetadata}
+              onRename={onRename}
+              onMove={onMove}
+              onShare={onShare}
+              onDownload={onDownload}
+              onDelete={onDelete}
+              onDeleteFolder={onDeleteFolder}
+            />
+          )}
           <LockIcon size={11} className="text-text-faint" />
         </div>
       </div>
@@ -90,13 +100,16 @@ export function FileGridCard({
       </div>
 
       {item.decrypted ? (
-        <div className="text-base-content mb-1.5 truncate text-xs">{item.name}</div>
+        <div className="text-base-content mb-0.5 truncate text-xs">{item.name}</div>
       ) : (
-        <div className="skeleton mb-1.5 h-4 w-24 rounded" />
+        <div className="skeleton mb-0.5 h-4 w-24 rounded" />
+      )}
+      {item.subtitle && (
+        <div className="text-caption text-text-faint mb-1 truncate">{item.subtitle}</div>
       )}
       <div className="flex items-center justify-between">
         <span className="text-caption text-text-faint">{item.modified}</span>
-        <StatusBadge status={item.status} />
+        {!hideStatus && <StatusBadge status={item.status} />}
       </div>
     </div>
   );

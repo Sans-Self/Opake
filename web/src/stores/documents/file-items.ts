@@ -24,14 +24,14 @@ export function directoryItemFromSnapshot(
   };
 }
 
-export function documentPlaceholder(record: PdsRecord<DocumentRecord>): FileItem {
+export function documentPlaceholder(record: PdsRecord<DocumentRecord>, shared: boolean): FileItem {
   return {
     id: record.uri,
     uri: record.uri,
     name: "",
     kind: "file",
     encrypted: true,
-    status: "private",
+    status: shared ? "shared" : "private",
     modified: formatRelativeDate(record.value.modifiedAt ?? record.value.createdAt),
     decrypted: false,
     tags: [],

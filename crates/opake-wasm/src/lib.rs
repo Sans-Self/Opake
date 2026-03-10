@@ -404,6 +404,32 @@ pub fn decrypt_directory_metadata_js(
 }
 
 // ---------------------------------------------------------------------------
+// DID document utilities
+// ---------------------------------------------------------------------------
+
+/// Return the URL to fetch a DID document (PLC directory or did:web .well-known).
+#[wasm_bindgen(js_name = didDocumentUrl)]
+pub fn did_document_url_js(did: &str) -> Result<String, JsError> {
+    opake_core::client::did_document_url(did).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Parse a fetched DID document and extract the handle from `alsoKnownAs`.
+#[wasm_bindgen(js_name = handleFromDidDocument)]
+pub fn handle_from_did_document_js(doc_json: &[u8]) -> Result<Option<String>, JsError> {
+    let doc: opake_core::client::DidDocument = serde_json::from_slice(doc_json)
+        .map_err(|e: serde_json::Error| JsError::new(&e.to_string()))?;
+    Ok(opake_core::client::handle_from_did_document(&doc))
+}
+
+/// Parse a fetched DID document and extract the PDS service endpoint.
+#[wasm_bindgen(js_name = pdsFromDidDocument)]
+pub fn pds_from_did_document_js(doc_json: &[u8]) -> Result<String, JsError> {
+    let doc: opake_core::client::DidDocument = serde_json::from_slice(doc_json)
+        .map_err(|e: serde_json::Error| JsError::new(&e.to_string()))?;
+    opake_core::client::pds_from_did_document(&doc).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // DirectoryTree handle (stateful WASM export)
 // ---------------------------------------------------------------------------
 

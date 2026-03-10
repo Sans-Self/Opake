@@ -163,15 +163,7 @@ pub async fn resolve_did_document(
     transport: &impl Transport,
     did: &str,
 ) -> Result<DidDocument, Error> {
-    let url = if did.starts_with("did:plc:") {
-        format!("{PLC_DIRECTORY}/{did}")
-    } else if let Some(domain) = did.strip_prefix("did:web:") {
-        format!("https://{domain}/.well-known/did.json")
-    } else {
-        return Err(Error::InvalidRecord(format!(
-            "unsupported DID method: {did}"
-        )));
-    };
+    let url = did_document_url(did)?;
 
     debug!("fetching DID document from {}", url);
 
@@ -186,6 +178,29 @@ pub async fn resolve_did_document(
 
     check_response(&response)?;
     Ok(serde_json::from_slice(&response.body)?)
+}
+
+/// Build the URL to fetch a DID document (PLC directory or did:web .well-known).
+pub fn did_document_url(did: &str) -> Result<String, Error> {
+    if did.starts_with("did:plc:") {
+        Ok(format!("{PLC_DIRECTORY}/{did}"))
+    } else if let Some(domain) = did.strip_prefix("did:web:") {
+        Ok(format!("https://{domain}/.well-known/did.json"))
+    } else {
+        Err(Error::InvalidRecord(format!(
+            "unsupported DID method: {did}"
+        )))
+    }
+}
+
+/// Extract the handle from a DID document's `alsoKnownAs` field.
+///
+/// Returns the first entry starting with `at://`, stripped of the prefix.
+pub fn handle_from_did_document(doc: &DidDocument) -> Option<String> {
+    doc.also_known_as
+        .iter()
+        .find(|a| a.starts_with("at://"))
+        .map(|a| a[5..].to_string())
 }
 
 /// Extract the PDS service endpoint (`#atproto_pds`) from a DID document.

@@ -1,14 +1,20 @@
 // Sharing helpers — resolve recipient, create/list/revoke grants.
 
 import type { WrappedKey } from "@/lib/cryptoTypes";
-import type { EncryptedMetadataEnvelope } from "@/lib/pdsTypes";
+import type { EncryptedMetadataEnvelope, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
+import type { DecryptedBlob } from "@/lib/preview";
 import type { Session } from "@/lib/storageTypes";
 import { authenticatedXrpc, authenticatedDeleteRecord, appview } from "@/lib/api";
 import { resolveHandleToPds } from "@/lib/oauth";
+import { pdsUrlFromDid } from "@/lib/did";
 import { getCryptoWorker } from "@/lib/worker";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@/lib/encoding";
+import { rkeyFromUri } from "@/lib/atUri";
+import { triggerBrowserDownload } from "@/lib/download";
+import { decryptEnvelope } from "@/stores/documents/decrypt";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 
+const storage = new IndexedDbStorage();
 const GRANT_COLLECTION = "app.opake.grant";
 const PUBLIC_KEY_COLLECTION = "app.opake.publicKey";
 
@@ -58,7 +64,7 @@ export async function resolveRecipient(handle: string): Promise<RecipientInfo> {
   const url = `${base}/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=${encodeURIComponent(PUBLIC_KEY_COLLECTION)}&rkey=self`;
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`No Opake public key found for ${handle} (${did})`);
+    throw new Error(`${handle} hasn't signed in to Opake yet — they need to log in at least once`);
   }
 
   const record = (await response.json()) as {
@@ -66,7 +72,7 @@ export async function resolveRecipient(handle: string): Promise<RecipientInfo> {
   };
   const raw = record.value?.publicKey;
   if (!raw) {
-    throw new Error(`No encryption public key published for ${handle}`);
+    throw new Error(`${handle} hasn't signed in to Opake yet — they need to log in at least once`);
   }
 
   const b64 = typeof raw === "string" ? raw : raw.$bytes;
@@ -187,7 +193,6 @@ interface InboxResponse {
 
 /** Fetch incoming grants from the AppView inbox. */
 export async function listIncomingGrants(did: string): Promise<InboxGrantItem[]> {
-  const storage = new IndexedDbStorage();
   const config = await storage.loadConfig().catch(() => null);
   const appviewUrl = config?.appviewUrl;
   if (!appviewUrl) return [];
@@ -224,8 +229,122 @@ export async function revokeGrant(
   grantUri: string,
   session: Session,
 ): Promise<void> {
-  const segments = grantUri.split("/");
-  const rkey = segments[segments.length - 1];
+  await authenticatedDeleteRecord(
+    { pdsUrl, did, collection: GRANT_COLLECTION, rkey: rkeyFromUri(grantUri) },
+    session,
+  );
+}
 
-  await authenticatedDeleteRecord({ pdsUrl, did, collection: GRANT_COLLECTION, rkey }, session);
+// ---------------------------------------------------------------------------
+// Incoming grant resolution (fetch record → unwrap → decrypt metadata)
+// ---------------------------------------------------------------------------
+
+const DOCUMENT_COLLECTION = "app.opake.document";
+
+/** Resolved incoming grant with decrypted document metadata. */
+export interface ResolvedIncomingGrant extends InboxGrantItem {
+  readonly ownerPdsUrl: string;
+  readonly contentKey: Uint8Array;
+  readonly documentRecord: DocumentRecord;
+  readonly metadata: DocumentMetadata;
+}
+
+/** Fetch a record from a PDS without authentication (records are public in atproto). */
+async function publicGetRecord(
+  pdsUrl: string,
+  repo: string,
+  collection: string,
+  rkey: string,
+): Promise<{ uri: string; cid: string; value: unknown }> {
+  const params = new URLSearchParams({ repo, collection, rkey });
+  const response = await fetch(
+    `${pdsUrl.replace(/\/$/, "")}/xrpc/com.atproto.repo.getRecord?${params}`,
+  );
+  if (!response.ok) throw new Error(`getRecord failed: HTTP ${response.status}`);
+  return response.json() as Promise<{ uri: string; cid: string; value: unknown }>;
+}
+
+/**
+ * Resolve an incoming grant: fetch the full grant + document records from the
+ * owner's PDS, unwrap the content key, and decrypt the document metadata.
+ */
+export async function resolveIncomingGrant(
+  grant: InboxGrantItem,
+  privateKey: Uint8Array,
+  knownPdsUrl?: string,
+): Promise<ResolvedIncomingGrant> {
+  const ownerPdsUrl = knownPdsUrl ?? (await pdsUrlFromDid(grant.ownerDid));
+
+  // Fetch the grant record to get the wrappedKey
+  const grantResult = await publicGetRecord(
+    ownerPdsUrl,
+    grant.ownerDid,
+    GRANT_COLLECTION,
+    rkeyFromUri(grant.uri),
+  );
+  const grantRecord = grantResult.value as GrantRecord;
+
+  // Unwrap the content key with our private key
+  const worker = getCryptoWorker();
+  const contentKey = await worker.unwrapKey(grantRecord.wrappedKey, privateKey);
+
+  // Fetch the document record to decrypt its metadata
+  const docResult = await publicGetRecord(
+    ownerPdsUrl,
+    grant.ownerDid,
+    DOCUMENT_COLLECTION,
+    rkeyFromUri(grantRecord.document),
+  );
+  const documentRecord = docResult.value as DocumentRecord;
+
+  // Decrypt document metadata using the content key
+  const { ciphertext, nonce } = decryptEnvelope(documentRecord.encryptedMetadata);
+  const metadata = await worker.decryptMetadata(contentKey, ciphertext, nonce);
+
+  return {
+    ...grant,
+    ownerPdsUrl,
+    contentKey,
+    documentRecord,
+    metadata,
+  };
+}
+
+/** Fetch and decrypt the blob of a resolved incoming grant. */
+async function decryptIncomingBlob(resolved: ResolvedIncomingGrant): Promise<DecryptedBlob> {
+  const { encryption } = resolved.documentRecord;
+  if (encryption.$type !== "app.opake.document#directEncryption") {
+    throw new Error("Keyring-encrypted documents are not yet supported");
+  }
+
+  const cid = resolved.documentRecord.blob.ref.$link;
+  const blobUrl = `${resolved.ownerPdsUrl.replace(/\/$/, "")}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(resolved.ownerDid)}&cid=${encodeURIComponent(cid)}`;
+  const blobResponse = await fetch(blobUrl);
+  if (!blobResponse.ok) throw new Error(`getBlob failed: HTTP ${blobResponse.status}`);
+
+  const worker = getCryptoWorker();
+  const blobNonce = base64ToUint8Array(encryption.envelope.nonce.$bytes);
+  const plaintext = await worker.decryptBlob(
+    resolved.contentKey,
+    new Uint8Array(await blobResponse.arrayBuffer()),
+    blobNonce,
+  );
+
+  return { plaintext, metadata: resolved.metadata };
+}
+
+/** Download a resolved incoming grant's blob to the user's device. */
+export async function downloadIncomingGrant(resolved: ResolvedIncomingGrant): Promise<void> {
+  const { plaintext, metadata } = await decryptIncomingBlob(resolved);
+  triggerBrowserDownload(plaintext, metadata.name, metadata.mimeType ?? "application/octet-stream");
+}
+
+/**
+ * Create a decrypt function for a shared incoming document.
+ * Suitable for passing directly to `<FilePreview decrypt={...} />`.
+ */
+export function decryptIncomingDocument(
+  resolved: ResolvedIncomingGrant,
+): () => Promise<DecryptedBlob> {
+  return () => decryptIncomingBlob(resolved);
 }

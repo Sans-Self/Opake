@@ -1,21 +1,18 @@
-// Preview container — handles blob decryption and dispatches to the
-// appropriate renderer based on MIME type.
+// Preview container — caches a decrypt promise (Suspense-stable) and
+// dispatches to the appropriate renderer based on MIME type.
+// The caller provides the decrypt function — FilePreview doesn't care
+// whether the blob came from the user's PDS or a shared grant.
 
 import { use } from "react";
 import { DownloadSimpleIcon } from "@phosphor-icons/react";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
-import { decryptDocumentBlob, type DecryptedBlob } from "@/lib/preview";
-import { useDocumentsStore } from "@/stores/documents";
-import { useAuthStore } from "@/stores/auth";
-import { base64ToUint8Array } from "@/lib/encoding";
-import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
-
-const storage = new IndexedDbStorage();
+import type { DecryptedBlob } from "@/lib/preview";
 
 interface FilePreviewProps {
-  readonly documentUri: string;
+  readonly cacheKey: string;
+  readonly decrypt: () => Promise<DecryptedBlob>;
+  readonly onDownload: () => void;
 }
 
 function isImageMime(mime: string): boolean {
@@ -32,55 +29,30 @@ type DecryptResult =
   | { readonly status: "unsupported"; readonly mimeType: string };
 
 // Module-level promise cache — survives Suspense unmount/remount cycles.
-// Keyed by documentUri so each document decrypts exactly once.
 const decryptCache = new Map<string, Promise<DecryptResult>>();
 
-function getOrCreateDecryptPromise(documentUri: string): Promise<DecryptResult> {
-  const cached = decryptCache.get(documentUri);
+function getOrCreate(
+  cacheKey: string,
+  decrypt: () => Promise<DecryptedBlob>,
+): Promise<DecryptResult> {
+  const cached = decryptCache.get(cacheKey);
   if (cached) return cached;
 
-  const promise = fetchAndDecrypt(documentUri);
+  const promise = run(decrypt);
   // eslint-disable-next-line functional/immutable-data -- module-level cache for Suspense stability
-  decryptCache.set(documentUri, promise);
+  decryptCache.set(cacheKey, promise);
   return promise;
 }
 
 /** Call when navigating away from a preview to free the cached result. */
-export function evictPreviewCache(documentUri: string): void {
+export function evictPreviewCache(cacheKey: string): void {
   // eslint-disable-next-line functional/immutable-data -- module-level cache cleanup
-  decryptCache.delete(documentUri);
+  decryptCache.delete(cacheKey);
 }
 
-async function fetchAndDecrypt(documentUri: string): Promise<DecryptResult> {
+async function run(decrypt: () => Promise<DecryptedBlob>): Promise<DecryptResult> {
   try {
-    const state = useDocumentsStore.getState();
-    const record = state.documentRecords[documentUri] as PdsRecord<DocumentRecord> | undefined;
-    if (!record) {
-      return { status: "error", message: "Document record not found" };
-    }
-
-    const authState = useAuthStore.getState();
-    if (authState.session.status !== "active") {
-      return { status: "error", message: "Not authenticated" };
-    }
-
-    const { did, pdsUrl } = authState.session;
-    const session = await storage.loadSession(did);
-    const identity = await storage.loadIdentity(did);
-    const privateKey = base64ToUint8Array(identity.private_key);
-
-    const storeItem = state.items[documentUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-    const knownMetadata: DocumentMetadata | undefined = storeItem?.decrypted
-      ? {
-          name: storeItem.name,
-          mimeType: storeItem.mimeType,
-          tags: storeItem.tags,
-          description: storeItem.description,
-        }
-      : undefined;
-
-    const blob = await decryptDocumentBlob(record, pdsUrl, did, privateKey, session, knownMetadata);
+    const blob = await decrypt();
     const mime = blob.metadata.mimeType ?? "application/octet-stream";
     const filename = blob.metadata.name;
 
@@ -96,15 +68,14 @@ async function fetchAndDecrypt(documentUri: string): Promise<DecryptResult> {
   }
 }
 
-export function FilePreview({ documentUri }: FilePreviewProps) {
-  const downloadFile = useDocumentsStore((s) => s.downloadFile);
-  const result = use(getOrCreateDecryptPromise(documentUri));
+export function FilePreview({ cacheKey, decrypt, onDownload }: FilePreviewProps) {
+  const result = use(getOrCreate(cacheKey, decrypt));
 
   if (result.status === "error") {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
         <span className="text-ui text-text-muted">{result.message}</span>
-        <DownloadButton onClick={() => void downloadFile(documentUri)} />
+        <DownloadButton onClick={onDownload} />
       </div>
     );
   }
@@ -113,7 +84,7 @@ export function FilePreview({ documentUri }: FilePreviewProps) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
         <span className="text-ui text-text-muted">Preview not available for {result.mimeType}</span>
-        <DownloadButton onClick={() => void downloadFile(documentUri)} />
+        <DownloadButton onClick={onDownload} />
       </div>
     );
   }

@@ -17,6 +17,7 @@ export interface FileItem {
   tags: string[];
   mimeType?: string;
   description?: string;
+  subtitle?: string;
 }
 
 const PREVIEWABLE_FILE_TYPES: ReadonlySet<FileType> = new Set(["image", "note"]);

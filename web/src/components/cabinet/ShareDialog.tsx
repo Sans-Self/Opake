@@ -7,6 +7,7 @@ import { getCryptoWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { authenticatedXrpc } from "@/lib/api";
 import { toastSuccess, toastError } from "@/stores/toast";
+import { useDocumentsStore } from "@/stores/documents";
 import type { DocumentRecord, Encryption } from "@/lib/pdsTypes";
 import type { OAuthSession } from "@/lib/storageTypes";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
@@ -122,6 +123,16 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         session: oauthSession,
       });
 
+      // Optimistically mark the item as shared in the store
+      const { items } = useDocumentsStore.getState();
+      const item = items[documentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+      if (item) {
+        useDocumentsStore.setState((state) => ({
+          items: { ...state.items, [documentUri]: { ...item, status: "shared" as const } },
+        }));
+      }
+
       setStatus("done");
       toastSuccess(`Shared "${documentName}" with ${handle}`);
       dismiss();
@@ -159,7 +170,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
             type="text"
             placeholder="alice.bsky.social"
             value={recipientHandle}
-            onChange={(e) => setRecipientHandle(e.target.value)}
+            onChange={(e) => setRecipientHandle(e.target.value.replace(/[^a-zA-Z0-9.:_-]/g, ""))}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !busy && recipientHandle.trim()) {
                 void handleShare();

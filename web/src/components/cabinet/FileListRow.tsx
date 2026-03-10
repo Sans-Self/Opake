@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
@@ -8,6 +9,8 @@ interface FileListRowProps {
   readonly item: FileItem;
   readonly isActive?: boolean;
   readonly onClick: () => void;
+  readonly renderActions?: () => ReactNode;
+  readonly hideStatus?: boolean;
   readonly onPreview?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
@@ -18,10 +21,13 @@ interface FileListRowProps {
   readonly onDeleteFolder?: () => void;
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- flat component with conditional prop rendering
 export function FileListRow({
   item,
   isActive,
   onClick,
+  renderActions,
+  hideStatus,
   onPreview,
   onEditMetadata,
   onRename,
@@ -65,17 +71,21 @@ export function FileListRow({
     >
       {/* Actions */}
       <div className="w-6">
-        <FileActionMenu
-          item={item}
-          onPreview={onPreview}
-          onEditMetadata={onEditMetadata}
-          onRename={onRename}
-          onMove={onMove}
-          onShare={onShare}
-          onDownload={onDownload}
-          onDelete={onDelete}
-          onDeleteFolder={onDeleteFolder}
-        />
+        {renderActions ? (
+          renderActions()
+        ) : (
+          <FileActionMenu
+            item={item}
+            onPreview={onPreview}
+            onEditMetadata={onEditMetadata}
+            onRename={onRename}
+            onMove={onMove}
+            onShare={onShare}
+            onDownload={onDownload}
+            onDelete={onDelete}
+            onDeleteFolder={onDeleteFolder}
+          />
+        )}
       </div>
 
       {/* Icon */}
@@ -92,6 +102,9 @@ export function FileListRow({
           </div>
         ) : (
           <div className="skeleton h-4 w-36 rounded" />
+        )}
+        {item.subtitle && (
+          <div className="text-caption text-text-faint truncate">{item.subtitle}</div>
         )}
         <div className="text-caption text-text-faint mt-0.5 flex items-center gap-1.5">
           <span>{item.modified}</span>
@@ -125,9 +138,11 @@ export function FileListRow({
       )}
 
       {/* Status */}
-      <div className="flex shrink-0 items-center gap-2">
-        <StatusBadge status={item.status} />
-      </div>
+      {!hideStatus && (
+        <div className="flex shrink-0 items-center gap-2">
+          <StatusBadge status={item.status} />
+        </div>
+      )}
     </div>
   );
 }

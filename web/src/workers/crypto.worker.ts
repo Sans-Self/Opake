@@ -18,6 +18,9 @@ import init, {
   generatePkce as wasmGeneratePkce,
   generateIdentity as wasmGenerateIdentity,
   generateEphemeralKeypair as wasmGenerateEphemeralKeypair,
+  didDocumentUrl as wasmDidDocumentUrl,
+  handleFromDidDocument as wasmHandleFromDidDocument,
+  pdsFromDidDocument as wasmPdsFromDidDocument,
   DirectoryTreeHandle,
 } from "@/wasm/opake-wasm/opake";
 import type {
@@ -144,6 +147,22 @@ const cryptoApi = {
 
   generateEphemeralKeypair(): EphemeralKeypair {
     return wasmGenerateEphemeralKeypair() as EphemeralKeypair;
+  },
+
+  // ---------------------------------------------------------------------------
+  // DID document utilities
+  // ---------------------------------------------------------------------------
+
+  didDocumentUrl(did: string): string {
+    return wasmDidDocumentUrl(did);
+  },
+
+  handleFromDidDocument(docJson: Uint8Array): string | undefined {
+    return wasmHandleFromDidDocument(docJson);
+  },
+
+  pdsFromDidDocument(docJson: Uint8Array): string {
+    return wasmPdsFromDidDocument(docJson);
   },
 
   // ---------------------------------------------------------------------------

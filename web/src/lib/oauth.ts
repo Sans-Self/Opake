@@ -6,6 +6,7 @@
 import type { Remote } from "comlink";
 import type { CryptoApi } from "@/workers/crypto.worker";
 import type { DpopKeyPair } from "@/lib/cryptoTypes";
+import { pdsUrlFromDid } from "@/lib/did";
 
 type CryptoWorker = Remote<CryptoApi>;
 
@@ -58,36 +59,14 @@ export async function resolveHandleToPds(handle: string): Promise<{ did: string;
   const resolveUrl = `${BSKY_PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`;
   const response = await fetch(resolveUrl);
   if (!response.ok) {
-    throw new Error(`Failed to resolve handle "${handle}": HTTP ${response.status}`);
+    throw new Error(
+      response.status === 400 ? "Handle not found" : `Failed to resolve handle "${handle}"`,
+    );
   }
   const { did } = (await response.json()) as { did: string };
 
   const pdsUrl = await pdsUrlFromDid(did);
   return { did, pdsUrl };
-}
-
-async function pdsUrlFromDid(did: string): Promise<string> {
-  const docUrl = did.startsWith("did:plc:")
-    ? `https://plc.directory/${did}`
-    : did.startsWith("did:web:")
-      ? `https://${did.slice("did:web:".length)}/.well-known/did.json`
-      : null;
-
-  if (!docUrl) throw new Error(`Unsupported DID method: ${did}`);
-
-  const response = await fetch(docUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch DID document for ${did}: HTTP ${response.status}`);
-  }
-
-  const doc = (await response.json()) as {
-    service?: { id: string; serviceEndpoint: string }[];
-  };
-
-  const pds = doc.service?.find((s) => s.id === "#atproto_pds");
-  if (!pds) throw new Error(`No #atproto_pds service in DID document for ${did}`);
-
-  return pds.serviceEndpoint;
 }
 
 // ---------------------------------------------------------------------------

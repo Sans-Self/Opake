@@ -273,3 +273,51 @@ fn pds_from_did_document_wrong_service_id() {
     };
     assert!(pds_from_did_document(&doc).is_err());
 }
+
+// -- did_document_url --
+
+#[test]
+fn did_document_url_plc() {
+    let url = did_document_url("did:plc:abc123").unwrap();
+    assert_eq!(url, "https://plc.directory/did:plc:abc123");
+}
+
+#[test]
+fn did_document_url_web() {
+    let url = did_document_url("did:web:example.com").unwrap();
+    assert_eq!(url, "https://example.com/.well-known/did.json");
+}
+
+#[test]
+fn did_document_url_unsupported() {
+    let err = did_document_url("did:key:z123").unwrap_err();
+    assert!(err.to_string().contains("unsupported DID method"));
+}
+
+// -- handle_from_did_document --
+
+#[test]
+fn handle_from_did_document_extracts_handle() {
+    let doc: DidDocument = serde_json::from_str(&plc_document_json()).unwrap();
+    assert_eq!(handle_from_did_document(&doc), Some("alice.test".into()));
+}
+
+#[test]
+fn handle_from_did_document_no_at_entry() {
+    let doc = DidDocument {
+        id: "did:plc:test".into(),
+        also_known_as: vec!["https://example.com".into()],
+        service: vec![],
+    };
+    assert_eq!(handle_from_did_document(&doc), None);
+}
+
+#[test]
+fn handle_from_did_document_empty() {
+    let doc = DidDocument {
+        id: "did:plc:test".into(),
+        also_known_as: vec![],
+        service: vec![],
+    };
+    assert_eq!(handle_from_did_document(&doc), None);
+}

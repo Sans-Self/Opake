@@ -25,7 +25,7 @@ export async function downloadDocument(
   triggerBrowserDownload(plaintext, filename, mimeType);
 }
 
-function triggerBrowserDownload(data: Uint8Array, filename: string, mimeType: string): void {
+export function triggerBrowserDownload(data: Uint8Array, filename: string, mimeType: string): void {
   const buffer = new ArrayBuffer(data.byteLength);
   new Uint8Array(buffer).set(data);
   const blob = new Blob([buffer], { type: mimeType });
