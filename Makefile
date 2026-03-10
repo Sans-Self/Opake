@@ -11,6 +11,7 @@ WASM_OUT   = web/src/wasm/opake-wasm
 
 .PHONY: build wasm wasm-dev install-web-devs web-build setup \
        validate lint test rust-test fmt clippy web-lint web-typecheck web-test \
+       appview appview-test appview-release \
        images push-images
 
 ## Build all Rust crates
@@ -55,8 +56,8 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
-## Run all tests (Rust + web)
-test: rust-test web-test
+## Run all tests (Rust + web + appview)
+test: rust-test web-test appview-test
 
 ## Run Rust tests
 rust-test:
@@ -76,6 +77,22 @@ web-test: install-web-devs
 
 ## Run all lints (Rust + web)
 lint: fmt clippy web-lint web-typecheck
+
+# ---------------------------------------------------------------------------
+# Elixir appview
+# ---------------------------------------------------------------------------
+
+## Run appview tests
+appview-test:
+	cd appview && mix test
+
+## Start appview dev server
+appview:
+	cd appview && mix phx.server
+
+## Build appview release
+appview-release:
+	cd appview && MIX_ENV=prod mix release
 
 # ---------------------------------------------------------------------------
 # Container images

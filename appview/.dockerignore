@@ -1,0 +1,9 @@
+_build/
+deps/
+.elixir_ls/
+*.ez
+.git
+test/
+docker-compose.yml
+AGENTS.md
+README.md

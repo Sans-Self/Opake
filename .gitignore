@@ -1,4 +1,6 @@
 /target
+appview/_build/
+appview/deps/
 node_modules/
 web/dist/
 web/src/wasm/
