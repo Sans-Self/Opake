@@ -2,47 +2,66 @@
 
 The AppView indexes `app.opake.grant` and `app.opake.keyring` records from the AT Protocol firehose and serves them via a REST API. It enables the `inbox` command — "what's been shared with me?" — without scanning every PDS in the network.
 
+Built with Elixir/Phoenix. Source lives in `appview/`.
+
 ## Running Modes
 
+Controlled by environment variables, not subcommands:
+
+| Mode | Config | Effect |
+|------|--------|--------|
+| `run` (default) | — | Indexer + API |
+| `serve` | `INDEXER_ENABLED=false` | API only (no Jetstream) |
+| `index` | `PHX_SERVER=false` | Indexer only (no HTTP) |
+
+Status check via release eval:
+
 ```bash
-opake-appview run      # indexer + API (default)
-opake-appview index    # indexer only (write-only, no HTTP)
-opake-appview serve    # API only (read-only, no Jetstream)
-opake-appview status   # print cursor + stats, exit
+bin/opake_appview eval "OpakeAppview.Release.status()"
 ```
 
-Running with no subcommand is equivalent to `run`.
+## Development
 
-### Flags
+```bash
+cd appview
+docker compose up -d          # start postgres
+mix setup                     # deps + create DB + migrate
+mix phx.server                # dev server on :6100
+mix test                      # run tests
+```
 
-| Flag | Effect |
-|------|--------|
-| `-v` / `-vv` / `-vvv` | Logging: info / debug / trace |
-| `--config-dir <path>` | Override data directory containing `appview.toml` |
+## Production (Docker)
+
+```bash
+cd appview
+docker compose --profile full up --build
+```
+
+This starts postgres and the appview container. The entrypoint auto-creates the database and runs migrations.
 
 ## Configuration
 
-TOML file at `~/.config/opake/appview.toml` (or `$XDG_CONFIG_HOME/opake/appview.toml`).
+### Development
 
-Override: set `OPAKE_DATA_DIR` to the directory containing `appview.toml`, or use `--config-dir`.
+`config/dev.exs` — defaults to local postgres (`postgres:postgres@localhost/opake_appview_dev`) and the public Jetstream relay.
 
-```toml
-jetstream_url = "wss://jetstream2.us-east.bsky.network/subscribe"
-listen = "127.0.0.1:6100"
-db_path = "~/.config/opake/appview.db"
-```
+### Production (environment variables)
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `jetstream_url` | yes | Must start with `ws://` or `wss://` |
-| `listen` | yes | `host:port` for the HTTP server |
-| `db_path` | yes | SQLite path. `~` is expanded. |
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `DATABASE_URL` | yes | — | Ecto URL, e.g. `ecto://user:pass@host/db` |
+| `SECRET_KEY_BASE` | yes | — | 64+ char random string |
+| `JETSTREAM_URL` | no | dev default | Must start with `ws://` or `wss://` |
+| `PORT` | no | `6100` | HTTP listen port |
+| `PHX_HOST` | no | `localhost` | Hostname for URL generation |
+| `PHX_SERVER` | no | `true` | Set to `false` to disable HTTP |
+| `INDEXER_ENABLED` | no | `true` | Set to `false` to disable Jetstream consumer |
+| `POOL_SIZE` | no | `10` | Postgres connection pool size |
+| `ECTO_IPV6` | no | `false` | Enable IPv6 for Postgres connections |
 
 ## Authentication
 
 All API endpoints except `/api/health` require authentication via DID-scoped Ed25519 signatures.
-
-Users prove they control a DID by signing with their opake Ed25519 signing key.
 
 **Header format:**
 ```
@@ -60,21 +79,13 @@ GET:/api/inbox:1709330400:did:plc:abc123
 ```
 
 **Verification flow:**
-1. Parse header — extract DID, timestamp, signature
+1. Parse header — extract DID, timestamp, signature (split from right, DIDs contain colons)
 2. Reject if timestamp is >60 seconds from now (replay protection)
 3. Reject if `?did=` parameter doesn't match authenticated DID (scope enforcement)
 4. Fetch `app.opake.publicKey/self` from the user's PDS
 5. Extract `signingKey` (Ed25519) from the record
-6. Verify signature with `ed25519-dalek`
-7. Cache verified key for 5 minutes
-
-**CLI side:**
-```rust
-let timestamp = Utc::now().timestamp();
-let message = format!("GET:/api/inbox:{timestamp}:{did}");
-let signature = signing_key.sign(message.as_bytes());
-let header = format!("Opake-Ed25519 {did}:{timestamp}:{}", BASE64.encode(signature.to_bytes()));
-```
+6. Verify signature with Erlang `:crypto` (Ed25519)
+7. Cache verified key in ETS for 5 minutes
 
 ## API Endpoints
 
@@ -85,7 +96,7 @@ Always unauthenticated. Returns indexer status only — no aggregate data.
 ```json
 {
   "indexerConnected": true,
-  "cursorTime": "2026-03-02T12:00:00+00:00",
+  "cursorTime": "2026-03-02T12:00:00.000000Z",
   "cursorAgeSecs": 5
 }
 ```
@@ -107,14 +118,11 @@ Returns grants where `did` is the recipient. Newest first.
       "uri": "at://did:plc:owner/app.opake.grant/3abc",
       "ownerDid": "did:plc:owner",
       "documentUri": "at://did:plc:owner/app.opake.document/3xyz",
-      "permissions": "read",
-      "note": "photos from the trip",
       "createdAt": "2026-03-01T12:00:00Z"
     }
   ],
-  "cursor": "2026-03-01T12:00:01Z::at://did:plc:owner/app.opake.grant/3abc"
+  "cursor": "2026-03-01T12:00:01.000000Z::at://did:plc:owner/app.opake.grant/3abc"
 }
-
 ```
 
 ### `GET /api/keyrings?did=<did>&limit=<n>&cursor=<cursor>`
@@ -127,8 +135,7 @@ Returns keyrings where `did` is a member.
     {
       "uri": "at://did:plc:owner/app.opake.keyring/3def",
       "ownerDid": "did:plc:owner",
-      "name": "family-photos",
-      "indexedAt": "2026-03-01T12:00:00Z"
+      "indexedAt": "2026-03-01T12:00:00.000000Z"
     }
   ],
   "cursor": "..."
@@ -137,29 +144,33 @@ Returns keyrings where `did` is a member.
 
 ## Rate Limiting
 
-All endpoints are rate-limited per IP via `tower_governor`. Limits: 10 requests/second sustained, 30 burst. Requests beyond the limit receive `429 Too Many Requests`.
+All endpoints are rate-limited per IP via Hammer (ETS backend). Limits: 30 requests/second burst. Requests beyond the limit receive `429 Too Many Requests`.
 
-IP extraction checks `X-Forwarded-For`, `X-Real-Ip`, and falls back to peer address — works correctly behind Traefik or similar reverse proxies.
+IP extraction checks `X-Forwarded-For`, `X-Real-Ip`, and falls back to peer address — works correctly behind reverse proxies.
 
 ## Horizontal Scaling
 
-SQLite WAL mode supports one writer + many readers. For horizontal scaling:
+PostgreSQL supports concurrent reads and writes natively. For horizontal scaling:
 
-- **One `index` process** — writes to the database
-- **N `serve` processes** — read-only, behind a load balancer
+- **One process with `INDEXER_ENABLED=true`** — consumes the firehose
+- **N processes with `INDEXER_ENABLED=false`** — read-only API servers behind a load balancer
 
-All processes point at the same `db_path`. WAL mode handles concurrent reads during writes.
+All processes share the same `DATABASE_URL`.
 
-For setups beyond a single machine, migrate to Postgres (future work).
+## Release Tasks
 
-## Status Command
+Available via `bin/opake_appview eval`:
 
-Quick operational check without starting a server:
+```bash
+# Create the database
+bin/opake_appview eval "OpakeAppview.Release.create_db()"
 
-```
-$ opake-appview status
-Cursor:   2026-03-02T12:00:00+00:00
-Lag:      5s
-Grants:   42
-Keyrings: 3
+# Run pending migrations
+bin/opake_appview eval "OpakeAppview.Release.migrate()"
+
+# Print cursor position, lag, and indexed record counts
+bin/opake_appview eval "OpakeAppview.Release.status()"
+
+# Rollback to a specific migration version
+bin/opake_appview eval "OpakeAppview.Release.rollback(OpakeAppview.Repo, 20260310000001)"
 ```

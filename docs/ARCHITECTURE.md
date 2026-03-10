@@ -12,8 +12,8 @@ graph TB
     end
 
     subgraph Server ["AppView (self-hosted)"]
-        AppView["opake-appview"]
-        SQLite["SQLite"]
+        AppView["opake-appview<br/>(Elixir/Phoenix)"]
+        Postgres["PostgreSQL"]
     end
 
     subgraph Network ["AT Protocol Network"]
@@ -33,7 +33,7 @@ graph TB
     Web -->|inbox query| AppView
 
     AppView -->|subscribe| Jetstream
-    AppView --> SQLite
+    AppView --> Postgres
     Jetstream -.->|events from| OwnPDS
     Jetstream -.->|events from| OtherPDS
 
@@ -146,38 +146,6 @@ crates/
         logout.rs      Remove account
         set_default.rs Switch default account
 
-  opake-appview/       Indexer + REST API for grant/keyring discovery
-    src/
-      main.rs          Clap app (run/index/serve/status subcommands)
-      config.rs        AppView config (appview.toml)
-      state.rs         AppState (Database, indexer status, key cache)
-      error.rs         Typed error hierarchy (thiserror)
-      indexer.rs       Event loop: firehose → parse → store
-      api/
-        mod.rs         Axum router (public + protected routes, rate limiting)
-        auth.rs        DID-scoped Ed25519 auth middleware
-        key_cache.rs   Signing key cache with TTL
-        health.rs      GET /api/health (unauthenticated)
-        inbox.rs       GET /api/inbox (grants by recipient DID)
-        keyrings.rs    GET /api/keyrings (memberships by DID)
-        types.rs       API response types
-      db/
-        mod.rs         Database wrapper (SQLite, WAL mode)
-        schema.rs      Table definitions
-        cursor.rs      Firehose cursor persistence
-        grants.rs      Grant upsert/query/delete
-        keyrings.rs    Keyring member upsert/query/delete
-      firehose/
-        mod.rs         Re-exports
-        subscribe.rs   WebSocket connection to Jetstream
-        events.rs      Event parsing → IndexableEvent
-      commands/
-        mod.rs         Shared helpers (build_state, serve_http)
-        run.rs         Indexer + API (default)
-        index.rs       Indexer only
-        serve.rs       API only
-        status.rs      Print cursor + stats
-
   opake-derive/        Proc-macro crate (RedactedDebug derive)
     src/
       lib.rs           #[derive(RedactedDebug)] + #[redact] attribute
@@ -211,6 +179,40 @@ web/                   React SPA (Vite + TanStack Router + Tailwind + daisyUI)
   tests/
     lib/
       indexeddb-storage.test.ts  Storage contract tests (fake-indexeddb)
+
+appview/               Elixir/Phoenix indexer + REST API (replaces Rust appview)
+  lib/
+    opake_appview/
+      application.ex       OTP supervision tree (Repo, KeyCache, Endpoint, Consumer)
+      indexer.ex            Event dispatch, cursor saving, connection state (ETS)
+      release.ex            Release tasks (create_db, migrate, rollback, status)
+      repo.ex               Ecto Repo
+      auth/
+        plug.ex             Opake-Ed25519 header verification (Plug)
+        key_cache.ex        GenServer + ETS, 5-min TTL per DID
+        key_fetcher.ex      DID → PDS → publicKey → signingKey resolution
+        base64.ex           Flexible base64 decode (padded/unpadded)
+      jetstream/
+        consumer.ex         WebSockex client with exponential backoff
+        event.ex            Jetstream JSON → tagged tuples
+      queries/
+        cursor_queries.ex   Singleton cursor upsert/load
+        grant_queries.ex    Grant CRUD + inbox pagination
+        keyring_queries.ex  Keyring member CRUD + membership pagination
+        pagination.ex       Shared cursor-based pagination helpers
+      schemas/
+        cursor.ex           Singleton cursor (id=1)
+        grant.ex            Grant (uri PK)
+        keyring_member.ex   Keyring member (composite PK)
+    opake_appview_web/
+      router.ex             /api/health (public), /api/inbox + /api/keyrings (auth'd)
+      endpoint.ex           Bandit HTTP, API-only (no sessions/static)
+      plugs/rate_limit.ex   Hammer ETS rate limiting per IP
+      controllers/
+        health_controller.ex     Indexer status + cursor lag
+        inbox_controller.ex      Grants by recipient DID
+        keyrings_controller.ex   Keyrings by member DID
+        pagination_helpers.ex    Shared param parsing (did, limit, cursor)
 ```
 
 The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens through the `Storage` trait — `FileStorage` (CLI, filesystem) and `IndexedDbStorage` (web, IndexedDB) implement the same contract with platform-specific backends. This keeps `opake-core` compilable to WASM, which the web frontend uses via `wasm-pack`.
@@ -352,7 +354,6 @@ Storage layout:
 ```
 ~/.config/opake/
   config.toml            CLI config (default DID, account map)
-  appview.toml           AppView config (jetstream URL, listen addr, db path)
   accounts/
     <did>/
       session.json       JWT tokens

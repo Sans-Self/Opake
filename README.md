@@ -42,7 +42,7 @@ cd opake.dev
 cargo build --release
 ```
 
-Produces two binaries: `target/release/opake` (CLI) and `target/release/opake-appview` (indexer/API server).
+Produces `target/release/opake` (CLI). The AppView is a separate Elixir/Phoenix app in `appview/`.
 
 ## Usage
 
@@ -158,18 +158,25 @@ The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, 
 
 ## AppView
 
-The AppView is a separate binary (`opake-appview`) that indexes grants and keyrings from the AT Protocol firehose and serves them via a REST API. It enables grant discovery — "what's been shared with me?" — without scanning every PDS in the network.
+The AppView is an Elixir/Phoenix service (`appview/`) that indexes grants and keyrings from the AT Protocol firehose and serves them via a REST API. It enables grant discovery — "what's been shared with me?" — without scanning every PDS in the network.
+
+```sh
+cd appview
+docker compose up -d                       # start postgres
+mix setup && mix phx.server                # dev server on :6100
+docker compose --profile full up --build   # production-like (postgres + appview)
+```
 
 See [docs/appview.md](docs/appview.md) for configuration, authentication, API endpoints, and deployment.
 
 ## Architecture
 
-Four crates + a web frontend:
+Three Rust crates, an Elixir service, and a web frontend:
 
 - **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations, `Storage` trait.
 - **`opake-cli`** — CLI binary. `FileStorage` (filesystem-backed), command dispatch.
-- **`opake-appview`** — Axum-based indexer and REST API. Jetstream firehose consumer, SQLite storage, DID-scoped Ed25519 auth.
 - **`opake-derive`** — Proc-macro crate. `RedactedDebug` derive macro for secret-safe Debug output.
+- **`appview/`** — Elixir/Phoenix indexer and REST API. Jetstream firehose consumer (WebSockex), PostgreSQL storage (Ecto), DID-scoped Ed25519 auth via Erlang `:crypto`.
 - **`web/`** — React SPA (Vite + TanStack Router + Tailwind/daisyUI). Uses `opake-core` via WASM. `IndexedDbStorage` (IndexedDB-backed) implements the same `Storage` trait as the CLI.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
