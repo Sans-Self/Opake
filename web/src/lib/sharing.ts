@@ -4,7 +4,7 @@ import type { WrappedKey } from "@/lib/cryptoTypes";
 import type { EncryptedMetadataEnvelope, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
 import type { DecryptedBlob } from "@/lib/preview";
 import type { Session } from "@/lib/storageTypes";
-import { authenticatedXrpc, authenticatedDeleteRecord, appview } from "@/lib/api";
+import { authenticatedXrpc, authenticatedDeleteRecord, authenticatedAppview } from "@/lib/api";
 import { resolveHandleToPds } from "@/lib/oauth";
 import { pdsUrlFromDid } from "@/lib/did";
 import { getCryptoWorker } from "@/lib/worker";
@@ -191,8 +191,11 @@ interface InboxResponse {
   readonly cursor?: string;
 }
 
-/** Fetch incoming grants from the AppView inbox. */
-export async function listIncomingGrants(did: string): Promise<InboxGrantItem[]> {
+/** Fetch incoming grants from the AppView inbox (authenticated). */
+export async function listIncomingGrants(
+  did: string,
+  signingKey: Uint8Array,
+): Promise<InboxGrantItem[]> {
   const config = await storage.loadConfig().catch(() => null);
   const appviewUrl = config?.appviewUrl;
   if (!appviewUrl) return [];
@@ -202,12 +205,14 @@ export async function listIncomingGrants(did: string): Promise<InboxGrantItem[]>
   let cursor: string | undefined;
 
   do {
-    const params = new URLSearchParams({ did, limit: "100" });
-    if (cursor) params.set("cursor", cursor);
+    const query = new URLSearchParams({ did, limit: "100" });
+    if (cursor) query.set("cursor", cursor);
 
-    const response = (await appview(`/api/inbox?${params}`, {
-      pdsUrl: "",
+    const response = (await authenticatedAppview({
       appviewUrl,
+      path: `/api/inbox?${query}`,
+      did,
+      signingKey,
     })) as InboxResponse;
 
     items.push(...response.grants);

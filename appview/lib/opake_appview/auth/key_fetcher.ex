@@ -87,6 +87,13 @@ defmodule OpakeAppview.Auth.KeyFetcher do
       {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
         {:ok, body}
 
+      # PLC directory returns application/did+ld+json which Req doesn't auto-decode
+      {:ok, %Req.Response{status: 200, body: body}} when is_binary(body) ->
+        case Jason.decode(body) do
+          {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+          _ -> {:error, "failed to decode JSON from #{url}"}
+        end
+
       {:ok, %Req.Response{status: status}} ->
         {:error, "HTTP #{status} from #{url}"}
 

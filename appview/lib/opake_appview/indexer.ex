@@ -32,18 +32,22 @@ defmodule OpakeAppview.Indexer do
   def process_message(json, event_count) do
     case Event.parse(json) do
       {:upsert_grant, attrs} ->
+        Logger.info("Indexing grant upsert: #{attrs.uri} (owner=#{attrs.owner_did}, recipient=#{attrs.recipient_did})")
         handle_upsert_grant(attrs)
         maybe_save_cursor(attrs.time_us, event_count + 1)
 
       {:delete_grant, %{uri: uri, time_us: time_us}} ->
+        Logger.info("Indexing grant delete: #{uri}")
         GrantQueries.delete_grant(uri)
         maybe_save_cursor(time_us, event_count + 1)
 
       {:upsert_keyring, attrs} ->
+        Logger.info("Indexing keyring upsert: #{attrs.uri} (owner=#{attrs.owner_did}, members=#{length(attrs.member_dids)})")
         handle_upsert_keyring(attrs)
         maybe_save_cursor(attrs.time_us, event_count + 1)
 
       {:delete_keyring, %{uri: uri, time_us: time_us}} ->
+        Logger.info("Indexing keyring delete: #{uri}")
         KeyringQueries.delete_keyring(uri)
         maybe_save_cursor(time_us, event_count + 1)
 

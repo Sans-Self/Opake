@@ -12,6 +12,10 @@ if jetstream_url = System.get_env("JETSTREAM_URL") do
   config :opake_appview, :jetstream_url, jetstream_url
 end
 
+if cors_origin = System.get_env("CORS_ORIGIN") do
+  config :opake_appview, :cors_origin, cors_origin
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

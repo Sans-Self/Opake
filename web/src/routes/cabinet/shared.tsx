@@ -203,27 +203,25 @@ function SharedPage() {
     try {
       const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
 
-      const [out, inc] = await Promise.all([
-        listOutgoingGrants(session.pdsUrl, session.did, oauthSession),
-        listIncomingGrants(session.did),
-      ]);
-
-      // REMOVE — hard-coded test grant
-      const testIncoming: InboxGrantItem = {
-        uri: "at://did:plc:jgevbp3tq46mkjcavmwfitgb/app.opake.grant/3mgnw5blxtn22",
-        ownerDid: "did:plc:jgevbp3tq46mkjcavmwfitgb",
-        documentUri: "",
-        createdAt: new Date().toISOString(),
-      };
-      const allIncoming = [testIncoming, ...inc];
-
-      setOutgoing(out);
-      setIncoming(allIncoming);
-
-      // Pre-resolve unique owner PDS URLs, then resolve each grant
       const identity = await storage.loadIdentity(session.did);
       const privateKey = base64ToUint8Array(identity.private_key);
-      const uniqueOwnerDids = [...new Set(allIncoming.map((g) => g.ownerDid))];
+      const signingKey = identity.signing_key ? base64ToUint8Array(identity.signing_key) : null;
+
+      const [out, inc] = await Promise.all([
+        listOutgoingGrants(session.pdsUrl, session.did, oauthSession),
+        signingKey
+          ? listIncomingGrants(session.did, signingKey).catch((err: unknown) => {
+              console.warn("[shared] inbox fetch failed, showing outgoing only:", err);
+              return [] as InboxGrantItem[];
+            })
+          : Promise.resolve([]),
+      ]);
+
+      setOutgoing(out);
+      setIncoming(inc);
+
+      // Pre-resolve unique owner PDS URLs, then resolve each grant
+      const uniqueOwnerDids = [...new Set(inc.map((g) => g.ownerDid))];
       const pdsResults = await Promise.all(
         uniqueOwnerDids.map((did) =>
           pdsUrlFromDid(did)
@@ -233,7 +231,7 @@ function SharedPage() {
       );
       const pdsUrlCache = new Map(pdsResults.filter((r): r is NonNullable<typeof r> => r !== null));
 
-      allIncoming.forEach((grant) => {
+      inc.forEach((grant) => {
         const ownerPds = pdsUrlCache.get(grant.ownerDid);
         if (!ownerPds) return;
         void resolveIncomingGrant(grant, privateKey, ownerPds)

@@ -150,8 +150,11 @@ pub fn check_response(response: &HttpResponse) -> Result<(), Error> {
         message: Option<String>,
     }
 
-    let message = serde_json::from_slice::<XrpcError>(&response.body)
-        .ok()
+    let parsed = serde_json::from_slice::<XrpcError>(&response.body).ok();
+
+    let error_code = parsed.as_ref().and_then(|e| e.error.clone());
+
+    let message = parsed
         .and_then(|e| match (e.error, e.message) {
             (Some(code), Some(msg)) => Some(format!("{code}: {msg}")),
             (Some(code), None) => Some(code),
@@ -160,7 +163,14 @@ pub fn check_response(response: &HttpResponse) -> Result<(), Error> {
         })
         .unwrap_or_else(|| format!("HTTP {}", response.status));
 
-    if response.status == 404 {
+    // 404 is the standard "not found" status. Some PDS implementations
+    // (e.g. Tranquil) return 400 with a *NotFound error code instead.
+    let is_not_found = response.status == 404
+        || error_code
+            .as_deref()
+            .is_some_and(|c| c.ends_with("NotFound"));
+
+    if is_not_found {
         Err(Error::NotFound(message))
     } else {
         Err(Error::Xrpc {

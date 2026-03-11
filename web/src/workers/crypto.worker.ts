@@ -18,6 +18,7 @@ import init, {
   generatePkce as wasmGeneratePkce,
   generateIdentity as wasmGenerateIdentity,
   generateEphemeralKeypair as wasmGenerateEphemeralKeypair,
+  signAppviewRequest as wasmSignAppviewRequest,
   didDocumentUrl as wasmDidDocumentUrl,
   handleFromDidDocument as wasmHandleFromDidDocument,
   pdsFromDidDocument as wasmPdsFromDidDocument,
@@ -147,6 +148,20 @@ const cryptoApi = {
 
   generateEphemeralKeypair(): EphemeralKeypair {
     return wasmGenerateEphemeralKeypair() as EphemeralKeypair;
+  },
+
+  // ---------------------------------------------------------------------------
+  // AppView auth signing
+  // ---------------------------------------------------------------------------
+
+  signAppviewRequest(
+    method: string,
+    path: string,
+    did: string,
+    signingKey: Uint8Array,
+    timestamp: number,
+  ): string {
+    return wasmSignAppviewRequest(method, path, did, signingKey, timestamp);
   },
 
   // ---------------------------------------------------------------------------

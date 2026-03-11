@@ -404,6 +404,33 @@ pub fn decrypt_directory_metadata_js(
 }
 
 // ---------------------------------------------------------------------------
+// AppView auth signing
+// ---------------------------------------------------------------------------
+
+/// Sign an appview request and return the full Authorization header value.
+///
+/// Returns: `Opake-Ed25519 <did>:<timestamp>:<base64(signature)>`
+#[wasm_bindgen(js_name = signAppviewRequest)]
+pub fn sign_appview_request_js(
+    method: &str,
+    path: &str,
+    did: &str,
+    signing_key: &[u8],
+    timestamp: f64,
+) -> Result<String, JsError> {
+    let key: [u8; 32] = signing_key
+        .try_into()
+        .map_err(|_| JsError::new("signing key must be exactly 32 bytes"))?;
+    Ok(opake_core::client::sign_appview_request(
+        method,
+        path,
+        did,
+        &key,
+        timestamp as u64,
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // DID document utilities
 // ---------------------------------------------------------------------------
 

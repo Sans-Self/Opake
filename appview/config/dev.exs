@@ -18,7 +18,8 @@ config :opake_appview, OpakeAppviewWeb.Endpoint,
   watchers: []
 
 config :opake_appview,
-  jetstream_url: "wss://jetstream2.us-east.bsky.network/subscribe"
+  jetstream_url: "wss://frankfurt.firehose.stream/tap",
+  cors_origin: "*"
 
 config :opake_appview, dev_routes: true
 

@@ -427,14 +427,32 @@ async function attachDpopAuth(
 }
 
 // ---------------------------------------------------------------------------
-// AppView (unauthenticated)
+// AppView (authenticated with Opake-Ed25519)
 // ---------------------------------------------------------------------------
 
-export async function appview(path: string, config: ApiConfig = defaultConfig): Promise<unknown> {
-  const response = await fetch(`${config.appviewUrl}${path}`);
+interface AuthenticatedAppviewParams {
+  readonly appviewUrl: string;
+  readonly path: string;
+  readonly did: string;
+  readonly signingKey: Uint8Array;
+}
+
+export async function authenticatedAppview(params: AuthenticatedAppviewParams): Promise<unknown> {
+  const { appviewUrl, path, did, signingKey } = params;
+  const worker = getCryptoWorker();
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  // Signature covers only the path (no query string), matching appview's conn.request_path
+  const pathOnly = path.split("?")[0];
+  const authHeader = await worker.signAppviewRequest("GET", pathOnly, did, signingKey, timestamp);
+
+  const response = await fetch(`${appviewUrl}${path}`, {
+    headers: { Authorization: authHeader },
+  });
 
   if (!response.ok) {
-    throw new Error(`AppView ${path}: ${response.status}`);
+    const detail = await response.text().catch(() => "");
+    throw new Error(`AppView ${path}: ${response.status} ${detail}`.trim());
   }
 
   return response.json();
