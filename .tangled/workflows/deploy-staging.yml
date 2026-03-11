@@ -1,0 +1,39 @@
+image: gcr.io/kaniko-project/executor:debug
+engine: "kubernetes"
+architecture: arm64
+
+when:
+  - event: ["push"]
+    branch: ["main"]
+
+steps:
+  - name: "Setup registry auth"
+    command: |
+      mkdir -p /kaniko/.docker
+      printf '{"auths":{"zot.sans-self.org":{"username":"%s","password":"%s"}}}' \
+        "$ZOT_USERNAME" "$ZOT_PASSWORD" > /kaniko/.docker/config.json
+
+  - name: "Build and push appview"
+    command: |
+      /kaniko/executor \
+        --dockerfile=Containerfile.appview \
+        --context=. \
+        --destination=zot.sans-self.org/opake/appview:staging \
+        --destination=zot.sans-self.org/opake/appview:staging-$TANGLED_COMMIT_SHA \
+        --cleanup
+
+  - name: "Build and push web"
+    command: |
+      /kaniko/executor \
+        --dockerfile=Containerfile.web \
+        --context=. \
+        --destination=zot.sans-self.org/opake/web:staging \
+        --destination=zot.sans-self.org/opake/web:staging-$TANGLED_COMMIT_SHA \
+        --build-arg=VITE_APPVIEW_URL=https://staging.opake.app \
+        --cleanup
+
+  - name: "Rollout restart staging"
+    command: |
+      wget -qO /tmp/kubectl "https://dl.k8s.io/release/v1.32.0/bin/linux/arm64/kubectl"
+      chmod +x /tmp/kubectl
+      /tmp/kubectl rollout restart deployment/opake-web deployment/opake-appview -n opake-staging
