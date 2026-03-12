@@ -1,0 +1,62 @@
+<HeroSection>
+  <HeroHeadline>
+    Frequently Asked <Highlight>Questions</Highlight>
+  </HeroHeadline>
+  <HeroSubtext>Everything you wanted to know about Opake but were too polite to ask.</HeroSubtext>
+</HeroSection>
+
+<FaqSection>
+  <FaqItem question="Is Opake free?">
+    Opake itself is open-source and free to use. However, you need a **Personal Data Server (PDS)**
+    to store your files. While a PDS doesn't inherently limit your storage, Opake defaults to
+    smaller limits out of **politeness** to providers we don't own. You (or your provider) can
+    increase these limits by uploading specific configuration files to your PDS.
+  </FaqItem>
+
+<FaqItem question="Where is my data actually stored?">
+  Opake uses a **bring-your-own-storage** design. Your encrypted files live on your PDS. In the
+  future, we may offer managed storage options, but the goal is always to keep you in control of
+  where your bits live.
+</FaqItem>
+
+<FaqItem question="Can Opake see my files?">
+  **No.** Encryption happens entirely on your device (browser or CLI) before any data is sent to
+  internet. We never see the contents of your files, your filenames, your tags, or your private
+  keys. To us, your data is just opaque noise.
+</FaqItem>
+
+<FaqItem question="Can I share files with people who don't use Opake?">
+  Because of how our [Encryption & Keys](/docs/encryption-keys) work, the recipient *must* have an
+  AT Protocol identity (a DID) to receive a secure sharing [Grant](/docs/sharing-dids). This is a
+  feature, not a bug. It ensures that the file key is wrapped specifically to their public key. If
+  you need to share with a total outsider, you'll need to help them join the network first—it's
+  worth it for the privacy.
+</FaqItem>
+
+<FaqItem question="What happens if I lose my device?">
+  If you lose your device and haven't backed up your private keys, **your data is lost forever**.
+  Because Opake is end-to-end encrypted with no central authority, there is no "Forgot Password" or
+  account recovery. We recommend using our [Device Pairing](/docs/pairing) feature to keep your
+  identity on multiple trusted devices.
+</FaqItem>
+
+<FaqItem question="Is this a blockchain?">
+  **No.** Opake is built on the [AT Protocol](/docs/at-protocol), which is a federated social
+  networking protocol. It uses cryptographic signatures and DIDs for identity, but it does not use a
+  proof-of-work blockchain or tokens.
+</FaqItem>
+
+  <FaqItem question="How do I contribute?">
+    You can [View the Sourcecode on Tangled](https://tangled.org/sans-self.org/opake.app) or [report issues](https://tangled.org/sans-self.org/opake.app/issues) there. We are built for the community, by the community.
+  </FaqItem>
+</FaqSection>
+
+<CenterAction
+  headline="Still curious?"
+  subtext="The handbook covers everything from encryption to keyrings to device pairing."
+>
+  <TextLink href="/docs">
+    Read the full Handbook
+    <ArrowRightIcon />
+  </TextLink>
+</CenterAction>

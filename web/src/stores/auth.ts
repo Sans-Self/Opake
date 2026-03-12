@@ -1,5 +1,11 @@
 // Auth store — OAuth 2.0 + DPoP + identity resolution via Zustand.
 //
+// NOTE TO EDITORS:
+// Opake uses a dual-documentation system. If you modify the authentication
+// flow, identity state machine, or session persistence in this file, you
+// MUST also update the corresponding MDX content in `web/src/content/`
+// to prevent documentation drift.
+//
 // Two independent state dimensions:
 //   Session:  none | authenticating | active
 //   Identity: unchecked | checking | fresh | remote_only | conflict | ready

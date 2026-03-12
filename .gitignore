@@ -48,3 +48,7 @@ driver-key.pub
 #   .claude/settings.json         — Claude Code project settings
 #   .claude/settings.local.json is per-developer, ignore separately if needed
 # === End crosslink managed ===
+
+# Claude Code
+.claude/settings.local.json
+.claude/hooks/node_modules/

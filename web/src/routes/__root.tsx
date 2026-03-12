@@ -1,12 +1,14 @@
 import {
   createRootRouteWithContext,
   HeadContent,
+  Link,
   Outlet,
   Scripts,
   useRouter,
 } from "@tanstack/react-router";
 import type { AuthSnapshot } from "@/stores/auth";
 import { ToastContainer } from "@/components/ToastContainer";
+import { OpakeLogo } from "@/components/OpakeLogo";
 import css from "@/index.css?url";
 
 export interface RouterContext {
@@ -19,6 +21,20 @@ function RootDocument({ children }: Readonly<{ children: React.ReactNode }>) {
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link
+          rel="preload"
+          href="/fonts/inter-latin-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
+        />
+        <link
+          rel="preload"
+          href="/fonts/cormorant-garamond-latin-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
+        />
         <link rel="stylesheet" href={css} />
         <HeadContent />
       </head>
@@ -62,6 +78,30 @@ function RootError({ error }: Readonly<{ error: Error }>) {
   );
 }
 
+function NotFound() {
+  return (
+    <div className="bg-base-300 flex min-h-screen flex-col items-center justify-center gap-6 px-6 font-sans">
+      <OpakeLogo />
+      <div className="text-center">
+        <h1 className="font-display text-base-content mb-2 text-[clamp(2rem,5vw,3.4rem)] font-normal tracking-tight">
+          Page not found
+        </h1>
+        <p className="text-text-muted text-[0.95rem]">
+          The page you&rsquo;re looking for doesn&rsquo;t exist, or it moved.
+        </p>
+      </div>
+      <div className="flex gap-3">
+        <Link to="/" className="btn btn-neutral btn-sm">
+          Back to home
+        </Link>
+        <Link to="/docs" className="btn btn-outline border-border-accent text-secondary btn-sm">
+          Read the docs
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
@@ -73,4 +113,5 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   }),
   component: RootLayout,
   errorComponent: RootError,
+  notFoundComponent: NotFound,
 });

@@ -1,4 +1,4 @@
-// Display formatting utilities for the cabinet UI.
+// Display formatting utilities for your cabinet UI.
 
 import type { FileType } from "@/components/cabinet/types";
 

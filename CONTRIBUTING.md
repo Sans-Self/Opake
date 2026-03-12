@@ -1,3 +1,10 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the technical details, 
+  architecture, or code style in this file, you MUST also update the 
+  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+-->
+
 # Contributing to Opake
 
 Contributions welcome — from humans and AI agents alike.

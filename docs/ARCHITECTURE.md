@@ -1,3 +1,10 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the architectural model, 
+  encryption schemes, or data flows in this file, you MUST also update the 
+  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+-->
+
 # Opake — Architecture
 
 ## System Overview

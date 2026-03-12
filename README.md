@@ -1,230 +1,67 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the technical details, 
+  command list, or installation steps in this README, you MUST also update 
+  the corresponding MDX content in `web/src/content/` to prevent 
+  documentation drift. 
+-->
+
 # Opake
 
-**/oʊˈpɑːk/** — like "opaque," but Dutch-flavored.
+**/oʊˈpɑːk/** — like "opaque," but built for the AT Protocol.
 
-An encrypted personal cloud built on the [AT Protocol](https://atproto.com).
-
-Opake uses your existing PDS as a storage and identity layer. Files are encrypted client-side with AES-256-GCM before upload — the PDS only ever sees ciphertext. Custom lexicons under `app.opake.*` give structure to documents, encryption metadata, and sharing grants.
+An encrypted personal cloud where privacy and collaboration are no longer a tradeoff. Opake uses your PDS as a blind storage layer. Files are encrypted client-side (AES-256-GCM) before they ever touch the network.
 
 Your data is opaque to everyone without the key. That's the point.
 
-[Issue Tracker](https://issues.opake.app) · [Architecture](docs/ARCHITECTURE.md) · [Lexicons](lexicons/README.md)
+[The Handbook](https://opake.app/docs) · [Issue Tracker](https://tangled.org/sans-self.org/opake.app/issues) · [Architecture](docs/ARCHITECTURE.md)
 
-## Install
+## Quick Start
 
+### 1. Install
 Requires Rust 1.75+.
-
 ```sh
 cargo install --path crates/opake-cli
 ```
 
-This puts `opake` in your `~/.cargo/bin/`.
+### 2. Login
+Authenticates via OAuth (DPoP) and publishes your public encryption key.
+```sh
+opake login you.bsky.social
+```
+
+### 3. Use
+```sh
+opake upload secret.pdf --tags confidential
+opake share secret.pdf bob.bsky.social
+opake ls --long
+```
 
 ## How It Works
 
-```
-plaintext file
-  → encrypt with random AES-256-GCM key
-  → upload ciphertext blob to PDS
-  → wrap content key to owner's DID public key
-  → store metadata as app.opake.document record
-```
+1. **Encrypt:** Plaintext → AES-256-GCM (random key K).
+2. **Wrap:** Key K → X25519-HKDF-A256KW (wrapped to your DID).
+3. **Publish:** Ciphertext blob + Metadata record → PDS.
 
 No modifications to the PDS. All crypto happens on your machine.
 
-## Build From Source
+## Repository Structure
 
-Requires Rust 1.75+.
-
-```sh
-git clone <repo-url>
-cd opake.dev
-cargo build --release
-```
-
-Produces `target/release/opake` (CLI). The AppView is a separate Elixir/Phoenix app in `appview/`.
-
-## Usage
-
-```sh
-# authenticate (resolves PDS automatically, uses OAuth by default)
-opake login alice.example.com
-
-# explicit PDS override
-opake login alice.example.com --pds https://pds.example.com
-
-# force legacy password-based auth
-opake login alice.example.com --legacy
-
-# log in to a second account
-opake login bob.other.com
-
-# list accounts and switch default
-opake accounts
-opake set-default bob.other.com
-
-# upload a file (encrypts + uploads)
-opake upload photo.jpg --tags vacation,beach
-
-# upload into a directory
-opake upload photo.jpg --dir Photos
-
-# organize files into directories
-opake mkdir Photos
-opake tree
-
-# list your documents
-opake ls
-opake ls --long
-opake ls --tag vacation
-
-# use a specific account for any command
-opake ls --as alice.example.com
-opake upload doc.pdf --as did:plc:alice123
-
-# download and decrypt (your own files)
-opake download photo.jpg
-opake download photo.jpg -o ~/Downloads/copy.jpg
-
-# print a file to stdout (decrypt without saving)
-opake cat notes.txt
-opake cat Photos/notes.txt
-
-# download a shared file from another user (via grant URI)
-opake download --grant at://did:plc:abc/app.opake.grant/tid123
-
-# delete (supports paths and recursive directory deletion)
-opake rm photo.jpg
-opake rm Photos/photo.jpg
-opake rm -r Photos
-
-# move a file to another directory
-opake move photo.jpg Photos/
-
-# view or edit document metadata
-opake metadata show photo.jpg
-opake metadata rename photo.jpg vacation-photo.jpg
-opake metadata tag add photo.jpg travel
-opake metadata tag remove photo.jpg travel
-opake metadata describe photo.jpg "Beach sunset from last summer"
-opake metadata describe photo.jpg --clear
-
-# resolve a handle or DID to see their public key
-opake resolve alice.example.com
-
-# share a file with another user
-opake share photo.jpg alice.example.com
-
-# list grants you've shared
-opake shared
-opake shared --long
-
-# revoke a share grant
-opake revoke at://did:plc:abc/app.opake.grant/tid123
-
-# check incoming grants (via AppView)
-opake inbox --appview https://appview.example.com
-opake inbox --long
-
-# keyring-based group sharing
-opake keyring create family-photos
-opake keyring ls
-opake keyring add-member family-photos alice.example.com
-opake upload photo.jpg --keyring family-photos
-opake download --keyring-member at://did:plc:abc/app.opake.document/tid456
-opake keyring remove-member family-photos alice.example.com
-
-# transfer encryption identity to a new device
-opake pair request              # on the NEW device (polls for approval)
-opake pair approve              # on the EXISTING device (select + approve)
-
-# delete all Opake data from PDS (see what would go)
-opake purge --dry-run
-
-# delete everything (prompts for confirmation phrase)
-opake purge
-
-# skip confirmation and also remove local identity
-opake purge --force
-
-# remove an account (defaults to only account if just one)
-opake logout
-opake logout bob.other.com
-```
-
-Commands accept a filename, a path (`Photos/beach.jpg`), or an `at://` URI. If a filename matches multiple documents, you'll be prompted to use the full URI.
-
-The `--as` flag works with document commands (`upload`, `download`, `ls`, `rm`, `move`, `cat`, `tree`, `metadata`, `share`, `shared`, `revoke`) and accepts a handle or DID.
-
-## AppView
-
-The AppView is an Elixir/Phoenix service (`appview/`) that indexes grants and keyrings from the AT Protocol firehose and serves them via a REST API. It enables grant discovery — "what's been shared with me?" — without scanning every PDS in the network.
-
-```sh
-cd appview
-docker compose up -d                       # start postgres
-mix setup && mix phx.server                # dev server on :6100
-docker compose --profile full up --build   # production-like (postgres + appview)
-```
-
-See [docs/appview.md](docs/appview.md) for configuration, authentication, API endpoints, and deployment.
-
-## Architecture
-
-Three Rust crates, an Elixir service, and a web frontend:
-
-- **`opake-core`** — platform-agnostic library (compiles to WASM). Encryption, records, XRPC client, document operations, `Storage` trait.
-- **`opake-cli`** — CLI binary. `FileStorage` (filesystem-backed), command dispatch.
-- **`opake-derive`** — Proc-macro crate. `RedactedDebug` derive macro for secret-safe Debug output.
-- **`appview/`** — Elixir/Phoenix indexer and REST API. Jetstream firehose consumer (WebSockex), PostgreSQL storage (Ecto), DID-scoped Ed25519 auth via Erlang `:crypto`.
-- **`web/`** — React SPA (Vite + TanStack Router + Tailwind/daisyUI). Uses `opake-core` via WASM. `IndexedDbStorage` (IndexedDB-backed) implements the same `Storage` trait as the CLI.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the encryption model, crate structure, and design decisions. See [docs/FLOWS.md](docs/FLOWS.md) for sequence diagrams of every operation.
-
-## Roadmap
-
-- [x] CLI foundation (auth, upload, download, ls, rm)
-- [x] Client-side AES-256-GCM encryption
-- [x] Asymmetric key wrapping (x25519-hkdf-a256kw)
-- [x] Automatic token refresh
-- [x] Multi-account support (--as flag, logout, set-default, accounts)
-- [x] Public key auto-publish on login (app.opake.publicKey record)
-- [x] DID resolution and public key extraction
-- [x] Direct file sharing between DIDs
-- [x] Cross-PDS shared file download (via --grant flag)
-- [x] Grant listing (shared command)
-- [x] AppView indexer (grants + keyrings from firehose)
-- [x] AppView REST API with DID-scoped Ed25519 auth
-- [x] Folder hierarchy (mkdir, tree, path-aware rm/mv/cat/upload)
-- [x] Grant discovery (inbox command — queries AppView)
-- [x] Keyring-based group sharing
-- [ ] Web UI — cabinet file browser (in progress, auth stubbed)
-- [x] AT Protocol OAuth (DPoP) for CLI and browser authentication
-- [x] Device-to-device identity pairing via PDS relay
-- [ ] Seed phrase key derivation for multi-device
+- `opake-core/` — Platform-agnostic library (Rust/WASM).
+- `opake-cli/` — CLI implementation.
+- `appview/` — Elixir/Phoenix indexer for grant discovery.
+- `web/` — React SPA (Vite + TanStack).
+- `lexicons/` — AT Protocol schemas (`app.opake.*`).
 
 ## Development
 
 ```sh
-cargo test           # run all Rust tests
-cargo clippy         # lint
-cargo fmt            # format
-
-# web frontend
-cd web
-bun install          # install deps
-bun run wasm:build   # build opake-core WASM module
-bun run dev          # start Vite dev server
-bun run test         # run Vitest suite
+cargo test           # Rust tests
+bun run wasm:build   # Build WASM for web
+mix setup            # Setup AppView
 ```
 
-CI runs on [Tangled](https://tangled.org) via `.tangled/workflows/test.yml`.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-
-## Lexicons
-
-Custom AT Protocol schemas live in `lexicons/`. See [lexicons/README.md](lexicons/README.md) for the full schema documentation and [lexicons/EXAMPLES.md](lexicons/EXAMPLES.md) for annotated example records.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit conventions.
 
 ## License
 

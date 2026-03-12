@@ -1,0 +1,177 @@
+<ChapterHeader title="The CLI Manual" />
+
+<Lead>
+  For the power users, the keyboard-bound, and the automation-obsessed. The Opake CLI is the
+  reference implementation of our protocol.
+</Lead>
+
+## Installation
+
+The CLI is built in Rust and distributed via `cargo`. Ensure you have Rust 1.75+ installed.
+
+<CodeBlock language="sh">cargo install --path crates/opake-cli</CodeBlock>
+
+This puts the `opake` binary in your `~/.cargo/bin/` directory.
+
+---
+
+## 1. Identity & Session Management
+
+Everything starts with a session. Opake supports multiple accounts and uses AT Protocol OAuth by default.
+
+### Login
+
+<CodeBlock language="sh">
+  # Standard OAuth login
+  opake login you.bsky.social
+
+# Explicit PDS override
+
+opake login you.bsky.social --pds https://pds.example.com
+
+# Legacy app-password fallback
+
+opake login you.bsky.social --legacy
+
+</CodeBlock>
+
+### Managing Accounts
+
+<CodeBlock language="sh">
+  # List all authenticated accounts
+  opake accounts
+
+# Set the default identity for future commands
+
+opake set-default bob.other.com
+
+# Use a specific account for a single command
+
+opake ls --as alice.example.com
+
+</CodeBlock>
+
+---
+
+## 2. The Social Filesystem
+
+Managing your encrypted vault from the terminal.
+
+### Upload & Download
+
+<CodeBlock language="sh">
+  # Encrypt and upload a file
+  opake upload photo.jpg --tags vacation,beach
+
+# Download and decrypt to a specific location
+
+opake download photo.jpg -o ~/Downloads/copy.jpg
+
+# Decrypt and stream to stdout (no local save)
+
+opake cat notes.txt
+
+</CodeBlock>
+
+### Organization
+
+<CodeBlock language="sh">
+  # List files and directories
+  opake ls --long
+
+# Create a virtual directory
+
+opake mkdir Photos
+
+# Visualize your vault hierarchy
+
+opake tree
+
+</CodeBlock>
+
+---
+
+## 3. Sharing & Collaboration
+
+Cryptographic access control at your fingertips.
+
+### Direct Sharing (Grants)
+
+<CodeBlock language="sh">
+  # Share a file with another DID or handle
+  opake share secret.pdf bob.bsky.social
+
+# List all grants you have issued
+
+opake shared
+
+# Check your inbox for incoming shares
+
+opake inbox
+
+# Revoke a grant by its URI
+
+opake revoke at://did:plc:123/app.opake.grant/tid456
+
+</CodeBlock>
+
+### Group Sharing (Keyrings)
+
+<CodeBlock language="sh">
+  # Create a new group keyring
+  opake keyring create "The Collective"
+
+# Add a member to the group
+
+opake keyring add-member "The Collective" alice.bsky.social
+
+# Upload a file to the group vault
+
+opake upload internal-docs.zip --keyring "The Collective"
+
+</CodeBlock>
+
+---
+
+## 4. Maintenance & Security
+
+### Device Pairing
+
+<CodeBlock language="sh">
+  # Request identity transfer (on the NEW device)
+  opake pair request
+
+# Approve identity transfer (on the EXISTING device)
+
+opake pair approve
+
+</CodeBlock>
+
+### The Nuclear Option
+
+<CodeBlock language="sh">
+  # Logout of an account (removes local keys)
+  opake logout alice.bsky.social
+
+# THE MINI NUKE: Delete every file in your vault, but keep your identity/keys
+
+opake rm -r /
+
+# THE FULL PURGE: Delete ALL Opake records from your PDS
+
+opake purge --dry-run
+opake purge --force
+
+</CodeBlock>
+
+<Callout type="warning">
+  **The Mini Nuke:** Running `opake rm -r /` is the fastest way to clear your entire vault while
+  keeping your cryptographic identity intact. Use it when you want a fresh start without needing to
+  re-pair your devices.
+</Callout>
+
+<Callout type="info">
+  **Pro-Tip:** Most commands support the `--help` flag for detailed usage and sub-command options.
+</Callout>
+
+Ready to learn about how these commands translate to the protocol? Check the [Technical Spec](/docs/protocol).

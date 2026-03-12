@@ -1,0 +1,62 @@
+<ChapterHeader title="Getting Started" />
+
+<Lead>
+  Though we've designed Opake to be as intuitive as possible, these documents are for if you want to
+  go a little more in-depth about our technology. Feel free to just get started, or to read on.
+</Lead>
+
+<Lead>
+  Opake is a radical departure from traditional cloud storage. You are not creating an account on
+  our servers; you are bringing your own identity and storage to our interface.
+</Lead>
+
+## The Burden of Ownership
+
+Before we begin, an uncomfortable truth: **owning your data means owning your keys**.
+
+In traditional systems, if you lose your password, a helpful corporation resets it for you. They can do this because they ultimately hold the master keys to your kingdom. Opake cannot do this. We do not have your keys. Your Personal Data Server (PDS) does not have your keys.
+
+If you lose your keypair, your encrypted files remain mathematically opaque forever. There is no recovery. This is not a flaw; it is the fundamental guarantee of end-to-end encryption.
+
+<Callout type="warning">
+  Treat your Opake identity like a physical key to a very heavy vault.
+</Callout>
+
+---
+
+## 1. Entering your cabinet
+
+Whether you use the Web App or the CLI, the process begins by authenticating with your AT Protocol handle (e.g., `alice.bsky.social`).
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+
+    1. Navigate to the login screen.
+    2. Enter your handle (e.g., `you.bsky.social`).
+    3. You will be redirected to your PDS (such as Bluesky) to authorize Opake.
+    4. Once authorized, Opake generates your encryption identity entirely within your browser's local storage.
+
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    Run the following command in your terminal:
+    <CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
+    This will open a browser window for OAuth authorization. Your keys will be generated and stored
+    securely in `~/.config/opake`.
+  </PlatformTab>
+</PlatformToggle>
+
+## 2. Keeping private what's in your drawers
+
+Inside your cabinet, everything looks familiar: files, folders, and organized grids. But this is a structure built entirely on your device.
+
+On the network, your data is hidden in plain sight. Because Opake encrypts your file names, tags, and folder paths before they ever leave your hand, the storage provider sees only a collection of nameless, scrambled records. They can see that something exists, but they have no way of knowing it’s a "Project" folder or a "Financial" PDF.
+
+Your cabinet only "assembles" itself once you provide your keys. Opake pulls these scrambled pieces from the network and organizes them back into the familiar hierarchy you expect—instantly and only for you.downloads these encrypted records, decrypts the metadata locally, and reconstructs the folder hierarchy on the fly.
+
+<Callout type="info">
+  **Why this matters:** Even if your server is compromised by a malicious admin, they will only see
+  a flat list of opaque data and encrypted records. They cannot even tell if a file is a PDF or an
+  image, nor what folder you've stored it in.
+</Callout>
+
+Ready to dive deeper into how the math actually works? Read about [Encryption & Keys](/docs/encryption-keys).

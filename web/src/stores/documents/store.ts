@@ -64,7 +64,7 @@ interface DocumentsState {
   readonly moveEntry: (entryUri: string, targetDirectoryUri: string | null) => Promise<void>;
   readonly renameDirectory: (directoryUri: string, newName: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
-  /** Build the cabinet files route splat path for a document URI, or null if not in the tree. */
+  /** Build your cabinet files route splat path for a document URI, or null if not in the tree. */
   readonly cabinetPathFor: (documentUri: string) => string | null;
 }
 

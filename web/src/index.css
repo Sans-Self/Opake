@@ -1,6 +1,26 @@
 @import "tailwindcss";
 @plugin "daisyui";
 
+/* ─── Fallback font metric overrides (eliminates layout shift on swap) ──── */
+
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 111.93%;
+  ascent-override: 86.55%;
+  descent-override: 21.55%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond Fallback";
+  src: local("Times New Roman"), local("Times");
+  size-adjust: 98.32%;
+  ascent-override: 93.98%;
+  descent-override: 29.19%;
+  line-gap-override: 0%;
+}
+
 /* ─── Self-hosted fonts ──────────────────────────────────────────────────── */
 
 @font-face {
@@ -145,8 +165,8 @@
 /* ─── Design tokens ───────────────────────────────────────────────────────── */
 
 @theme {
-  --font-display: "Cormorant Garamond", serif;
-  --font-sans: "Inter", sans-serif;
+  --font-display: "Cormorant Garamond", "Cormorant Garamond Fallback", serif;
+  --font-sans: "Inter", "Inter Fallback", sans-serif;
 
   /* Text scale */
   --text-ui: 0.8125rem; /* 13px — primary UI text */
@@ -260,5 +280,54 @@
   }
   .prose strong {
     font-weight: 600;
+  }
+  .prose h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin-top: 2.5em;
+    margin-bottom: 0.75em;
+    color: var(--color-base-content);
+  }
+  .prose h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.8em;
+    margin-bottom: 0.5em;
+    color: var(--color-base-content);
+  }
+  .prose ul,
+  .prose ol {
+    margin-block: 0.75em;
+    padding-left: 1.5em;
+  }
+  .prose li {
+    margin-block: 0.25em;
+  }
+  .prose hr {
+    border: none;
+    border-top: 1px solid var(--color-border-accent);
+    opacity: 0.4;
+    margin-block: 2em;
+  }
+  .prose code:not(pre code) {
+    font-size: 0.85em;
+    padding: 0.15em 0.35em;
+    border-radius: 0.25rem;
+    background: var(--color-base-300);
+  }
+  .prose blockquote {
+    border-left: 3px solid var(--color-border-accent);
+    padding-left: 1em;
+    margin-block: 1em;
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+  .prose pre {
+    margin-block: 1em;
+    border-radius: 0.5rem;
+    overflow-x: auto;
   }
 }

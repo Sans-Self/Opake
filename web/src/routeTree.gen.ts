@@ -9,11 +9,12 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PublicRouteImport } from './routes/_public'
 import { Route as DevicesRouteRouteImport } from './routes/devices/route'
 import { Route as CabinetRouteRouteImport } from './routes/cabinet/route'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevicesIndexRouteImport } from './routes/devices/index'
 import { Route as CabinetIndexRouteImport } from './routes/cabinet/index'
+import { Route as PublicIndexRouteImport } from './routes/_public/index'
 import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
 import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-callback'
@@ -21,13 +22,23 @@ import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
 import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
 import { Route as CabinetSettingsRouteImport } from './routes/cabinet/settings'
 import { Route as CabinetEncryptedRouteImport } from './routes/cabinet/encrypted'
-import { Route as CabinetDocsRouteImport } from './routes/cabinet/docs'
+import { Route as PublicTroubleshootingRouteImport } from './routes/_public/troubleshooting'
+import { Route as PublicFaqRouteImport } from './routes/_public/faq'
 import { Route as CabinetFilesRouteRouteImport } from './routes/cabinet/files/route'
+import { Route as CabinetDocsRouteRouteImport } from './routes/cabinet/docs/route'
 import { Route as CabinetFilesIndexRouteImport } from './routes/cabinet/files/index'
+import { Route as CabinetDocsIndexRouteImport } from './routes/cabinet/docs/index'
+import { Route as PublicDocsIndexRouteImport } from './routes/_public/docs/index'
 import { Route as DevicesPairRequestRouteImport } from './routes/devices/pair.request'
 import { Route as DevicesPairAcceptRouteImport } from './routes/devices/pair.accept'
 import { Route as CabinetFilesSplatRouteImport } from './routes/cabinet/files/$'
+import { Route as CabinetDocsSlugRouteImport } from './routes/cabinet/docs/$slug'
+import { Route as PublicDocsSlugRouteImport } from './routes/_public/docs/$slug'
 
+const PublicRoute = PublicRouteImport.update({
+  id: '/_public',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DevicesRouteRoute = DevicesRouteRouteImport.update({
   id: '/devices',
   path: '/devices',
@@ -36,11 +47,6 @@ const DevicesRouteRoute = DevicesRouteRouteImport.update({
 const CabinetRouteRoute = CabinetRouteRouteImport.update({
   id: '/cabinet',
   path: '/cabinet',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DevicesIndexRoute = DevicesIndexRouteImport.update({
@@ -52,6 +58,11 @@ const CabinetIndexRoute = CabinetIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CabinetRouteRoute,
+} as any)
+const PublicIndexRoute = PublicIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PublicRoute,
 } as any)
 const DevicesOauthCallbackRoute = DevicesOauthCallbackRouteImport.update({
   id: '/oauth-callback',
@@ -88,20 +99,40 @@ const CabinetEncryptedRoute = CabinetEncryptedRouteImport.update({
   path: '/encrypted',
   getParentRoute: () => CabinetRouteRoute,
 } as any)
-const CabinetDocsRoute = CabinetDocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
-  getParentRoute: () => CabinetRouteRoute,
+const PublicTroubleshootingRoute = PublicTroubleshootingRouteImport.update({
+  id: '/troubleshooting',
+  path: '/troubleshooting',
+  getParentRoute: () => PublicRoute,
+} as any)
+const PublicFaqRoute = PublicFaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => PublicRoute,
 } as any)
 const CabinetFilesRouteRoute = CabinetFilesRouteRouteImport.update({
   id: '/files',
   path: '/files',
   getParentRoute: () => CabinetRouteRoute,
 } as any)
+const CabinetDocsRouteRoute = CabinetDocsRouteRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
 const CabinetFilesIndexRoute = CabinetFilesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CabinetFilesRouteRoute,
+} as any)
+const CabinetDocsIndexRoute = CabinetDocsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CabinetDocsRouteRoute,
+} as any)
+const PublicDocsIndexRoute = PublicDocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => PublicRoute,
 } as any)
 const DevicesPairRequestRoute = DevicesPairRequestRouteImport.update({
   id: '/pair/request',
@@ -118,13 +149,25 @@ const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => CabinetFilesRouteRoute,
 } as any)
+const CabinetDocsSlugRoute = CabinetDocsSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => CabinetDocsRouteRoute,
+} as any)
+const PublicDocsSlugRoute = PublicDocsSlugRouteImport.update({
+  id: '/docs/$slug',
+  path: '/docs/$slug',
+  getParentRoute: () => PublicRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
   '/cabinet': typeof CabinetRouteRouteWithChildren
   '/devices': typeof DevicesRouteRouteWithChildren
+  '/': typeof PublicIndexRoute
+  '/cabinet/docs': typeof CabinetDocsRouteRouteWithChildren
   '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
-  '/cabinet/docs': typeof CabinetDocsRoute
+  '/faq': typeof PublicFaqRoute
+  '/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
@@ -134,14 +177,18 @@ export interface FileRoutesByFullPath {
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/docs/$slug': typeof PublicDocsSlugRoute
+  '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/docs/': typeof PublicDocsIndexRoute
+  '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/cabinet/docs': typeof CabinetDocsRoute
+  '/faq': typeof PublicFaqRoute
+  '/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
@@ -149,20 +196,27 @@ export interface FileRoutesByTo {
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/': typeof PublicIndexRoute
   '/cabinet': typeof CabinetIndexRoute
   '/devices': typeof DevicesIndexRoute
+  '/docs/$slug': typeof PublicDocsSlugRoute
+  '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/docs': typeof PublicDocsIndexRoute
+  '/cabinet/docs': typeof CabinetDocsIndexRoute
   '/cabinet/files': typeof CabinetFilesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/cabinet': typeof CabinetRouteRouteWithChildren
   '/devices': typeof DevicesRouteRouteWithChildren
+  '/_public': typeof PublicRouteWithChildren
+  '/cabinet/docs': typeof CabinetDocsRouteRouteWithChildren
   '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
-  '/cabinet/docs': typeof CabinetDocsRoute
+  '/_public/faq': typeof PublicFaqRoute
+  '/_public/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
@@ -170,21 +224,28 @@ export interface FileRoutesById {
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/_public/': typeof PublicIndexRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/_public/docs/$slug': typeof PublicDocsSlugRoute
+  '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
+  '/_public/docs/': typeof PublicDocsIndexRoute
+  '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/cabinet'
     | '/devices'
-    | '/cabinet/files'
+    | '/'
     | '/cabinet/docs'
+    | '/cabinet/files'
+    | '/faq'
+    | '/troubleshooting'
     | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
@@ -194,14 +255,18 @@ export interface FileRouteTypes {
     | '/devices/oauth-callback'
     | '/cabinet/'
     | '/devices/'
+    | '/docs/$slug'
+    | '/cabinet/docs/$slug'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/docs/'
+    | '/cabinet/docs/'
     | '/cabinet/files/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
-    | '/cabinet/docs'
+    | '/faq'
+    | '/troubleshooting'
     | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
@@ -209,19 +274,26 @@ export interface FileRouteTypes {
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/'
     | '/cabinet'
     | '/devices'
+    | '/docs/$slug'
+    | '/cabinet/docs/$slug'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/docs'
+    | '/cabinet/docs'
     | '/cabinet/files'
   id:
     | '__root__'
-    | '/'
     | '/cabinet'
     | '/devices'
-    | '/cabinet/files'
+    | '/_public'
     | '/cabinet/docs'
+    | '/cabinet/files'
+    | '/_public/faq'
+    | '/_public/troubleshooting'
     | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
@@ -229,22 +301,34 @@ export interface FileRouteTypes {
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/_public/'
     | '/cabinet/'
     | '/devices/'
+    | '/_public/docs/$slug'
+    | '/cabinet/docs/$slug'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
+    | '/_public/docs/'
+    | '/cabinet/docs/'
     | '/cabinet/files/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   CabinetRouteRoute: typeof CabinetRouteRouteWithChildren
   DevicesRouteRoute: typeof DevicesRouteRouteWithChildren
+  PublicRoute: typeof PublicRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/_public': {
+      id: '/_public'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof PublicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/devices': {
       id: '/devices'
       path: '/devices'
@@ -257,13 +341,6 @@ declare module '@tanstack/react-router' {
       path: '/cabinet'
       fullPath: '/cabinet'
       preLoaderRoute: typeof CabinetRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/devices/': {
@@ -279,6 +356,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/cabinet/'
       preLoaderRoute: typeof CabinetIndexRouteImport
       parentRoute: typeof CabinetRouteRoute
+    }
+    '/_public/': {
+      id: '/_public/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof PublicIndexRouteImport
+      parentRoute: typeof PublicRoute
     }
     '/devices/oauth-callback': {
       id: '/devices/oauth-callback'
@@ -329,12 +413,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetEncryptedRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
-    '/cabinet/docs': {
-      id: '/cabinet/docs'
-      path: '/docs'
-      fullPath: '/cabinet/docs'
-      preLoaderRoute: typeof CabinetDocsRouteImport
-      parentRoute: typeof CabinetRouteRoute
+    '/_public/troubleshooting': {
+      id: '/_public/troubleshooting'
+      path: '/troubleshooting'
+      fullPath: '/troubleshooting'
+      preLoaderRoute: typeof PublicTroubleshootingRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/_public/faq': {
+      id: '/_public/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof PublicFaqRouteImport
+      parentRoute: typeof PublicRoute
     }
     '/cabinet/files': {
       id: '/cabinet/files'
@@ -343,12 +434,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetFilesRouteRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
+    '/cabinet/docs': {
+      id: '/cabinet/docs'
+      path: '/docs'
+      fullPath: '/cabinet/docs'
+      preLoaderRoute: typeof CabinetDocsRouteRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
     '/cabinet/files/': {
       id: '/cabinet/files/'
       path: '/'
       fullPath: '/cabinet/files/'
       preLoaderRoute: typeof CabinetFilesIndexRouteImport
       parentRoute: typeof CabinetFilesRouteRoute
+    }
+    '/cabinet/docs/': {
+      id: '/cabinet/docs/'
+      path: '/'
+      fullPath: '/cabinet/docs/'
+      preLoaderRoute: typeof CabinetDocsIndexRouteImport
+      parentRoute: typeof CabinetDocsRouteRoute
+    }
+    '/_public/docs/': {
+      id: '/_public/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof PublicDocsIndexRouteImport
+      parentRoute: typeof PublicRoute
     }
     '/devices/pair/request': {
       id: '/devices/pair/request'
@@ -371,8 +483,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetFilesSplatRouteImport
       parentRoute: typeof CabinetFilesRouteRoute
     }
+    '/cabinet/docs/$slug': {
+      id: '/cabinet/docs/$slug'
+      path: '/$slug'
+      fullPath: '/cabinet/docs/$slug'
+      preLoaderRoute: typeof CabinetDocsSlugRouteImport
+      parentRoute: typeof CabinetDocsRouteRoute
+    }
+    '/_public/docs/$slug': {
+      id: '/_public/docs/$slug'
+      path: '/docs/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof PublicDocsSlugRouteImport
+      parentRoute: typeof PublicRoute
+    }
   }
 }
+
+interface CabinetDocsRouteRouteChildren {
+  CabinetDocsSlugRoute: typeof CabinetDocsSlugRoute
+  CabinetDocsIndexRoute: typeof CabinetDocsIndexRoute
+}
+
+const CabinetDocsRouteRouteChildren: CabinetDocsRouteRouteChildren = {
+  CabinetDocsSlugRoute: CabinetDocsSlugRoute,
+  CabinetDocsIndexRoute: CabinetDocsIndexRoute,
+}
+
+const CabinetDocsRouteRouteWithChildren =
+  CabinetDocsRouteRoute._addFileChildren(CabinetDocsRouteRouteChildren)
 
 interface CabinetFilesRouteRouteChildren {
   CabinetFilesSplatRoute: typeof CabinetFilesSplatRoute
@@ -388,8 +527,8 @@ const CabinetFilesRouteRouteWithChildren =
   CabinetFilesRouteRoute._addFileChildren(CabinetFilesRouteRouteChildren)
 
 interface CabinetRouteRouteChildren {
+  CabinetDocsRouteRoute: typeof CabinetDocsRouteRouteWithChildren
   CabinetFilesRouteRoute: typeof CabinetFilesRouteRouteWithChildren
-  CabinetDocsRoute: typeof CabinetDocsRoute
   CabinetEncryptedRoute: typeof CabinetEncryptedRoute
   CabinetSettingsRoute: typeof CabinetSettingsRoute
   CabinetSharedRoute: typeof CabinetSharedRoute
@@ -398,8 +537,8 @@ interface CabinetRouteRouteChildren {
 }
 
 const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
+  CabinetDocsRouteRoute: CabinetDocsRouteRouteWithChildren,
   CabinetFilesRouteRoute: CabinetFilesRouteRouteWithChildren,
-  CabinetDocsRoute: CabinetDocsRoute,
   CabinetEncryptedRoute: CabinetEncryptedRoute,
   CabinetSettingsRoute: CabinetSettingsRoute,
   CabinetSharedRoute: CabinetSharedRoute,
@@ -433,10 +572,29 @@ const DevicesRouteRouteWithChildren = DevicesRouteRoute._addFileChildren(
   DevicesRouteRouteChildren,
 )
 
+interface PublicRouteChildren {
+  PublicFaqRoute: typeof PublicFaqRoute
+  PublicTroubleshootingRoute: typeof PublicTroubleshootingRoute
+  PublicIndexRoute: typeof PublicIndexRoute
+  PublicDocsSlugRoute: typeof PublicDocsSlugRoute
+  PublicDocsIndexRoute: typeof PublicDocsIndexRoute
+}
+
+const PublicRouteChildren: PublicRouteChildren = {
+  PublicFaqRoute: PublicFaqRoute,
+  PublicTroubleshootingRoute: PublicTroubleshootingRoute,
+  PublicIndexRoute: PublicIndexRoute,
+  PublicDocsSlugRoute: PublicDocsSlugRoute,
+  PublicDocsIndexRoute: PublicDocsIndexRoute,
+}
+
+const PublicRouteWithChildren =
+  PublicRoute._addFileChildren(PublicRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   CabinetRouteRoute: CabinetRouteRouteWithChildren,
   DevicesRouteRoute: DevicesRouteRouteWithChildren,
+  PublicRoute: PublicRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

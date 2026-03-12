@@ -1,3 +1,10 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the AppView service 
+  details or indexing logic in this file, you MUST also update the 
+  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+-->
+
 # AppView: API & Deployment
 
 The AppView indexes `app.opake.grant` and `app.opake.keyring` records from the AT Protocol firehose and serves them via a REST API. It enables the `inbox` command — "what's been shared with me?" — without scanning every PDS in the network.

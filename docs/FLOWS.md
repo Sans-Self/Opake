@@ -1,3 +1,10 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the operation flows 
+  or data models in this file, you MUST also update the corresponding MDX 
+  content in `web/src/content/` to prevent documentation drift. 
+-->
+
 # Opake — Operation Flows
 
 This document has been split into per-topic files for maintainability. See [flows/README.md](flows/README.md) for the index.

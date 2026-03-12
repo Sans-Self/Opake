@@ -1,3 +1,10 @@
+<!-- 
+  NOTE TO EDITORS: 
+  Opake uses a dual-documentation system. If you modify the AT Protocol 
+  schemas or lexicon definitions in this file, you MUST also update the 
+  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+-->
+
 # app.opake.* Lexicon Schemas
 
 An encrypted personal cloud built on AT Protocol.
