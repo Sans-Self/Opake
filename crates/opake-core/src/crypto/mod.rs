@@ -1,5 +1,11 @@
 // Client-side encryption primitives.
 //
+// NOTE TO EDITORS:
+// Opake uses a dual-documentation system. If you modify the cryptographic
+// primitives, key wrapping schemes, or security model in this file, you
+// MUST also update the corresponding MDX content in `web/src/content/`
+// to prevent documentation drift.
+//
 // This module handles AES-256-GCM content encryption and asymmetric key
 // wrapping (x25519-hkdf-a256kw). It intentionally has no I/O — it takes
 // bytes in and returns bytes out. The calling layer (CLI or WASM) handles
@@ -113,10 +119,11 @@ pub struct EncryptedPayload {
     pub nonce: [u8; AES_GCM_NONCE_LEN],
 }
 
-/// HKDF info string for domain separation — includes schema version so a
-/// version bump produces different derived keys from the same shared secret.
-fn hkdf_info() -> Vec<u8> {
-    format!("opake-key-wrap-v{SCHEMA_VERSION}").into_bytes()
+/// HKDF info string for domain separation — includes schema version and
+/// recipient DID so a version bump or different recipient produces different
+/// derived keys from the same shared secret.
+fn hkdf_info(recipient_did: &str) -> Vec<u8> {
+    format!("opake-v{SCHEMA_VERSION}-{WRAP_ALGO}-{recipient_did}").into_bytes()
 }
 
 #[cfg(test)]

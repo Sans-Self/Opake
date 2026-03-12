@@ -11,13 +11,14 @@ use crate::error::Error;
 use crate::records::WrappedKey;
 
 /// Derive a 256-bit wrapping key from an ECDH shared secret via HKDF-SHA256.
-fn derive_wrapping_key(shared_secret: &[u8; 32]) -> Result<[u8; 32], Error> {
+/// The recipient DID is included in the info string for domain separation.
+fn derive_wrapping_key(shared_secret: &[u8; 32], recipient_did: &str) -> Result<[u8; 32], Error> {
     use hkdf::Hkdf;
     use sha2::Sha256;
 
     let hkdf = Hkdf::<Sha256>::new(None, shared_secret);
     let mut wrapping_key = [0u8; 32];
-    hkdf.expand(&hkdf_info(), &mut wrapping_key)
+    hkdf.expand(&hkdf_info(recipient_did), &mut wrapping_key)
         .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
     Ok(wrapping_key)
 }
@@ -38,7 +39,7 @@ pub fn wrap_key(
     let recipient_public_key = PublicKey::from(*recipient_public_key);
     let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public_key);
 
-    let wrapping_key = derive_wrapping_key(shared_secret.as_bytes())?;
+    let wrapping_key = derive_wrapping_key(shared_secret.as_bytes(), recipient_did)?;
     let kek = KekAes256::new((&wrapping_key).into());
     let wrapped = kek
         .wrap_vec(&content_key.0)
@@ -82,7 +83,7 @@ pub fn unwrap_key(
     let secret = StaticSecret::from(*private_key);
     let shared_secret = secret.diffie_hellman(&ephemeral_public_key);
 
-    let wrapping_key = derive_wrapping_key(shared_secret.as_bytes())?;
+    let wrapping_key = derive_wrapping_key(shared_secret.as_bytes(), &wrapped.did)?;
     let kek = KekAes256::new((&wrapping_key).into());
     let content_key_bytes = kek
         .unwrap_vec(wrapped_key_bytes)
