@@ -51,6 +51,13 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
       "Securely transfer your identity keypair to new devices using your PDS as a relay.",
   },
   {
+    slug: "cli",
+    title: "The CLI Manual",
+    icon: "terminal",
+    description:
+      "Complete command reference for the Opake CLI — identity, files, sharing, and more.",
+  },
+  {
     slug: "glossary",
     title: "Glossary",
     icon: "book",

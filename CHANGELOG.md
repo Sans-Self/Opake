@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add SEO audit for web application [#263](https://issues.opake.app/issues/263.html)
+- Add web and AppView hosting [#262](https://issues.opake.app/issues/262.html)
+- Add web UI with AppView and SPA [#113](https://issues.opake.app/issues/113.html)
 - Add mobile responsive layout for cabinet [#268](https://issues.opake.app/issues/268.html)
 - Rewrite sharing page to reuse cabinet file browser components [#289](https://issues.opake.app/issues/289.html)
 - Add web inbox for incoming grants [#150](https://issues.opake.app/issues/150.html)

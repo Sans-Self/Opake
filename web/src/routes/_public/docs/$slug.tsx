@@ -10,6 +10,7 @@ import EncryptionKeys from "@/content/docs/encryption-keys.mdx";
 import SharingDids from "@/content/docs/sharing-dids.mdx";
 import Keyrings from "@/content/docs/keyrings.mdx";
 import Pairing from "@/content/docs/pairing.mdx";
+import Cli from "@/content/docs/cli.mdx";
 import Glossary from "@/content/docs/glossary.mdx";
 import Faq from "@/content/faq.mdx";
 
@@ -22,6 +23,7 @@ const CONTENT_BY_SLUG: Partial<
   "sharing-dids": SharingDids,
   keyrings: Keyrings,
   pairing: Pairing,
+  cli: Cli,
   glossary: Glossary,
   faq: Faq,
 };

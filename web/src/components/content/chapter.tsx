@@ -143,13 +143,18 @@ interface CodeBlockProps {
   readonly children: ReactNode;
 }
 
+function extractText(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (node == null || typeof node === "boolean") return "";
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (typeof node === "object" && "props" in node)
+    return extractText((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
 export function CodeBlock({ language, title, children }: CodeBlockProps) {
-  const code =
-    typeof children === "string"
-      ? children.trim()
-      : Array.isArray(children)
-        ? (children as string[]).join("")
-        : "";
+  const code = extractText(children).trim();
 
   return (
     <div className="border-border-accent/30 my-4 overflow-hidden rounded-lg border">

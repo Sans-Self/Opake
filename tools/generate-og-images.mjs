@@ -94,6 +94,7 @@ const DOCS = [
   { slug: "sharing-dids", title: "Sharing & DIDs", description: "Share files using decentralised identifiers without a central authority." },
   { slug: "keyrings", title: "Keyrings & Groups", description: "Manage secure group sharing for families, teams, and research groups." },
   { slug: "pairing", title: "Multi-Device Magic", description: "Securely transfer your identity keypair to new devices using your PDS as a relay." },
+  { slug: "cli", title: "The CLI Manual", description: "Complete command reference for the Opake CLI — identity, files, sharing, and more." },
   { slug: "glossary", title: "Glossary", description: "A quick-hit reference for the terminology and acronyms we use in Opake." },
   { slug: "faq", title: "FAQ", description: "Common questions about privacy, security, and how Opake compares to alternatives." },
 ];
