@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "@phosphor-icons/react";
+import { ogMeta } from "@/lib/og-meta";
 import {
   HeroSection,
   HeroHeadline,
@@ -151,14 +152,10 @@ function LandingPage() {
 
 export const Route = createFileRoute("/_public/")({
   head: () => ({
-    meta: [
-      { title: "Opake — Your data, freely shared, privately kept" },
-      { name: "description", content: DESCRIPTION },
-      { name: "og:title", content: "Opake — Your data, freely shared, privately kept" },
-      { name: "og:description", content: DESCRIPTION },
-      { name: "twitter:title", content: "Opake — Your data, freely shared, privately kept" },
-      { name: "twitter:description", content: DESCRIPTION },
-    ],
+    meta: ogMeta({
+      title: "Opake — Your data, freely shared, privately kept",
+      description: DESCRIPTION,
+    }),
   }),
   component: LandingPage,
 });

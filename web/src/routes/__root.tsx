@@ -35,6 +35,11 @@ function RootDocument({ children }: Readonly<{ children: React.ReactNode }>) {
           type="font/woff2"
           crossOrigin=""
         />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/site.webmanifest" />
+        <meta name="theme-color" content="#f4f0e8" />
         <link rel="stylesheet" href={css} />
         <HeadContent />
       </head>
@@ -106,9 +111,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
       { title: "Opake" },
-      { name: "og:site_name", content: "Opake" },
-      { name: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:site_name", content: "Opake" },
+      { property: "og:type", content: "website" },
     ],
   }),
   component: RootLayout,

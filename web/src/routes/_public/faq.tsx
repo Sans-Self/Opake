@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ogMeta } from "@/lib/og-meta";
 import { MdxContent } from "@/components/content/MdxProvider";
 import FaqContent from "@/content/faq.mdx";
 
@@ -12,10 +13,11 @@ function FaqPage() {
 
 export const Route = createFileRoute("/_public/faq")({
   head: () => ({
-    meta: [
-      { title: "FAQ — Opake" },
-      { name: "description", content: "Frequently asked questions about Opake." },
-    ],
+    meta: ogMeta({
+      title: "FAQ — Opake",
+      description: "Frequently asked questions about Opake.",
+      image: "/og/faq.png",
+    }),
   }),
   component: FaqPage,
 });

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ogMeta } from "@/lib/og-meta";
 import { MdxContent } from "@/components/content/MdxProvider";
 import TroubleshootingContent from "@/content/troubleshooting.mdx";
 
@@ -12,13 +13,10 @@ function TroubleshootingPage() {
 
 export const Route = createFileRoute("/_public/troubleshooting")({
   head: () => ({
-    meta: [
-      { title: "Troubleshooting — Opake" },
-      {
-        name: "description",
-        content: "Common issues and solutions for Opake.",
-      },
-    ],
+    meta: ogMeta({
+      title: "Troubleshooting — Opake",
+      description: "Common issues and solutions for Opake.",
+    }),
   }),
   component: TroubleshootingPage,
 });

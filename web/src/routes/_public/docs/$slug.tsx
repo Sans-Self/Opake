@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { MdxContent } from "@/components/content/MdxProvider";
 import { findDoc } from "@/lib/docs-registry";
+import { ogMeta } from "@/lib/og-meta";
 
 import GettingStarted from "@/content/docs/getting-started.mdx";
 import AtProtocol from "@/content/docs/at-protocol.mdx";
@@ -48,10 +49,11 @@ export const Route = createFileRoute("/_public/docs/$slug")({
   head: ({ params }) => {
     const doc = findDoc(params.slug);
     return {
-      meta: [
-        { title: doc ? `${doc.title} — Opake` : "Docs — Opake" },
-        { name: "description", content: doc?.description ?? "" },
-      ],
+      meta: ogMeta({
+        title: doc ? `${doc.title} — Opake` : "Docs — Opake",
+        description: doc?.description ?? "",
+        image: doc ? `/og/${params.slug}.png` : undefined,
+      }),
     };
   },
   component: DocChapterPage,
