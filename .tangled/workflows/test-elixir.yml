@@ -1,0 +1,25 @@
+image: hexpm/elixir:1.18.3-erlang-27.3-debian-bookworm-20250317-slim
+engine: "kubernetes"
+architecture: arm64
+
+when:
+  - event: ["push", "pull_request"]
+    branch: ["main"]
+
+steps:
+  - name: "Install deps"
+    command: |
+      apt-get update -y && apt-get install -y --no-install-recommends build-essential git
+      cd appview
+      mix local.hex --force && mix local.rebar --force
+      mix deps.get
+
+  - name: "Compile (warnings as errors)"
+    command: |
+      cd appview
+      MIX_ENV=test mix compile --warnings-as-errors
+
+  - name: "Test"
+    command: |
+      cd appview
+      MIX_ENV=test mix test
