@@ -25,7 +25,14 @@ export function ReadyView() {
           Back to cabinet
         </Link>
         <button
-          onClick={() => void useAuthStore.getState().logout()}
+          onClick={() =>
+            void useAuthStore
+              .getState()
+              .logout()
+              .then(() => {
+                window.location.href = "/devices";
+              })
+          }
           className="text-error/60 hover:text-error/80 text-sm"
         >
           Log out

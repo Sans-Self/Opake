@@ -26,10 +26,15 @@ export function PanelShell({
     <div
       className={`${PANEL_CHROME} ${sidePanel ? "order-2 min-h-0 flex-1 lg:order-1 lg:basis-2/5" : "h-full"}`}
     >
-      {/* Panel header */}
-      <div className="border-base-300/50 bg-base-100/70 flex shrink-0 items-center gap-2.5 border-b px-4 py-2.75">
+      {/* Panel header — desktop: single row, breadcrumbs left + toolbar right */}
+      <div className="border-base-300/50 bg-base-100/70 hidden shrink-0 items-center justify-between gap-2.5 border-b px-4 py-2.75 md:flex">
         {breadcrumbs}
         {toolbar && <div className="flex shrink-0 items-center gap-2">{toolbar}</div>}
+      </div>
+      {/* Panel header — mobile: breadcrumbs on own row, toolbar below spread evenly */}
+      <div className="border-base-300/50 bg-base-100/70 shrink-0 space-y-2 border-b px-4 py-2.5 md:hidden">
+        {toolbar && <div className="flex items-center justify-between gap-2">{toolbar}</div>}
+        {breadcrumbs}
       </div>
 
       {/* Panel body */}
@@ -48,7 +53,7 @@ export function PanelShell({
   );
 
   return (
-    <div className="relative flex-1 overflow-hidden p-5.5 pl-7">
+    <div className="relative flex-1 overflow-hidden">
       {/* Ghost panels — filing cabinet depth */}
       {depth >= 4 && (
         <div className="border-primary/10 bg-bg-ghost-1/60 animate-ghost-panel absolute inset-y-5.5 right-5.5 left-7 z-0 -translate-x-3.75 -translate-y-3.75 rounded-2xl border delay-150" />

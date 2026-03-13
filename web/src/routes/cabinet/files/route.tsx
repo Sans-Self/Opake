@@ -194,71 +194,82 @@ function FileBrowserLayout() {
   // Breadcrumb always shows directory path — document name is in the preview pane header
   const breadcrumbSegments = isPreviewMode ? parentSegments : segments;
 
+  const cabinetLabel = (
+    <>
+      <FolderIcon size={14} className="md:hidden" />
+      <span className="hidden md:inline">Your Cabinet</span>
+    </>
+  );
+
   const breadcrumbsContent = (
-    <Breadcrumbs>
-      {contextRkey ? (
-        <li>
-          <Link to="/cabinet/files" className="text-text-faint">
-            Your Cabinet
-          </Link>
-        </li>
-      ) : (
-        <BreadcrumbActive>Your Cabinet</BreadcrumbActive>
-      )}
-      {ancestors.map((ancestor, index) => (
-        <li key={ancestor.uri}>
-          <Link
-            to="/cabinet/files/$"
-            params={{ _splat: breadcrumbSegments.slice(0, index + 1).join("/") }}
-            className="text-text-faint"
-          >
-            {ancestor.name}
-          </Link>
-        </li>
-      ))}
-      {contextRkey && currentDirectoryName && (
-        <BreadcrumbActive>{currentDirectoryName}</BreadcrumbActive>
-      )}
-      {contextRkey && !currentDirectoryName && <BreadcrumbSkeleton />}
-    </Breadcrumbs>
+    <div className="flex items-center gap-2">
+      <Breadcrumbs>
+        {contextRkey ? (
+          <li>
+            <Link to="/cabinet/files" className="text-text-faint">
+              {cabinetLabel}
+            </Link>
+          </li>
+        ) : (
+          <BreadcrumbActive>{cabinetLabel}</BreadcrumbActive>
+        )}
+        {ancestors.map((ancestor, index) => (
+          <li key={ancestor.uri}>
+            <Link
+              to="/cabinet/files/$"
+              params={{ _splat: breadcrumbSegments.slice(0, index + 1).join("/") }}
+              className="text-text-faint"
+            >
+              {ancestor.name}
+            </Link>
+          </li>
+        ))}
+        {contextRkey && currentDirectoryName && (
+          <BreadcrumbActive>{currentDirectoryName}</BreadcrumbActive>
+        )}
+        {contextRkey && !currentDirectoryName && <BreadcrumbSkeleton />}
+      </Breadcrumbs>
+    </div>
   );
 
   const toolbar = (
     <>
-      <SegmentedToggle
-        options={[
-          { value: "list" as const, icon: ListBulletsIcon },
-          { value: "grid" as const, icon: SquaresFourIcon },
-        ]}
-        value={viewMode}
-        onChange={setViewMode}
-      />
+      <div className="flex gap-2">
+        <SegmentedToggle
+          options={[
+            { value: "list" as const, icon: ListBulletsIcon },
+            { value: "grid" as const, icon: SquaresFourIcon },
+          ]}
+          value={viewMode}
+          onChange={setViewMode}
+        />
 
-      <DropdownMenu
-        trigger={
-          <>
-            <PlusIcon size={13} />
-            New
-          </>
-        }
-        items={[
-          {
-            icon: UploadSimpleIcon,
-            label: "Upload file",
-            onClick: () => fileInputRef.current?.click(),
-          },
-          {
-            icon: FolderIcon,
-            label: "New folder",
-            onClick: () => newFolderDialogRef.current?.show(),
-          },
-          { icon: FileTextIcon, label: "New document" },
-          { icon: BookOpenIcon, label: "New note" },
-        ]}
-      />
+        <DropdownMenu
+          trigger={
+            <>
+              <PlusIcon size={13} />
+              New
+            </>
+          }
+          items={[
+            {
+              icon: UploadSimpleIcon,
+              label: "Upload file",
+              onClick: () => fileInputRef.current?.click(),
+            },
+            {
+              icon: FolderIcon,
+              label: "New folder",
+              onClick: () => newFolderDialogRef.current?.show(),
+            },
+            { icon: FileTextIcon, label: "New document" },
+            { icon: BookOpenIcon, label: "New note" },
+          ]}
+        />
+      </div>
 
       {depth > 1 && (
-        <button onClick={handleClose} className="btn btn-ghost btn-sm btn-square rounded-md">
+        <button onClick={handleClose} className="btn btn-ghost btn-sm btn-square flex rounded-md">
           <XIcon size={14} className="text-text-muted" />
         </button>
       )}

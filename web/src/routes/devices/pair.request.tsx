@@ -114,7 +114,7 @@ function PairRequestPage() {
 
             setState({ step: "success" });
             removeLoading("pair-request-receive");
-            setTimeout(() => navigate({ to: "/devices" }), 1500);
+            setTimeout(() => navigate({ to: "/cabinet" }), 1500);
           } catch (err) {
             cleanup();
             removeLoading("pair-request-receive");

@@ -50,8 +50,8 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
 
   return (
     <header className="border-base-300/50 bg-base-300/90 flex shrink-0 items-center gap-3 border-b px-5 py-2.5 backdrop-blur-[10px]">
-      {/* Search */}
-      <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui flex max-w-90 flex-1 items-center gap-2 rounded-lg py-1.75">
+      {/* Search — hidden on mobile (lives in sidebar instead) */}
+      <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui hidden max-w-90 flex-1 items-center gap-2 rounded-lg py-1.75 md:flex">
         <MagnifyingGlassIcon size={13} className="text-text-faint" />
         <input
           type="text"
@@ -145,7 +145,9 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
                 <button
                   onClick={() => {
                     closeMenu();
-                    void logout();
+                    void logout().then(() => {
+                      window.location.href = "/devices";
+                    });
                   }}
                   className="text-error gap-2.5 text-xs"
                 >

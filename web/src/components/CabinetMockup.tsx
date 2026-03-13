@@ -259,32 +259,121 @@ function MockPanelShell() {
   );
 }
 
-// ─── Exported mockup ──────────────────────────────────────────────────────────
+// ─── Mobile mockup — phone frame with compact file list ──────────────────────
 
-export function CabinetMockup() {
+const MOBILE_FILES = FILES;
+
+function MockMobileFrame() {
   return (
-    <div className="shadow-panel-lg overflow-hidden rounded-2xl border border-[rgba(112,83,40,0.13)]">
-      {/* Browser chrome */}
-      <div className="bg-base-100 flex items-center gap-1.5 border-b border-[rgba(112,83,40,0.13)] px-4 py-2.5">
-        <div className="size-2.5 rounded-full bg-[#D9B8A0]" />
-        <div className="size-2.5 rounded-full bg-[#D4C4A8]" />
-        <div className="size-2.5 rounded-full bg-[#C8D4B8]" />
-        <div className="flex flex-1 justify-center">
-          <div className="bg-base-300 flex h-5.5 w-48 items-center gap-1.5 rounded-md border border-[rgba(112,83,40,0.13)] px-3">
-            <LockIcon size={9} className="text-text-faint" />
-            <span className="text-text-faint text-[10px]">opake.app/cabinet</span>
+    <div
+      className="border-base-300/50 bg-base-300 mx-auto flex w-80 flex-col overflow-hidden rounded-[1.75rem] border-4 shadow-xl"
+      style={{ aspectRatio: "9 / 19" }}
+    >
+      {/* Status bar */}
+      <div className="bg-base-200 flex items-center justify-between px-5 pt-2 pb-1">
+        <span className="text-text-faint text-[0.6rem] font-medium">9:41</span>
+        <div className="flex items-center gap-1">
+          <div className="bg-text-faint h-1.5 w-4 rounded-full" />
+          <div className="bg-text-faint size-2 rounded-full" />
+        </div>
+      </div>
+
+      {/* App header */}
+      <div className="bg-base-200 flex items-center justify-between border-b border-[rgba(112,83,40,0.1)] px-4 py-2.5">
+        <OpakeLogo size="sm" />
+        <div className="flex items-center gap-2">
+          <MagnifyingGlassIcon size={14} className="text-text-muted" />
+          <div className="bg-accent text-primary flex size-6 items-center justify-center rounded-full text-[0.55rem] font-semibold">
+            V
           </div>
         </div>
       </div>
 
-      {/* App layout */}
-      <div className="bg-base-300 flex h-96">
-        <MockSidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <MockTopBar />
-          <MockPanelShell />
+      {/* Panel area with ghost layers */}
+      <div className="bg-base-300 relative flex-1 overflow-hidden px-3 pt-3 pb-2">
+        {/* Ghost panels */}
+        <div className="border-primary/15 bg-bg-ghost-1 absolute inset-x-3 inset-y-3 z-0 -translate-x-1.5 -translate-y-1.5 rounded-xl border" />
+        <div className="border-base-300/50 bg-bg-ghost-2 shadow-panel-sm absolute inset-x-3 inset-y-3 z-1 -translate-x-0.75 -translate-y-0.75 rounded-xl border" />
+
+        {/* Active panel */}
+        <div className="border-base-300/50 bg-base-100 shadow-panel-lg relative z-10 flex flex-col overflow-hidden rounded-xl border">
+          {/* Breadcrumb */}
+          <div className="border-b border-[rgba(112,83,40,0.08)] px-3 py-2">
+            <div className="text-ui flex items-center gap-1.5">
+              <FolderIcon size={12} className="text-text-faint" />
+              <span className="text-text-faint text-label">›</span>
+              <span className="text-base-content text-[0.7rem] font-medium">Documents</span>
+            </div>
+          </div>
+
+          {/* File list */}
+          <div className="px-1.5 py-1">
+            {MOBILE_FILES.map((file) => {
+              const Icon = file.icon;
+              return (
+                <div key={file.name} className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+                  <div
+                    className={`flex size-7 shrink-0 items-center justify-center rounded-md ${file.iconBg} ${file.iconText}`}
+                  >
+                    <Icon size={13} weight={file.folder ? "fill" : "regular"} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-base-content truncate text-[0.7rem]">{file.name}</div>
+                    <div className="text-text-faint text-[0.55rem]">{file.meta}</div>
+                  </div>
+                  {file.folder && <CaretRightIcon size={11} className="text-text-faint shrink-0" />}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center gap-1.5 border-t border-[rgba(112,83,40,0.08)] px-3 py-1.5">
+            <ShieldCheckIcon size={9} className="text-primary" />
+            <span className="text-text-faint text-[0.55rem]">End-to-end encrypted</span>
+          </div>
         </div>
       </div>
+
+      {/* Home indicator */}
+      <div className="bg-base-100 flex justify-center pt-1 pb-2">
+        <div className="bg-text-faint/30 h-1 w-24 rounded-full" />
+      </div>
     </div>
+  );
+}
+
+// ─── Exported mockup ──────────────────────────────────────────────────────────
+
+export function CabinetMockup() {
+  return (
+    <>
+      {/* Desktop — browser chrome */}
+      <div className="shadow-panel-lg hidden overflow-hidden rounded-2xl border border-[rgba(112,83,40,0.13)] md:block">
+        <div className="bg-base-100 flex items-center gap-1.5 border-b border-[rgba(112,83,40,0.13)] px-4 py-2.5">
+          <div className="size-2.5 rounded-full bg-[#D9B8A0]" />
+          <div className="size-2.5 rounded-full bg-[#D4C4A8]" />
+          <div className="size-2.5 rounded-full bg-[#C8D4B8]" />
+          <div className="flex flex-1 justify-center">
+            <div className="bg-base-300 flex h-5.5 w-48 items-center gap-1.5 rounded-md border border-[rgba(112,83,40,0.13)] px-3">
+              <LockIcon size={9} className="text-text-faint" />
+              <span className="text-text-faint text-label">opake.app/cabinet</span>
+            </div>
+          </div>
+        </div>
+        <div className="bg-base-300 flex h-96">
+          <MockSidebar />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <MockTopBar />
+            <MockPanelShell />
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile — phone frame */}
+      <div className="md:hidden">
+        <MockMobileFrame />
+      </div>
+    </>
   );
 }

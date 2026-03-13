@@ -58,12 +58,12 @@ export function ImagePreview({ data, mimeType }: ImagePreviewProps) {
           buttonNext: () => null,
           buttonClose: () => null,
           iconZoomIn: () => (
-            <button className="btn btn-sm btn-square" aria-label="Zoom in">
+            <button className="btn btn-sm btn-square shadow-none" aria-label="Zoom in">
               <MagnifyingGlassPlusIcon size={16} />
             </button>
           ),
           iconZoomOut: () => (
-            <button className="btn btn-sm btn-square" aria-label="Zoom out">
+            <button className="btn btn-sm btn-square shadow-none" aria-label="Zoom out">
               <MagnifyingGlassMinusIcon size={16} />
             </button>
           ),

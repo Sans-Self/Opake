@@ -6,15 +6,17 @@ interface SidebarItemProps {
   readonly icon: PhosphorIcon;
   readonly label: string;
   readonly badge?: string | number;
+  readonly onClick?: () => void;
 }
 
-export function SidebarItem({ to, icon: Icon, label, badge }: SidebarItemProps) {
+export function SidebarItem({ to, icon: Icon, label, badge, onClick }: SidebarItemProps) {
   const matchRoute = useMatchRoute();
   const active = Boolean(matchRoute({ to, fuzzy: true }));
 
   return (
     <Link
       to={to}
+      onClick={onClick}
       className={`text-ui flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left transition-colors ${
         active ? "bg-accent text-primary" : "text-text-muted hover:bg-bg-hover"
       }`}

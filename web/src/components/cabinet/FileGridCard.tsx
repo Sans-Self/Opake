@@ -109,7 +109,11 @@ export function FileGridCard({
       )}
       <div className="flex items-center justify-between">
         <span className="text-caption text-text-faint">{item.modified}</span>
-        {!hideStatus && <StatusBadge status={item.status} />}
+        {!hideStatus && (
+          <span className="hidden md:inline">
+            <StatusBadge status={item.status} />
+          </span>
+        )}
       </div>
     </div>
   );

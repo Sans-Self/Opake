@@ -17,7 +17,7 @@ export function SegmentedToggle<T extends string>({
   onChange,
 }: SegmentedToggleProps<T>) {
   return (
-    <div className="join bg-primary/10 rounded-lg p-0.5">
+    <div className="join bg-primary/10 items-center rounded-lg p-0.5">
       {options.map((option) => (
         <button
           key={option.value}

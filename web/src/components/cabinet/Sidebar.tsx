@@ -1,4 +1,11 @@
-import { FolderIcon, UsersIcon, BookOpenIcon, GearIcon } from "@phosphor-icons/react";
+import {
+  FolderIcon,
+  UsersIcon,
+  BookOpenIcon,
+  GearIcon,
+  MagnifyingGlassIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
@@ -19,22 +26,50 @@ const WORKSPACES = [
   { id: "ws-team", name: "Team Alpha", count: 2 },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  readonly onNavigate?: () => void;
+  readonly searchQuery?: string;
+  readonly onSearchChange?: (query: string) => void;
+}
+
+export function Sidebar({ onNavigate, searchQuery, onSearchChange }: SidebarProps) {
   const anyLoading = useAppStore((s) => s.anythingLoading());
 
   return (
-    <aside className="border-base-300/50 bg-base-200 flex w-53 shrink-0 flex-col border-r px-3 py-4">
-      {/* Logo */}
-      <div className="mb-5 px-0.5">
+    <aside className="border-base-300/50 bg-base-200 flex h-full w-53 shrink-0 flex-col border-r px-3 py-4">
+      {/* Logo — hidden on mobile (shown in mobile topbar instead) */}
+      <div className="mb-5 hidden px-0.5 md:block">
         <Link to="/" className="inline-block">
           <OpakeLogo loading={anyLoading} />
         </Link>
       </div>
 
+      {/* Search — mobile only */}
+      {onSearchChange && (
+        <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui mb-3 flex items-center gap-2 rounded-lg py-1.75 md:hidden">
+          <MagnifyingGlassIcon size={13} className="text-text-faint" />
+          <input
+            type="text"
+            placeholder="Search…"
+            value={searchQuery ?? ""}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="text-secondary grow bg-transparent"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange("")}
+              className="btn btn-ghost btn-xs text-text-faint p-0"
+            >
+              <XIcon size={12} />
+            </button>
+          )}
+        </label>
+      )}
+
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {MAIN_NAV.map(({ to, icon, label }) => (
-          <SidebarItem key={to} to={to} icon={icon} label={label} />
+          <SidebarItem key={to} to={to} icon={icon} label={label} onClick={onNavigate} />
         ))}
 
         {/* Workspaces */}
@@ -44,6 +79,7 @@ export function Sidebar() {
         {WORKSPACES.map((ws) => (
           <button
             key={ws.id}
+            onClick={onNavigate}
             className="text-ui text-text-muted hover:bg-bg-hover flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.75 text-left"
           >
             <div className="bg-accent text-micro text-primary flex size-5 shrink-0 items-center justify-center rounded-md font-semibold">
@@ -60,7 +96,7 @@ export function Sidebar() {
         <div className="divider mx-1 my-0" />
         <div className="flex flex-col gap-0.5">
           {BOTTOM_NAV.map(({ to, icon, label }) => (
-            <SidebarItem key={to} to={to} icon={icon} label={label} />
+            <SidebarItem key={to} to={to} icon={icon} label={label} onClick={onNavigate} />
           ))}
         </div>
       </div>

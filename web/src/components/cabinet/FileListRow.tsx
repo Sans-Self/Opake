@@ -123,9 +123,9 @@ export function FileListRow({
         </div>
       </div>
 
-      {/* Tags */}
+      {/* Tags — hidden on mobile */}
       {item.decrypted && item.tags.length > 0 && (
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="hidden shrink-0 items-center gap-1 md:flex">
           {item.tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
@@ -137,9 +137,9 @@ export function FileListRow({
         </div>
       )}
 
-      {/* Status */}
+      {/* Status — hidden on mobile */}
       {!hideStatus && (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="hidden shrink-0 items-center gap-2 md:flex">
           <StatusBadge status={item.status} />
         </div>
       )}
