@@ -12,6 +12,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
 
 ### Added
+- Add MDX content components and public documentation routes [#303](https://issues.opake.app/issues/303.html)
+- Add MDX content components and public documentation routes [#303](https://issues.opake.app/issues/303.html)
+- DNS: Add opake.app and appview.opake.app records [#284](https://issues.opake.app/issues/284.html)
+- Containerfiles for appview and web [#283](https://issues.opake.app/issues/283.html)
+- CI/CD: Spindle deploy pipeline [#282](https://issues.opake.app/issues/282.html)
+- CI/CD: Spindle validation pipeline [#280](https://issues.opake.app/issues/280.html)
+- k8s: Web frontend deployment (TanStack Start SSR) [#279](https://issues.opake.app/issues/279.html)
+- k8s: AppView deployment with SQLite persistence [#278](https://issues.opake.app/issues/278.html)
+- Add TanStack Start with MDX rendering and SEO meta tags [#275](https://issues.opake.app/issues/275.html)
+- Add Coming Soon placeholder component [#272](https://issues.opake.app/issues/272.html)
+- Add favicon and app branding [#269](https://issues.opake.app/issues/269.html)
 - Add SEO audit for web application [#263](https://issues.opake.app/issues/263.html)
 - Add web and AppView hosting [#262](https://issues.opake.app/issues/262.html)
 - Add web UI with AppView and SPA [#113](https://issues.opake.app/issues/113.html)
