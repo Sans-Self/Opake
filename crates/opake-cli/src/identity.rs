@@ -17,35 +17,35 @@ pub fn load_identity(storage: &FileStorage, did: &str) -> anyhow::Result<Identit
     storage.load_account_json(did, "identity.json")
 }
 
-/// Return the existing identity if present, otherwise generate a new
-/// keypair set, save it, and return it. The boolean indicates whether
-/// a new keypair was generated (or an existing one was migrated).
+/// Load an existing identity and migrate it if needed (add signing keys to
+/// old format). Returns `None` if no identity exists for this DID.
 ///
-/// Migration: old identity files without signing keys get Ed25519 keys
-/// added transparently on load.
-pub fn ensure_identity(
+/// Does NOT generate a new identity — callers decide what to do when
+/// no identity is found (seed phrase flow, pairing, etc.).
+pub fn load_and_migrate(
     storage: &FileStorage,
     did: &str,
     rng: &mut (impl CryptoRng + RngCore),
-) -> anyhow::Result<(Identity, bool)> {
-    if let Ok(mut existing) = load_identity(storage, did) {
-        if existing.did == did {
-            if existing.ensure_signing_keys(rng) {
-                info!("migrating identity: adding Ed25519 signing keypair");
-                save_identity(storage, did, &existing)?;
-                return Ok((existing, true));
-            }
-            return Ok((existing, false));
-        }
+) -> anyhow::Result<Option<Identity>> {
+    let mut existing = match load_identity(storage, did) {
+        Ok(id) => id,
+        Err(_) => return Ok(None),
+    };
+
+    if existing.did != did {
         info!(
-            "identity DID mismatch (stored {}, logged in as {}) — generating new keypair",
+            "identity DID mismatch (stored {}, logged in as {}) — ignoring",
             existing.did, did
         );
+        return Ok(None);
     }
 
-    let identity = Identity::generate(did, rng);
-    save_identity(storage, did, &identity)?;
-    Ok((identity, true))
+    if existing.ensure_signing_keys(rng) {
+        info!("migrating identity: adding Ed25519 signing keypair");
+        save_identity(storage, did, &existing)?;
+    }
+
+    Ok(Some(existing))
 }
 
 #[cfg(test)]
@@ -76,6 +76,14 @@ mod tests {
             .unwrap();
     }
 
+    /// Helper: save a test identity directly so tests don't depend on
+    /// any particular generation path.
+    fn save_test_identity(storage: &FileStorage, did: &str) -> Identity {
+        let identity = Identity::generate(did, &mut OsRng);
+        save_identity(storage, did, &identity).unwrap();
+        identity
+    }
+
     #[test]
     fn save_and_load_identity_roundtrip() {
         let (_dir, storage) = test_storage();
@@ -104,42 +112,35 @@ mod tests {
     }
 
     #[test]
-    fn ensure_identity_generates_when_missing() {
+    fn load_and_migrate_returns_none_when_missing() {
         let (_dir, storage) = test_storage();
         let did = "did:plc:new";
         setup_account(&storage, did);
-        let (identity, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
-        assert!(generated);
-        assert_eq!(identity.did, did);
-        assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
-        assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
-        assert!(identity.has_signing_keys());
-        assert!(identity.signing_key_bytes().unwrap().is_some());
-        assert!(identity.verify_key_bytes().unwrap().is_some());
+        let result = load_and_migrate(&storage, did, &mut OsRng).unwrap();
+        assert!(result.is_none());
     }
 
     #[test]
-    fn ensure_identity_returns_existing_when_did_matches() {
+    fn load_and_migrate_returns_existing() {
         let (_dir, storage) = test_storage();
         let did = "did:plc:same";
         setup_account(&storage, did);
-        let (first, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
-        assert!(generated);
+        let saved = save_test_identity(&storage, did);
 
-        let (second, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
-        assert!(!generated);
-        assert_eq!(first.public_key, second.public_key);
-        assert_eq!(first.private_key, second.private_key);
-        assert_eq!(first.signing_key, second.signing_key);
+        let loaded = load_and_migrate(&storage, did, &mut OsRng)
+            .unwrap()
+            .expect("should find existing identity");
+        assert_eq!(loaded.public_key, saved.public_key);
+        assert_eq!(loaded.private_key, saved.private_key);
     }
 
     #[test]
-    fn ensure_identity_migrates_old_identity_without_signing_keys() {
+    fn load_and_migrate_adds_signing_keys_to_old_format() {
         let (_dir, storage) = test_storage();
         let did = "did:plc:legacy";
         setup_account(&storage, did);
 
-        // Write an old-format identity (no signing keys) with correct permissions
+        // Write an old-format identity (no signing keys) with correct permissions.
         let old_identity = serde_json::json!({
             "did": did,
             "public_key": BASE64.encode([1u8; 32]),
@@ -152,14 +153,15 @@ mod tests {
         )
         .unwrap();
 
-        let (identity, generated) = ensure_identity(&storage, did, &mut OsRng).unwrap();
-        assert!(generated, "migration should report as generated");
+        let identity = load_and_migrate(&storage, did, &mut OsRng)
+            .unwrap()
+            .expect("should load and migrate");
         assert!(identity.has_signing_keys());
-        // X25519 keys should be preserved
+        // X25519 keys preserved.
         assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
         assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
 
-        // Re-load should have signing keys persisted
+        // Re-load should have signing keys persisted.
         let reloaded = load_identity(&storage, did).unwrap();
         assert!(reloaded.has_signing_keys());
         assert_eq!(reloaded.signing_key, identity.signing_key);
@@ -198,10 +200,8 @@ mod tests {
         let (_dir, storage) = test_storage();
         let did = "did:plc:test";
         setup_account(&storage, did);
-        let (identity, _) = ensure_identity(&storage, did, &mut OsRng).unwrap();
-        assert_eq!(identity.did, did);
+        save_test_identity(&storage, did);
 
-        // Loosen permissions to simulate a bad umask
         let path = storage.account_dir(did).join("identity.json");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
@@ -215,7 +215,7 @@ mod tests {
         let (_dir, storage) = test_storage();
         let did = "did:plc:test";
         setup_account(&storage, did);
-        let (_, _) = ensure_identity(&storage, did, &mut OsRng).unwrap();
+        save_test_identity(&storage, did);
 
         // save_identity goes through write_sensitive_file, so already 0600
         let loaded = load_identity(&storage, did).unwrap();

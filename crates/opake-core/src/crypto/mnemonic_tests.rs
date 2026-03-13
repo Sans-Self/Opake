@@ -283,3 +283,98 @@ fn wordlist_is_sorted() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Grid formatting
+// ---------------------------------------------------------------------------
+
+use crate::crypto::{format_mnemonic_grid, parse_mnemonic_grid};
+
+#[test]
+fn grid_roundtrips_through_parse() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let grid = format_mnemonic_grid(&mnemonic);
+    let parsed = parse_mnemonic_grid(&grid).expect("grid should parse back");
+    assert_eq!(parsed.to_string(), mnemonic.to_string());
+}
+
+#[test]
+fn grid_has_correct_shape() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let grid = format_mnemonic_grid(&mnemonic);
+    let lines: Vec<&str> = grid.lines().collect();
+    assert_eq!(lines.len(), 6, "grid should have 6 rows");
+    // Each line should contain 4 numbered words.
+    for line in &lines {
+        let numbers: Vec<&str> = line
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(numbers.len(), 4, "each row should have 4 numbers: {line}");
+    }
+}
+
+#[test]
+fn grid_numbers_are_1_through_24() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let grid = format_mnemonic_grid(&mnemonic);
+    // Extract all numbers from the grid.
+    let numbers: Vec<u32> = grid
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().unwrap())
+        .collect();
+    let mut sorted = numbers.clone();
+    sorted.sort();
+    assert_eq!(sorted, (1..=24).collect::<Vec<u32>>());
+}
+
+#[test]
+fn grid_parse_lenient_newline_separated() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let one_per_line = mnemonic
+        .words()
+        .iter()
+        .enumerate()
+        .map(|(i, w)| format!("{}. {}", i + 1, w))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let parsed = parse_mnemonic_grid(&one_per_line).expect("numbered list should parse");
+    assert_eq!(parsed.to_string(), mnemonic.to_string());
+}
+
+#[test]
+fn grid_parse_lenient_plain_words() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let plain = mnemonic.to_string();
+    let parsed = parse_mnemonic_grid(&plain).expect("plain words should parse");
+    assert_eq!(parsed.to_string(), mnemonic.to_string());
+}
+
+#[test]
+fn grid_parse_lenient_extra_whitespace() {
+    let mnemonic = generate_mnemonic(&mut test_rng());
+    let messy = mnemonic
+        .words()
+        .iter()
+        .map(|w| format!("  {w}  "))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let parsed = parse_mnemonic_grid(&messy).expect("messy whitespace should parse");
+    assert_eq!(parsed.to_string(), mnemonic.to_string());
+}
+
+#[test]
+fn grid_parse_rejects_invalid_words() {
+    let err = parse_mnemonic_grid("1. notaword 2. abandon 3. abandon").unwrap_err();
+    assert!(err.to_string().contains("notaword") || err.to_string().contains("expected 24"));
+}
+
+#[test]
+fn grid_all_zero_entropy_roundtrip() {
+    let entropy = [0u8; 32];
+    let mnemonic = entropy_to_mnemonic(&entropy);
+    let grid = format_mnemonic_grid(&mnemonic);
+    let parsed = parse_mnemonic_grid(&grid).unwrap();
+    assert_eq!(parsed.to_string(), mnemonic.to_string());
+}

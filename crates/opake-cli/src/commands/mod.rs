@@ -11,6 +11,7 @@ pub mod mkdir;
 pub mod move_cmd;
 pub mod pair;
 pub mod purge;
+pub mod recover;
 pub mod resolve;
 pub mod revoke;
 pub mod rm;

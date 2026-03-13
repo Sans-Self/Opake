@@ -55,6 +55,8 @@ enum Command {
     Pair(commands::pair::PairCommand),
     /// Delete all Opake data from the PDS
     Purge(commands::purge::PurgeCommand),
+    /// Recover encryption identity from a 24-word seed phrase
+    Recover(commands::recover::RecoverCommand),
     Tree(commands::tree::TreeCommand),
 }
 
@@ -124,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Purge(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Recover(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
     }
 

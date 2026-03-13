@@ -11,6 +11,7 @@
 // This makes invalid mnemonics unrepresentable in the type system.
 
 mod derive;
+mod format;
 mod generate;
 
 use std::fmt;
@@ -22,6 +23,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::error::Error;
 
 pub use derive::derive_identity_from_mnemonic;
+pub use format::{format_mnemonic_grid, parse_mnemonic_grid};
 pub use generate::generate_mnemonic;
 
 // Embedded at compile time — works for both native and WASM.

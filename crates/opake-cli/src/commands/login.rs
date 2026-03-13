@@ -8,7 +8,9 @@ use log::debug;
 use opake_core::client::ReqwestTransport;
 use opake_core::client::Transport;
 use opake_core::client::{Session, XrpcClient};
-use opake_core::crypto::OsRng;
+use opake_core::crypto::{
+    derive_identity_from_mnemonic, format_mnemonic_grid, generate_mnemonic, OsRng,
+};
 
 /// Resolve password from env var or a fallback function (e.g. stdin prompt).
 pub fn resolve_password(
@@ -135,15 +137,16 @@ impl LoginCommand {
 }
 
 /// Check for existing published key, prompt for --force confirmation if needed,
-/// generate (or load) identity, and publish the public key. Shared by both
-/// legacy and OAuth login paths.
+/// generate identity from seed phrase (or load existing), and publish the
+/// public key. Shared by both legacy and OAuth login paths.
 pub async fn ensure_identity_and_publish(
     client: &mut XrpcClient<impl Transport>,
     storage: &FileStorage,
     did: &str,
     force: bool,
 ) -> Result<()> {
-    let has_local_identity = identity::load_identity(storage, did).is_ok();
+    // Single load attempt — avoids reading identity.json twice.
+    let existing = identity::load_and_migrate(storage, did, &mut OsRng)?;
     let has_published_key = client
         .get_record(
             did,
@@ -153,7 +156,18 @@ pub async fn ensure_identity_and_publish(
         .await
         .is_ok();
 
-    if !has_local_identity && has_published_key && force {
+    // Published key exists, no local identity, no --force → can't proceed.
+    if existing.is_none() && has_published_key && !force {
+        println!();
+        println!("This account has an existing encryption identity.");
+        println!("Run `opake pair request` to transfer it from another device,");
+        println!("`opake recover` to restore from a seed phrase,");
+        println!("or `opake login --force` to generate a new identity (invalidates old one).");
+        return Ok(());
+    }
+
+    // Published key exists + --force → scary confirmation before overwriting.
+    if existing.is_none() && has_published_key && force {
         println!();
         println!("WARNING: --force will generate a new encryption identity.");
         println!("All data encrypted to the old identity will become permanently unreadable.");
@@ -169,18 +183,15 @@ pub async fn ensure_identity_and_publish(
         println!("Proceeding with new identity generation.");
     }
 
-    if !has_local_identity && has_published_key && !force {
-        println!();
-        println!("This account has an existing encryption identity.");
-        println!("Run `opake pair request` to transfer it from another device,");
-        println!("or `opake login --force` to generate a new identity (invalidates old one).");
-        return Ok(());
-    }
-
-    let (identity, generated) = identity::ensure_identity(storage, did, &mut OsRng)?;
-    if generated {
-        println!("Generated new encryption keypair");
-    }
+    // Use existing identity, or generate new from seed phrase.
+    let identity = match existing {
+        Some(identity) => identity,
+        None => {
+            let fresh = generate_identity_from_seed_phrase(did)?;
+            identity::save_identity(storage, did, &fresh)?;
+            fresh
+        }
+    };
 
     let public_key_bytes = identity.public_key_bytes()?;
     let verify_key_bytes = identity.verify_key_bytes()?;
@@ -194,6 +205,124 @@ pub async fn ensure_identity_and_publish(
     println!("Published encryption public key");
 
     Ok(())
+}
+
+/// Interactive seed phrase generation flow: generate mnemonic, display grid,
+/// confirm 3 random words, derive identity.
+fn generate_identity_from_seed_phrase(did: &str) -> Result<opake_core::storage::Identity> {
+    let mnemonic = generate_mnemonic(&mut OsRng);
+
+    println!();
+    println!("Your seed phrase (write this down — it will NOT be shown again):");
+    println!();
+    print!("{}", format_mnemonic_grid(&mnemonic));
+    println!();
+
+    // Pick 3 random word positions for confirmation.
+    let mut confirm_indices = pick_confirmation_indices(&mut OsRng);
+    confirm_indices.sort();
+
+    let words = mnemonic.words();
+    for &idx in &confirm_indices {
+        let expected = &words[idx];
+        println!("Enter word #{}: ", idx + 1);
+        print!("> ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if input.trim() != expected.as_str() {
+            anyhow::bail!(
+                "word #{} incorrect (expected {expected:?}, got {:?}). \
+                 Please try again with `opake login`.",
+                idx + 1,
+                input.trim()
+            );
+        }
+    }
+
+    println!("Seed phrase confirmed.");
+
+    // Offer to save the seed phrase to a file.
+    offer_save_seed_file(&mnemonic)?;
+
+    let identity = derive_identity_from_mnemonic(&mnemonic, did);
+    Ok(identity)
+}
+
+/// Prompt the user to save the seed phrase grid to a .txt file.
+/// Loops on write failure so the user can fix the path.
+fn offer_save_seed_file(mnemonic: &opake_core::crypto::Mnemonic) -> Result<()> {
+    println!();
+    println!("Save seed phrase to a file? Enter a path, or press Enter to skip.");
+
+    let default_path = std::env::current_dir()
+        .unwrap_or_default()
+        .join("opake-seed-phrase.txt");
+
+    loop {
+        print!("[{}] > ", default_path.display());
+        std::io::Write::flush(&mut std::io::stdout())?;
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let trimmed = input.trim();
+
+        if trimmed.is_empty() {
+            // Use default path.
+            let path = &default_path;
+            match write_seed_file(path, mnemonic) {
+                Ok(()) => {
+                    println!("Saved to {}", path.display());
+                    return Ok(());
+                }
+                Err(e) => {
+                    println!("Failed to write {}: {e}", path.display());
+                    println!("Enter a different path, or type 'skip' to continue without saving:");
+                    continue;
+                }
+            }
+        }
+
+        if trimmed == "skip" {
+            println!("Skipping file save.");
+            return Ok(());
+        }
+
+        let path = std::path::PathBuf::from(trimmed);
+        match write_seed_file(&path, mnemonic) {
+            Ok(()) => {
+                println!("Saved to {}", path.display());
+                return Ok(());
+            }
+            Err(e) => {
+                println!("Failed to write {}: {e}", path.display());
+                println!("Try a different path, or type 'skip':");
+            }
+        }
+    }
+}
+
+/// Write the seed phrase grid to a file with restrictive permissions.
+fn write_seed_file(path: &std::path::Path, mnemonic: &opake_core::crypto::Mnemonic) -> Result<()> {
+    let grid = format_mnemonic_grid(mnemonic);
+    crate::config::FileStorage::write_sensitive_file(path, grid)?;
+    Ok(())
+}
+
+/// Pick 3 distinct random indices from 0..23 for word confirmation.
+fn pick_confirmation_indices(
+    rng: &mut (impl opake_core::crypto::CryptoRng + opake_core::crypto::RngCore),
+) -> [usize; 3] {
+    let mut indices = [0usize; 3];
+    let mut count = 0;
+    while count < 3 {
+        let idx = (rng.next_u32() as usize) % 24;
+        if !indices[..count].contains(&idx) {
+            indices[count] = idx;
+            count += 1;
+        }
+    }
+    indices
 }
 
 #[cfg(test)]

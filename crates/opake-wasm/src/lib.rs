@@ -599,3 +599,36 @@ impl DirectoryTreeHandle {
         serde_wasm_bindgen::to_value(&descendants).unwrap_or(JsValue::NULL)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Mnemonic / seed phrase exports
+// ---------------------------------------------------------------------------
+
+/// Generate a new 24-word BIP-39 mnemonic phrase.
+///
+/// Returns the phrase as a space-separated string.
+#[wasm_bindgen(js_name = generateMnemonic)]
+pub fn generate_mnemonic_js() -> String {
+    opake_core::crypto::generate_mnemonic(&mut OsRng).to_string()
+}
+
+/// Validate a BIP-39 mnemonic phrase.
+///
+/// Returns `true` if the phrase is valid (24 words, all in wordlist,
+/// valid checksum), `false` otherwise.
+#[wasm_bindgen(js_name = validateMnemonic)]
+pub fn validate_mnemonic_js(phrase: &str) -> bool {
+    opake_core::crypto::parse_mnemonic(phrase).is_ok()
+}
+
+/// Derive a deterministic Identity from a BIP-39 mnemonic phrase and DID.
+///
+/// Returns a JS object with did, publicKey, privateKey, signingKey, verifyKey
+/// (all base64-encoded). Throws if the mnemonic is invalid.
+#[wasm_bindgen(js_name = deriveIdentityFromMnemonic)]
+pub fn derive_identity_from_mnemonic_js(phrase: &str, did: &str) -> Result<JsValue, JsError> {
+    let mnemonic =
+        opake_core::crypto::parse_mnemonic(phrase).map_err(|e| JsError::new(&e.to_string()))?;
+    let identity = opake_core::crypto::derive_identity_from_mnemonic(&mnemonic, did);
+    serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
+}

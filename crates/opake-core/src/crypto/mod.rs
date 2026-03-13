@@ -41,7 +41,10 @@ pub use metadata::{
     decrypt_metadata, encrypt_metadata, DirectoryMetadata, DocumentMetadata, GrantMetadata,
     KeyringMetadata,
 };
-pub use mnemonic::{derive_identity_from_mnemonic, generate_mnemonic, parse_mnemonic, Mnemonic};
+pub use mnemonic::{
+    derive_identity_from_mnemonic, format_mnemonic_grid, generate_mnemonic, parse_mnemonic,
+    parse_mnemonic_grid, Mnemonic,
+};
 
 const WRAP_ALGO: &str = "x25519-hkdf-a256kw";
 const CONTENT_KEY_LEN: usize = 32;
