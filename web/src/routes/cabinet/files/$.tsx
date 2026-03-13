@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { PanelContent } from "@/components/cabinet/PanelContent";
 import { evictPreviewCache } from "@/components/cabinet/FilePreview";
 import { evictReadmeCache } from "@/components/cabinet/DirectoryReadme";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { directoryUri, documentUri, rkeyFromUri } from "@/lib/atUri";
 import type { FileItem } from "@/components/cabinet/types";

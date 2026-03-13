@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ArrowBendUpRightIcon, FolderIcon, HouseIcon } from "@phosphor-icons/react";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 
 // ---------------------------------------------------------------------------

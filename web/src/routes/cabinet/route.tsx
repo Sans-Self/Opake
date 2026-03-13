@@ -3,7 +3,7 @@ import { createFileRoute, redirect, Outlet, Link } from "@tanstack/react-router"
 import { Sidebar } from "@/components/cabinet/Sidebar";
 import { TopBar } from "@/components/cabinet/TopBar";
 import { OpakeLogo } from "@/components/OpakeLogo";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
 

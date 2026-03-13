@@ -17,7 +17,7 @@ import {
 import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
 import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { getCryptoWorker } from "@/lib/worker";
 import { isPreviewable, type FileItem } from "./types";
 

@@ -24,7 +24,7 @@ import { FilePreview, evictPreviewCache } from "@/components/cabinet/FilePreview
 import { decryptOwnDocument } from "@/lib/preview";
 import { TagFilterBar } from "@/components/cabinet/TagFilterBar";
 import { NewFolderDialog, type NewFolderDialogHandle } from "@/components/cabinet/NewFolderDialog";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
 import { directoryUri, documentUri } from "@/lib/atUri";

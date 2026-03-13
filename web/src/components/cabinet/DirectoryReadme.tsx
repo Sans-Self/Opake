@@ -5,7 +5,7 @@ import { use, useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretUpIcon, FileTextIcon } from "@phosphor-icons/react";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { decryptDocumentBlob } from "@/lib/preview";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { base64ToUint8Array } from "@/lib/encoding";
 import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";

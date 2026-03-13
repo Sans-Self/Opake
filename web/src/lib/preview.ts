@@ -4,7 +4,7 @@ import { authenticatedBlobFetch } from "@/lib/api";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { getCryptoWorker } from "@/lib/worker";
 import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";

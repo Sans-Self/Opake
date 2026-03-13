@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { PanelContent } from "@/components/cabinet/PanelContent";
 import { evictReadmeCache } from "@/components/cabinet/DirectoryReadme";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { rkeyFromUri } from "@/lib/atUri";
 import type { FileItem } from "@/components/cabinet/types";
 

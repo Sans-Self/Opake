@@ -7,7 +7,7 @@ import { getCryptoWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { authenticatedXrpc } from "@/lib/api";
 import { toastSuccess, toastError } from "@/stores/toast";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import type { DocumentRecord, Encryption } from "@/lib/pdsTypes";
 import type { OAuthSession } from "@/lib/storageTypes";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";

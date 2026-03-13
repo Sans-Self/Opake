@@ -22,7 +22,7 @@ import { RevokeShareDialog } from "@/components/cabinet/RevokeShareDialog";
 import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
 import { isPreviewable } from "@/components/cabinet/types";
 import { useAuthStore } from "@/stores/auth";
-import { useDocumentsStore } from "@/stores/documents";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { decryptDocumentRecord } from "@/stores/documents/decrypt";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { truncateDid, formatRelativeDate, mimeTypeToFileType, formatFileSize } from "@/lib/format";

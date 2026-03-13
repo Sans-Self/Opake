@@ -24,12 +24,15 @@ COPY --from=wasm-builder /build/web/src/wasm/opake-wasm/ ./src/wasm/opake-wasm/
 
 RUN bun run tsc && bun run vite build
 
-FROM node:22-slim
+FROM oven/bun:1-slim
 
 RUN groupadd -g 1000 opake || true && useradd -u 1000 -g 1000 -m opake || true
 
 WORKDIR /app
 COPY --from=web-builder --chown=1000:1000 /build/web/dist/ ./dist/
+COPY --from=web-builder --chown=1000:1000 /build/web/node_modules/ ./node_modules/
+COPY --from=web-builder --chown=1000:1000 /build/web/package.json ./
+COPY --from=web-builder --chown=1000:1000 /build/web/serve.ts ./
 
 USER 1000:1000
 EXPOSE 3000
@@ -37,4 +40,4 @@ EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 
-CMD ["node", "dist/server/server.js"]
+CMD ["bun", "run", "serve.ts"]
