@@ -16,10 +16,11 @@ Before we begin, an uncomfortable truth: **owning your data means owning your ke
 
 In traditional systems, if you lose your password, a helpful corporation resets it for you. They can do this because they ultimately hold the master keys to your kingdom. Opake cannot do this. We do not have your keys. Your Personal Data Server (PDS) does not have your keys.
 
-If you lose your keypair, your encrypted files remain mathematically opaque forever. There is no recovery. This is not a flaw; it is the fundamental guarantee of end-to-end encryption.
+When you first set up Opake, you'll receive a **24-word secret phrase** — a backup that can reconstruct your keys on any device. If you lose both your seed phrase and all your devices, your encrypted files remain mathematically opaque forever. This is not a flaw; it is the fundamental guarantee of end-to-end encryption.
 
 <Callout type="warning">
-  Treat your Opake identity like a physical key to a very heavy vault.
+  Write down your 24 words and store it somewhere safe. It is the only way to recover your identity
+  if you lose access to all your devices. Read more in [Your Seed Phrase](/docs/seed-phrase).
 </Callout>
 
 ---
@@ -34,14 +35,14 @@ Whether you use the Web App or the CLI, the process begins by authenticating wit
     1. Navigate to the login screen.
     2. Enter your handle (e.g., `you.bsky.social`).
     3. You will be redirected to your PDS (such as Bluesky) to authorize Opake.
-    4. Once authorized, Opake generates your encryption identity entirely within your browser's local storage.
+    4. Once authorized, Opake generates your encryption identity from a 24-word seed phrase. Write these words down — they're your backup.
 
   </PlatformTab>
   <PlatformTab name="CLI">
     Run the following command in your terminal:
     <CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
-    This will open a browser window for OAuth authorization. Your keys will be generated and stored
-    securely in `~/.config/opake`.
+    This will open a browser window for OAuth authorization. Your keys will be derived from a
+    24-word seed phrase — write it down when prompted.
   </PlatformTab>
 </PlatformToggle>
 

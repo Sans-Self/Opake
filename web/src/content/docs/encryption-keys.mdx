@@ -56,11 +56,17 @@ Opake doesn't reinvent the wheel. We stand on the shoulders of giants who have s
 
 ---
 
-## Where Are My Keys?
+## Where Do Keys Come From?
+
+Your keys are derived from a **24-word secret phrase** generated when you first set up Opake. The same phrase always produces the same keys — this is how you can recover your identity on a new device without needing your old one.
+
+For nerds: the derivation uses standard cryptographic primitives: PBKDF2 to stretch the phrase into a master seed, then HKDF to derive separate X25519 (encryption) and Ed25519 (signing) keys. For the full technical details, see [Your Seed Phrase](/docs/seed-phrase).
+
+## Where Are My Keys Stored?
 
 Your private keys never touch the network.
 
 - **On the Web:** They are stored in your browser's `IndexedDB`, accessible only to the Opake web app domain.
 - **On the CLI:** They are stored in `~/.config/opake/accounts/`, guarded by strict `0600` UNIX file permissions.
 
-To learn how to transfer these keys securely to a new device without exposing them, read about [Multi-Device Survival](/docs/pairing).
+Your seed phrase is shown once at setup and never stored. To learn how to back it up and recover, read [Your Seed Phrase](/docs/seed-phrase). To transfer keys between devices without re-entering the phrase, read about [Device Pairing](/docs/pairing).

@@ -1,8 +1,8 @@
-<!-- 
-  NOTE TO EDITORS: 
-  Opake uses a dual-documentation system. If you modify the architectural model, 
-  encryption schemes, or data flows in this file, you MUST also update the 
-  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+<!--
+  NOTE TO EDITORS:
+  Opake uses a dual-documentation system. If you modify the architectural model,
+  encryption schemes, or data flows in this file, you MUST also update the
+  corresponding MDX content in `web/src/content/` to prevent documentation drift.
 -->
 
 # Opake — Architecture
@@ -69,6 +69,11 @@ crates/
         content.rs     AES-256-GCM: generate_content_key(), encrypt_blob(), decrypt_blob()
         key_wrapping.rs  X25519-HKDF-A256KW: wrap_key(), unwrap_key(), create_group_key()
         keyring_wrapping.rs  Symmetric AES-KW: wrap/unwrap content key under group key
+        mnemonic/
+          mod.rs       Mnemonic type, parse_mnemonic(), wordlist (BIP-39 embedded)
+          generate.rs  generate_mnemonic() — entropy → 24 words
+          derive.rs    derive_identity_from_mnemonic() — PBKDF2 → HKDF dual-path
+          format.rs    format_mnemonic_grid(), parse_mnemonic_grid() — .txt import/export
       records/
         mod.rs         SCHEMA_VERSION, Versioned trait, check_version(), re-exports
         defs.rs        WrappedKey, EncryptionEnvelope, KeyringRef
@@ -130,13 +135,14 @@ crates/
       main.rs          Clap app, command dispatch
       config.rs        FileStorage (impl Storage for filesystem), anyhow wrappers
       session.rs       CommandContext resolution, session persistence
-      identity.rs      Keypair generation, migration, permission checks
+      identity.rs      Identity loading, migration (signing keys), permission checks
       keyring_store.rs Local group key persistence (per-keyring)
       transport.rs     reqwest-based Transport implementation
       oauth.rs         OAuth loopback redirect server + browser open
       utils.rs         Test harness, env helpers
       commands/
-        login.rs       Auth + key publish (OAuth-first with --legacy fallback)
+        login.rs       Auth + seed phrase generation + key publish (OAuth-first)
+        recover.rs     Seed phrase recovery (stdin or --file .txt import)
         upload.rs      File → encrypt → upload (direct or --keyring)
         download.rs    Download + decrypt (direct, keyring, or --grant)
         ls.rs          List documents
@@ -263,6 +269,23 @@ AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encry
 
 Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. Both keys are published automatically on every `opake login` via an idempotent `putRecord`.
 
+## Identity Derivation
+
+Identity keypairs are deterministically derived from a BIP-39 mnemonic (24 words / 256-bit entropy). The same phrase always produces the same keys.
+
+```
+256 bits entropy (CSPRNG)
+  → BIP-39 encode → 24-word mnemonic
+  → PBKDF2-HMAC-SHA512 (2048 rounds, salt = "mnemonic")
+  → 512-bit master seed
+  → HKDF-SHA256 (info = "opake-v1-x25519-identity")  → X25519 private key
+  → HKDF-SHA256 (info = "opake-v1-ed25519-signing")   → Ed25519 signing key
+```
+
+The PBKDF2 salt is `"mnemonic"` per the [BIP-39 specification](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#from-mnemonic-to-seed) — security comes from the 256-bit entropy, not the salt. The HKDF info strings include the schema version for domain separation, consistent with the key wrapping convention.
+
+The mnemonic is shown once at first login and never stored. Recovery is via `opake recover` (CLI) or the "Use your recovery phrase" flow (web). See [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) for sequence diagrams.
+
 ## Data Model
 
 All records live under the `app.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
@@ -318,12 +341,12 @@ All three are unauthenticated reads — AT Protocol records and blobs are public
 
 Config, identity, and session types live in `opake-core/src/storage.rs` alongside the `Storage` trait. This lets both platforms share the same data model and mutation logic (e.g. `Config::add_account`, `Config::remove_account`, `Config::set_default`).
 
-| Method | Contract |
-|--------|----------|
-| `load_config` / `save_config` | Read/write the global config (accounts map, default DID) |
-| `load_identity` / `save_identity` | Read/write per-account encryption keypairs |
-| `load_session` / `save_session` | Read/write per-account JWT tokens |
-| `remove_account` | Full cleanup: mutate config + delete identity/session data + persist |
+| Method                            | Contract                                                             |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `load_config` / `save_config`     | Read/write the global config (accounts map, default DID)             |
+| `load_identity` / `save_identity` | Read/write per-account encryption keypairs                           |
+| `load_session` / `save_session`   | Read/write per-account JWT tokens                                    |
+| `remove_account`                  | Full cleanup: mutate config + delete identity/session data + persist |
 
 **CLI (`FileStorage`)** — TOML config at `~/.config/opake/config.toml`, JSON files in per-account directories, unix permissions (0600/0700).
 
@@ -371,11 +394,11 @@ Storage layout:
 
 Group keys are stored locally because they never appear in plaintext on the PDS — only wrapped copies exist in the keyring record. Each keyring file holds an array of `{ rotation, group_key }` entries so that keys from previous rotations remain available for decrypting older documents. Legacy files (single `group_key` without rotation) are auto-migrated to rotation 0 on read.
 
-The `--as <handle-or-did>` flag overrides the default account for any command. Future improvement: seed phrase derivation for the keypair instead of storing it in plaintext.
+The `--as <handle-or-did>` flag overrides the default account for any command. Keypairs are derived from a BIP-39 seed phrase on first login — see [Identity Derivation](#identity-derivation).
 
 ## Device Pairing
 
-When a user logs in on a new device, they need their X25519 identity keypair from the existing device. The PDS acts as a relay — both devices are authenticated to the same DID and can read/write records in the same repo.
+When a user logs in on a new device, they can recover their identity either by entering their seed phrase (see [Identity Derivation](#identity-derivation)) or by pairing with an existing device. The pairing protocol uses the PDS as a relay — both devices are authenticated to the same DID and can read/write records in the same repo.
 
 The protocol uses ephemeral X25519 Diffie-Hellman to establish a shared secret. The identity payload is encrypted with AES-256-GCM and the content key is wrapped to the ephemeral public key using the same `x25519-hkdf-a256kw` scheme as document encryption. Both `pairRequest` and `pairResponse` records are deleted after a successful transfer.
 
@@ -401,7 +424,7 @@ Device B (new)                    PDS                    Device A (existing)
      |-- deleteRecord pairResp -->|                              |
 ```
 
-Login on a second device detects an existing `publicKey/self` record and skips identity generation, directing the user to `opake pair request` instead. This prevents accidental key overwrites.
+Login on a second device detects an existing `publicKey/self` record and offers three options: `opake pair request` (transfer from existing device), `opake recover` (enter seed phrase), or `opake login --force` (overwrite with new identity). This prevents accidental key overwrites.
 
 See [docs/flows/pairing.md](flows/pairing.md) for the full sequence diagrams.
 

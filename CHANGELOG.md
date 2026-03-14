@@ -7,11 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add BIP-39 seed phrase recovery for account identity (24 words) [#211](https://issues.opake.app/issues/211.html)
 
 ### Fixed
 
 ### Changed
-- Add web UI for seed phrase recovery and generation (#216)
+- Update docs: seed phrase derivation, CLI flows, and recovery procedures [#338](https://issues.opake.app/issues/338.html)
+- Add web UI for seed phrase recovery and generation [#216](https://issues.opake.app/issues/216.html)
 - Add WASM exports for mnemonic and derivation functions [#215](https://issues.opake.app/issues/215.html)
 - Add CLI seed phrase flows (init, login, recover) [#214](https://issues.opake.app/issues/214.html)
 - Add seed-to-keypair derivation (PBKDF2 + HKDF dual-path) to opake-core [#213](https://issues.opake.app/issues/213.html)

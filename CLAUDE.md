@@ -22,7 +22,7 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 4. **No revocation guarantee for historical access.** Same as git-crypt. True revocation requires re-encrypting the blob with a new content key.
 5. **Plaintext metadata is opt-in transparency.** Names and tags unencrypted by default for AppView indexing. Full opacity via dummy values + encrypted metadata payload.
 6. **Public keys as PDS records.** atproto DID docs only have signing keys. Opake publishes X25519 encryption public keys as `app.opake.publicKey/self` singleton records.
-7. **Multi-device: seed phrase** (future). MVP uses plaintext keypair at `~/.config/opake/accounts/<did>/identity.json`.
+7. **Multi-device: seed phrase.** Identity keypairs are derived from a BIP-39 24-word mnemonic via PBKDF2 + HKDF. The seed phrase is the default identity creation path — no random keypair fallback. Recovery via `opake recover` (CLI) or the web UI.
 8. **Storage trait in opake-core.** Config, Identity, Session types and the `Storage` trait live in core so both CLI (`FileStorage`, filesystem) and web (`IndexedDbStorage`, IndexedDB) share the same contract. Platform-specific I/O is injected, never imported.
 
 ## Documentation

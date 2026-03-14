@@ -10,6 +10,7 @@ import AtProtocol from "@/content/docs/at-protocol.mdx";
 import EncryptionKeys from "@/content/docs/encryption-keys.mdx";
 import SharingDids from "@/content/docs/sharing-dids.mdx";
 import Keyrings from "@/content/docs/keyrings.mdx";
+import SeedPhrase from "@/content/docs/seed-phrase.mdx";
 import Pairing from "@/content/docs/pairing.mdx";
 import Cli from "@/content/docs/cli.mdx";
 import Glossary from "@/content/docs/glossary.mdx";
@@ -25,6 +26,7 @@ const CONTENT_BY_SLUG: Partial<Record<string, MdxComponent>> = {
   "encryption-keys": EncryptionKeys,
   "sharing-dids": SharingDids,
   keyrings: Keyrings,
+  "seed-phrase": SeedPhrase,
   pairing: Pairing,
   cli: Cli,
   glossary: Glossary,

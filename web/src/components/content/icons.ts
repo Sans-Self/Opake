@@ -9,6 +9,7 @@ import {
   QuestionIcon,
   UsersThreeIcon,
   ArrowsLeftRightIcon,
+  PlantIcon,
 } from "@phosphor-icons/react";
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr";
 
@@ -22,6 +23,7 @@ export type IconName =
   | "question"
   | "group"
   | "pairing"
+  | "seedling"
   | "terminal";
 
 const ICON_MAP: Readonly<Record<IconName, Icon>> = {
@@ -34,6 +36,7 @@ const ICON_MAP: Readonly<Record<IconName, Icon>> = {
   question: QuestionIcon,
   group: UsersThreeIcon,
   pairing: ArrowsLeftRightIcon,
+  seedling: PlantIcon,
   terminal: TerminalIcon,
 };
 

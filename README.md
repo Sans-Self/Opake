@@ -1,9 +1,9 @@
-<!-- 
-  NOTE TO EDITORS: 
-  Opake uses a dual-documentation system. If you modify the technical details, 
-  command list, or installation steps in this README, you MUST also update 
-  the corresponding MDX content in `web/src/content/` to prevent 
-  documentation drift. 
+<!--
+  NOTE TO EDITORS:
+  Opake uses a dual-documentation system. If you modify the technical details,
+  command list, or installation steps in this README, you MUST also update
+  the corresponding MDX content in `web/src/content/` to prevent
+  documentation drift.
 -->
 
 # Opake
@@ -19,18 +19,25 @@ Your data is opaque to everyone without the key. That's the point.
 ## Quick Start
 
 ### 1. Install
+
 Requires Rust 1.75+.
+
 ```sh
 cargo install --path crates/opake-cli
 ```
 
 ### 2. Login
-Authenticates via OAuth (DPoP) and publishes your public encryption key.
+
+Authenticates via OAuth (DPoP), generates a 24-word seed phrase, and publishes your public encryption key.
+
 ```sh
 opake login you.bsky.social
 ```
 
+Write down the seed phrase when prompted — it's your recovery key for all devices.
+
 ### 3. Use
+
 ```sh
 opake upload secret.pdf --tags confidential
 opake share secret.pdf bob.bsky.social

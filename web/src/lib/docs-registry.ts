@@ -44,6 +44,12 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     description: "Manage secure group sharing for families, teams, and research groups.",
   },
   {
+    slug: "seed-phrase",
+    title: "Your Seed Phrase",
+    icon: "seedling",
+    description: "Back up and recover your identity with a 24-word recovery phrase.",
+  },
+  {
     slug: "pairing",
     title: "Multi-Device Magic",
     icon: "pairing",
