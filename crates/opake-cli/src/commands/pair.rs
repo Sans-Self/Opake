@@ -14,8 +14,15 @@ use crate::commands::Execute;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
-#[derive(Args)]
 /// Transfer encryption identity between devices
+///
+/// Uses an ephemeral key exchange via PDS relay records. Compare
+/// fingerprints on both devices to verify the pairing.
+#[derive(Args)]
+#[command(after_help = "\
+Workflow:
+  New device:       opake pair request
+  Existing device:  opake pair approve")]
 pub struct PairCommand {
     #[command(subcommand)]
     action: PairAction,
@@ -178,10 +185,9 @@ async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {
     }
 
     println!();
-    eprint!("Approve which request? [1-{}] ", requests.len());
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let choice: usize = input.trim().parse().context("invalid selection")?;
+    let selection =
+        crate::prompt::input(&format!("Approve which request? [1-{}] ", requests.len()))?;
+    let choice: usize = selection.parse().context("invalid selection")?;
     anyhow::ensure!(
         choice >= 1 && choice <= requests.len(),
         "selection out of range"

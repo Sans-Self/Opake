@@ -16,8 +16,17 @@ use crate::keyring_store;
 use crate::session::{self, CommandContext};
 use opake_core::client::ReqwestTransport;
 
-#[derive(Args)]
 /// Download and decrypt a file
+///
+/// Three modes: own files (by name or AT-URI), shared grants (--grant),
+/// and keyring member files (--keyring-member) for cross-PDS access.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake download secret.pdf
+  opake download secret.pdf -o ~/Downloads/
+  opake download --grant at://did:plc:abc/app.opake.grant/xyz
+  opake download doc.pdf --keyring-member at://did:plc:abc/app.opake.document/xyz")]
 pub struct DownloadCommand {
     /// AT URI or filename of the document (not needed with --grant)
     reference: Option<String>,
@@ -27,11 +36,11 @@ pub struct DownloadCommand {
     output: Option<PathBuf>,
 
     /// Grant URI for downloading a shared file from another user's PDS
-    #[arg(long, conflicts_with = "keyring_member")]
+    #[arg(long, conflicts_with = "keyring_member", value_name = "AT-URI")]
     grant: Option<String>,
 
     /// Download a keyring-encrypted document as a member (cross-PDS)
-    #[arg(long, conflicts_with = "grant")]
+    #[arg(long, conflicts_with = "grant", value_name = "AT-URI")]
     keyring_member: Option<String>,
 }
 

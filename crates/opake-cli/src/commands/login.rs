@@ -26,21 +26,25 @@ pub fn resolve_password(
 }
 
 fn prompt_password(identifier: &str, pds: &str) -> Result<String> {
-    print!("Password for user {} on {}: ", identifier, pds);
-    std::io::Write::flush(&mut std::io::stdout())?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    Ok(input.trim().to_string())
+    crate::prompt::input(&format!("Password for {identifier} on {pds}: "))
 }
 
-#[derive(Args)]
 /// Authenticate with your PDS
+///
+/// Uses OAuth by default. Falls back to legacy password authentication
+/// if the PDS does not support OAuth.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake account login alice.bsky.social
+  opake account login alice.bsky.social --legacy
+  opake account login did:plc:abc123 --pds https://pds.example.com")]
 pub struct LoginCommand {
     /// Handle or DID (e.g. alice.bsky.social, did:plc:...)
     identifier: String,
 
     /// PDS URL override (e.g. https://pds.example.com). Resolved automatically if omitted.
-    #[arg(long)]
+    #[arg(long, value_name = "URL")]
     pds: Option<String>,
 
     /// Force legacy password-based authentication
@@ -169,17 +173,11 @@ pub async fn ensure_identity_and_publish(
     // Published key exists + --force → scary confirmation before overwriting.
     if existing.is_none() && has_published_key && force {
         println!();
-        println!("WARNING: --force will generate a new encryption identity.");
-        println!("All data encrypted to the old identity will become permanently unreadable.");
-        println!();
-        println!("Type exactly: This will brick my data and I am okay with that");
-        print!("> ");
-        std::io::Write::flush(&mut std::io::stdout())?;
-        let mut confirmation = String::new();
-        std::io::stdin().read_line(&mut confirmation)?;
-        if confirmation.trim() != "This will brick my data and I am okay with that" {
-            anyhow::bail!("Identity reset cancelled.");
-        }
+        crate::prompt::confirm_exact(
+            "WARNING: --force will generate a new encryption identity.\n\
+             All data encrypted to the old identity will become permanently unreadable.\n",
+            "This will brick my data and I am okay with that",
+        )?;
         println!("Proceeding with new identity generation.");
     }
 
@@ -225,17 +223,12 @@ fn generate_identity_from_seed_phrase(did: &str) -> Result<opake_core::storage::
     let words = mnemonic.words();
     for &idx in &confirm_indices {
         let expected = &words[idx];
-        println!("Enter word #{}: ", idx + 1);
-        print!("> ");
-        std::io::Write::flush(&mut std::io::stdout())?;
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        if input.trim() != expected.as_str() {
+        let entered = crate::prompt::input(&format!("Enter word #{}: ", idx + 1))?;
+        if entered != expected.as_str() {
             anyhow::bail!(
-                "word #{} incorrect (expected {expected:?}, got {:?}). \
+                "word #{} incorrect (expected {expected:?}, got {entered:?}). \
                  Please try again with `opake login`.",
                 idx + 1,
-                input.trim()
             );
         }
     }
@@ -260,14 +253,9 @@ fn offer_save_seed_file(mnemonic: &opake_core::crypto::Mnemonic) -> Result<()> {
         .join("opake-seed-phrase.txt");
 
     loop {
-        print!("[{}] > ", default_path.display());
-        std::io::Write::flush(&mut std::io::stdout())?;
+        let trimmed = crate::prompt::input_with_default(">", &default_path.display().to_string())?;
 
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let trimmed = input.trim();
-
-        if trimmed.is_empty() {
+        if trimmed == default_path.display().to_string() {
             // Use default path.
             let path = &default_path;
             match write_seed_file(path, mnemonic) {

@@ -11,8 +11,11 @@ use crate::document_resolve;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
-#[derive(Args)]
 /// Display directory hierarchy as a tree
+///
+/// Shows all directories and documents in a nested tree structure.
+/// Document names are decrypted client-side from encrypted metadata.
+#[derive(Args)]
 pub struct TreeCommand;
 
 impl Execute for TreeCommand {

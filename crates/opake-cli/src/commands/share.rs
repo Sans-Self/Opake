@@ -16,7 +16,7 @@ use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
 /// Share a document with another user
-pub struct ShareCommand {
+pub struct NewShareCommand {
     /// AT URI or filename of the document
     document: String,
 
@@ -28,7 +28,7 @@ pub struct ShareCommand {
     note: Option<String>,
 }
 
-impl Execute for ShareCommand {
+impl Execute for NewShareCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
         let id =

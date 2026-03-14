@@ -4,16 +4,46 @@ mod document_resolve;
 mod identity;
 mod keyring_store;
 mod oauth;
+mod prompt;
 mod session;
 pub mod utils;
 
-use clap::{Parser, Subcommand};
+use clap::builder::styling::{AnsiColor, Styles};
+use clap::{CommandFactory, Parser, Subcommand};
 use commands::Execute;
 use config::FileStorage;
 use log::info;
 
+const fn opake_styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::BrightCyan.on_default().bold())
+        .usage(AnsiColor::BrightCyan.on_default())
+        .literal(AnsiColor::BrightWhite.on_default().bold())
+        .placeholder(AnsiColor::BrightMagenta.on_default())
+        .valid(AnsiColor::BrightGreen.on_default())
+        .invalid(AnsiColor::BrightRed.on_default())
+        .error(AnsiColor::BrightRed.on_default().bold())
+}
+
+/// Encrypted personal cloud on AT Protocol.
+///
+/// Opake encrypts files client-side and stores them on your AT Protocol PDS.
+/// All crypto happens locally — the server only ever sees ciphertext.
 #[derive(Parser)]
-#[command(name = "opake", about = "Encrypted personal cloud on AT Protocol")]
+#[command(
+    name = "opake",
+    version,
+    author = "Not Herself <me@sans-self.org>",
+    styles = opake_styles(),
+    after_help = "\
+Quick start:
+  opake account login alice.bsky.social
+  opake upload secret.pdf
+  opake ls
+  opake share new secret.pdf bob.bsky.social
+
+https://opake.app",
+)]
 struct Cli {
     /// Act as a specific account (handle or DID)
     #[arg(long, global = true)]
@@ -33,31 +63,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Login(commands::login::LoginCommand),
-    Logout(commands::logout::LogoutCommand),
-    Accounts(commands::accounts::AccountsCommand),
-    SetDefault(commands::set_default::SetDefaultCommand),
+    // --- Grouped commands ---
+    Account(commands::account::AccountCommand),
+    Share(commands::share_group::ShareGroupCommand),
+    Keyring(commands::keyring::KeyringCommand),
+    Metadata(commands::metadata::MetadataCommand),
+    Pair(commands::pair::PairCommand),
+
+    // --- Files ---
     Upload(commands::upload::UploadCommand),
     Download(commands::download::DownloadCommand),
     Cat(commands::cat::CatCommand),
-    Inbox(commands::inbox::InboxCommand),
     Ls(commands::ls::LsCommand),
-    Metadata(commands::metadata::MetadataCommand),
-    Mkdir(commands::mkdir::MkdirCommand),
-    /// Moves a file to another directory. Use the metadata command for that.
-    Move(commands::move_cmd::MoveCommand),
-    Rm(commands::rm::RmCommand),
-    Resolve(commands::resolve::ResolveCommand),
-    Share(commands::share::ShareCommand),
-    Shared(commands::shared::SharedCommand),
-    Revoke(commands::revoke::RevokeCommand),
-    Keyring(commands::keyring::KeyringCommand),
-    Pair(commands::pair::PairCommand),
-    /// Delete all Opake data from the PDS
-    Purge(commands::purge::PurgeCommand),
-    /// Recover encryption identity from a 24-word seed phrase
-    Recover(commands::recover::RecoverCommand),
     Tree(commands::tree::TreeCommand),
+    Rm(commands::rm::RmCommand),
+    Move(commands::move_cmd::MoveCommand),
+    Mkdir(commands::mkdir::MkdirCommand),
+
+    // --- Danger Zone ---
+    Purge(commands::purge::PurgeCommand),
+
+    // --- Utilities ---
+    Recover(commands::recover::RecoverCommand),
+    Resolve(commands::resolve::ResolveCommand),
+    Completions(commands::completions::CompletionsCommand),
 }
 
 async fn run_with_context(
@@ -100,34 +129,31 @@ async fn main() -> anyhow::Result<()> {
     let storage = FileStorage::new(base_dir);
 
     match command {
-        Command::Login(cmd) => {
+        Command::Account(cmd) => {
             let session = cmd.execute(&storage).await?;
             if let Some(ref s) = session {
                 session::persist_session(&storage, s.did(), s)?;
             }
         }
-        Command::Logout(cmd) => cmd.run(&storage)?,
-        Command::Accounts(cmd) => cmd.run(&storage)?,
-        Command::SetDefault(cmd) => cmd.run(&storage)?,
 
         Command::Upload(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Download(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Cat(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Inbox(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Ls(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Metadata(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Mkdir(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Move(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Rm(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Resolve(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+
         Command::Share(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Shared(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Revoke(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Purge(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Recover(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Resolve(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Completions(cmd) => cmd.run(&mut Cli::command()),
     }
 
     Ok(())

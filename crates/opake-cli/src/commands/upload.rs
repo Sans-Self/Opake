@@ -16,8 +16,17 @@ use crate::commands::{encrypt_directory, Execute};
 use crate::session::{self, CommandContext};
 use crate::{document_resolve, identity, keyring_store};
 
-#[derive(Args)]
 /// Upload and encrypt a file
+///
+/// Files are encrypted client-side with AES-256-GCM before upload.
+/// MIME type is auto-detected from the file extension.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake upload photo.jpg
+  opake upload doc.pdf --dir projects/
+  opake upload data.csv --keyring team
+  opake upload notes.md --description \"meeting notes\"")]
 pub struct UploadCommand {
     /// Path to the file to encrypt and upload
     path: PathBuf,

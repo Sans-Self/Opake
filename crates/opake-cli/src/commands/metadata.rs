@@ -12,8 +12,18 @@ use crate::identity;
 use crate::keyring_store;
 use crate::session::{self, CommandContext};
 
-#[derive(Args)]
 /// View or modify document metadata (name, tags, description)
+///
+/// All metadata is encrypted client-side. Record-level fields on the PDS
+/// contain only dummy values.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake metadata show report.pdf
+  opake metadata rename report.pdf quarterly-report.pdf
+  opake metadata describe report.pdf \"Q4 financial summary\"
+  opake metadata tag add report.pdf finance
+  opake metadata tag remove report.pdf draft")]
 pub struct MetadataCommand {
     #[command(subcommand)]
     action: MetadataAction,

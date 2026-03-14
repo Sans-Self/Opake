@@ -10,8 +10,15 @@ use crate::commands::Execute;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
-#[derive(Args)]
 /// Recover encryption identity from a 24-word seed phrase
+///
+/// Derives the encryption keypair from a BIP-39 mnemonic. Warns if the
+/// derived key does not match the key published on your PDS.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake recover                    # enter phrase interactively
+  opake recover -f seed-backup.txt # read from backup file")]
 pub struct RecoverCommand {
     /// Read seed phrase from a .txt backup file instead of stdin
     #[arg(long, short)]
@@ -40,14 +47,8 @@ impl Execute for RecoverCommand {
             }
             None => {
                 println!("Enter your 24-word seed phrase (space-separated):");
-                print!("> ");
-                std::io::Write::flush(&mut std::io::stdout())?;
-
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-
-                parse_mnemonic(input.trim())
-                    .map_err(|e| anyhow::anyhow!("invalid mnemonic: {e}"))?
+                let entered = crate::prompt::input("> ")?;
+                parse_mnemonic(&entered).map_err(|e| anyhow::anyhow!("invalid mnemonic: {e}"))?
             }
         };
 
@@ -59,21 +60,15 @@ impl Execute for RecoverCommand {
 
         if mismatch {
             println!();
-            println!(
-                "WARNING: The derived public key does NOT match the key published on your PDS."
+            let result = crate::prompt::confirm_exact(
+                "WARNING: The derived public key does NOT match the key published on your PDS.\n\
+                 This means either:\n\
+                 \x20 - The seed phrase is for a different account\n\
+                 \x20 - The account's identity was generated randomly (not from a seed phrase)\n\n\
+                 Saving this identity will NOT let you decrypt existing data.",
+                "save anyway",
             );
-            println!("This means either:");
-            println!("  - The seed phrase is for a different account");
-            println!("  - The account's identity was generated randomly (not from a seed phrase)");
-            println!();
-            println!("Saving this identity will NOT let you decrypt existing data.");
-            println!("Type 'save anyway' to proceed, or anything else to cancel:");
-            print!("> ");
-            std::io::Write::flush(&mut std::io::stdout())?;
-
-            let mut confirm = String::new();
-            std::io::stdin().read_line(&mut confirm)?;
-            if confirm.trim() != "save anyway" {
+            if result.is_err() {
                 println!("Recovery cancelled.");
                 return Ok(None);
             }

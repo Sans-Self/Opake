@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use clap::Args;
 use opake_core::client::Session;
@@ -58,16 +58,9 @@ impl Execute for RmCommand {
 
         // Fast path: document AT-URI — no tree needed, no parent cleanup.
         if let Some(resolved) = try_fast_resolve(&self.reference) {
-            if !self.yes {
-                eprint!("delete {}? [y/N] ", resolved.name);
-                let mut answer = String::new();
-                std::io::stdin()
-                    .read_line(&mut answer)
-                    .context("failed to read confirmation")?;
-                if !answer.trim().eq_ignore_ascii_case("y") {
-                    println!("aborted");
-                    return Ok(session::refreshed_session(&client));
-                }
+            if !self.yes && !crate::prompt::confirm(&format!("delete {}?", resolved.name))? {
+                println!("aborted");
+                return Ok(session::refreshed_session(&client));
             }
 
             documents::delete_document(&mut client, &resolved.uri).await?;
@@ -104,12 +97,7 @@ impl Execute for RmCommand {
                 }
             };
 
-            eprint!("{prompt} [y/N] ");
-            let mut answer = String::new();
-            std::io::stdin()
-                .read_line(&mut answer)
-                .context("failed to read confirmation")?;
-            if !answer.trim().eq_ignore_ascii_case("y") {
+            if !crate::prompt::confirm(&prompt)? {
                 println!("aborted");
                 return Ok(session::refreshed_session(&client));
             }

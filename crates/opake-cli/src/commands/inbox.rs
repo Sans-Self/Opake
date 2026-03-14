@@ -15,7 +15,7 @@ pub struct InboxCommand {
     long: bool,
 
     /// AppView URL (overrides OPAKE_APPVIEW_URL and config)
-    #[arg(long)]
+    #[arg(long, value_name = "URL")]
     appview: Option<String>,
 }
 

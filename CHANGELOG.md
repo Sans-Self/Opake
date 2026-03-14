@@ -7,11 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- CLI ergonomics: command structure and completion (#305)
 - Add BIP-39 seed phrase recovery for account identity (24 words) [#211](https://issues.opake.app/issues/211.html)
 
 ### Fixed
 
 ### Changed
+- Audit and improve command hierarchy for clarity (#306)
+- Improve help text and examples for all commands [#307](https://issues.opake.app/issues/307.html)
+- Refactor stdin prompt handling: consolidate 4+ duplicated implementations [#334](https://issues.opake.app/issues/334.html)
+- Generate man page for opake CLI [#339](https://issues.opake.app/issues/339.html)
 - Update docs: seed phrase derivation, CLI flows, and recovery procedures [#338](https://issues.opake.app/issues/338.html)
 - Add web UI for seed phrase recovery and generation [#216](https://issues.opake.app/issues/216.html)
 - Add WASM exports for mnemonic and derivation functions [#215](https://issues.opake.app/issues/215.html)

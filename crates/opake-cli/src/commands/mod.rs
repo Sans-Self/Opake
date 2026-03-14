@@ -1,5 +1,7 @@
+pub mod account;
 pub mod accounts;
 pub mod cat;
+pub mod completions;
 pub mod download;
 pub mod inbox;
 pub mod keyring;
@@ -17,6 +19,7 @@ pub mod revoke;
 pub mod rm;
 pub mod set_default;
 pub mod share;
+pub mod share_group;
 pub mod shared;
 pub mod tree;
 pub mod upload;

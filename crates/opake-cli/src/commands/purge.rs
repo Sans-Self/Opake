@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 use opake_core::atproto;
 use opake_core::client::{Session, Transport, XrpcClient};
@@ -27,7 +27,17 @@ const COLLECTIONS: &[&str] = &[
 ];
 
 /// Delete all Opake data from the PDS
+///
+/// Permanently deletes all Opake records and blobs from your PDS.
+/// This action is irreversible.
 #[derive(Args)]
+#[command(after_help = "\
+Requires typing the exact phrase: \"I want to delete all my Opake data\"
+
+Recommended workflow:
+  opake purge --dry-run    # preview what would be deleted
+  opake purge              # delete with confirmation prompt
+  opake purge --force      # skip all prompts (use with caution)")]
 pub struct PurgeCommand {
     /// Show what would be deleted without deleting anything
     #[arg(long)]
@@ -71,22 +81,12 @@ async fn collect_rkeys(
 /// Prompt the user to type the exact confirmation phrase.
 fn require_confirmation() -> Result<()> {
     println!();
-    println!("WARNING: This will permanently delete ALL Opake data from your PDS.");
-    println!("All encrypted files, keys, grants, and directories will be gone.");
-    println!("This action is irreversible.");
-    println!();
-    println!("Type exactly: {CONFIRMATION_PHRASE}");
-    print!("> ");
-    std::io::Write::flush(&mut std::io::stdout())?;
-
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-
-    if input.trim() != CONFIRMATION_PHRASE {
-        anyhow::bail!("Purge cancelled.");
-    }
-
-    Ok(())
+    crate::prompt::confirm_exact(
+        "WARNING: This will permanently delete ALL Opake data from your PDS.\n\
+         All encrypted files, keys, grants, and directories will be gone.\n\
+         This action is irreversible.\n",
+        CONFIRMATION_PHRASE,
+    )
 }
 
 /// Ask whether to delete local identity and session files.
@@ -95,13 +95,7 @@ fn confirm_local_cleanup(force: bool) -> Result<bool> {
         return Ok(true);
     }
 
-    eprint!("Delete local identity and session? [y/N] ");
-    let mut answer = String::new();
-    std::io::stdin()
-        .read_line(&mut answer)
-        .context("failed to read confirmation")?;
-
-    Ok(answer.trim().eq_ignore_ascii_case("y"))
+    crate::prompt::confirm("Delete local identity and session?")
 }
 
 impl Execute for PurgeCommand {

@@ -9,8 +9,14 @@ use crate::document_resolve;
 use crate::identity;
 use crate::session::{self, CommandContext};
 
-#[derive(Args)]
 /// Move a document or directory into another directory
+///
+/// To rename a document, use `opake metadata rename` instead.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake move report.pdf projects/
+  opake move old-notes/ archive/")]
 pub struct MoveCommand {
     /// Source path, filename, or AT-URI
     source: String,

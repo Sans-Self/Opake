@@ -13,8 +13,17 @@ use crate::keyring_store;
 use crate::session::{self, CommandContext};
 use opake_core::client::ReqwestTransport;
 
-#[derive(Args)]
 /// Manage keyrings for group-based access control
+///
+/// Keyrings enable group-based access. Members share a group key;
+/// documents encrypted to the keyring are accessible to all members.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  opake keyring create family-photos
+  opake keyring add-member family-photos bob.bsky.social
+  opake keyring ls -l
+  opake keyring remove-member family-photos bob.bsky.social")]
 pub struct KeyringCommand {
     #[command(subcommand)]
     action: KeyringAction,
@@ -197,10 +206,7 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
             display, args.keyring
         );
         eprintln!("existing documents stay encrypted under the old key.");
-        eprint!("continue? [y/N] ");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
+        if !crate::prompt::confirm("continue?")? {
             eprintln!("cancelled");
             return Ok(session::refreshed_session(&client));
         }

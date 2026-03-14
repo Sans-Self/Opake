@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
 use opake_core::sharing;
@@ -21,16 +21,9 @@ impl Execute for RevokeCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
-        if !self.yes {
-            eprint!("revoke {}? [y/N] ", self.grant);
-            let mut answer = String::new();
-            std::io::stdin()
-                .read_line(&mut answer)
-                .context("failed to read confirmation")?;
-            if !answer.trim().eq_ignore_ascii_case("y") {
-                println!("aborted");
-                return Ok(session::refreshed_session(&client));
-            }
+        if !self.yes && !crate::prompt::confirm(&format!("revoke {}?", self.grant))? {
+            println!("aborted");
+            return Ok(session::refreshed_session(&client));
         }
 
         sharing::revoke_grant(&mut client, &self.grant).await?;
