@@ -18,7 +18,7 @@ import { immer } from "zustand/middleware/immer";
 import type { OAuthSession, Config } from "@/lib/storageTypes";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { getCryptoWorker } from "@/lib/worker";
-import { authenticatedXrpc } from "@/lib/api";
+import { authenticatedXrpc, authenticatedPutRecord } from "@/lib/api";
 import { loading } from "@/stores/app";
 import {
   resolveHandleToPds,
@@ -28,7 +28,6 @@ import {
   buildClientId,
   buildRedirectUri,
   exchangeCode,
-  publishPublicKey,
   savePendingState,
   loadPendingState,
   clearPendingState,
@@ -67,6 +66,9 @@ interface AuthActions {
   completeLogin(code: string, state: string): Promise<void>;
   checkIdentity(): Promise<void>;
   generateAndPublishIdentity(): Promise<void>;
+  generateSeedPhrase(): Promise<string>;
+  confirmSeedPhrase(phrase: string): Promise<void>;
+  recoverFromSeedPhrase(phrase: string, force?: boolean): Promise<{ mismatch: boolean }>;
   logout(): Promise<void>;
 }
 
@@ -163,6 +165,30 @@ async function fetchUpstreamPublicKey(
     console.warn("[auth] publicKey/self lookup failed (treating as absent):", error);
     return null;
   }
+}
+
+/** Publish an identity's public key to the PDS via authenticated putRecord.
+ *  Uses the token-refresh-aware `authenticatedPutRecord` path. */
+async function publishIdentityKey(
+  pdsUrl: string,
+  did: string,
+  identity: { readonly public_key: string; readonly verify_key: string | null },
+  session: OAuthSession,
+): Promise<void> {
+  const record: Record<string, unknown> = {
+    opakeVersion: 1,
+    algo: "x25519",
+    publicKey: { $bytes: identity.public_key },
+    createdAt: new Date().toISOString(),
+    ...(identity.verify_key
+      ? { signingKey: { $bytes: identity.verify_key }, signingAlgo: "ed25519" }
+      : {}),
+  };
+
+  await authenticatedPutRecord(
+    { pdsUrl, did, collection: "app.opake.publicKey", rkey: "self", record },
+    session,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -290,17 +316,7 @@ export const useAuthStore = create<AuthState>()(
         const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
         const identity = await worker.generateIdentity(session.did);
 
-        await publishPublicKey(
-          session.pdsUrl,
-          session.did,
-          identity.public_key,
-          identity.verify_key,
-          oauthSession.accessToken,
-          oauthSession.dpopKey,
-          oauthSession.dpopNonce,
-          worker,
-        );
-
+        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
         await storage.saveIdentity(session.did, identity);
 
         set((draft) => {
@@ -311,6 +327,80 @@ export const useAuthStore = create<AuthState>()(
         set((draft) => {
           draft.identity = { status: "fresh" };
         });
+      } finally {
+        done();
+      }
+    },
+
+    generateSeedPhrase: async () => {
+      const worker = getCryptoWorker();
+      return worker.generateMnemonic();
+    },
+
+    confirmSeedPhrase: async (phrase: string) => {
+      const { session } = get();
+      if (session.status !== "active") return;
+
+      const done = loading("confirm-seed-phrase");
+      const worker = getCryptoWorker();
+
+      try {
+        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
+        const identity = await worker.deriveIdentityFromMnemonic(phrase, session.did);
+
+        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
+        await storage.saveIdentity(session.did, identity);
+
+        set((draft) => {
+          draft.identity = { status: "ready" };
+        });
+      } catch (error) {
+        console.error("[auth] confirmSeedPhrase failed:", error);
+        set((draft) => {
+          draft.identity = { status: "fresh" };
+        });
+        throw error;
+      } finally {
+        done();
+      }
+    },
+
+    recoverFromSeedPhrase: async (phrase: string, force?: boolean) => {
+      const { session } = get();
+      if (session.status !== "active") return { mismatch: false };
+
+      const done = loading("recover-seed-phrase");
+      const worker = getCryptoWorker();
+
+      try {
+        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
+        const identity = await worker.deriveIdentityFromMnemonic(phrase, session.did);
+
+        // Compare against published key.
+        const upstreamKey = await fetchUpstreamPublicKey(session.pdsUrl, session.did, oauthSession);
+
+        if (upstreamKey && identity.public_key !== upstreamKey && !force) {
+          return { mismatch: true };
+        }
+
+        set((draft) => {
+          draft.identity = { status: "checking" };
+        });
+
+        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
+        await storage.saveIdentity(session.did, identity);
+
+        set((draft) => {
+          draft.identity = { status: "ready" };
+        });
+
+        return { mismatch: false };
+      } catch (error) {
+        console.error("[auth] recoverFromSeedPhrase failed:", error);
+        set((draft) => {
+          draft.identity = { status: "unchecked" };
+        });
+        throw error;
       } finally {
         done();
       }

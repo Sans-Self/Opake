@@ -44,6 +44,26 @@ describe("auth store", () => {
     expect(typeof state.completeLogin).toBe("function");
     expect(typeof state.checkIdentity).toBe("function");
     expect(typeof state.generateAndPublishIdentity).toBe("function");
+    expect(typeof state.generateSeedPhrase).toBe("function");
+    expect(typeof state.confirmSeedPhrase).toBe("function");
+    expect(typeof state.recoverFromSeedPhrase).toBe("function");
     expect(typeof state.logout).toBe("function");
+  });
+
+  it("generateSeedPhrase is callable", () => {
+    const state = useAuthStore.getState();
+    expect(typeof state.generateSeedPhrase).toBe("function");
+  });
+
+  it("confirmSeedPhrase is a no-op without active session", async () => {
+    useAuthStore.setState({ session: { status: "none" } });
+    await useAuthStore.getState().confirmSeedPhrase("test phrase");
+    expect(useAuthStore.getState().identity.status).toBe("unchecked");
+  });
+
+  it("recoverFromSeedPhrase returns mismatch false without active session", async () => {
+    useAuthStore.setState({ session: { status: "none" } });
+    const result = await useAuthStore.getState().recoverFromSeedPhrase("test phrase");
+    expect(result).toEqual({ mismatch: false });
   });
 });

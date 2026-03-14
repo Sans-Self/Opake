@@ -17,6 +17,9 @@ import init, {
   createDpopProof as wasmCreateDpopProof,
   generatePkce as wasmGeneratePkce,
   generateIdentity as wasmGenerateIdentity,
+  generateMnemonic as wasmGenerateMnemonic,
+  validateMnemonic as wasmValidateMnemonic,
+  deriveIdentityFromMnemonic as wasmDeriveIdentityFromMnemonic,
   generateEphemeralKeypair as wasmGenerateEphemeralKeypair,
   signAppviewRequest as wasmSignAppviewRequest,
   didDocumentUrl as wasmDidDocumentUrl,
@@ -144,6 +147,18 @@ const cryptoApi = {
 
   generateIdentity(did: string): Identity {
     return wasmGenerateIdentity(did) as Identity;
+  },
+
+  generateMnemonic(): string {
+    return wasmGenerateMnemonic();
+  },
+
+  validateMnemonic(phrase: string): boolean {
+    return wasmValidateMnemonic(phrase);
+  },
+
+  deriveIdentityFromMnemonic(phrase: string, did: string): Identity {
+    return wasmDeriveIdentityFromMnemonic(phrase, did) as Identity;
   },
 
   generateEphemeralKeypair(): EphemeralKeypair {
