@@ -49,7 +49,8 @@ export interface OAuthPendingState {
 }
 
 const PENDING_STATE_KEY = "opake:oauth_pending";
-const BSKY_PUBLIC_API = "https://public.api.bsky.app";
+const BSKY_PUBLIC_API =
+  (import.meta.env.VITE_RESOLVE_API as string | undefined) ?? "https://public.api.bsky.app";
 
 // ---------------------------------------------------------------------------
 // Handle → PDS resolution
@@ -191,6 +192,7 @@ export async function pushedAuthorizationRequest(
   dpopKey: DpopKeyPair,
   dpopNonce: string | null,
   worker: CryptoWorker,
+  loginHint?: string,
 ): Promise<{ requestUri: string; expiresIn: number; dpopNonce: string | null }> {
   const body = new URLSearchParams({
     client_id: clientId,
@@ -200,6 +202,7 @@ export async function pushedAuthorizationRequest(
     state,
     code_challenge: pkceChallenge,
     code_challenge_method: "S256",
+    ...(loginHint ? { login_hint: loginHint } : {}),
   });
 
   const { response, dpopNonce: nonce } = await fetchWithDpop(

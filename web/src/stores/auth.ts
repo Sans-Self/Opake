@@ -433,6 +433,7 @@ export const useAuthStore = create<AuthState>()(
           dpopKey,
           null,
           worker,
+          handle,
         );
 
         savePendingState({

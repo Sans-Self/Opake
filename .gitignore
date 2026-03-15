@@ -16,6 +16,9 @@ issues.db
 driver-key.pub
 .vscode/
 .vite/
+e2e-tests/.e2e-state.json
+e2e-tests/test-results/
+e2e-tests/playwright-report/
 
 # === Crosslink managed (do not edit between markers) ===
 # .crosslink/ — machine-local state (never commit)
