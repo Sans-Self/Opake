@@ -158,6 +158,12 @@ pub async fn get_blob_public(
 
 const PLC_DIRECTORY: &str = "https://plc.directory";
 
+/// Override the PLC directory URL via environment variable.
+/// Used in testing with a fake PDS that also serves DID documents.
+fn plc_directory_url() -> String {
+    std::env::var("OPAKE_PLC_DIRECTORY").unwrap_or_else(|_| PLC_DIRECTORY.to_string())
+}
+
 /// Fetch a DID document from the PLC directory (did:plc) or .well-known (did:web).
 pub async fn resolve_did_document(
     transport: &impl Transport,
@@ -183,7 +189,8 @@ pub async fn resolve_did_document(
 /// Build the URL to fetch a DID document (PLC directory or did:web .well-known).
 pub fn did_document_url(did: &str) -> Result<String, Error> {
     if did.starts_with("did:plc:") {
-        Ok(format!("{PLC_DIRECTORY}/{did}"))
+        let base = plc_directory_url();
+        Ok(format!("{base}/{did}"))
     } else if let Some(domain) = did.strip_prefix("did:web:") {
         Ok(format!("https://{domain}/.well-known/did.json"))
     } else {
