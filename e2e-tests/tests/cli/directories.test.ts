@@ -49,6 +49,25 @@ describe("directories", () => {
     expect(cat.stdout).toBe("cat path content");
   });
 
+  it("upload into nonexistent directory fails", async () => {
+    const testFile = join(fx.workDir, "orphan.txt");
+    writeFileSync(testFile, "no home");
+    const upload = await fx.opake(["upload", testFile, "--dir", "NoSuchDir"]);
+    expect(upload.code).not.toBe(0);
+  });
+
+  it("move nonexistent file fails", async () => {
+    await fx.opake(["mkdir", "MoveEmpty"]);
+    const mv = await fx.opake(["move", "ghost.txt", "MoveEmpty/"]);
+    expect(mv.code).not.toBe(0);
+  });
+
+  it("move directory into itself fails", async () => {
+    await fx.opake(["mkdir", "SelfMove"]);
+    const mv = await fx.opake(["move", "SelfMove", "SelfMove/"]);
+    expect(mv.code).not.toBe(0);
+  });
+
   it("move file into directory", async () => {
     await fx.opake(["mkdir", "MoveTarget"]);
 

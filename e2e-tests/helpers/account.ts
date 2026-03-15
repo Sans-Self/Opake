@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getPds } from "./pds.js";
+import { getPds, TEST_ACCOUNTS } from "./pds.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import initWasm, {
@@ -77,7 +77,10 @@ export async function setupAccount(
   const sessionRes = await fetch(`${pdsUrl}/xrpc/com.atproto.server.createSession`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ identifier: handle, password: "test" }),
+    body: JSON.stringify({
+      identifier: handle,
+      password: TEST_ACCOUNTS.find((a) => a.handle === handle)?.password ?? "test",
+    }),
   });
   const session = (await sessionRes.json()) as {
     accessJwt: string;

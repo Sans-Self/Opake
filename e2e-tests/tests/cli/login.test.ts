@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { startPds, stopPds } from "../../helpers/pds.js";
+import { startPds, stopPds, getPds } from "../../helpers/pds.js";
 import { opake } from "../../helpers/cli.js";
 import { interactiveLogin } from "../../helpers/login.js";
 
@@ -65,6 +65,34 @@ describe("account management", () => {
 
     const accounts = await opake(["account", "list"], { configDir });
     expect(accounts.stdout).toContain("bob.test");
+  });
+
+  it("login with wrong password fails", async () => {
+    const configDir = freshConfigDir();
+    const pds = getPds();
+    // Bob has password "secret" set in the accounts table
+    // But we'll send "wrong" via env var
+    const result = await opake(
+      ["account", "login", "bob.test", "--legacy", "--pds", pds.url],
+      { configDir, env: { OPAKE_CLI_PASSWORD: "wrong" } },
+    );
+    expect(result.code).not.toBe(0);
+  });
+
+  it("logout nonexistent account fails", async () => {
+    const configDir = freshConfigDir();
+    await interactiveLogin("alice.test", configDir);
+
+    const logout = await opake(["account", "logout", "nobody.test"], { configDir });
+    expect(logout.code).not.toBe(0);
+  });
+
+  it("set-default unknown handle fails", async () => {
+    const configDir = freshConfigDir();
+    await interactiveLogin("alice.test", configDir);
+
+    const result = await opake(["account", "set-default", "nobody.test"], { configDir });
+    expect(result.code).not.toBe(0);
   });
 
   it("logout removes an account", async () => {

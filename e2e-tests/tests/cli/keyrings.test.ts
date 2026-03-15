@@ -140,4 +140,22 @@ describe("keyrings", () => {
     ]);
     expect(download.code).not.toBe(0);
   });
+
+  it("upload under nonexistent keyring fails", async () => {
+    const workDir = freshDir();
+    const testFile = join(workDir, "orphan-kr.txt");
+    writeFileSync(testFile, "no keyring");
+    const upload = await aliceOpake(["upload", testFile, "--keyring", "no-such-keyring"]);
+    expect(upload.code).not.toBe(0);
+  });
+
+  it("non-member download fails", async () => {
+    // Bob was removed earlier — try downloading the original file
+    const workDir = freshDir();
+    const downloadPath = join(workDir, "non-member.txt");
+    const download = await bobOpake([
+      "download", "--keyring-member", krDocUri, "-o", downloadPath,
+    ]);
+    expect(download.code).not.toBe(0);
+  });
 });

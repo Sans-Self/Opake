@@ -4,7 +4,7 @@
 // from stdout and responding to word prompts automatically.
 
 import { opakeInteractive, type CliResult } from "./cli.js";
-import { getPds } from "./pds.js";
+import { getPds, TEST_ACCOUNTS } from "./pds.js";
 
 /** Parse numbered word entries from the mnemonic grid in stdout. */
 export function parseSeedPhrase(output: string): string {
@@ -46,7 +46,10 @@ export async function interactiveLogin(
     ["account", "login", handle, "--legacy", "--pds", pds.url],
     {
       configDir,
-      env: { OPAKE_CLI_PASSWORD: "test" },
+      env: {
+        OPAKE_CLI_PASSWORD:
+          TEST_ACCOUNTS.find((a) => a.handle === handle)?.password ?? "test",
+      },
       respond(output) {
         if (output.includes("Your seed phrase") && !capturedPhrase) {
           capturedPhrase = parseSeedPhrase(output);

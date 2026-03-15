@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add e2e test suite for CLI against fake-pds (#358)
 - Add DID document resolution to fake-pds and CLI PLC directory override [#359](https://issues.opake.app/issues/359.html)
 - Add fake-pds: in-memory AT Protocol PDS for integration testing [#349](https://issues.opake.app/issues/349.html)
 - Move appview URL from local config to PDS-synced account config [#346](https://issues.opake.app/issues/346.html)

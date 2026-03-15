@@ -137,4 +137,16 @@ describe("device pairing", () => {
     expect(download.code).toBe(0);
     expect(readFileSync(downloadPath, "utf-8")).toBe("pairing test content");
   });
+
+  it("pair request fails when identity already exists", async () => {
+    resetPds();
+
+    // Device with full identity
+    const device = await setupAccount("did:plc:alice", "alice.test");
+    tempDirs.push(device.configDir);
+
+    const result = await opake(["pair", "request"], { configDir: device.configDir });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("already has");
+  });
 });

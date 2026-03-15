@@ -77,6 +77,25 @@ describe("metadata", () => {
     expect(remove.stdout).not.toContain("finance");
   });
 
+  it("show nonexistent file fails", async () => {
+    const show = await fx.opake(["metadata", "show", "no-such-file.txt"]);
+    expect(show.code).not.toBe(0);
+  });
+
+  it("rename nonexistent file fails", async () => {
+    const rename = await fx.opake(["metadata", "rename", "ghost.txt", "new.txt"]);
+    expect(rename.code).not.toBe(0);
+  });
+
+  it("describe without text or --clear fails", async () => {
+    const testFile = join(fx.workDir, "no-desc-arg.txt");
+    writeFileSync(testFile, "needs argument");
+    await fx.opake(["upload", testFile]);
+
+    const desc = await fx.opake(["metadata", "describe", "no-desc-arg.txt"]);
+    expect(desc.code).not.toBe(0);
+  });
+
   it("duplicate tag is idempotent", async () => {
     const testFile = join(fx.workDir, "dupe-tag.txt");
     writeFileSync(testFile, "dupe test");

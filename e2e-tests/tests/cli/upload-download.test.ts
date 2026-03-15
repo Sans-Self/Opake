@@ -79,6 +79,11 @@ describe("upload and download", () => {
     expect(readFileSync(downloadPath, "utf-8")).toBe("");
   });
 
+  it("upload nonexistent file fails", async () => {
+    const result = await fx.opake(["upload", "/nonexistent/path.txt"]);
+    expect(result.code).not.toBe(0);
+  });
+
   it("cat decrypts to stdout", async () => {
     const testFile = join(fx.workDir, "cat-test.txt");
     writeFileSync(testFile, "stdout content");

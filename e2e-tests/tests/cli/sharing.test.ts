@@ -100,6 +100,16 @@ describe("sharing", () => {
     expect(download.code).not.toBe(0);
   });
 
+  it("share nonexistent file fails", async () => {
+    const share = await aliceOpake(["share", "new", "no-such-file.txt", "bob.test"]);
+    expect(share.code).not.toBe(0);
+  });
+
+  it("resolve unknown handle fails", async () => {
+    const resolve = await aliceOpake(["resolve", "nobody.nonexistent"]);
+    expect(resolve.code).not.toBe(0);
+  });
+
   it("resolve command works with PLC directory override", async () => {
     const resolve = await aliceOpake(["resolve", "bob.test"]);
     expect(resolve.code).toBe(0);
