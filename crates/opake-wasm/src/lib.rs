@@ -601,6 +601,29 @@ impl DirectoryTreeHandle {
 }
 
 // ---------------------------------------------------------------------------
+// Account config exports
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_name = accountConfigCollection)]
+pub fn account_config_collection() -> String {
+    opake_core::records::ACCOUNT_CONFIG_COLLECTION.to_owned()
+}
+
+#[wasm_bindgen(js_name = accountConfigRkey)]
+pub fn account_config_rkey() -> String {
+    opake_core::records::ACCOUNT_CONFIG_RKEY.to_owned()
+}
+
+/// Create a default AccountConfigRecord (telemetry disabled).
+///
+/// Returns `{ opakeVersion, telemetryEnabled, modifiedAt }`.
+#[wasm_bindgen(js_name = newAccountConfig)]
+pub fn new_account_config(modified_at: &str) -> Result<JsValue, JsError> {
+    let record = opake_core::records::AccountConfigRecord::new(modified_at);
+    serde_wasm_bindgen::to_value(&record).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
 // Mnemonic / seed phrase exports
 // ---------------------------------------------------------------------------
 

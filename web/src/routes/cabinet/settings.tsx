@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { UserIcon, GlobeIcon, FloppyDiskIcon } from "@phosphor-icons/react";
+import { UserIcon, GlobeIcon, FloppyDiskIcon, GearIcon } from "@phosphor-icons/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { useAuthStore } from "@/stores/auth";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { authenticatedGetRecord, authenticatedPutRecord } from "@/lib/api";
+import { getCryptoWorker } from "@/lib/worker";
 import { truncateDid } from "@/lib/format";
 import { toastSuccess, toastError } from "@/stores/toast";
 import type { Config } from "@/lib/storageTypes";
+import type { AccountConfigRecord } from "@/lib/pdsTypes";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,6 +103,107 @@ function AppViewUrlSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Account Config Section (PDS-synced preferences)
+// ---------------------------------------------------------------------------
+
+function AccountConfigSection() {
+  const session = useAuthStore((s) => s.session);
+  const [telemetry, setTelemetry] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const did = session.status === "active" ? session.did : null;
+  const pdsUrl = session.status === "active" ? session.pdsUrl : null;
+
+  useEffect(() => {
+    if (!did || !pdsUrl) return;
+
+    const cancelled = { current: false };
+    const worker = getCryptoWorker();
+
+    Promise.all([
+      worker.accountConfigCollection(),
+      worker.accountConfigRkey(),
+      storage.loadSession(did),
+    ])
+      .then(([collection, rkey, sess]) =>
+        authenticatedGetRecord<AccountConfigRecord>({ pdsUrl, did, collection, rkey }, sess),
+      )
+      .then((record) => {
+        if (!cancelled.current) setTelemetry(record.value.telemetryEnabled);
+      })
+      .catch((err: unknown) => {
+        if (cancelled.current) return;
+        const is404 = err instanceof Error && err.message.includes("404");
+        if (is404) {
+          setTelemetry(false);
+          return;
+        }
+        console.error("[settings] failed to load account config:", err);
+      });
+
+    return () => {
+      cancelled.current = true;
+    };
+  }, [did, pdsUrl]);
+
+  const handleToggle = useCallback(async () => {
+    if (!did || !pdsUrl || telemetry === null) return;
+
+    const next = !telemetry;
+    setSaving(true);
+    try {
+      const worker = getCryptoWorker();
+      const [collection, rkey, defaultRecord, sess] = await Promise.all([
+        worker.accountConfigCollection(),
+        worker.accountConfigRkey(),
+        worker.newAccountConfig(new Date().toISOString()),
+        storage.loadSession(did),
+      ]);
+      const record: AccountConfigRecord = { ...defaultRecord, telemetryEnabled: next };
+      await authenticatedPutRecord({ pdsUrl, did, collection, rkey, record }, sess);
+      setTelemetry(next);
+      toastSuccess(`Telemetry ${next ? "enabled" : "disabled"}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save";
+      toastError(message);
+    } finally {
+      setSaving(false);
+    }
+  }, [did, pdsUrl, telemetry]);
+
+  if (telemetry === null) return null;
+
+  return (
+    <div className="card card-bordered border-base-300/50 bg-base-100 p-4">
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="bg-bg-stone flex size-8 shrink-0 items-center justify-center rounded-lg">
+          <GearIcon size={14} className="text-text-muted" />
+        </div>
+        <div>
+          <div className="text-ui text-base-content font-medium">Preferences</div>
+          <div className="text-caption text-text-muted">Synced to your PDS across devices.</div>
+        </div>
+      </div>
+
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <div>
+          <div className="text-ui text-base-content">Telemetry</div>
+          <div className="text-caption text-text-muted">Usage analytics — not yet active</div>
+        </div>
+        <input
+          type="checkbox"
+          className="toggle toggle-sm toggle-primary"
+          checked={telemetry}
+          disabled={saving}
+          onChange={() => void handleToggle()}
+          aria-label="Enable telemetry"
+        />
+      </label>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Account Section
 // ---------------------------------------------------------------------------
 
@@ -162,6 +266,7 @@ function SettingsPage() {
 
         <div className="flex flex-col gap-3">
           <AccountSection />
+          <AccountConfigSection />
           <AppViewUrlSection />
         </div>
       </div>

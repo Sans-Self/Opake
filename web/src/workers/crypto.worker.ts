@@ -25,6 +25,9 @@ import init, {
   didDocumentUrl as wasmDidDocumentUrl,
   handleFromDidDocument as wasmHandleFromDidDocument,
   pdsFromDidDocument as wasmPdsFromDidDocument,
+  accountConfigCollection as wasmAccountConfigCollection,
+  accountConfigRkey as wasmAccountConfigRkey,
+  newAccountConfig as wasmNewAccountConfig,
   DirectoryTreeHandle,
 } from "@/wasm/opake-wasm/opake";
 import type {
@@ -35,6 +38,7 @@ import type {
   EphemeralKeypair,
 } from "@/lib/cryptoTypes";
 import type {
+  AccountConfigRecord,
   DocumentMetadata,
   DirectoryMetadata,
   DirectoryTreeSnapshot,
@@ -163,6 +167,22 @@ const cryptoApi = {
 
   generateEphemeralKeypair(): EphemeralKeypair {
     return wasmGenerateEphemeralKeypair() as EphemeralKeypair;
+  },
+
+  // ---------------------------------------------------------------------------
+  // Account config
+  // ---------------------------------------------------------------------------
+
+  accountConfigCollection(): string {
+    return wasmAccountConfigCollection();
+  },
+
+  accountConfigRkey(): string {
+    return wasmAccountConfigRkey();
+  },
+
+  newAccountConfig(modifiedAt: string): AccountConfigRecord {
+    return wasmNewAccountConfig(modifiedAt) as AccountConfigRecord;
   },
 
   // ---------------------------------------------------------------------------

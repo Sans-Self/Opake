@@ -19,6 +19,16 @@ export interface ListRecordsResponse<T> {
 }
 
 // ---------------------------------------------------------------------------
+// app.opake.accountConfig
+// ---------------------------------------------------------------------------
+
+export interface AccountConfigRecord {
+  readonly opakeVersion: number;
+  readonly telemetryEnabled: boolean;
+  readonly modifiedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Encryption envelope (shared by documents, directories, keyrings, grants)
 // ---------------------------------------------------------------------------
 
