@@ -40,7 +40,7 @@ if ! [ -d "$TEST_DATA_DIR" ]; then
     exit 1
 fi
 
-if ! $OPAKE_BIN accounts | grep -q "did:plc"; then
+if ! $OPAKE_BIN account list | grep -q "did:plc"; then
     echo -e "${YELLOW}No accounts found.${RESET} Please run 'opake login' first."
     exit 1
 fi
