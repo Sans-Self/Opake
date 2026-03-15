@@ -7,6 +7,34 @@ import { useFixture } from "../../helpers/fixture.js";
 
 const fx = useFixture();
 
+describe("delete root directory", () => {
+  it("rm / without -r fails", async () => {
+    // Seed some content so root is non-empty
+    const testFile = join(fx.workDir, "root-child.txt");
+    writeFileSync(testFile, "child of root");
+    await fx.opake(["upload", testFile]);
+
+    const rm = await fx.opake(["rm", "/", "-y"]);
+    expect(rm.code).not.toBe(0);
+  });
+
+  it("rm -r / deletes everything", async () => {
+    await fx.opake(["mkdir", "RootTestDir"]);
+
+    const testFile = join(fx.workDir, "root-file.txt");
+    writeFileSync(testFile, "will die with root");
+    await fx.opake(["upload", testFile, "--dir", "RootTestDir"]);
+
+    const rm = await fx.opake(["rm", "-r", "/", "-y"]);
+    expect(rm.code).toBe(0);
+
+    const tree = await fx.opake(["tree"]);
+    // After deleting root, tree should show an empty root or just "/"
+    expect(tree.stdout).not.toContain("RootTestDir");
+    expect(tree.stdout).not.toContain("root-file.txt");
+  });
+});
+
 describe("delete", () => {
   it("rm -y deletes a file", async () => {
     const testFile = join(fx.workDir, "doomed.txt");

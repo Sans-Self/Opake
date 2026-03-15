@@ -13,12 +13,18 @@ import { tmpdir } from "node:os";
 import { beforeAll, afterAll, beforeEach } from "vitest";
 import { startPds, stopPds } from "./pds.js";
 import { setupAccount } from "./account.js";
-import { opake, type CliResult } from "./cli.js";
+import { opake, opakeInteractive, type CliResult } from "./cli.js";
 
 interface Fixture {
   readonly ctx: Awaited<ReturnType<typeof setupAccount>>;
   readonly workDir: string;
   opake(args: readonly string[], env?: Record<string, string>): Promise<CliResult>;
+  opakeStdin(args: readonly string[], stdin: string, env?: Record<string, string>): Promise<CliResult>;
+  opakeInteractive(
+    args: readonly string[],
+    respond: (output: string) => string | null,
+    env?: Record<string, string>,
+  ): Promise<CliResult>;
 }
 
 /**
@@ -68,6 +74,18 @@ export function useFixture(
     opake(args: readonly string[], env?: Record<string, string>) {
       if (!state.ctx) throw new Error("fixture not initialized");
       return opake(args, { configDir: state.ctx.configDir, env });
+    },
+    opakeStdin(args: readonly string[], stdin: string, env?: Record<string, string>) {
+      if (!state.ctx) throw new Error("fixture not initialized");
+      return opake(args, { configDir: state.ctx.configDir, env, stdin });
+    },
+    opakeInteractive(
+      args: readonly string[],
+      respond: (output: string) => string | null,
+      env?: Record<string, string>,
+    ) {
+      if (!state.ctx) throw new Error("fixture not initialized");
+      return opakeInteractive(args, { configDir: state.ctx.configDir, env, respond });
     },
   };
 }
