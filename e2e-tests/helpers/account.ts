@@ -53,6 +53,7 @@ function sanitizeDid(did: string): string {
 export async function setupAccount(
   did: string,
   handle: string,
+  opts?: { skipIdentity?: boolean },
 ): Promise<AccountContext> {
   await ensureWasm();
   const pds = getPds();
@@ -107,37 +108,41 @@ handle = "${handle}"
     mode: 0o600,
   });
 
-  // 5. Write identity.json
-  writeFileSync(join(accountDir, "identity.json"), JSON.stringify(identity), {
-    mode: 0o600,
-  });
-
-  // 6. Publish public key to fake PDS
-  const publicKeyRecord: Record<string, unknown> = {
-    $type: "app.opake.publicKey",
-    opakeVersion: 1,
-    publicKey: { $bytes: identity.public_key },
-    algo: "x25519",
-    createdAt: new Date().toISOString(),
-  };
-  if (identity.verify_key) {
-    publicKeyRecord["signingKey"] = { $bytes: identity.verify_key };
-    publicKeyRecord["signingAlgo"] = "ed25519";
+  // 5. Write identity.json (skip for pairing test — new device has no identity)
+  if (!opts?.skipIdentity) {
+    writeFileSync(join(accountDir, "identity.json"), JSON.stringify(identity), {
+      mode: 0o600,
+    });
   }
 
-  await fetch(`${pdsUrl}/xrpc/com.atproto.repo.putRecord`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.accessJwt}`,
-    },
-    body: JSON.stringify({
-      repo: did,
-      collection: "app.opake.publicKey",
-      rkey: "self",
-      record: publicKeyRecord,
-    }),
-  });
+  // 6. Publish public key to fake PDS (skip if no identity)
+  if (!opts?.skipIdentity) {
+    const publicKeyRecord: Record<string, unknown> = {
+      $type: "app.opake.publicKey",
+      opakeVersion: 1,
+      publicKey: { $bytes: identity.public_key },
+      algo: "x25519",
+      createdAt: new Date().toISOString(),
+    };
+    if (identity.verify_key) {
+      publicKeyRecord["signingKey"] = { $bytes: identity.verify_key };
+      publicKeyRecord["signingAlgo"] = "ed25519";
+    }
+
+    await fetch(`${pdsUrl}/xrpc/com.atproto.repo.putRecord`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.accessJwt}`,
+      },
+      body: JSON.stringify({
+        repo: did,
+        collection: "app.opake.publicKey",
+        rkey: "self",
+        record: publicKeyRecord,
+      }),
+    });
+  }
 
   return { configDir, did, handle, pdsUrl };
 }
