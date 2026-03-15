@@ -1,81 +1,38 @@
 // §2 from AGENT-BLACKBOX-TEST.md: Upload and Download (Direct Encryption)
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { describe, it, expect } from "vitest";
+import { writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { startPds, stopPds } from "../../helpers/pds.js";
-import { setupAccount } from "../../helpers/account.js";
-import { opake } from "../../helpers/cli.js";
+import { useFixture } from "../../helpers/fixture.js";
 
-// eslint-disable-next-line functional/no-let
-let ctx: Awaited<ReturnType<typeof setupAccount>>;
-// eslint-disable-next-line functional/no-let
-let workDir: string;
-
-const tempDirs: string[] = [];
-
-function freshWorkDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "opake-e2e-work-"));
-  tempDirs.push(dir);
-  return dir;
-}
-
-beforeAll(async () => {
-  await startPds();
-  ctx = await setupAccount("did:plc:alice", "alice.test");
-});
-
-beforeEach(() => {
-  workDir = freshWorkDir();
-});
-
-afterAll(async () => {
-  await stopPds();
-  for (const dir of tempDirs) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  if (ctx?.configDir) {
-    rmSync(ctx.configDir, { recursive: true, force: true });
-  }
-});
+const fx = useFixture();
 
 describe("upload and download", () => {
   it("upload → ls → download roundtrip", async () => {
-    // Create a test file
-    const testFile = join(workDir, "hello.txt");
+    const testFile = join(fx.workDir, "hello.txt");
     writeFileSync(testFile, "hello opake");
 
-    // Upload
-    const upload = await opake(["upload", testFile], { configDir: ctx.configDir });
+    const upload = await fx.opake(["upload", testFile]);
     expect(upload.code).toBe(0);
     expect(upload.stdout).toContain("hello.txt");
     expect(upload.stdout).toContain("at://");
 
-    // List
-    const ls = await opake(["ls"], { configDir: ctx.configDir });
+    const ls = await fx.opake(["ls"]);
     expect(ls.code).toBe(0);
     expect(ls.stdout).toContain("hello.txt");
 
-    // Download
-    const downloadPath = join(workDir, "downloaded.txt");
-    const download = await opake(
-      ["download", "hello.txt", "-o", downloadPath],
-      { configDir: ctx.configDir },
-    );
+    const downloadPath = join(fx.workDir, "downloaded.txt");
+    const download = await fx.opake(["download", "hello.txt", "-o", downloadPath]);
     expect(download.code).toBe(0);
-
-    // Verify content matches
-    const downloaded = readFileSync(downloadPath, "utf-8");
-    expect(downloaded).toBe("hello opake");
+    expect(readFileSync(downloadPath, "utf-8")).toBe("hello opake");
   });
 
   it("ls -l shows mime type and size", async () => {
-    const testFile = join(workDir, "doc.txt");
+    const testFile = join(fx.workDir, "doc.txt");
     writeFileSync(testFile, "some content");
 
-    await opake(["upload", testFile], { configDir: ctx.configDir });
-    const ls = await opake(["ls", "-l"], { configDir: ctx.configDir });
+    await fx.opake(["upload", testFile]);
+    const ls = await fx.opake(["ls", "-l"]);
 
     expect(ls.code).toBe(0);
     expect(ls.stdout).toContain("doc.txt");
@@ -83,62 +40,51 @@ describe("upload and download", () => {
   });
 
   it("download by AT-URI", async () => {
-    const testFile = join(workDir, "uri-test.txt");
+    const testFile = join(fx.workDir, "uri-test.txt");
     writeFileSync(testFile, "uri content");
 
-    const upload = await opake(["upload", testFile], { configDir: ctx.configDir });
-    // Extract AT-URI from output
+    const upload = await fx.opake(["upload", testFile]);
     const uriMatch = upload.stdout.match(/at:\/\/[^\s]+/);
     expect(uriMatch).toBeTruthy();
 
-    const downloadPath = join(workDir, "uri-download.txt");
-    const download = await opake(
-      ["download", uriMatch![0]!, "-o", downloadPath],
-      { configDir: ctx.configDir },
-    );
+    const downloadPath = join(fx.workDir, "uri-download.txt");
+    const download = await fx.opake(["download", uriMatch![0]!, "-o", downloadPath]);
     expect(download.code).toBe(0);
     expect(readFileSync(downloadPath, "utf-8")).toBe("uri content");
   });
 
   it("download refuses to overwrite existing file", async () => {
-    const testFile = join(workDir, "overwrite.txt");
+    const testFile = join(fx.workDir, "overwrite.txt");
     writeFileSync(testFile, "original");
-    await opake(["upload", testFile], { configDir: ctx.configDir });
+    await fx.opake(["upload", testFile]);
 
-    // Create the output file so it exists
-    const outputPath = join(workDir, "already-exists.txt");
+    const outputPath = join(fx.workDir, "already-exists.txt");
     writeFileSync(outputPath, "existing");
 
-    const download = await opake(
-      ["download", "overwrite.txt", "-o", outputPath],
-      { configDir: ctx.configDir },
-    );
+    const download = await fx.opake(["download", "overwrite.txt", "-o", outputPath]);
     expect(download.code).not.toBe(0);
     expect(download.stderr).toContain("exists");
   });
 
   it("upload and download empty file", async () => {
-    const testFile = join(workDir, "empty.bin");
+    const testFile = join(fx.workDir, "empty.bin");
     writeFileSync(testFile, "");
 
-    const upload = await opake(["upload", testFile], { configDir: ctx.configDir });
+    const upload = await fx.opake(["upload", testFile]);
     expect(upload.code).toBe(0);
 
-    const downloadPath = join(workDir, "empty-download.bin");
-    const download = await opake(
-      ["download", "empty.bin", "-o", downloadPath],
-      { configDir: ctx.configDir },
-    );
+    const downloadPath = join(fx.workDir, "empty-download.bin");
+    const download = await fx.opake(["download", "empty.bin", "-o", downloadPath]);
     expect(download.code).toBe(0);
     expect(readFileSync(downloadPath, "utf-8")).toBe("");
   });
 
   it("cat decrypts to stdout", async () => {
-    const testFile = join(workDir, "cat-test.txt");
+    const testFile = join(fx.workDir, "cat-test.txt");
     writeFileSync(testFile, "stdout content");
 
-    await opake(["upload", testFile], { configDir: ctx.configDir });
-    const cat = await opake(["cat", "cat-test.txt"], { configDir: ctx.configDir });
+    await fx.opake(["upload", testFile]);
+    const cat = await fx.opake(["cat", "cat-test.txt"]);
 
     expect(cat.code).toBe(0);
     expect(cat.stdout).toBe("stdout content");
