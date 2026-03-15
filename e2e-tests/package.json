@@ -1,0 +1,15 @@
+{
+  "name": "opake-e2e-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "fake-pds": "^0.1.0",
+    "typescript": "^5.7",
+    "vitest": "^3.0"
+  }
+}
