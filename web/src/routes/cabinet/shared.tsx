@@ -210,10 +210,12 @@ function SharedPage() {
       const [out, inc] = await Promise.all([
         listOutgoingGrants(session.pdsUrl, session.did, oauthSession),
         signingKey
-          ? listIncomingGrants(session.did, signingKey).catch((err: unknown) => {
-              console.warn("[shared] inbox fetch failed, showing outgoing only:", err);
-              return [] as InboxGrantItem[];
-            })
+          ? listIncomingGrants(session.pdsUrl, session.did, oauthSession, signingKey).catch(
+              (err: unknown) => {
+                console.warn("[shared] inbox fetch failed, showing outgoing only:", err);
+                return [] as InboxGrantItem[];
+              },
+            )
           : Promise.resolve([]),
       ]);
 

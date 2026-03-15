@@ -6,7 +6,6 @@ import type { DpopKeyPair } from "./cryptoTypes";
 export interface Config {
   readonly defaultDid: string | null;
   readonly accounts: Readonly<Record<string, AccountEntry>>;
-  readonly appviewUrl: string | null;
 }
 
 export interface AccountEntry {

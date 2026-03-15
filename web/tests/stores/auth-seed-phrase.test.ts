@@ -36,7 +36,6 @@ const mockStorage = {
   loadConfig: vi.fn().mockResolvedValue({
     defaultDid: TEST_DID,
     accounts: { [TEST_DID]: { pdsUrl: TEST_PDS, handle: "test.handle" } },
-    appviewUrl: null,
   }),
   saveConfig: vi.fn().mockResolvedValue(undefined),
   loadSession: vi.fn().mockResolvedValue(testSession),

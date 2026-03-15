@@ -512,7 +512,6 @@ export const useAuthStore = create<AuthState>()(
         const existingConfig: Readonly<Config> = await storage.loadConfig().catch(() => ({
           defaultDid: null,
           accounts: {},
-          appviewUrl: null,
         }));
         const config: Readonly<Config> = {
           ...existingConfig,

@@ -19,6 +19,11 @@
             "type": "boolean",
             "description": "Whether usage analytics are enabled."
           },
+          "appviewUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "AppView endpoint URL for indexing and search."
+          },
           "modifiedAt": {
             "type": "string",
             "format": "datetime",

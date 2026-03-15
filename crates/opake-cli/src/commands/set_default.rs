@@ -51,7 +51,6 @@ mod tests {
         Config {
             default_did: Some("did:plc:alice".into()),
             accounts,
-            appview_url: None,
         }
     }
 

@@ -10,14 +10,13 @@ use crate::session::{self, CommandContext};
 /// View or modify account config synced to your PDS
 ///
 /// Account config is stored as a record on your PDS and syncs across
-/// devices. Local settings (default account, appview URL) are not
-/// affected.
+/// devices. Local settings (default account) are not affected.
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
   opake config
   opake config set telemetry-enabled true
-  opake config set telemetry-enabled false")]
+  opake config set appview-url https://appview.opake.app")]
 pub struct ConfigCommand {
     #[command(subcommand)]
     action: Option<ConfigAction>,
@@ -37,7 +36,7 @@ struct SetArgs {
     value: String,
 }
 
-const VALID_KEYS: &[&str] = &["telemetry-enabled"];
+const VALID_KEYS: &[&str] = &["appview-url", "telemetry-enabled"];
 
 fn parse_bool(value: &str) -> Result<bool> {
     match value {
@@ -63,6 +62,10 @@ impl Execute for ConfigCommand {
                     .unwrap_or_else(|| AccountConfigRecord::new(&now));
 
                 match args.key.as_str() {
+                    "appview-url" => {
+                        let url = args.value.trim().to_string();
+                        config.appview_url = if url.is_empty() { None } else { Some(url) };
+                    }
                     "telemetry-enabled" => {
                         config.telemetry_enabled = parse_bool(&args.value)?;
                     }
@@ -93,10 +96,15 @@ fn print_config(config: Option<&AccountConfigRecord>) {
                 "disabled"
             };
             println!("telemetry    {telemetry}");
+            println!(
+                "appview      {}",
+                config.appview_url.as_deref().unwrap_or("(not set)")
+            );
             println!("modified     {}", config.modified_at);
         }
         None => {
             println!("telemetry    disabled  (default)");
+            println!("appview      (not set)");
             println!("modified     never");
         }
     }

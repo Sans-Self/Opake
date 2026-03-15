@@ -105,7 +105,6 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some(did.to_string()),
                 accounts,
-                appview_url: None,
             })
             .unwrap();
     }
@@ -160,7 +159,6 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
-                appview_url: None,
             })
             .unwrap();
 
@@ -191,7 +189,6 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
-                appview_url: None,
             })
             .unwrap();
 
@@ -214,7 +211,6 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: None,
                 accounts: BTreeMap::new(),
-                appview_url: None,
             })
             .unwrap();
         let err = resolve_context(&storage, None).unwrap_err();

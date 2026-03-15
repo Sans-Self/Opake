@@ -21,7 +21,6 @@ const testConfig: Config = {
   accounts: {
     "did:plc:alice": { pdsUrl: "https://pds.alice", handle: "alice.test" },
   },
-  appviewUrl: null,
 };
 
 const testIdentity: Identity = {
@@ -76,13 +75,11 @@ describe("config", () => {
         "did:plc:alice": { pdsUrl: "https://pds.alice", handle: "alice.test" },
         "did:plc:bob": { pdsUrl: "https://pds.bob", handle: "bob.test" },
       },
-      appviewUrl: "https://appview.test",
     };
     await storage.saveConfig(config);
     const loaded = await storage.loadConfig();
     expect(Object.keys(loaded.accounts)).toHaveLength(2);
     expect(loaded.accounts["did:plc:bob"]?.handle).toBe("bob.test");
-    expect(loaded.appviewUrl).toBe("https://appview.test");
   });
 
   it("AccountEntry fields roundtrip through config", async () => {
@@ -93,7 +90,6 @@ describe("config", () => {
     const config: Config = {
       defaultDid: "did:plc:carol",
       accounts: { "did:plc:carol": entry },
-      appviewUrl: null,
     };
     await storage.saveConfig(config);
     const loaded = await storage.loadConfig();
@@ -173,7 +169,6 @@ const multiAccountConfig: Config = {
     "did:plc:alice": { pdsUrl: "https://pds.alice", handle: "alice.test" },
     "did:plc:bob": { pdsUrl: "https://pds.bob", handle: "bob.test" },
   },
-  appviewUrl: null,
 };
 
 describe("removeAccount", () => {

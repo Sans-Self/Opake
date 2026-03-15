@@ -1,10 +1,20 @@
 // Sharing helpers — resolve recipient, create/list/revoke grants.
 
 import type { WrappedKey } from "@/lib/cryptoTypes";
-import type { EncryptedMetadataEnvelope, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
+import type {
+  AccountConfigRecord,
+  EncryptedMetadataEnvelope,
+  DocumentRecord,
+  DocumentMetadata,
+} from "@/lib/pdsTypes";
 import type { DecryptedBlob } from "@/lib/preview";
 import type { Session } from "@/lib/storageTypes";
-import { authenticatedXrpc, authenticatedDeleteRecord, authenticatedAppview } from "@/lib/api";
+import {
+  authenticatedXrpc,
+  authenticatedGetRecord,
+  authenticatedDeleteRecord,
+  authenticatedAppview,
+} from "@/lib/api";
 import { resolveHandleToPds } from "@/lib/oauth";
 import { pdsUrlFromDid } from "@/lib/did";
 import { getCryptoWorker } from "@/lib/worker";
@@ -12,9 +22,6 @@ import { base64ToUint8Array, uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
 import { triggerBrowserDownload } from "@/lib/download";
 import { decryptEnvelope } from "@/stores/documents/decrypt";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
-
-const storage = new IndexedDbStorage();
 const GRANT_COLLECTION = "app.opake.grant";
 const PUBLIC_KEY_COLLECTION = "app.opake.publicKey";
 
@@ -193,12 +200,24 @@ interface InboxResponse {
 
 /** Fetch incoming grants from the AppView inbox (authenticated). */
 export async function listIncomingGrants(
+  pdsUrl: string,
   did: string,
+  session: Session,
   signingKey: Uint8Array,
 ): Promise<InboxGrantItem[]> {
-  const config = await storage.loadConfig().catch(() => null);
-  const appviewUrl = config?.appviewUrl;
-  if (!appviewUrl) return [];
+  const worker = getCryptoWorker();
+  const [collection, rkey] = await Promise.all([
+    worker.accountConfigCollection(),
+    worker.accountConfigRkey(),
+  ]);
+  const accountConfig = await authenticatedGetRecord<AccountConfigRecord>(
+    { pdsUrl, did, collection, rkey },
+    session,
+  ).catch(() => null);
+  const appviewUrl =
+    accountConfig?.value.appviewUrl ??
+    (import.meta.env.VITE_APPVIEW_URL as string | undefined) ??
+    "https://appview.opake.app";
 
   /* eslint-disable functional/no-loop-statements, functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- paginated cursor loop */
   const items: InboxGrantItem[] = [];

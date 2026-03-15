@@ -25,6 +25,7 @@ export interface ListRecordsResponse<T> {
 export interface AccountConfigRecord {
   readonly opakeVersion: number;
   readonly telemetryEnabled: boolean;
+  readonly appviewUrl?: string;
   readonly modifiedAt: string;
 }
 

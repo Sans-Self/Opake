@@ -132,35 +132,6 @@ impl FileStorage {
         self.save_config_anyhow(&config)
     }
 
-    /// Resolve the appview URL from (in priority order):
-    /// 1. Explicit flag value (`--appview`)
-    /// 2. `OPAKE_APPVIEW_URL` environment variable
-    /// 3. `appview_url` field in config
-    ///
-    /// Returns a clear error if none are set.
-    pub fn resolve_appview_url(&self, explicit: Option<&str>) -> anyhow::Result<String> {
-        if let Some(url) = explicit {
-            return Ok(url.to_string());
-        }
-
-        if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
-            if !url.is_empty() {
-                return Ok(url);
-            }
-        }
-
-        if let Ok(config) = self.load_config_anyhow() {
-            if let Some(url) = config.appview_url {
-                return Ok(url);
-            }
-        }
-
-        anyhow::bail!(
-            "no appview URL configured — pass --appview <url>, \
-             set OPAKE_APPVIEW_URL, or add appview_url to config.toml"
-        )
-    }
-
     // -- Anyhow wrappers (the trait uses opake_core::Error, CLI wants anyhow) -
 
     /// Load config using anyhow errors (for CLI callers that don't go through the trait).
@@ -235,6 +206,44 @@ impl Storage for FileStorage {
 pub use opake_core::storage::{
     resolve_handle_or_did, sanitize_did, AccountEntry, Config, Identity,
 };
+
+/// Compile-time default appview URL, baked in via `OPAKE_DEFAULT_APPVIEW_URL` env var at build.
+const DEFAULT_APPVIEW_URL: Option<&str> = option_env!("OPAKE_DEFAULT_APPVIEW_URL");
+
+/// Resolve the appview URL from (in priority order):
+/// 1. Explicit flag value (`--appview`)
+/// 2. `OPAKE_APPVIEW_URL` environment variable
+/// 3. PDS account config record
+/// 4. Compile-time default (`OPAKE_DEFAULT_APPVIEW_URL`)
+///
+/// Returns a clear error if none are set.
+pub fn resolve_appview_url(
+    explicit: Option<&str>,
+    account_config: Option<&opake_core::records::AccountConfigRecord>,
+) -> anyhow::Result<String> {
+    if let Some(url) = explicit {
+        return Ok(url.to_string());
+    }
+
+    if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
+        if !url.is_empty() {
+            return Ok(url);
+        }
+    }
+
+    if let Some(url) = account_config.and_then(|c| c.appview_url.as_deref()) {
+        return Ok(url.to_string());
+    }
+
+    if let Some(url) = DEFAULT_APPVIEW_URL {
+        return Ok(url.to_string());
+    }
+
+    anyhow::bail!(
+        "no appview URL configured — pass --appview <url>, \
+         set OPAKE_APPVIEW_URL, or run `opake config set appview-url <url>`"
+    )
+}
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

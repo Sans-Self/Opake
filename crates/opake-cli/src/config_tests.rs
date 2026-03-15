@@ -14,7 +14,6 @@ fn test_config(did: &str, pds_url: &str, handle: &str) -> Config {
     Config {
         default_did: Some(did.to_string()),
         accounts,
-        appview_url: None,
     }
 }
 
@@ -52,7 +51,6 @@ fn config_with_multiple_accounts_roundtrips() {
     let config = Config {
         default_did: Some("did:plc:alice".into()),
         accounts,
-        appview_url: None,
     };
     storage.save_config_anyhow(&config).unwrap();
 
@@ -239,7 +237,6 @@ fn remove_account_promotes_next_default() {
         .save_config_anyhow(&Config {
             default_did: Some("did:plc:alice".into()),
             accounts,
-            appview_url: None,
         })
         .unwrap();
 
@@ -276,47 +273,48 @@ fn remove_account_without_dir_still_works() {
 
 // -- resolve_appview_url --
 
+use super::resolve_appview_url;
+use opake_core::records::AccountConfigRecord;
+
 #[test]
 fn resolve_appview_url_explicit_flag_wins() {
-    let (_dir, storage) = test_storage();
     std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
-    let result = storage
-        .resolve_appview_url(Some("https://flag.test"))
-        .unwrap();
+    let account = AccountConfigRecord {
+        appview_url: Some("https://pds.test".into()),
+        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
+    };
+    let result = resolve_appview_url(Some("https://flag.test"), Some(&account)).unwrap();
     assert_eq!(result, "https://flag.test");
     std::env::remove_var("OPAKE_APPVIEW_URL");
 }
 
 #[test]
-fn resolve_appview_url_env_over_config() {
-    let (_dir, storage) = test_storage();
-    let mut config = test_config("did:plc:alice", "https://pds.test", "alice.test");
-    config.appview_url = Some("https://config.test".into());
-    storage.save_config_anyhow(&config).unwrap();
-
+fn resolve_appview_url_env_over_account_config() {
     std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
-    let result = storage.resolve_appview_url(None).unwrap();
+    let account = AccountConfigRecord {
+        appview_url: Some("https://pds.test".into()),
+        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
+    };
+    let result = resolve_appview_url(None, Some(&account)).unwrap();
     assert_eq!(result, "https://env.test");
     std::env::remove_var("OPAKE_APPVIEW_URL");
 }
 
 #[test]
-fn resolve_appview_url_config_fallback() {
-    let (_dir, storage) = test_storage();
+fn resolve_appview_url_account_config_fallback() {
     std::env::remove_var("OPAKE_APPVIEW_URL");
-    let mut config = test_config("did:plc:alice", "https://pds.test", "alice.test");
-    config.appview_url = Some("https://config.test".into());
-    storage.save_config_anyhow(&config).unwrap();
-
-    let result = storage.resolve_appview_url(None).unwrap();
-    assert_eq!(result, "https://config.test");
+    let account = AccountConfigRecord {
+        appview_url: Some("https://account.test".into()),
+        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
+    };
+    let result = resolve_appview_url(None, Some(&account)).unwrap();
+    assert_eq!(result, "https://account.test");
 }
 
 #[test]
 fn resolve_appview_url_missing_gives_clear_error() {
-    let (_dir, storage) = test_storage();
     std::env::remove_var("OPAKE_APPVIEW_URL");
-    let err = storage.resolve_appview_url(None).unwrap_err().to_string();
+    let err = resolve_appview_url(None, None).unwrap_err().to_string();
     assert!(err.contains("--appview"), "expected usage hint: {err}");
     assert!(
         err.contains("OPAKE_APPVIEW_URL"),

@@ -13,15 +13,18 @@ pub struct AccountConfigRecord {
     #[serde(default = "default_version")]
     pub opake_version: u32,
     pub telemetry_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appview_url: Option<String>,
     pub modified_at: String,
 }
 
 impl AccountConfigRecord {
-    /// Default preferences: telemetry disabled.
+    /// Default preferences: telemetry disabled, no appview URL.
     pub fn new(modified_at: &str) -> Self {
         Self {
             opake_version: SCHEMA_VERSION,
             telemetry_enabled: false,
+            appview_url: None,
             modified_at: modified_at.into(),
         }
     }

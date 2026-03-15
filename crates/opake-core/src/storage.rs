@@ -26,13 +26,14 @@ pub type Ed25519SecretKey = [u8; 32];
 pub type Ed25519VerifyKey = [u8; 32];
 
 /// Persistent CLI configuration — tracks all logged-in accounts.
+///
+/// Device-local only. Cross-device preferences (appview URL, telemetry)
+/// live in `AccountConfigRecord` on the PDS.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
     pub default_did: Option<String>,
     #[serde(default)]
     pub accounts: BTreeMap<String, AccountEntry>,
-    #[serde(default)]
-    pub appview_url: Option<String>,
 }
 
 impl Config {
@@ -253,7 +254,6 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts: BTreeMap::new(),
-            appview_url: None,
         };
         let result = resolve_handle_or_did(&config, "did:plc:someone").unwrap();
         assert_eq!(result, "did:plc:someone");
@@ -272,7 +272,6 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts,
-            appview_url: None,
         };
         let result = resolve_handle_or_did(&config, "alice.test").unwrap();
         assert_eq!(result, "did:plc:alice");
@@ -283,7 +282,6 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts: BTreeMap::new(),
-            appview_url: None,
         };
         let err = resolve_handle_or_did(&config, "nobody.test").unwrap_err();
         assert!(err.to_string().contains("nobody.test"));
@@ -352,7 +350,6 @@ mod tests {
         let config = Config::default();
         assert!(config.default_did.is_none());
         assert!(config.accounts.is_empty());
-        assert!(config.appview_url.is_none());
     }
 
     // -- Config mutation methods --
