@@ -77,7 +77,7 @@ pub fn persist_session(storage: &FileStorage, did: &str, session: &Session) -> a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AccountConfig, Config};
+    use crate::config::{AccountEntry, Config};
     use crate::utils::test_harness::test_storage;
     use opake_core::client::LegacySession;
     use std::collections::BTreeMap;
@@ -96,7 +96,7 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             did.to_string(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: pds_url.into(),
                 handle: handle.into(),
             },
@@ -144,14 +144,14 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             "did:plc:alice".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.alice".into(),
                 handle: "alice.test".into(),
             },
         );
         accounts.insert(
             "did:plc:bob".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.bob".into(),
                 handle: "bob.test".into(),
             },
@@ -175,14 +175,14 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             "did:plc:alice".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.alice".into(),
                 handle: "alice.test".into(),
             },
         );
         accounts.insert(
             "did:plc:bob".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.bob".into(),
                 handle: "bob.test".into(),
             },

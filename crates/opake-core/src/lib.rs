@@ -19,6 +19,7 @@ pub fn binding_check() -> &'static str {
     "WORKS"
 }
 
+pub mod account_config;
 pub mod atproto;
 pub mod client;
 pub mod crypto;

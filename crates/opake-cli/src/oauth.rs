@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::commands::login::ensure_identity_and_publish;
-use crate::config::{AccountConfig, FileStorage};
+use crate::config::{AccountEntry, FileStorage};
 use opake_core::client::ReqwestTransport;
 
 /// Attempt a full OAuth login flow. Returns `Err` if the PDS doesn't support
@@ -199,7 +199,7 @@ pub async fn try_oauth_login(
     let mut cfg = storage.load_config_anyhow().unwrap_or_default();
     cfg.add_account(
         did.clone(),
-        AccountConfig {
+        AccountEntry {
             pds_url: pds_url.to_string(),
             handle: handle.clone(),
         },

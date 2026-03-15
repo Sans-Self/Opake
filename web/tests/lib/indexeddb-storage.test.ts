@@ -2,7 +2,12 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { IndexedDbStorage } from "../../src/lib/indexeddbStorage";
 import { StorageError } from "../../src/lib/storage";
-import type { Config, Identity, Session } from "../../src/lib/storageTypes";
+import type {
+  AccountEntry,
+  Config,
+  Identity,
+  Session,
+} from "../../src/lib/storageTypes";
 
 let storage: IndexedDbStorage;
 let dbCounter = 0;
@@ -78,6 +83,24 @@ describe("config", () => {
     expect(Object.keys(loaded.accounts)).toHaveLength(2);
     expect(loaded.accounts["did:plc:bob"]?.handle).toBe("bob.test");
     expect(loaded.appviewUrl).toBe("https://appview.test");
+  });
+
+  it("AccountEntry fields roundtrip through config", async () => {
+    const entry: AccountEntry = {
+      pdsUrl: "https://pds.carol",
+      handle: "carol.test",
+    };
+    const config: Config = {
+      defaultDid: "did:plc:carol",
+      accounts: { "did:plc:carol": entry },
+      appviewUrl: null,
+    };
+    await storage.saveConfig(config);
+    const loaded = await storage.loadConfig();
+    const loadedEntry = loaded.accounts["did:plc:carol"];
+    expect(loadedEntry).toBeDefined();
+    expect(loadedEntry?.pdsUrl).toBe("https://pds.carol");
+    expect(loadedEntry?.handle).toBe("carol.test");
   });
 });
 

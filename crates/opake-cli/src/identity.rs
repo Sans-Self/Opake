@@ -51,7 +51,7 @@ pub fn load_and_migrate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AccountConfig, Config};
+    use crate::config::{AccountEntry, Config};
     use crate::utils::test_harness::test_storage;
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use opake_core::crypto::OsRng;
@@ -62,7 +62,7 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             did.to_string(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.test".into(),
                 handle: "test.handle".into(),
             },

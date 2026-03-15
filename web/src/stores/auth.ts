@@ -214,7 +214,7 @@ export const useAuthStore = create<AuthState>()(
 
         const did = config.defaultDid;
         const account = config.accounts[did] as
-          | import("@/lib/storageTypes").AccountConfig
+          | import("@/lib/storageTypes").AccountEntry
           | undefined;
         if (!account) {
           set((draft) => {

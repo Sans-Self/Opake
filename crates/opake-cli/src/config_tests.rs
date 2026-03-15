@@ -6,7 +6,7 @@ fn test_config(did: &str, pds_url: &str, handle: &str) -> Config {
     let mut accounts = BTreeMap::new();
     accounts.insert(
         did.to_string(),
-        AccountConfig {
+        AccountEntry {
             pds_url: pds_url.into(),
             handle: handle.into(),
         },
@@ -37,14 +37,14 @@ fn config_with_multiple_accounts_roundtrips() {
     let mut accounts = BTreeMap::new();
     accounts.insert(
         "did:plc:alice".into(),
-        AccountConfig {
+        AccountEntry {
             pds_url: "https://pds.alice".into(),
             handle: "alice.test".into(),
         },
     );
     accounts.insert(
         "did:plc:bob".into(),
-        AccountConfig {
+        AccountEntry {
             pds_url: "https://pds.bob".into(),
             handle: "bob.test".into(),
         },
@@ -223,14 +223,14 @@ fn remove_account_promotes_next_default() {
     let mut accounts = BTreeMap::new();
     accounts.insert(
         "did:plc:alice".into(),
-        AccountConfig {
+        AccountEntry {
             pds_url: "https://pds.alice".into(),
             handle: "alice.test".into(),
         },
     );
     accounts.insert(
         "did:plc:bob".into(),
-        AccountConfig {
+        AccountEntry {
             pds_url: "https://pds.bob".into(),
             handle: "bob.test".into(),
         },

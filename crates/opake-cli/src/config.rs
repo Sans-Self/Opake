@@ -233,7 +233,7 @@ impl Storage for FileStorage {
 
 // Re-export types so existing `use crate::config::*` keeps working.
 pub use opake_core::storage::{
-    resolve_handle_or_did, sanitize_did, AccountConfig, Config, Identity,
+    resolve_handle_or_did, sanitize_did, AccountEntry, Config, Identity,
 };
 
 #[cfg(test)]

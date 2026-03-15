@@ -1,0 +1,31 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.accountConfig",
+  "description": "Per-account configuration stored on the user's PDS. Syncs across devices. Contains user preferences that are not security-sensitive.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["opakeVersion", "telemetryEnabled", "modifiedAt"],
+        "properties": {
+          "opakeVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Schema version for forward compatibility."
+          },
+          "telemetryEnabled": {
+            "type": "boolean",
+            "description": "Whether usage analytics are enabled."
+          },
+          "modifiedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When the config was last modified."
+          }
+        }
+      }
+    }
+  }
+}

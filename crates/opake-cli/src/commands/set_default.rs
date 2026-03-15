@@ -28,7 +28,7 @@ impl SetDefaultCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AccountConfig, Config};
+    use crate::config::{AccountEntry, Config};
     use crate::utils::test_harness::test_storage;
     use std::collections::BTreeMap;
 
@@ -36,14 +36,14 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             "did:plc:alice".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.alice".into(),
                 handle: "alice.test".into(),
             },
         );
         accounts.insert(
             "did:plc:bob".into(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.bob".into(),
                 handle: "bob.test".into(),
             },

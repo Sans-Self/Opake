@@ -1,4 +1,4 @@
-use crate::config::{AccountConfig, FileStorage};
+use crate::config::{AccountEntry, FileStorage};
 use crate::identity;
 use crate::utils::prefixed_get_env;
 use anyhow::Result;
@@ -125,7 +125,7 @@ impl LoginCommand {
 
         cfg.add_account(
             session.did().to_owned(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: pds_url.to_string(),
                 handle: session.handle().to_owned(),
             },

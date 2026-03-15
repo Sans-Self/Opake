@@ -6,6 +6,7 @@
 // AT Protocol primitives (AtUri, AtBytes, CidLink, BlobRef) live in the
 // `atproto` module. The ones used as record fields are re-exported here.
 
+mod account_config;
 mod defs;
 mod directory;
 mod document;
@@ -22,6 +23,7 @@ use crate::error::Error;
 pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 // Re-export all record types at the `records::` level.
+pub use account_config::{AccountConfigRecord, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY};
 pub use defs::{EncryptedMetadata, EncryptionEnvelope, KeyringRef, WrappedKey};
 pub use directory::Directory;
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
@@ -49,6 +51,7 @@ macro_rules! impl_versioned {
 }
 
 impl_versioned!(
+    AccountConfigRecord,
     Directory,
     Document,
     PublicKeyRecord,

@@ -21,6 +21,7 @@ The encryption model follows the same hybrid pattern as git-crypt:
 
 | NSID | Type | Purpose |
 |------|------|---------|
+| `app.opake.accountConfig` | record | Singleton per-account config/preferences (rkey: `self`), synced across devices |
 | `app.opake.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
 | `app.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
 | `app.opake.document` | record | An encrypted file/document with metadata |

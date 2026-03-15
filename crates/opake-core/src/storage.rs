@@ -30,14 +30,14 @@ pub type Ed25519VerifyKey = [u8; 32];
 pub struct Config {
     pub default_did: Option<String>,
     #[serde(default)]
-    pub accounts: BTreeMap<String, AccountConfig>,
+    pub accounts: BTreeMap<String, AccountEntry>,
     #[serde(default)]
     pub appview_url: Option<String>,
 }
 
 impl Config {
     /// Add an account. Sets it as default if no default exists yet.
-    pub fn add_account(&mut self, did: String, account: AccountConfig) {
+    pub fn add_account(&mut self, did: String, account: AccountEntry) {
         if self.default_did.is_none() {
             self.default_did = Some(did.clone());
         }
@@ -70,9 +70,9 @@ impl Config {
     }
 }
 
-/// Per-account configuration stored in the global config.
+/// Per-account routing entry stored in the local config.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AccountConfig {
+pub struct AccountEntry {
     pub pds_url: String,
     pub handle: String,
 }
@@ -264,7 +264,7 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             "did:plc:alice".to_string(),
-            AccountConfig {
+            AccountEntry {
                 pds_url: "https://pds.test".into(),
                 handle: "alice.test".into(),
             },
@@ -357,15 +357,15 @@ mod tests {
 
     // -- Config mutation methods --
 
-    fn alice_account() -> AccountConfig {
-        AccountConfig {
+    fn alice_account() -> AccountEntry {
+        AccountEntry {
             pds_url: "https://pds.alice".into(),
             handle: "alice.test".into(),
         }
     }
 
-    fn bob_account() -> AccountConfig {
-        AccountConfig {
+    fn bob_account() -> AccountEntry {
+        AccountEntry {
             pds_url: "https://pds.bob".into(),
             handle: "bob.test".into(),
         }
