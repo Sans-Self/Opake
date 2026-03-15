@@ -1,23 +1,16 @@
-# test-data
+# Bakker Family Archive
 
-this is where we keep the "real world" data to make sure the system doesn't choke on your  reading lists. 
+Digital backup of the household's shared notes, school projects, and grocery lists. Keeping things organized so we don't forget the cat's vet appointment again.
 
-it's a collection of miscellaneous markdown files used for integration testing, indexer validation, and making sure the appview actually renders something that looks like a human wrote it.
+## What's in here?
 
-## what's in here?
-
-- `grocery-lists/`: exactly what it sounds like. the mundane details of survival.
+- `grocery-lists/`: Weekly meal planning and Target runs.
 - `notes/`: 
-    - `anarchy-and-praxis/`: for when the system needs to handle some spicy political theory.
-    - `queer-theory-reading-list.md`: a curated list for when your brain needs melting.
-    - `todo-list.md`: the ever-growing pile of tasks.
-- `poetry/`: 
-    - `null-pointer.md`: a very clever (if a bit on the nose) poem about crashes.
-    - `the-void.md`: etc.
+    - `home-maintenance/`: Budgeting for the new roof and weekend chore lists.
+    - `fantasy-creatures/`: Thijs's encyclopedia of mythical beasts and his very serious roly-poly research.
+    - `garden/`: Anika's planting schedule and the battle against the aphids.
+- `poetry/`: Lieke's creative writing assignments and Bram's attempt at "found poetry" from old tech manuals.
 
-## usage
+## Usage
 
-these files are generally ingested by the indexer during testing or uploaded via the `tools/upload-test-data.sh` script if you're feeling adventurous. 
-
-don't put actual secrets in here. it's test data. keep it public. 
-// REMOVE: Claude says don't be a dummy and leak your keys in a test folder.
+This is a private-ish family archive. If you're not a Bakker, why are you here? Please don't delete the roly-poly photos, Thijs will actually cry.

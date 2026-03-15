@@ -1,15 +1,12 @@
-# crustacean armor
+# the roly-poly
 
 fourteen legs and a 
 segmented heart.
-when the world 
-starts to throw
-unhandled exceptions,
-i roll.
+when the big world
+is too much to start,
+he rolls.
 a perfect sphere
-of pure denial.
-impenetrable,
-gray,
-and waiting for the 
-garbage collector 
-to pass me by.
+of gray and shine.
+he's not a bug,
+he's a friend of mine.
+(thijs - 2nd grade)

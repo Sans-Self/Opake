@@ -1,7 +1,9 @@
 # grocery list - week 10
 
-- [ ] oat milk (the expensive kind)
-- [ ] kale (for the "health" aesthetic)
-- [ ] coffee beans (lifeblood)
-- [ ] tofu
-- [ ] nutritional yeast (obviously)
+- [ ] Whole milk (2 cartons)
+- [ ] Apple juice boxes
+- [ ] Fish sticks (the ones thijs likes)
+- [ ] Baby carrots
+- [ ] Hummus & cucumber for anika
+- [ ] Coffee (bram is out!!!)
+- [ ] Dish soap

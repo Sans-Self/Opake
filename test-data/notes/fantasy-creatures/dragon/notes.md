@@ -1,6 +1,6 @@
-# dragon
+# the red dragon
 
-- hoarding behavior (usually rare typescript libraries)
-- fire-breathing is just for show; the real damage is in the logic errors.
-- prefers dark, cold servers.
-- hates being called a "large lizard."
+- hoards gold and silver coins (and maybe stolen legos).
+- lives in a cave on top of the mountain.
+- sleeps for 100 years at a time.
+- only likes knights that are nice.

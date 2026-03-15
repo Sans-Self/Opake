@@ -1,6 +1,8 @@
-# todo
+# family todo list
 
-- [ ] refactor that one messy component. you know which one.
-- [ ] actually drink enough water.
-- [ ] look into `zod` schema validation for the new API.
-- [ ] remember why we do this. (dopamine?)
+- [ ] Clean the guest room for Grandma's visit.
+- [ ] Sign up for Thijs's swimming lessons (don't forget the goggles).
+- [ ] Schedule Kiki's vet appointment.
+- [ ] Research campsites in the Veluwe for the summer.
+- [ ] Find the missing remote.
+- [ ] Actually drink enough water (Bram, this means you).

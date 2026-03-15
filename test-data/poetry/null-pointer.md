@@ -1,10 +1,10 @@
-# null pointer
+# the computer crashed (lieke's school assignment)
 
-reaching for something
-that isn't there.
-a memory address
-pointing to the abyss.
-it's not a failure,
-it's just...
-nothing.
-but the crash is real.
+the screen turned blue,
+and i did too.
+i lost my homework,
+and my minecraft world too.
+it didn't save,
+it just gave up.
+i think the computer
+needs a break.

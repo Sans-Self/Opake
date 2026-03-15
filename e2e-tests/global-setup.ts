@@ -7,11 +7,7 @@ import { createFakePds, type FakePds } from "fake-pds";
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import path from "node:path";
-
-export const TEST_ACCOUNTS = [
-  { did: "did:plc:alice", handle: "alice.test" },
-  { did: "did:plc:bob", handle: "bob.test", password: "bobsecret" },
-] as const;
+import { TEST_ACCOUNTS } from "./helpers/pds.js";
 
 const STATE_FILE = path.join(import.meta.dirname, ".e2e-state.json");
 

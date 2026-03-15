@@ -1,13 +1,9 @@
-# bird's eye view (quinn-inspired)
+# after the storm (found poetry from the manual)
 
-high above the 
-static,
-the bird sees what
-the compiler missed.
-swoop down,
-mark the vulnerability,
-and then...
-silence.
-it's not a bug,
-it's a tactical advantage.
-(or so we tell the users)
+loose debris,
+clogged drainage,
+ensure the unit is level.
+disconnect power,
+wait five minutes,
+then try again.
+(bram: it didn't work, i'm calling the repair guy)

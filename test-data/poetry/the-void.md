@@ -1,9 +1,10 @@
-# the void
+# the empty room (lieke)
 
-it's a dark space
-with no types to guide us.
-we're just mapping through
-the existential dread of
-undefined behavior.
-it's quiet here.
-(until the compiler shouts)
+no toys on the floor,
+no books on the bed.
+everything's put away,
+just like mom said.
+it's too quiet now,
+like a library or a cloud.
+i'm going to go outside
+and be very loud.

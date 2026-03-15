@@ -1,5 +1,7 @@
-# phoenix
+# the phoenix
 
-- dies and rises from its own `node_modules`.
-- very hot, very loud.
-- burns out every two weeks. (relatable?)
+- he's made of fire and red feathers.
+- when he gets too old, he turns into a pile of ash.
+- then a baby phoenix pops out of the ash!
+- he lives forever (lieke wants one but anika says no).
+- his tears can heal a broken heart.

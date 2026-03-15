@@ -1,5 +1,6 @@
-# dragon characteristics
+# dragon facts
 
-- **scales**: impenetrable.
-- **wings**: impressive, but mostly for migration to better repos.
-- **diet**: strictly `npm audit` failures.
+- **scales**: harder than rocks.
+- **wings**: big enough to hide a whole house.
+- **diet**: mostly sheep and maybe occasionally a spicy taco.
+- **fire**: hotter than an oven.

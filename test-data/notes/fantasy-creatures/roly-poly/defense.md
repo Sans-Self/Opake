@@ -1,6 +1,7 @@
-# defense mechanism
+# how roly-polies stay safe
 
 - [x] roll into ball.
-- [x] ignore all `rejected` promises.
-- [ ] wait for someone else to fix the `any` types.
-- [x] remain adorable and impervious.
+- [x] hide under damp logs.
+- [ ] wait for the big bird to go away.
+- [x] stay cool (don't dry out!).
+- [x] armor plates look like tiny tanks.
