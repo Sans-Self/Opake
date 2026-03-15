@@ -7,8 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Move appview URL from local config to PDS-synced account config (#346)
-- Add PDS-synced account config with telemetry preference (#344)
+- Add fake-pds: in-memory AT Protocol PDS for integration testing [#349](https://issues.opake.app/issues/349.html)
+- Move appview URL from local config to PDS-synced account config [#346](https://issues.opake.app/issues/346.html)
+- Add PDS-synced account config with telemetry preference [#344](https://issues.opake.app/issues/344.html)
 - CLI ergonomics: command structure and completion [#305](https://issues.opake.app/issues/305.html)
 - Add BIP-39 seed phrase recovery for account identity (24 words) [#211](https://issues.opake.app/issues/211.html)
 
