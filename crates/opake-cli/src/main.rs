@@ -84,6 +84,7 @@ enum Command {
     Purge(commands::purge::PurgeCommand),
 
     // --- Utilities ---
+    Config(commands::config::ConfigCommand),
     Recover(commands::recover::RecoverCommand),
     Resolve(commands::resolve::ResolveCommand),
     Completions(commands::completions::CompletionsCommand),
@@ -149,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Share(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
 
+        Command::Config(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Purge(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Recover(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,

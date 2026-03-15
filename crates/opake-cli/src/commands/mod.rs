@@ -2,6 +2,7 @@ pub mod account;
 pub mod accounts;
 pub mod cat;
 pub mod completions;
+pub mod config;
 pub mod download;
 pub mod inbox;
 pub mod keyring;
