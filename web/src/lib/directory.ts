@@ -26,22 +26,45 @@ export async function addEntryToDirectory(
   session: Session,
 ): Promise<void> {
   const rkey = directoryUri ? rkeyFromUri(directoryUri) : "self";
+  const collection = "app.opake.directory";
 
-  const response = await authenticatedGetRecord<DirectoryRecord>(
-    { pdsUrl, did, collection: "app.opake.directory", rkey },
+  const existingRecord = await authenticatedGetRecord<DirectoryRecord>(
+    { pdsUrl, did, collection, rkey },
     session,
-  );
+  )
+    .then((r) => r.value)
+    .catch((err: unknown) => {
+      // Root directory doesn't exist yet — create it on first upload
+      if (rkey === "self" && err instanceof Error && err.message.includes("404")) {
+        return undefined;
+      }
+      throw err;
+    });
 
-  const updatedRecord: DirectoryRecord = {
-    ...response.value,
-    entries: [...response.value.entries, entryUri],
-    modifiedAt,
-  };
-
-  await authenticatedPutRecord(
-    { pdsUrl, did, collection: "app.opake.directory", rkey, record: updatedRecord },
-    session,
-  );
+  if (existingRecord) {
+    const updatedRecord: DirectoryRecord = {
+      ...existingRecord,
+      entries: [...existingRecord.entries, entryUri],
+      modifiedAt,
+    };
+    await authenticatedPutRecord({ pdsUrl, did, collection, rkey, record: updatedRecord }, session);
+  } else {
+    // Create root directory with this entry as the first child
+    const worker = getCryptoWorker();
+    const opakeVersion = await worker.schemaVersion();
+    const newRoot: DirectoryRecord = {
+      opakeVersion,
+      entries: [entryUri],
+      encryption: {
+        $type: "app.opake.document#directEncryption",
+        envelope: { algo: "none", nonce: { $bytes: "" }, keys: [] },
+      },
+      encryptedMetadata: { ciphertext: { $bytes: "" }, nonce: { $bytes: "" } },
+      createdAt: modifiedAt,
+      modifiedAt: null,
+    };
+    await authenticatedPutRecord({ pdsUrl, did, collection, rkey, record: newRoot }, session);
+  }
 }
 
 export async function removeEntryFromDirectory(

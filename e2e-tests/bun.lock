@@ -7,7 +7,7 @@
       "devDependencies": {
         "@playwright/test": "^1.58.2",
         "@types/node": "^22",
-        "fake-pds": "^0.4.0",
+        "fake-pds": "^0.5.0",
         "typescript": "^5.7",
         "vitest": "^3.0",
       },
@@ -162,7 +162,7 @@
 
     "expect-type": ["expect-type@1.3.0", "", {}, "sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA=="],
 
-    "fake-pds": ["fake-pds@0.4.0", "", {}, "sha512-MUCxxRkzqtjnCQou7ntcpnWvRkXzRP5av0u8A3IWIePjFOzxIs7DhtOdINdrs9xlRl1qgqf9EWK3gqVA28r3DQ=="],
+    "fake-pds": ["fake-pds@0.5.0", "", {}, "sha512-JuoxG78f+pY4ZiV9tdzO4mKQ7HQbAeYy0wNF13L3DJ8Gsdgh7Rxw/js2u+AJVKUBbwX8BsbDENaaBTsUZYX8TQ=="],
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 

@@ -7,10 +7,7 @@ import { completeSeedPhraseSetup } from "../../helpers/seed-phrase.js";
 const ACCOUNT = { handle: "charlie.test", did: "did:plc:charlie" } as const;
 
 test.describe("file lifecycle", () => {
-  // FIXME: hidden file input doesn't reliably trigger React onChange in headless Chromium.
-  // setInputFiles, filechooser, and evaluate+DataTransfer all fail to trigger the upload.
-  // Needs investigation: possibly a TanStack Start / React 19 interaction.
-  test.fixme("upload, verify, and delete a file", async ({
+  test("upload, verify, and delete a file", async ({
     page,
     webUrl,
     pdsUrl,
@@ -18,6 +15,14 @@ test.describe("file lifecycle", () => {
   }) => {
     await browserLogin(ACCOUNT.handle);
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+
+    // Capture browser errors for debugging upload issues
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") {
+        console.log(`BROWSER [${msg.type()}]: ${msg.text()}`);
+      }
+    });
+    page.on("pageerror", (err) => console.log("PAGE ERROR:", err.message));
 
     await page.goto(`${webUrl}/cabinet/files`);
 
@@ -27,32 +32,19 @@ test.describe("file lifecycle", () => {
     });
     await expect(page).toHaveScreenshot("file-browser-empty.png");
 
-    // Upload: use Playwright's setInputFiles with force (bypasses visibility checks)
-    await page.locator('input[type="file"]').setInputFiles(
-      {
-        name: "test-file.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("hello from e2e test"),
-      },
-    );
+    // Upload: force-click the opacity:0 input to open native dialog, intercept via filechooser
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByTestId("file-upload").click({ force: true }),
+    ]);
+    await fileChooser.setFiles({
+      name: "test-file.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("hello from e2e test"),
+    });
 
-    // If setInputFiles didn't trigger onChange, fall back to manual dispatch
-    const stillEmpty = await page.getByText("Nothing here yet").isVisible();
-    if (stillEmpty) {
-      // Try clicking New → Upload file via the menu (triggers fileInputRef.click())
-      const fileChooserPromise = page.waitForEvent("filechooser");
-      await page.getByRole("button", { name: /New/ }).click();
-      await page.getByRole("button", { name: /Upload file/ }).click();
-      const fileChooser = await fileChooserPromise;
-      await fileChooser.setFiles({
-        name: "test-file.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("hello from e2e test"),
-      });
-    }
-
-    // Wait for file row — may briefly show "Decrypting…" then real name
-    const fileRow = page.locator('[aria-label*="test-file"]');
+    // Wait for uploaded file to appear with decrypted name
+    const fileRow = page.locator('[aria-label*="test-file"]').first();
     await expect(fileRow).toBeVisible({ timeout: 30_000 });
 
     // Open action menu and delete
@@ -71,7 +63,7 @@ test.describe("file lifecycle", () => {
 });
 
 test.describe("folders", () => {
-  test.fixme("create folder and navigate into it", async ({
+  test("create folder and navigate into it", async ({
     page,
     webUrl,
     pdsUrl,
@@ -81,9 +73,8 @@ test.describe("folders", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    await expect(page.getByText("Nothing here yet")).toBeVisible({
-      timeout: 10_000,
-    });
+    // Wait for cabinet to load (may have items from prior tests)
+    await page.waitForLoadState("networkidle");
 
     // Open "New" dropdown and click "New folder"
     await page.getByRole("button", { name: "New" }).click();
@@ -103,9 +94,9 @@ test.describe("folders", () => {
     await folderRow.click();
 
     // Breadcrumbs should show folder name, "Your Cabinet" link visible
-    await expect(page.getByText("Test Folder")).toBeVisible();
+    await expect(page.locator(".breadcrumbs").getByText("Test Folder").first()).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Your Cabinet" }),
+      page.getByRole("link", { name: "Your Cabinet" }).first(),
     ).toBeVisible();
 
     // Inside is empty
@@ -114,7 +105,7 @@ test.describe("folders", () => {
 });
 
 test.describe("new folder dialog validation", () => {
-  test.fixme("create button disabled when name is empty", async ({
+  test("create button disabled when name is empty", async ({
     page,
     webUrl,
     pdsUrl,
@@ -124,9 +115,7 @@ test.describe("new folder dialog validation", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    await expect(page.getByText("Nothing here yet")).toBeVisible({
-      timeout: 10_000,
-    });
+    await page.waitForLoadState("networkidle");
 
     // Open dialog
     await page.getByRole("button", { name: "New" }).click();

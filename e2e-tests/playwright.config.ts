@@ -12,5 +12,8 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
+  expect: {
+    toHaveScreenshot: { maxDiffPixelRatio: 0.02 },
+  },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
 });

@@ -10,19 +10,17 @@ import { completeSeedPhraseSetup } from "../../helpers/seed-phrase.js";
 
 const ACCOUNT = { handle: "dave.test", did: "did:plc:dave" } as const;
 
-/** Upload a file via evaluate (Chromium allows DataTransfer on hidden inputs). */
+/** Upload a file: force-click opacity:0 input → filechooser intercept. */
 async function uploadTestFile(page: Page, name: string, content: string): Promise<void> {
-  await page.evaluate(
-    ({ name, content }) => {
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const file = new File([content], name, { type: "text/plain" });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      input.files = dt.files;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    },
-    { name, content },
-  );
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("file-upload").click({ force: true }),
+  ]);
+  await fileChooser.setFiles({
+    name,
+    mimeType: "text/plain",
+    buffer: Buffer.from(content),
+  });
 }
 
 /** Open the share dialog for a file row (action menu → Share…). */
@@ -66,8 +64,7 @@ test.describe("shared page empty state", () => {
 });
 
 test.describe("share dialog", () => {
-  // FIXME: depends on file upload which doesn't work in headless Chromium (see file-browser.test.ts)
-  test.fixme("opens from file action menu with correct state", async ({
+  test("opens from file action menu with correct state", async ({
     page,
     webUrl,
     pdsUrl,
@@ -77,10 +74,8 @@ test.describe("share dialog", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to load (may have files from prior tests)
-    await expect(page.getByText(/Nothing here yet|Your Cabinet/)).toBeVisible({
-      timeout: 10_000,
-    });
+    // Wait for cabinet to finish loading
+    await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "share-test.txt", "file to share");
     const shareDialog = await openShareDialog(page, "share-test");
@@ -93,7 +88,7 @@ test.describe("share dialog", () => {
     ).toBeDisabled();
   });
 
-  test.fixme("share button enables when handle is entered", async ({
+  test("share button enables when handle is entered", async ({
     page,
     webUrl,
     pdsUrl,
@@ -103,10 +98,8 @@ test.describe("share dialog", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to load (may have files from prior tests)
-    await expect(page.getByText(/Nothing here yet|Your Cabinet/)).toBeVisible({
-      timeout: 10_000,
-    });
+    // Wait for cabinet to finish loading
+    await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "enable-test.txt", "testing share button");
     const shareDialog = await openShareDialog(page, "enable-test");
@@ -121,7 +114,7 @@ test.describe("share dialog", () => {
     await expect(shareButton).toBeDisabled();
   });
 
-  test.fixme("shows error for unresolvable recipient", async ({
+  test("shows error for unresolvable recipient", async ({
     page,
     webUrl,
     pdsUrl,
@@ -131,10 +124,8 @@ test.describe("share dialog", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to load (may have files from prior tests)
-    await expect(page.getByText(/Nothing here yet|Your Cabinet/)).toBeVisible({
-      timeout: 10_000,
-    });
+    // Wait for cabinet to finish loading
+    await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "error-test.txt", "testing error path");
     const shareDialog = await openShareDialog(page, "error-test");
@@ -147,7 +138,7 @@ test.describe("share dialog", () => {
     await expect(errorAlert).toHaveAttribute("role", "alert");
   });
 
-  test.fixme("cancel closes the dialog", async ({
+  test("cancel closes the dialog", async ({
     page,
     webUrl,
     pdsUrl,
@@ -157,10 +148,8 @@ test.describe("share dialog", () => {
     await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to load (may have files from prior tests)
-    await expect(page.getByText(/Nothing here yet|Your Cabinet/)).toBeVisible({
-      timeout: 10_000,
-    });
+    // Wait for cabinet to finish loading
+    await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "cancel-test.txt", "testing cancel");
     const shareDialog = await openShareDialog(page, "cancel-test");

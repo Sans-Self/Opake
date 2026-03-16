@@ -320,9 +320,11 @@ function FileBrowserLayout() {
       <input
         ref={fileInputRef}
         type="file"
-        className="hidden"
         onChange={handleFileSelected}
         aria-hidden="true"
+        data-testid="file-upload"
+        tabIndex={-1}
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
       />
       <NewFolderDialog
         ref={newFolderDialogRef}
