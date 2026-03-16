@@ -6,7 +6,7 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   // Tests share one fake-pds — use different accounts per file to avoid
   // state conflicts. Login tests use resetPds and run serially.
-  workers: 6,
+  workers: 15,
   use: {
     headless: true,
     screenshot: "only-on-failure",

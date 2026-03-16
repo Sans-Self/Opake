@@ -1,16 +1,9 @@
 // Sharing page: empty state, share dialog interactions, error handling.
-// Uses dave.test to avoid PDS state conflicts with other test files.
-//
-// Does NOT test successful end-to-end sharing (requires recipient publicKey
-// on PDS) or incoming grants (requires appview). Focuses on UI interactions,
-// empty state, and error paths.
 
 import { test, expect, type Page } from "../../helpers/web-fixture.js";
 import { completeSeedPhraseSetup } from "../../helpers/seed-phrase.js";
 
-const ACCOUNT = { handle: "dave.test", did: "did:plc:dave" } as const;
-
-/** Upload a file: force-click opacity:0 input → filechooser intercept. */
+/** Upload a file via the opacity:0 file input + filechooser. */
 async function uploadTestFile(page: Page, name: string, content: string): Promise<void> {
   const [fileChooser] = await Promise.all([
     page.waitForEvent("filechooser"),
@@ -39,10 +32,11 @@ test.describe("shared page empty state", () => {
     page,
     webUrl,
     pdsUrl,
+    account,
     browserLogin,
   }) => {
-    await browserLogin(ACCOUNT.handle);
-    await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+    await browserLogin();
+    await completeSeedPhraseSetup(page, { pdsUrl, ...account });
 
     await page.goto(`${webUrl}/cabinet/shared`);
 
@@ -68,13 +62,13 @@ test.describe("share dialog", () => {
     page,
     webUrl,
     pdsUrl,
+    account,
     browserLogin,
   }) => {
-    await browserLogin(ACCOUNT.handle);
-    await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+    await browserLogin();
+    await completeSeedPhraseSetup(page, { pdsUrl, ...account });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to finish loading
     await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "share-test.txt", "file to share");
@@ -92,13 +86,13 @@ test.describe("share dialog", () => {
     page,
     webUrl,
     pdsUrl,
+    account,
     browserLogin,
   }) => {
-    await browserLogin(ACCOUNT.handle);
-    await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+    await browserLogin();
+    await completeSeedPhraseSetup(page, { pdsUrl, ...account });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to finish loading
     await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "enable-test.txt", "testing share button");
@@ -118,13 +112,13 @@ test.describe("share dialog", () => {
     page,
     webUrl,
     pdsUrl,
+    account,
     browserLogin,
   }) => {
-    await browserLogin(ACCOUNT.handle);
-    await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+    await browserLogin();
+    await completeSeedPhraseSetup(page, { pdsUrl, ...account });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to finish loading
     await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "error-test.txt", "testing error path");
@@ -142,13 +136,13 @@ test.describe("share dialog", () => {
     page,
     webUrl,
     pdsUrl,
+    account,
     browserLogin,
   }) => {
-    await browserLogin(ACCOUNT.handle);
-    await completeSeedPhraseSetup(page, { pdsUrl, ...ACCOUNT });
+    await browserLogin();
+    await completeSeedPhraseSetup(page, { pdsUrl, ...account });
 
     await page.goto(`${webUrl}/cabinet/files`);
-    // Wait for cabinet to finish loading
     await page.waitForTimeout(2_000);
 
     await uploadTestFile(page, "cancel-test.txt", "testing cancel");

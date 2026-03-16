@@ -7,6 +7,8 @@ export const TEST_ACCOUNTS: readonly Account[] = [
   { did: "did:plc:bob", handle: "bob.test", password: "bobsecret" },
   { did: "did:plc:charlie", handle: "charlie.test" },
   { did: "did:plc:dave", handle: "dave.test" },
+  { did: "did:plc:eve", handle: "eve.test" },
+  { did: "did:plc:frank", handle: "frank.test" },
 ];
 
 // eslint-disable-next-line functional/no-let

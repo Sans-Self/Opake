@@ -1,11 +1,10 @@
 // Identity setup: seed phrase generation, display, and confirmation.
 
 import { test, expect } from "../../helpers/web-fixture.js";
-import { deletePublicKeyViaXrpc } from "../../helpers/seed-phrase.js";
 
 test.describe("fresh account identity setup", () => {
   test.beforeEach(async ({ browserLogin }) => {
-    await browserLogin("alice.test");
+    await browserLogin();
   });
 
   test("shows welcome screen for fresh account", async ({ page }) => {
@@ -17,7 +16,6 @@ test.describe("fresh account identity setup", () => {
   test("create-key button starts seed phrase generation", async ({ page }) => {
     await page.getByText(/Create my key/).click();
 
-    // Should show seed phrase grid (24 words)
     await expect(page.getByRole("list")).toBeVisible({ timeout: 10_000 });
   });
 
@@ -37,7 +35,6 @@ test.describe("fresh account identity setup", () => {
     const continueButton = page.getByRole("button", { name: /Continue/ });
     await expect(continueButton).toBeDisabled();
 
-    // Check the checkbox
     await page.getByLabel(/I have written down/).check();
     await expect(continueButton).toBeEnabled();
   });
@@ -45,12 +42,10 @@ test.describe("fresh account identity setup", () => {
   test("full seed phrase confirmation flow reaches ready state", async ({
     page,
   }) => {
-    // 1. Start key creation
     await page.getByText(/Create my key/).click();
     await expect(page.getByRole("list")).toBeVisible({ timeout: 10_000 });
 
-    // 2. Read the 24 words from the grid (keyed by number, not DOM order —
-    //    CSS grid-cols-4 may reorder the elements visually)
+    // Read the 24 words (keyed by displayed number, not DOM order)
     const items = page.getByRole("listitem");
     const words: string[] = new Array(24).fill("");
     const count = await items.count();
@@ -58,17 +53,15 @@ test.describe("fresh account identity setup", () => {
       const text = await items.nth(i).textContent();
       const match = text?.match(/^(\d+)\.\s*(.+)$/);
       if (match) {
-        const idx = parseInt(match[1]!, 10) - 1;
-        words[idx] = match[2]!.trim();
+        words[parseInt(match[1]!, 10) - 1] = match[2]!.trim();
       }
     }
     expect(words.filter(Boolean)).toHaveLength(24);
 
-    // 3. Check the checkbox and continue
     await page.getByLabel(/I have written down/).check();
     await page.getByRole("button", { name: /Continue/ }).click();
 
-    // 4. Fill in confirmation words
+    // Fill confirmation words
     await expect(page.getByText(/Confirm your seed phrase/)).toBeVisible();
 
     const confirmLabels = page.locator("label").filter({ hasText: /^Word #/ });
@@ -78,16 +71,14 @@ test.describe("fresh account identity setup", () => {
     for (let i = 0; i < labelCount; i++) {
       const labelText = await confirmLabels.nth(i).textContent();
       const wordNum = parseInt(labelText?.match(/Word #(\d+)/)?.[1] ?? "0", 10);
-      const word = words[wordNum - 1]; // 1-based → 0-based
+      const word = words[wordNum - 1];
       if (word) {
         await confirmLabels.nth(i).locator("input").fill(word);
       }
     }
 
-    // 5. Confirm
     await page.getByRole("button", { name: /Confirm/ }).click();
 
-    // 6. Should reach ready state
     await expect(page.getByText(/You're all set/)).toBeVisible({
       timeout: 15_000,
     });
@@ -96,23 +87,18 @@ test.describe("fresh account identity setup", () => {
 });
 
 test.describe("seed phrase confirmation failures", () => {
-  test.beforeEach(async ({ pdsUrl, browserLogin, page }) => {
-    // Delete publicKey left by success tests so alice sees "fresh" state
-    await deletePublicKeyViaXrpc(pdsUrl, "alice.test", "did:plc:alice");
-    await browserLogin("alice.test");
+  test.beforeEach(async ({ browserLogin }) => {
+    await browserLogin();
   });
 
   test("wrong confirmation words show error", async ({ page }) => {
-    // 1. Generate seed phrase
     await page.getByText(/Create my key/).click();
     await expect(page.getByRole("list")).toBeVisible({ timeout: 10_000 });
 
-    // 2. Check checkbox and continue
     await page.getByLabel(/I have written down/).check();
     await page.getByRole("button", { name: /Continue/ }).click();
     await expect(page.getByText(/Confirm your seed phrase/)).toBeVisible();
 
-    // 3. Fill in WRONG words
     const confirmInputs = page
       .locator("label")
       .filter({ hasText: /^Word #/ })
@@ -122,7 +108,6 @@ test.describe("seed phrase confirmation failures", () => {
       await confirmInputs.nth(i).fill("wrongword");
     }
 
-    // 4. Submit — should show error
     await page.getByRole("button", { name: /Confirm/ }).click();
     await expect(page.locator("[role='alert']")).toBeVisible();
   });
@@ -135,10 +120,8 @@ test.describe("seed phrase confirmation failures", () => {
     await page.getByRole("button", { name: /Continue/ }).click();
     await expect(page.getByText(/Confirm your seed phrase/)).toBeVisible();
 
-    // Click back
     await page.getByRole("button", { name: /Back/ }).click();
 
-    // Should show seed phrase grid again
     await expect(page.getByRole("list")).toBeVisible();
     await expect(page.getByRole("listitem")).toHaveCount(24);
   });

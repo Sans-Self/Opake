@@ -17,7 +17,6 @@ test.describe("login page", () => {
     const input = page.getByLabel("AT Protocol handle");
     await expect(input).toHaveValue("");
 
-    // HTML5 required attribute — submit should not fire
     const button = page.getByRole("button", { name: /Sign in/ });
     await button.click();
 
@@ -27,16 +26,13 @@ test.describe("login page", () => {
 });
 
 test.describe("OAuth login flow", () => {
-  test("successful login reaches devices page", async ({ page, webUrl }) => {
-    await page.goto(`${webUrl}/devices/login`);
-
-    await page.getByLabel("AT Protocol handle").fill("alice.test");
-    await page.getByRole("button", { name: /Sign in/ }).click();
-
-    // Wait for full OAuth redirect chain to complete
-    await expect(
-      page.getByText(/Setting things up|Welcome to Opake|You're all set/),
-    ).toBeVisible({ timeout: 15_000 });
+  test("successful login reaches devices page", async ({
+    page,
+    webUrl,
+    account,
+    browserLogin,
+  }) => {
+    await browserLogin();
 
     // Should be on /devices (not /devices/login)
     expect(page.url()).toContain("/devices");
@@ -51,13 +47,9 @@ test.describe("OAuth login flow", () => {
     await page.getByLabel("AT Protocol handle").fill("nobody.test");
     await page.getByRole("button", { name: /Sign in/ }).click();
 
-    // Should show an error (handle not found on fake-pds)
     await expect(page.locator("[role='alert']")).toBeVisible({ timeout: 10_000 });
     await expect(page).toHaveScreenshot("login-error-invalid-handle.png");
   });
-
-  // Loading state (button disabled during auth) is too transient to assert
-  // reliably — the redirect completes before Playwright can check.
 });
 
 test.describe("OAuth callback", () => {
@@ -65,10 +57,8 @@ test.describe("OAuth callback", () => {
     page,
     webUrl,
   }) => {
-    // Navigate directly to callback without code/state
     await page.goto(`${webUrl}/devices/oauth-callback`);
 
-    // Should show login failed or redirect to login
     await expect(
       page.getByText(/Login failed|Sign in/),
     ).toBeVisible({ timeout: 10_000 });
@@ -84,7 +74,6 @@ test.describe("auth guards", () => {
   }) => {
     await page.goto(`${webUrl}/cabinet/files`);
 
-    // Should redirect to login page
     await expect(page.getByLabel("AT Protocol handle")).toBeVisible({
       timeout: 10_000,
     });
@@ -96,12 +85,10 @@ test.describe("auth guards", () => {
     webUrl,
     browserLogin,
   }) => {
-    await browserLogin("alice.test");
+    await browserLogin();
 
-    // Navigate to login page — should redirect away since already logged in
     await page.goto(`${webUrl}/devices/login`);
 
-    // Should not show login form
     await expect(
       page.getByText(/Welcome to Opake|You're all set|Setting things up/),
     ).toBeVisible({ timeout: 10_000 });

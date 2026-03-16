@@ -1,15 +1,18 @@
 // Playwright test fixtures for web e2e tests.
 //
-// Provides pdsUrl, webUrl, resetPds, and browserLogin to all web tests.
-// See global-setup.ts for server lifecycle.
+// Core fixtures: pdsUrl, webUrl, account (auto-acquired from pool),
+// browserLogin, and resetPds. See global-setup.ts for server lifecycle.
 
 import { test as base, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { type TestAccount, acquireAccount } from "./account-pool.js";
+import { deletePublicKeyViaXrpc } from "./seed-phrase.js";
 
 interface E2eState {
   readonly pdsUrl: string;
   readonly webUrl: string;
+  readonly pool: readonly TestAccount[];
 }
 
 let cachedState: E2eState | null = null;
@@ -19,42 +22,6 @@ function loadState(): E2eState {
   const statePath = path.join(import.meta.dirname, "../.e2e-state.json");
   cachedState = JSON.parse(readFileSync(statePath, "utf-8")) as E2eState;
   return cachedState;
-}
-
-/**
- * Delete a specific account's publicKey record via authenticated XRPC.
- * Uses PAR → token exchange to get a valid DPoP token (fake-pds skips proof validation).
- * This enables per-account cleanup without a full PDS reset.
- */
-async function deletePublicKey(pdsUrl: string, handle: string, did: string): Promise<void> {
-  const parRes = await fetch(`${pdsUrl}/oauth/par`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: "test", login_hint: handle }).toString(),
-  });
-  if (!parRes.ok) return; // Account might not exist
-  const { code } = (await parRes.json()) as { code: string };
-
-  const tokenRes = await fetch(`${pdsUrl}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "authorization_code", code }).toString(),
-  });
-  if (!tokenRes.ok) return;
-  const { access_token } = (await tokenRes.json()) as { access_token: string };
-
-  await fetch(`${pdsUrl}/xrpc/com.atproto.repo.deleteRecord`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `DPoP ${access_token}`,
-    },
-    body: JSON.stringify({
-      repo: did,
-      collection: "app.opake.publicKey",
-      rkey: "self",
-    }),
-  });
 }
 
 /**
@@ -68,15 +35,17 @@ async function doLogin(page: Page, webUrl: string, handle: string): Promise<void
 
   // Wait for OAuth redirect chain: login → PAR → authorize → callback → /devices
   await expect(
-    page.getByText(/Setting things up|Welcome to Opake|You're all set/),
+    page.getByText(/Setting things up|Welcome to Opake|You're all set|Welcome back/),
   ).toBeVisible({ timeout: 15_000 });
 }
 
 interface WebFixtures {
   pdsUrl: string;
   webUrl: string;
+  /** Auto-acquired unique account from the pool — cleaned up after test. */
+  account: TestAccount;
   resetPds: () => Promise<void>;
-  browserLogin: (handle: string) => Promise<void>;
+  browserLogin: (handle?: string) => Promise<void>;
 }
 
 export const test = base.extend<WebFixtures>({
@@ -90,17 +59,25 @@ export const test = base.extend<WebFixtures>({
     await use(webUrl);
   },
 
+  account: async ({ pdsUrl }, use) => {
+    const { pool } = loadState();
+    const { account, release } = acquireAccount(pool);
+    // Clean up publicKey from any prior test run
+    await deletePublicKeyViaXrpc(pdsUrl, account.handle, account.did);
+    await use(account);
+    release();
+  },
+
   resetPds: async ({ pdsUrl }, use) => {
     await use(async () => {
       await fetch(`${pdsUrl}/_test/reset`, { method: "POST" });
     });
   },
 
-  browserLogin: async ({ page, webUrl }, use) => {
-    const login = async (handle: string) => {
-      await doLogin(page, webUrl, handle);
-    };
-    await use(login);
+  browserLogin: async ({ page, webUrl, account }, use) => {
+    await use(async (handle?: string) => {
+      await doLogin(page, webUrl, handle ?? account.handle);
+    });
   },
 });
 

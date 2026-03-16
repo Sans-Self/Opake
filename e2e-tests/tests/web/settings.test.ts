@@ -4,30 +4,28 @@ import { test, expect } from "../../helpers/web-fixture.js";
 
 test.describe("settings page", () => {
   test.beforeEach(async ({ browserLogin }) => {
-    // Use bob.test to avoid PDS state conflicts with other parallel test files
-    await browserLogin("bob.test");
+    await browserLogin();
   });
 
-  test("displays account info", async ({ page, webUrl, pdsUrl }) => {
+  test("displays account info", async ({ page, webUrl, pdsUrl, account }) => {
     await page.goto(`${webUrl}/cabinet/settings`);
 
-    // Account section — use definition list role to avoid sidebar ambiguity
     const definitions = page.getByRole("definition");
-    await expect(definitions.filter({ hasText: "bob.test" })).toBeVisible({ timeout: 10_000 });
-    await expect(definitions.filter({ hasText: /did:plc:bob/ })).toBeVisible();
+    await expect(definitions.filter({ hasText: account.handle })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(definitions.filter({ hasText: new RegExp(account.did) })).toBeVisible();
     await expect(definitions.filter({ hasText: pdsUrl })).toBeVisible();
 
-    // PDS URL contains a random port — allow minor pixel differences
-    await expect(page).toHaveScreenshot("settings-account-info.png", {
-      maxDiffPixelRatio: 0.02,
-    });
+    await expect(page).toHaveScreenshot("settings-account-info.png");
   });
 
   test("displays preferences section", async ({ page, webUrl }) => {
     await page.goto(`${webUrl}/cabinet/settings`);
 
-    // Preferences section
-    await expect(page.getByText("Preferences", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Preferences", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByLabel("Enable telemetry")).toBeVisible();
     await expect(page.getByLabel("AppView URL")).toBeVisible();
   });
@@ -41,7 +39,6 @@ test.describe("settings page", () => {
     const initialState = await toggle.isChecked();
     await toggle.click();
 
-    // State should have flipped
     await expect(toggle).toBeChecked({ checked: !initialState });
   });
 

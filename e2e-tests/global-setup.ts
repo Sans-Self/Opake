@@ -1,15 +1,16 @@
 // Global setup for Playwright web e2e tests.
 //
 // Starts a fake-pds instance (OAuth mode) and a Vite dev server pointing at it.
-// Writes both URLs to a state file so test fixtures can read them.
+// Registers a pool of test accounts for parallel isolation.
 
 import { createFakePds, type FakePds } from "fake-pds";
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { TEST_ACCOUNTS } from "./helpers/pds.js";
+import { generatePool } from "./helpers/account-pool.js";
 
 const STATE_FILE = path.join(import.meta.dirname, ".e2e-state.json");
+const LOCKS_DIR = path.join(import.meta.dirname, ".e2e-locks");
 
 function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -19,7 +20,6 @@ function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<strin
 
     const onData = (chunk: Buffer) => {
       const text = chunk.toString();
-      // Vite prints "Local:   http://localhost:XXXX/" when ready
       const match = /https?:\/\/localhost:\d+/.exec(text);
       if (match) {
         clearTimeout(timeout);
@@ -30,7 +30,6 @@ function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<strin
 
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", (chunk: Buffer) => {
-      // Surface Vite errors for debugging
       process.stderr.write(chunk);
     });
 
@@ -49,9 +48,10 @@ function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<strin
 }
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
-  // 1. Start fake-pds with OAuth enabled
+  // 1. Generate account pool and start fake-pds
+  const pool = generatePool();
   const pds: FakePds = await createFakePds({
-    accounts: [...TEST_ACCOUNTS],
+    accounts: pool.map((a) => ({ did: a.did, handle: a.handle })),
     auth: "oauth",
   });
 
@@ -70,11 +70,17 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   const webUrl = await waitForViteReady(vite);
 
-  // 3. Write state for test fixtures
+  // 3. Write state + pool for test fixtures
   mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  writeFileSync(STATE_FILE, JSON.stringify({ pdsUrl: pds.url, webUrl }));
+  writeFileSync(
+    STATE_FILE,
+    JSON.stringify({ pdsUrl: pds.url, webUrl, pool }),
+  );
 
-  // 4. Teardown
+  // 4. Clean stale lock files from prior runs
+  rmSync(LOCKS_DIR, { recursive: true, force: true });
+
+  // 5. Teardown
   return async () => {
     vite.kill("SIGTERM");
     await pds.close();
@@ -83,5 +89,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     } catch {
       // already cleaned up
     }
+    rmSync(LOCKS_DIR, { recursive: true, force: true });
   };
 }
