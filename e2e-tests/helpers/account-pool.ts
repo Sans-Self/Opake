@@ -11,16 +11,27 @@ export interface TestAccount {
   readonly did: string;
 }
 
-export const POOL_SIZE = 50;
-
 const LOCKS_DIR = path.join(import.meta.dirname, "../.e2e-locks");
+
+// Dutch-flavored names for the Bakker household test universe
+const NAMES = [
+  "anika", "bram", "carmen", "daan", "eline", "floris", "greta", "hugo",
+  "iris", "jesse", "karin", "lieke", "mees", "noor", "otto", "pien",
+  "quinn", "ruben", "sanne", "thijs", "ulla", "vera", "wouter", "xander",
+  "yara", "zev", "anke", "bas", "cato", "dirk", "eva", "fem",
+  "guus", "hanna", "ivo", "jip", "kees", "lotte", "max", "niek",
+  "olga", "pepijn", "roos", "stef", "tessa", "udo", "vince", "wies",
+  "xenia", "yves",
+] as const;
+
+export const POOL_SIZE = NAMES.length;
 
 /** Generate the full pool of test accounts for global-setup registration. */
 export function generatePool(): readonly TestAccount[] {
-  return Array.from({ length: POOL_SIZE }, (_, i) => {
-    const id = String(i).padStart(2, "0");
-    return { handle: `test-${id}.test`, did: `did:plc:test-${id}` };
-  });
+  return NAMES.map((name) => ({
+    handle: `${name}.test`,
+    did: `did:plc:${name}`,
+  }));
 }
 
 /** Acquire an unused account from the pool (atomic file lock). */
