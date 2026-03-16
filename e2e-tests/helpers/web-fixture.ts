@@ -6,13 +6,13 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { type TestAccount, acquireAccount } from "./account-pool.js";
+import { AccountPool, type Account } from "fake-pds";
 import { deletePublicKeyViaXrpc } from "./seed-phrase.js";
 
 interface E2eState {
   readonly pdsUrl: string;
   readonly webUrl: string;
-  readonly pool: readonly TestAccount[];
+  readonly pool: readonly Account[];
 }
 
 let cachedState: E2eState | null = null;
@@ -43,7 +43,7 @@ interface WebFixtures {
   pdsUrl: string;
   webUrl: string;
   /** Auto-acquired unique account from the pool — cleaned up after test. */
-  account: TestAccount;
+  account: Account;
   resetPds: () => Promise<void>;
   browserLogin: (handle?: string) => Promise<void>;
 }
@@ -60,10 +60,13 @@ export const test = base.extend<WebFixtures>({
   },
 
   account: async ({ pdsUrl }, use) => {
-    const { pool } = loadState();
-    const { account, release } = acquireAccount(pool);
-    // Clean up publicKey from any prior test run
-    await deletePublicKeyViaXrpc(pdsUrl, account.handle, account.did);
+    const { pool: accounts } = loadState();
+    const accountPool = new AccountPool(accounts);
+    const { account, release } = accountPool.acquire();
+    // Clean up state from any prior test run (per-DID, not global reset)
+    await fetch(`${pdsUrl}/_test/cleanup?did=${encodeURIComponent(account.did)}`, {
+      method: "POST",
+    });
     await use(account);
     release();
   },

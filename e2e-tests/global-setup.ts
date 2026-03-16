@@ -5,12 +5,12 @@
 
 import { createFakePds, type FakePds } from "fake-pds";
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, unlinkSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { generatePool } from "./helpers/account-pool.js";
+import { generateAccounts, AccountPool } from "fake-pds";
 
 const STATE_FILE = path.join(import.meta.dirname, ".e2e-state.json");
-const LOCKS_DIR = path.join(import.meta.dirname, ".e2e-locks");
+
 
 function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,9 +49,9 @@ function waitForViteReady(proc: ChildProcess, timeoutMs = 30_000): Promise<strin
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   // 1. Generate account pool and start fake-pds
-  const pool = generatePool();
+  const pool = generateAccounts();
   const pds: FakePds = await createFakePds({
-    accounts: pool.map((a) => ({ did: a.did, handle: a.handle })),
+    accounts: [...pool],
     auth: "oauth",
   });
 
@@ -78,17 +78,18 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   );
 
   // 4. Clean stale lock files from prior runs
-  rmSync(LOCKS_DIR, { recursive: true, force: true });
+  const accountPool = new AccountPool(pool);
+  accountPool.clearLocks();
 
   // 5. Teardown
   return async () => {
     vite.kill("SIGTERM");
     await pds.close();
+    accountPool.clearLocks();
     try {
       unlinkSync(STATE_FILE);
     } catch {
       // already cleaned up
     }
-    rmSync(LOCKS_DIR, { recursive: true, force: true });
   };
 }
