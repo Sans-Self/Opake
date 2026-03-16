@@ -22,6 +22,42 @@ function loadState(): E2eState {
 }
 
 /**
+ * Delete a specific account's publicKey record via authenticated XRPC.
+ * Uses PAR → token exchange to get a valid DPoP token (fake-pds skips proof validation).
+ * This enables per-account cleanup without a full PDS reset.
+ */
+async function deletePublicKey(pdsUrl: string, handle: string, did: string): Promise<void> {
+  const parRes = await fetch(`${pdsUrl}/oauth/par`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: "test", login_hint: handle }).toString(),
+  });
+  if (!parRes.ok) return; // Account might not exist
+  const { code } = (await parRes.json()) as { code: string };
+
+  const tokenRes = await fetch(`${pdsUrl}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", code }).toString(),
+  });
+  if (!tokenRes.ok) return;
+  const { access_token } = (await tokenRes.json()) as { access_token: string };
+
+  await fetch(`${pdsUrl}/xrpc/com.atproto.repo.deleteRecord`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `DPoP ${access_token}`,
+    },
+    body: JSON.stringify({
+      repo: did,
+      collection: "app.opake.publicKey",
+      rkey: "self",
+    }),
+  });
+}
+
+/**
  * Perform a full browser-based OAuth login against fake-pds.
  * Waits for the redirect chain to complete and the devices page to render.
  */

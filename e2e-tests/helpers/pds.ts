@@ -5,6 +5,8 @@ import { createFakePds, type FakePds, type Account } from "fake-pds";
 export const TEST_ACCOUNTS: readonly Account[] = [
   { did: "did:plc:alice", handle: "alice.test" },
   { did: "did:plc:bob", handle: "bob.test", password: "bobsecret" },
+  { did: "did:plc:charlie", handle: "charlie.test" },
+  { did: "did:plc:dave", handle: "dave.test" },
 ];
 
 // eslint-disable-next-line functional/no-let

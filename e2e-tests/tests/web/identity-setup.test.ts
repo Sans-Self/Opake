@@ -1,6 +1,7 @@
 // Identity setup: seed phrase generation, display, and confirmation.
 
 import { test, expect } from "../../helpers/web-fixture.js";
+import { deletePublicKeyViaXrpc } from "../../helpers/seed-phrase.js";
 
 test.describe("fresh account identity setup", () => {
   test.beforeEach(async ({ browserLogin }) => {
@@ -95,10 +96,9 @@ test.describe("fresh account identity setup", () => {
 });
 
 test.describe("seed phrase confirmation failures", () => {
-  test.beforeEach(async ({ resetPds, browserLogin }) => {
-    // Reset clears publicKey record left by the success tests above,
-    // so alice.test gets a fresh identity state again.
-    await resetPds();
+  test.beforeEach(async ({ pdsUrl, browserLogin, page }) => {
+    // Delete publicKey left by success tests so alice sees "fresh" state
+    await deletePublicKeyViaXrpc(pdsUrl, "alice.test", "did:plc:alice");
     await browserLogin("alice.test");
   });
 
