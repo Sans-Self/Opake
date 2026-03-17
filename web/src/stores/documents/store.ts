@@ -1,4 +1,4 @@
-// Documents store — directory tree from WASM, lazy per-directory document decryption.
+// Documents store — directory tree from WASM, lazy per-directory document loading.
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -14,13 +14,19 @@ import type {
   DirectoryRecord,
   DirectoryTreeSnapshot,
 } from "@/lib/pdsTypes";
+import type { CachedRecord } from "@/lib/storageTypes";
 import { rkeyFromUri } from "@/lib/atUri";
 import { triggerBrowserDownload } from "@/lib/download";
 import type { Session } from "@/lib/storageTypes";
 import { toastSuccess, toastError, toastInfo } from "@/stores/toast";
-import { storage, fetchAllRecords } from "./fetch";
+import { storage } from "@/lib/indexeddbStorage";
+import { documentCollection, directoryCollection, grantCollection } from "@/wasm/opake-wasm/opake";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
+
+const DOCUMENT_COLLECTION = documentCollection();
+const DIRECTORY_COLLECTION = directoryCollection();
+const GRANT_COLLECTION = grantCollection();
 
 // ---------------------------------------------------------------------------
 // Types & helpers
@@ -51,13 +57,18 @@ interface DocumentsState {
   items: Record<string, FileItem>;
   treeSnapshot: DirectoryTreeSnapshot | null;
   documentRecords: Record<string, PdsRecord<DocumentRecord>>;
-  decryptedDirectories: Set<string>;
+  /** Document URIs that have at least one outgoing grant (from loadCabinet). */
+  sharedDocumentUris: Set<string>;
+  /** Whether caching is enabled (loaded once from config in loadCabinet). */
+  cacheEnabled: boolean;
+  /** Directories whose documents have been fetched AND decrypted. */
+  readyDirectories: Set<string>;
   error: string | null;
   activeTagFilters: string[];
   viewMode: "list" | "grid";
 
-  readonly fetchAll: () => Promise<void>;
-  readonly ensureDirectoryDecrypted: (directoryUri: string | null) => Promise<void>;
+  readonly loadCabinet: () => Promise<void>;
+  readonly ensureDirectoryReady: (directoryUri: string | null) => Promise<void>;
   readonly itemsForDirectory: (directoryUri: string | null) => FileItem[];
   readonly setTagFilters: (tags: string[]) => void;
   readonly setViewMode: (mode: "list" | "grid") => void;
@@ -98,42 +109,33 @@ export const useDocumentsStore = create<DocumentsState>()(
     items: {},
     treeSnapshot: null,
     documentRecords: {},
-    decryptedDirectories: new Set<string>(),
+    sharedDocumentUris: new Set<string>(),
+    cacheEnabled: true,
+    readyDirectories: new Set<string>(),
     error: null,
     activeTagFilters: [],
     viewMode: "list",
 
-    fetchAll: async () => {
+    loadCabinet: async () => {
       const authState = useAuthStore.getState();
       if (authState.session.status !== "active") return;
 
       const { did, pdsUrl } = authState.session;
-      const done = loading("documents-fetch");
+      const done = loading("cabinet-load");
 
-      try {
-        const session = await storage.loadSession(did);
-        const identity = await storage.loadIdentity(did);
-        const privateKey = base64ToUint8Array(identity.private_key);
+      /** Build the directory tree and populate store with directory + grant items. */
+      const populateCabinet = async (
+        dirRecords: readonly PdsRecord<DirectoryRecord>[],
+        grantRecords: readonly PdsRecord<{ document: string }>[],
+        privateKey: Uint8Array,
+      ): Promise<void> => {
+        const sharedUris = new Set(grantRecords.map((r) => r.value.document));
 
-        const [documentRecords, directoryRecords, grantRecords] = await Promise.all([
-          fetchAllRecords<DocumentRecord>(pdsUrl, did, "app.opake.document", session),
-          fetchAllRecords<DirectoryRecord>(pdsUrl, did, "app.opake.directory", session),
-          fetchAllRecords<{ document: string }>(pdsUrl, did, "app.opake.grant", session),
-        ]);
-
-        // Collect document URIs that have at least one outgoing grant
-        const sharedDocumentUris = new Set(grantRecords.map((r) => r.value.document));
-
-        // Build directory tree in WASM — decrypts all directory names in one call
         const worker = getOpakeWorker();
-        const snapshot = await worker.buildDirectoryTree(directoryRecords, did, privateKey);
+        const snapshot = await worker.buildDirectoryTree(dirRecords, did, privateKey);
 
-        // Build a lookup for directory records by URI (for timestamps)
-        const dirRecordsByUri = Object.fromEntries(
-          directoryRecords.map((r) => [r.uri, r] as const),
-        );
+        const dirRecordsByUri = Object.fromEntries(dirRecords.map((r) => [r.uri, r] as const));
 
-        // Create directory FileItems from the snapshot (names already decrypted)
         const directoryItems = Object.entries(snapshot.directories)
           .filter(([uri]) => uri in dirRecordsByUri)
           .map(
@@ -149,34 +151,105 @@ export const useDocumentsStore = create<DocumentsState>()(
               ] as const,
           );
 
-        // Create placeholder FileItems for all documents
-        const documentItems = documentRecords.map(
-          (r) => [r.uri, documentPlaceholder(r, sharedDocumentUris.has(r.uri))] as const,
+        // Rebuild document items from documentRecords (already fetched by ensureDirectoryReady)
+        const existingDocItems = Object.entries(get().documentRecords).map(
+          ([uri, record]) =>
+            [uri, get().items[uri] ?? documentPlaceholder(record, sharedUris.has(uri))] as const,
         );
 
         const items: Readonly<Record<string, FileItem>> = Object.fromEntries([
           ...directoryItems,
-          ...documentItems,
+          ...existingDocItems,
         ]);
 
-        const docRecordsMap: Readonly<Record<string, PdsRecord<DocumentRecord>>> =
-          Object.fromEntries(documentRecords.map((r) => [r.uri, r] as const));
-
-        // Swap atomically — no intermediate empty state that causes skeleton flicker
         set((draft) => {
           draft.error = null;
           draft.items = items;
           draft.treeSnapshot = castDraft(snapshot);
-          draft.documentRecords = castDraft(docRecordsMap);
-          draft.decryptedDirectories = new Set();
+          draft.sharedDocumentUris = sharedUris;
+          draft.readyDirectories = new Set();
+        });
+      };
+
+      try {
+        const [config, session, identity] = await Promise.all([
+          storage.loadConfig(),
+          storage.loadSession(did),
+          storage.loadIdentity(did),
+        ]);
+        const privateKey = base64ToUint8Array(identity.private_key);
+        const cacheEnabled = config.cacheEnabled !== false;
+        set((draft) => {
+          draft.cacheEnabled = cacheEnabled;
         });
 
-        done();
+        // Phase 1: show cached tree immediately
+        if (cacheEnabled) {
+          const [cachedDirs, cachedGrants] = await Promise.all([
+            storage.cacheGetCollection<DirectoryRecord>(did, DIRECTORY_COLLECTION),
+            storage.cacheGetCollection<{ document: string }>(did, GRANT_COLLECTION),
+          ]);
 
-        // Eagerly decrypt root directory's documents
-        await get().ensureDirectoryDecrypted(null);
+          if (cachedDirs && cachedGrants) {
+            await populateCabinet(cachedDirs.records, cachedGrants.records, privateKey);
+            // Let the UI render the cached tree while we fetch fresh
+            await get().ensureDirectoryReady(null);
+          }
+        }
+
+        // Phase 2: fetch fresh dirs + grants from PDS via WASM
+        const worker = getOpakeWorker();
+        const [freshDirs, freshGrants] = await Promise.all([
+          worker.listDirectoriesRaw(pdsUrl, session),
+          worker.listGrantsRaw(pdsUrl, session),
+        ]);
+        await persistSession(did, freshGrants.session);
+
+        const freshDirRecords = freshDirs.records as readonly CachedRecord<DirectoryRecord>[];
+        const freshGrantRecords = freshGrants.records as readonly CachedRecord<{
+          document: string;
+        }>[];
+
+        // Phase 3: update cache + rebuild tree
+        if (cacheEnabled) {
+          const now = Date.now();
+          await Promise.all([
+            storage.cachePutCollection(did, DIRECTORY_COLLECTION, {
+              records: freshDirRecords,
+              fetchedAt: now,
+            }),
+            storage.cachePutCollection(did, GRANT_COLLECTION, {
+              records: freshGrantRecords,
+              fetchedAt: now,
+            }),
+          ]);
+        }
+
+        await populateCabinet(freshDirRecords, freshGrantRecords, privateKey);
+
+        done();
+        await get().ensureDirectoryReady(null);
+
+        // Background warm: bulk-fetch all documents into cache (1-3 paginated requests
+        // instead of N individual getRecord calls). ensureDirectoryReady reads from
+        // cache, so subsequent directory navigations are instant. See ARCHITECTURE.md
+        // "Local Record Cache → Design: Two-Path Loading" for rationale.
+        if (cacheEnabled) {
+          const warmSession = await storage.loadSession(did);
+          worker.listDocumentsRaw(pdsUrl, warmSession).then(
+            async (result) => {
+              await persistSession(did, result.session);
+              const records = result.records as readonly CachedRecord<DocumentRecord>[];
+              // Upsert individual records — avoids delete+reinsert of records
+              // already cached by ensureDirectoryReady during this session
+              await storage.cachePutRecords(did, DOCUMENT_COLLECTION, records);
+            },
+            (error: unknown) =>
+              console.warn("[cabinet] background document cache warm failed:", error),
+          );
+        }
       } catch (error) {
-        console.error("[documents] fetchAll failed:", error);
+        console.error("[cabinet] loadCabinet failed:", error);
         toastError("Failed to load documents");
         done();
         set((draft) => {
@@ -185,19 +258,19 @@ export const useDocumentsStore = create<DocumentsState>()(
       }
     },
 
-    ensureDirectoryDecrypted: async (directoryUri: string | null) => {
+    // eslint-disable-next-line sonarjs/cognitive-complexity -- fetch + cache + decrypt orchestration is inherently branchy
+    ensureDirectoryReady: async (directoryUri: string | null) => {
       const state = get();
-      const { treeSnapshot, decryptedDirectories, documentRecords } = state;
+      const { treeSnapshot, readyDirectories } = state;
       if (!treeSnapshot) return;
 
       const targetUri = directoryUri ?? treeSnapshot.rootUri;
       if (!targetUri) return;
-
-      if (decryptedDirectories.has(targetUri)) return;
+      if (readyDirectories.has(targetUri)) return;
 
       // Mark immediately to prevent concurrent calls
       set((draft) => {
-        draft.decryptedDirectories.add(targetUri);
+        draft.readyDirectories.add(targetUri);
       });
 
       const dirEntry = treeSnapshot.directories[targetUri];
@@ -207,25 +280,104 @@ export const useDocumentsStore = create<DocumentsState>()(
       const authState = useAuthStore.getState();
       if (authState.session.status !== "active") return;
 
-      const { did } = authState.session;
+      const { did, pdsUrl } = authState.session;
       const identity = await storage.loadIdentity(did);
       const privateKey = base64ToUint8Array(identity.private_key);
 
-      // Filter to document entries (not in snapshot.directories = not a directory)
+      // Filter to document URIs only (entries not in snapshot.directories)
       const documentUris = dirEntry.entries.filter((uri) => !(uri in treeSnapshot.directories));
-      const done = loading("decrypt-directory");
+      if (documentUris.length === 0) return;
 
-      // Decrypt sequentially to avoid overwhelming the worker
+      const done = loading("directory-ready");
+      const { sharedDocumentUris, cacheEnabled } = get();
+
+      // Filter to URIs not already in the store (from a previous navigation)
+      const needed = documentUris.filter(
+        (uri) =>
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+          !get().documentRecords[uri],
+      );
+      if (needed.length === 0) {
+        done();
+        return;
+      }
+
+      // Parallel cache lookups — IndexedDB reads are independent
+      const cacheResults = cacheEnabled
+        ? await Promise.all(
+            needed.map(async (uri) => ({
+              uri,
+              record: await storage.cacheGetRecord<DocumentRecord>(did, DOCUMENT_COLLECTION, uri),
+            })),
+          )
+        : needed.map((uri) => ({ uri, record: null }));
+
+      /* eslint-disable functional/prefer-immutable-types, functional/immutable-data -- accumulator arrays consumed once then discarded */
+      const fetchedRecords: PdsRecord<DocumentRecord>[] = [];
+      const pdsNeeded: string[] = [];
+
+      // eslint-disable-next-line functional/no-loop-statements -- partition cache hits from misses
+      for (const { uri, record } of cacheResults) {
+        if (record) {
+          fetchedRecords.push(record);
+        } else {
+          pdsNeeded.push(uri);
+        }
+      }
+
+      // Sequential PDS fetches for cache misses (session chaining requires sequential)
+      // eslint-disable-next-line functional/no-let -- session accumulates across sequential fetches
+      let currentSession: unknown = await storage.loadSession(did);
+      const cacheMisses: CachedRecord<DocumentRecord>[] = [];
+
+      // eslint-disable-next-line functional/no-loop-statements -- sequential fetch with session chaining
+      for (const uri of pdsNeeded) {
+        const worker = getOpakeWorker();
+        const result = await worker.getRecordRaw(pdsUrl, currentSession, uri);
+        currentSession = result.session;
+
+        const record = result.record as CachedRecord<DocumentRecord>;
+        fetchedRecords.push(record);
+        cacheMisses.push(record);
+      }
+      /* eslint-enable functional/prefer-immutable-types, functional/immutable-data */
+
+      await persistSession(did, currentSession);
+
+      // Batch cache write for all misses
+      if (cacheEnabled && cacheMisses.length > 0) {
+        await storage.cachePutRecords(did, DOCUMENT_COLLECTION, cacheMisses);
+      }
+
+      // Batch store update for all fetched records
+      if (fetchedRecords.length > 0) {
+        set((draft) => {
+          // eslint-disable-next-line functional/no-loop-statements -- immer draft mutation
+          for (const record of fetchedRecords) {
+            draft.documentRecords[record.uri] = castDraft(record);
+            draft.items[record.uri] = documentPlaceholder(
+              record,
+              sharedDocumentUris.has(record.uri),
+            );
+          }
+        });
+      }
+
+      // Decrypt: now that all records are fetched, decrypt metadata
+      const { documentRecords } = get();
       await documentUris.reduce(async (prev, uri) => {
         await prev;
         const record = documentRecords[uri];
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
         if (!record) return;
+        // Skip already-decrypted items
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+        if (get().items[uri]?.decrypted) return;
 
         try {
           await decryptDocumentRecord(record, did, privateKey, set);
         } catch (error) {
-          console.warn("[documents] failed to decrypt document:", uri, error);
+          console.warn("[cabinet] failed to decrypt document:", uri, error);
           markDecryptionFailed(uri, set);
         }
       }, Promise.resolve());
@@ -290,7 +442,7 @@ export const useDocumentsStore = create<DocumentsState>()(
 
         toastSuccess("Download started");
       } catch (error) {
-        console.error("[documents] download failed:", documentUri, error);
+        console.error("[cabinet] download failed:", documentUri, error);
         toastError("Download failed");
       } finally {
         done();
@@ -313,9 +465,13 @@ export const useDocumentsStore = create<DocumentsState>()(
         const worker = getOpakeWorker();
         const result = await worker.documentDelete(pdsUrl, session, documentUri, parentUri ?? null);
         await persistSession(did, result.session);
+        await Promise.all([
+          storage.cacheRemoveRecord(did, DOCUMENT_COLLECTION, documentUri),
+          storage.cacheInvalidateCollection(did, DIRECTORY_COLLECTION),
+        ]);
         toastSuccess("File deleted");
 
-        // Optimistic removal from store — reuse cached parentUri
+        // Optimistic removal from store
         set((draft) => {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft mutation
           delete draft.items[documentUri];
@@ -335,7 +491,7 @@ export const useDocumentsStore = create<DocumentsState>()(
           }
         });
       } catch (error) {
-        console.error("[documents] delete failed:", documentUri, error);
+        console.error("[cabinet] delete failed:", documentUri, error);
         toastError("Failed to delete file");
       } finally {
         done();
@@ -382,7 +538,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         console.debug("[upload] WASM returned", { uri: result.uri, hasSession: !!result.session });
         await persistSession(did, result.session);
 
-        await get().fetchAll();
+        await get().loadCabinet();
         toastSuccess("File uploaded");
       } catch (error) {
         console.error("[upload] FAILED:", error instanceof Error ? error.message : error);
@@ -415,10 +571,10 @@ export const useDocumentsStore = create<DocumentsState>()(
         );
         await persistSession(did, result.session);
 
-        await get().fetchAll();
+        await get().loadCabinet();
         toastSuccess("Folder created");
       } catch (error) {
-        console.error("[documents] createFolder failed:", error);
+        console.error("[cabinet] createFolder failed:", error);
         toastError("Failed to create folder");
       } finally {
         done();
@@ -467,6 +623,10 @@ export const useDocumentsStore = create<DocumentsState>()(
           currentSession = rmResult.session;
         }
         await persistSession(did, currentSession);
+        await Promise.all([
+          storage.cacheInvalidateCollection(did, DOCUMENT_COLLECTION),
+          storage.cacheInvalidateCollection(did, DIRECTORY_COLLECTION),
+        ]);
 
         // Optimistic removal — remove the folder + all descendants from store
         const descendantUris = new Set(descendants.map((d) => d.uri));
@@ -507,7 +667,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         });
         toastSuccess("Folder deleted");
       } catch (error) {
-        console.error("[documents] deleteFolder failed:", folderUri, error);
+        console.error("[cabinet] deleteFolder failed:", folderUri, error);
         // Persist the last good session to avoid stale DPoP nonce after partial failure
         if (currentSession) {
           // eslint-disable-next-line @typescript-eslint/no-empty-function -- best-effort persistence, failure is non-fatal
@@ -541,6 +701,7 @@ export const useDocumentsStore = create<DocumentsState>()(
           did,
         );
         await persistSession(did, result.session);
+        await storage.cacheRemoveRecord(did, DOCUMENT_COLLECTION, documentUri);
 
         // Optimistic store update
         set((draft) => {
@@ -557,7 +718,7 @@ export const useDocumentsStore = create<DocumentsState>()(
 
         toastSuccess("Metadata updated");
       } catch (error) {
-        console.error("[documents] updateMetadata failed:", documentUri, error);
+        console.error("[cabinet] updateMetadata failed:", documentUri, error);
         toastError("Failed to update metadata");
       } finally {
         done();
@@ -609,12 +770,12 @@ export const useDocumentsStore = create<DocumentsState>()(
         }
         await persistSession(did, currentSession);
 
-        await get().fetchAll();
+        await get().loadCabinet();
         toastSuccess(`Moved "${entryName}"`);
       } catch (error) {
-        console.error("[documents] moveEntry failed:", entryUri, error);
+        console.error("[cabinet] moveEntry failed:", entryUri, error);
         toastError(`Failed to move "${entryName}"`);
-        await get().fetchAll();
+        await get().loadCabinet();
       } finally {
         done();
       }
@@ -642,6 +803,7 @@ export const useDocumentsStore = create<DocumentsState>()(
           did,
         );
         await persistSession(did, result.session);
+        await storage.cacheInvalidateCollection(did, DIRECTORY_COLLECTION);
 
         // Update store item + tree snapshot in place
         set((draft) => {
@@ -663,7 +825,7 @@ export const useDocumentsStore = create<DocumentsState>()(
 
         toastSuccess("Folder renamed");
       } catch (error) {
-        console.error("[documents] renameDirectory failed:", directoryUri, error);
+        console.error("[cabinet] renameDirectory failed:", directoryUri, error);
         toastError("Failed to rename folder");
       } finally {
         done();

@@ -14,6 +14,7 @@ fn test_config(did: &str, pds_url: &str, handle: &str) -> Config {
     Config {
         default_did: Some(did.to_string()),
         accounts,
+        ..Default::default()
     }
 }
 
@@ -51,6 +52,7 @@ fn config_with_multiple_accounts_roundtrips() {
     let config = Config {
         default_did: Some("did:plc:alice".into()),
         accounts,
+        ..Default::default()
     };
     storage.save_config_anyhow(&config).unwrap();
 
@@ -237,6 +239,7 @@ fn remove_account_promotes_next_default() {
         .save_config_anyhow(&Config {
             default_did: Some("did:plc:alice".into()),
             accounts,
+            ..Default::default()
         })
         .unwrap();
 

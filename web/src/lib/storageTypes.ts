@@ -6,6 +6,23 @@ import type { DpopKeyPair } from "./cryptoTypes";
 export interface Config {
   readonly defaultDid: string | null;
   readonly accounts: Readonly<Record<string, AccountEntry>>;
+  /** Whether to cache PDS records locally. Defaults to true when absent. */
+  readonly cacheEnabled?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Cache types (mirrors CachedRecord / CachedCollection in storage.rs)
+// ---------------------------------------------------------------------------
+
+export interface CachedRecord<T = unknown> {
+  readonly uri: string;
+  readonly cid: string;
+  readonly value: T;
+}
+
+export interface CachedCollection<T = unknown> {
+  readonly records: readonly CachedRecord<T>[];
+  readonly fetchedAt: number;
 }
 
 export interface AccountEntry {

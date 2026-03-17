@@ -6,11 +6,9 @@ import { getOpakeWorker } from "@/lib/worker";
 import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
 import type { Session } from "@/lib/storageTypes";
-
-const previewStorage = new IndexedDbStorage();
 
 export interface DecryptedBlob {
   readonly plaintext: Uint8Array;
@@ -78,8 +76,8 @@ export function decryptOwnDocument(documentUri: string): () => Promise<Decrypted
     if (authState.session.status !== "active") throw new Error("Not authenticated");
 
     const { did, pdsUrl } = authState.session;
-    const session = await previewStorage.loadSession(did);
-    const identity = await previewStorage.loadIdentity(did);
+    const session = await storage.loadSession(did);
+    const identity = await storage.loadIdentity(did);
     const privateKey = base64ToUint8Array(identity.private_key);
 
     const storeItem = state.items[documentUri];

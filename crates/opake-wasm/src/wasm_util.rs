@@ -49,7 +49,13 @@ pub fn result_with_session<T: Serialize>(
         result: payload,
         session,
     };
-    serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+    // serialize_maps_as_objects: serde_json::Value::Object → plain JS object (not Map).
+    // Without this, nested JSON values (e.g. RecordEntry.value) become Maps, and
+    // field access returns Map.prototype methods instead of record fields.
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    result
+        .serialize(&serializer)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Parse a 32-byte public key from a JS Uint8Array slice.

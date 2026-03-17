@@ -621,6 +621,21 @@ impl DirectoryTreeHandle {
 // Account config exports
 // ---------------------------------------------------------------------------
 
+#[wasm_bindgen(js_name = documentCollection)]
+pub fn document_collection() -> String {
+    opake_core::documents::DOCUMENT_COLLECTION.to_owned()
+}
+
+#[wasm_bindgen(js_name = directoryCollection)]
+pub fn directory_collection() -> String {
+    opake_core::directories::DIRECTORY_COLLECTION.to_owned()
+}
+
+#[wasm_bindgen(js_name = grantCollection)]
+pub fn grant_collection() -> String {
+    opake_core::sharing::GRANT_COLLECTION.to_owned()
+}
+
 #[wasm_bindgen(js_name = accountConfigCollection)]
 pub fn account_config_collection() -> String {
     opake_core::records::ACCOUNT_CONFIG_COLLECTION.to_owned()

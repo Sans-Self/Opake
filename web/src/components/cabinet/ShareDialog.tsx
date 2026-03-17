@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "
 import { ShareNetworkIcon } from "@phosphor-icons/react";
 import { resolveRecipient, createGrant } from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { authenticatedXrpc } from "@/lib/api";
@@ -15,8 +15,6 @@ import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 export interface ShareDialogHandle {
   readonly show: (documentUri: string, documentName: string) => void;
 }
-
-const storage = new IndexedDbStorage();
 
 /** Unwrap the content key from a document's encryption envelope. */
 async function unwrapContentKey(

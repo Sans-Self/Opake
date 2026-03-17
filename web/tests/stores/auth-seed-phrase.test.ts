@@ -64,6 +64,7 @@ class MockIndexedDbStorage {
 
 vi.mock("../../src/lib/indexeddbStorage", () => ({
   IndexedDbStorage: MockIndexedDbStorage,
+  storage: new MockIndexedDbStorage(),
 }));
 
 // Mock opake worker

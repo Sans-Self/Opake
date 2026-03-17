@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
 import { getOpakeWorker } from "@/lib/worker";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { listPairRequests, approvePairRequest, type PendingPairRequest } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
@@ -10,8 +10,6 @@ import { useAppStore } from "@/stores/app";
 const POLL_INTERVAL_MS = 5000;
 const MAX_KEY_AGE_MINUTES = 30;
 const MAX_KEY_AGE = 1000 * 60 * MAX_KEY_AGE_MINUTES;
-
-const storage = new IndexedDbStorage();
 
 // ---------------------------------------------------------------------------
 // Route

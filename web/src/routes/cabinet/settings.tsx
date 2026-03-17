@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { UserIcon, FloppyDiskIcon, GearIcon } from "@phosphor-icons/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { useAuthStore } from "@/stores/auth";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { authenticatedGetRecord, authenticatedPutRecord } from "@/lib/api";
 import { getOpakeWorker } from "@/lib/worker";
 import { truncateDid } from "@/lib/format";
@@ -13,8 +13,6 @@ import type { AccountConfigRecord } from "@/lib/pdsTypes";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const storage = new IndexedDbStorage();
 
 // ---------------------------------------------------------------------------
 // Account Config Section (PDS-synced preferences)

@@ -7,7 +7,7 @@
 use log::debug;
 use serde::de::DeserializeOwned;
 
-use super::{RecordPage, Transport, XrpcClient};
+use super::{RecordEntry, RecordPage, Transport, XrpcClient};
 use crate::error::Error;
 use crate::records::{self, Versioned};
 
@@ -53,6 +53,53 @@ where
             }
 
             entries.push(map(&record.uri, parsed));
+        }
+
+        match page.cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Paginate an entire collection and return raw record entries (uri + cid + value).
+///
+/// Version-checks each record without fully deserializing — peeks at `opakeVersion`
+/// via `Value::get` to avoid cloning the entire JSON. Preserves the full `RecordEntry`
+/// for caching.
+pub async fn list_collection_raw(
+    client: &mut XrpcClient<impl Transport>,
+    collection: &str,
+) -> Result<Vec<RecordEntry>, Error> {
+    let mut entries = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    loop {
+        debug!("listing {} (raw), cursor={:?}", collection, cursor);
+        let page: RecordPage = client
+            .list_records(collection, Some(100), cursor.as_deref())
+            .await?;
+
+        for record in &page.records {
+            let version = match record.value.get("opakeVersion").and_then(|v| v.as_u64()) {
+                Some(v) => v as u32,
+                None => {
+                    debug!("skipping record {} without opakeVersion", record.uri);
+                    continue;
+                }
+            };
+
+            if records::check_version(version).is_err() {
+                debug!(
+                    "skipping record {} with unsupported version {}",
+                    record.uri, version
+                );
+                continue;
+            }
+
+            entries.push(record.clone());
         }
 
         match page.cursor {

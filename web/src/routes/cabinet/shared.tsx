@@ -24,7 +24,7 @@ import { isPreviewable } from "@/components/cabinet/types";
 import { useAuthStore } from "@/stores/auth";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { decryptDocumentRecord } from "@/stores/documents/decrypt";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { truncateDid, formatRelativeDate, mimeTypeToFileType, formatFileSize } from "@/lib/format";
 import { handleFromDid, pdsUrlFromDid } from "@/lib/did";
 import { loading as trackLoading } from "@/stores/app";
@@ -44,8 +44,6 @@ import { base64ToUint8Array } from "@/lib/encoding";
 import type { OAuthSession } from "@/lib/storageTypes";
 import type { FileItem } from "@/components/cabinet/types";
 import { toastSuccess, toastError } from "@/stores/toast";
-
-const storage = new IndexedDbStorage();
 
 // ---------------------------------------------------------------------------
 // Handle resolution cache
@@ -146,7 +144,7 @@ function SharedPage() {
   const session = useAuthStore((s) => s.session);
   const storeItems = useDocumentsStore((s) => s.items);
   const documentRecords = useDocumentsStore((s) => s.documentRecords);
-  const fetchAll = useDocumentsStore((s) => s.fetchAll);
+  const loadCabinet = useDocumentsStore((s) => s.loadCabinet);
   const cabinetPathFor = useDocumentsStore((s) => s.cabinetPathFor);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const setViewMode = useDocumentsStore((s) => s.setViewMode);
@@ -258,8 +256,8 @@ function SharedPage() {
 
   // Ensure documents store is loaded so outgoing grant names resolve
   useEffect(() => {
-    void fetchAll();
-  }, [fetchAll]);
+    void loadCabinet();
+  }, [loadCabinet]);
 
   // Decrypt metadata for outgoing grant documents that the store hasn't decrypted yet
   useEffect(() => {

@@ -9,9 +9,7 @@ import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { base64ToUint8Array } from "@/lib/encoding";
 import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
-
-const storage = new IndexedDbStorage();
+import { storage } from "@/lib/indexeddbStorage";
 
 const COLLAPSED_MAX_HEIGHT = 300;
 

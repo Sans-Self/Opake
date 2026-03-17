@@ -26,6 +26,10 @@ import {
   listDocuments as wasmListDocuments,
   listDirectories as wasmListDirectories,
   listGrants as wasmListGrants,
+  listDocumentsRaw as wasmListDocumentsRaw,
+  listDirectoriesRaw as wasmListDirectoriesRaw,
+  listGrantsRaw as wasmListGrantsRaw,
+  getRecordRaw as wasmGetRecordRaw,
   downloadFromGrant as wasmDownloadFromGrant,
 } from "@/wasm/opake-wasm/opake";
 
@@ -271,6 +275,46 @@ export const pdsApi = {
     session: unknown,
   ): Promise<{ records: readonly unknown[]; session: unknown }> {
     return flatten(await wasmListGrants(pdsUrl, session));
+  },
+
+  // Raw list operations (for caching — preserves uri + cid + value)
+
+  async listDocumentsRaw(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{
+    records: readonly { uri: string; cid: string; value: unknown }[];
+    session: unknown;
+  }> {
+    return flatten(await wasmListDocumentsRaw(pdsUrl, session));
+  },
+
+  async listDirectoriesRaw(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{
+    records: readonly { uri: string; cid: string; value: unknown }[];
+    session: unknown;
+  }> {
+    return flatten(await wasmListDirectoriesRaw(pdsUrl, session));
+  },
+
+  async listGrantsRaw(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{
+    records: readonly { uri: string; cid: string; value: unknown }[];
+    session: unknown;
+  }> {
+    return flatten(await wasmListGrantsRaw(pdsUrl, session));
+  },
+
+  async getRecordRaw(
+    pdsUrl: string,
+    session: unknown,
+    uri: string,
+  ): Promise<{ record: { uri: string; cid: string; value: unknown }; session: unknown }> {
+    return flatten(await wasmGetRecordRaw(pdsUrl, session, uri));
   },
 
   async downloadFromGrant(

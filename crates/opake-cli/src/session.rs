@@ -105,6 +105,7 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some(did.to_string()),
                 accounts,
+                ..Default::default()
             })
             .unwrap();
     }
@@ -159,6 +160,7 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
+                ..Default::default()
             })
             .unwrap();
 
@@ -189,6 +191,7 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: Some("did:plc:alice".into()),
                 accounts,
+                ..Default::default()
             })
             .unwrap();
 
@@ -211,6 +214,7 @@ mod tests {
             .save_config_anyhow(&Config {
                 default_did: None,
                 accounts: BTreeMap::new(),
+                ..Default::default()
             })
             .unwrap();
         let err = resolve_context(&storage, None).unwrap_err();

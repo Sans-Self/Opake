@@ -4,7 +4,7 @@ import type { OAuthSession, Session } from "@/lib/storageTypes";
 import type { TokenResponse } from "@/lib/oauth";
 import type { PdsRecord } from "@/lib/pdsTypes";
 import { getOpakeWorker } from "@/lib/worker";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 
 interface ApiConfig {
   pdsUrl: string;
@@ -265,8 +265,6 @@ export async function authenticatedDeleteRecord(
 // ---------------------------------------------------------------------------
 // Token refresh
 // ---------------------------------------------------------------------------
-
-const storage = new IndexedDbStorage();
 
 /** Refresh an expired OAuth access token. Mutates the session in place and persists to IndexedDB. */
 async function refreshAccessToken(session: OAuthSession): Promise<boolean> {

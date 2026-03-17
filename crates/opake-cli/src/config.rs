@@ -200,6 +200,62 @@ impl Storage for FileStorage {
         self.save_config_anyhow(&config)
             .map_err(|e| Error::Storage(e.to_string()))
     }
+
+    async fn cache_get_record(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _uri: &str,
+    ) -> Result<Option<opake_core::storage::CachedRecord>, Error> {
+        Ok(None)
+    }
+
+    async fn cache_put_records(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _records: &[opake_core::storage::CachedRecord],
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn cache_remove_record(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _uri: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn cache_get_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+    ) -> Result<Option<opake_core::storage::CachedCollection>, Error> {
+        Ok(None)
+    }
+
+    async fn cache_put_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _data: &opake_core::storage::CachedCollection,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn cache_invalidate_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn cache_clear(&self, _did: &str) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 // Re-export types so existing `use crate::config::*` keeps working.

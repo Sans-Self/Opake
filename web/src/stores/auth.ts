@@ -16,7 +16,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { OAuthSession, Config } from "@/lib/storageTypes";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { getOpakeWorker } from "@/lib/worker";
 import { authenticatedXrpc, authenticatedPutRecord } from "@/lib/api";
 import { loading } from "@/stores/app";
@@ -82,12 +82,6 @@ export interface AuthSnapshot {
   session: SessionState;
   identity: IdentityState;
 }
-
-// ---------------------------------------------------------------------------
-// Singletons (created once, shared across store actions)
-// ---------------------------------------------------------------------------
-
-const storage = new IndexedDbStorage();
 
 // ---------------------------------------------------------------------------
 // Helpers

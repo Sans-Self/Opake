@@ -24,7 +24,7 @@ function SubdirectoryContent() {
 
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
   const documentRecords = useDocumentsStore((s) => s.documentRecords);
-  const ensureDirectoryDecrypted = useDocumentsStore((s) => s.ensureDirectoryDecrypted);
+  const ensureDirectoryReady = useDocumentsStore((s) => s.ensureDirectoryReady);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
@@ -63,8 +63,8 @@ function SubdirectoryContent() {
   // Fixes the breadcrumb bug: on direct navigation to a preview URL, the parent
   // directory's documents get decrypted, populating the file list and names.
   useEffect(() => {
-    void ensureDirectoryDecrypted(currentDirectoryUri);
-  }, [currentDirectoryUri, ensureDirectoryDecrypted]);
+    void ensureDirectoryReady(currentDirectoryUri);
+  }, [currentDirectoryUri, ensureDirectoryReady]);
 
   // Evict decrypted blob from cache when navigating away from a preview
   useEffect(() => {

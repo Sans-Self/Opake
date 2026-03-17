@@ -17,6 +17,26 @@ use crate::crypto::{
 use crate::error::Error;
 
 // ---------------------------------------------------------------------------
+// Cache types
+// ---------------------------------------------------------------------------
+
+/// A single PDS record preserved for local caching (uri + content hash + raw value).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedRecord {
+    pub uri: String,
+    pub cid: String,
+    pub value: serde_json::Value,
+}
+
+/// A snapshot of an entire collection at a point in time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedCollection {
+    pub records: Vec<CachedRecord>,
+    /// Unix epoch milliseconds when this snapshot was fetched from the PDS.
+    pub fetched_at: u64,
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -29,11 +49,29 @@ pub type Ed25519VerifyKey = [u8; 32];
 ///
 /// Device-local only. Cross-device preferences (appview URL, telemetry)
 /// live in `AccountConfigRecord` on the PDS.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub default_did: Option<String>,
     #[serde(default)]
     pub accounts: BTreeMap<String, AccountEntry>,
+    /// Whether to cache PDS records locally for faster loads.
+    /// Device-local toggle — each device can have its own cache policy.
+    #[serde(default = "default_cache_enabled")]
+    pub cache_enabled: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            default_did: None,
+            accounts: BTreeMap::new(),
+            cache_enabled: default_cache_enabled(),
+        }
+    }
+}
+
+fn default_cache_enabled() -> bool {
+    true
 }
 
 impl Config {
@@ -229,6 +267,62 @@ pub trait Storage {
     ) -> impl std::future::Future<Output = Result<(), Error>>;
 
     fn remove_account(&self, did: &str) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    // -- Cache: record-level -------------------------------------------------
+
+    /// Look up a single cached record by URI.
+    fn cache_get_record(
+        &self,
+        did: &str,
+        collection: &str,
+        uri: &str,
+    ) -> impl std::future::Future<Output = Result<Option<CachedRecord>, Error>>;
+
+    /// Upsert one or more records into the cache (does not touch collection metadata).
+    fn cache_put_records(
+        &self,
+        did: &str,
+        collection: &str,
+        records: &[CachedRecord],
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    /// Remove a single record from the cache.
+    fn cache_remove_record(
+        &self,
+        did: &str,
+        collection: &str,
+        uri: &str,
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    // -- Cache: collection-level ----------------------------------------------
+
+    /// Return all cached records for a collection plus the timestamp of the
+    /// last full fetch, or `None` if the collection has never been fully fetched.
+    fn cache_get_collection(
+        &self,
+        did: &str,
+        collection: &str,
+    ) -> impl std::future::Future<Output = Result<Option<CachedCollection>, Error>>;
+
+    /// Atomically replace all records for a collection and set `fetched_at`.
+    fn cache_put_collection(
+        &self,
+        did: &str,
+        collection: &str,
+        data: &CachedCollection,
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    /// Clear the `fetched_at` timestamp (records stay for offline/record-level use).
+    fn cache_invalidate_collection(
+        &self,
+        did: &str,
+        collection: &str,
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    // -- Cache: account-level ------------------------------------------------
+
+    /// Remove all cached data for an account.
+    fn cache_clear(&self, did: &str) -> impl std::future::Future<Output = Result<(), Error>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +348,7 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts: BTreeMap::new(),
+            ..Default::default()
         };
         let result = resolve_handle_or_did(&config, "did:plc:someone").unwrap();
         assert_eq!(result, "did:plc:someone");
@@ -272,6 +367,7 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts,
+            ..Default::default()
         };
         let result = resolve_handle_or_did(&config, "alice.test").unwrap();
         assert_eq!(result, "did:plc:alice");
@@ -282,6 +378,7 @@ mod tests {
         let config = Config {
             default_did: None,
             accounts: BTreeMap::new(),
+            ..Default::default()
         };
         let err = resolve_handle_or_did(&config, "nobody.test").unwrap_err();
         assert!(err.to_string().contains("nobody.test"));

@@ -1,11 +1,15 @@
 // IndexedDB-backed Storage implementation using Dexie.js.
 // Mirrors: crates/opake-cli/src/config.rs — FileStorage (but for the browser)
 
-import Dexie, { type EntityTable } from "dexie";
-import type { Config, Identity, Session } from "./storageTypes";
+import Dexie, { type EntityTable, type Table } from "dexie";
+import type { CachedCollection, CachedRecord, Config, Identity, Session } from "./storageTypes";
 import { type Storage, StorageError, sanitizeDid } from "./storage";
 
 const CONFIG_KEY = "global";
+
+// ---------------------------------------------------------------------------
+// Row types (Dexie table shapes)
+// ---------------------------------------------------------------------------
 
 interface ConfigRow {
   key: string;
@@ -33,11 +37,31 @@ interface ProfileRow {
   value: CachedProfile;
 }
 
+interface CacheRecordRow {
+  did: string;
+  collection: string;
+  uri: string;
+  cid: string;
+  value: unknown;
+}
+
+interface CacheMetaRow {
+  did: string;
+  collection: string;
+  fetchedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
+
 class OpakeDatabase extends Dexie {
   readonly configs!: Readonly<EntityTable<ConfigRow, "key">>;
   readonly identities!: Readonly<EntityTable<IdentityRow, "did">>;
   readonly sessions!: Readonly<EntityTable<SessionRow, "did">>;
   readonly profiles!: Readonly<EntityTable<ProfileRow, "did">>;
+  readonly cacheRecords!: Readonly<Table<CacheRecordRow>>;
+  readonly cacheMeta!: Readonly<Table<CacheMetaRow>>;
 
   constructor(name = "opake") {
     super(name);
@@ -52,8 +76,20 @@ class OpakeDatabase extends Dexie {
       sessions: "did",
       profiles: "did",
     });
+    this.version(3).stores({
+      configs: "key",
+      identities: "did",
+      sessions: "did",
+      profiles: "did",
+      cacheRecords: "[did+collection+uri], [did+collection], did",
+      cacheMeta: "[did+collection], did",
+    });
   }
 }
+
+// ---------------------------------------------------------------------------
+// IndexedDbStorage
+// ---------------------------------------------------------------------------
 
 export class IndexedDbStorage implements Storage {
   private readonly db: Readonly<OpakeDatabase>;
@@ -61,6 +97,8 @@ export class IndexedDbStorage implements Storage {
   constructor(dbName = "opake") {
     this.db = new OpakeDatabase(dbName);
   }
+
+  // -- Config / Identity / Session ------------------------------------------
 
   async loadConfig(): Promise<Config> {
     const row = await this.db.configs.get(CONFIG_KEY);
@@ -102,6 +140,8 @@ export class IndexedDbStorage implements Storage {
     await this.db.sessions.put({ did: key, value: session });
   }
 
+  // -- Profiles (not on trait — web-only) -----------------------------------
+
   async loadProfile(did: string): Promise<CachedProfile | null> {
     const key = sanitizeDid(did);
     const row = await this.db.profiles.get(key);
@@ -112,6 +152,97 @@ export class IndexedDbStorage implements Storage {
     const key = sanitizeDid(did);
     await this.db.profiles.put({ did: key, value: profile });
   }
+
+  // -- Cache: record-level --------------------------------------------------
+
+  async cacheGetRecord<T>(
+    did: string,
+    collection: string,
+    uri: string,
+  ): Promise<CachedRecord<T> | null> {
+    const row = await this.db.cacheRecords.get([did, collection, uri]);
+    if (!row) return null;
+    return { uri: row.uri, cid: row.cid, value: row.value as T };
+  }
+
+  async cachePutRecords<T>(
+    did: string,
+    collection: string,
+    records: readonly CachedRecord<T>[],
+  ): Promise<void> {
+    const rows: readonly CacheRecordRow[] = records.map((r) => ({
+      did,
+      collection,
+      uri: r.uri,
+      cid: r.cid,
+      value: r.value,
+    }));
+    await this.db.cacheRecords.bulkPut(rows as CacheRecordRow[]);
+  }
+
+  async cacheRemoveRecord(did: string, collection: string, uri: string): Promise<void> {
+    await this.db.cacheRecords.delete([did, collection, uri]);
+  }
+
+  // -- Cache: collection-level ----------------------------------------------
+
+  async cacheGetCollection<T>(
+    did: string,
+    collection: string,
+  ): Promise<CachedCollection<T> | null> {
+    const [meta, rows] = await Promise.all([
+      this.db.cacheMeta.get([did, collection]),
+      this.db.cacheRecords.where("[did+collection]").equals([did, collection]).toArray(),
+    ]);
+    if (!meta) return null;
+
+    const records: readonly CachedRecord<T>[] = rows.map((r) => ({
+      uri: r.uri,
+      cid: r.cid,
+      value: r.value as T,
+    }));
+
+    return { records, fetchedAt: meta.fetchedAt };
+  }
+
+  async cachePutCollection<T>(
+    did: string,
+    collection: string,
+    data: CachedCollection<T>,
+  ): Promise<void> {
+    await this.db.transaction("rw", [this.db.cacheRecords, this.db.cacheMeta], async () => {
+      // Delete existing records for this (did, collection)
+      await this.db.cacheRecords.where("[did+collection]").equals([did, collection]).delete();
+
+      // Insert fresh records
+      const rows: readonly CacheRecordRow[] = data.records.map((r) => ({
+        did,
+        collection,
+        uri: r.uri,
+        cid: r.cid,
+        value: r.value,
+      }));
+      await this.db.cacheRecords.bulkPut(rows as CacheRecordRow[]);
+
+      // Set collection metadata
+      await this.db.cacheMeta.put({ did, collection, fetchedAt: data.fetchedAt });
+    });
+  }
+
+  async cacheInvalidateCollection(did: string, collection: string): Promise<void> {
+    await this.db.cacheMeta.delete([did, collection]);
+  }
+
+  // -- Cache: account-level -------------------------------------------------
+
+  async cacheClear(did: string): Promise<void> {
+    await this.db.transaction("rw", [this.db.cacheRecords, this.db.cacheMeta], async () => {
+      await this.db.cacheRecords.where("did").equals(did).delete();
+      await this.db.cacheMeta.where("did").equals(did).delete();
+    });
+  }
+
+  // -- Account removal (extends to clear cache) -----------------------------
 
   async removeAccount(did: string): Promise<void> {
     const config = await this.loadConfig();
@@ -132,12 +263,22 @@ export class IndexedDbStorage implements Storage {
     const key = sanitizeDid(did);
     await this.db.transaction(
       "rw",
-      [this.db.configs, this.db.identities, this.db.sessions, this.db.profiles],
+      [
+        this.db.configs,
+        this.db.identities,
+        this.db.sessions,
+        this.db.profiles,
+        this.db.cacheRecords,
+        this.db.cacheMeta,
+      ],
       async () => {
         await this.db.configs.put({ key: CONFIG_KEY, value: updatedConfig });
         await this.db.identities.delete(key);
         await this.db.sessions.delete(key);
         await this.db.profiles.delete(key);
+        // Clear all cached records for this account
+        await this.db.cacheRecords.where("did").equals(did).delete();
+        await this.db.cacheMeta.where("did").equals(did).delete();
       },
     );
   }
@@ -153,3 +294,6 @@ export class IndexedDbStorage implements Storage {
     await this.db.delete();
   }
 }
+
+/** Shared singleton — every module should import this instead of constructing its own. */
+export const storage = new IndexedDbStorage();

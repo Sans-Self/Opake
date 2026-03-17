@@ -10,15 +10,15 @@ import { useAppStore } from "@/stores/app";
 function CabinetLayout() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const fetchAll = useDocumentsStore((s) => s.fetchAll);
+  const loadCabinet = useDocumentsStore((s) => s.loadCabinet);
   const anyLoading = useAppStore((s) => s.anythingLoading());
 
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   useEffect(() => {
-    void fetchAll();
-  }, [fetchAll]);
+    void loadCabinet();
+  }, [loadCabinet]);
 
   return (
     <div className="bg-base-300 flex h-screen overflow-hidden font-sans">

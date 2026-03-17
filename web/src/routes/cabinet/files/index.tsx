@@ -9,7 +9,7 @@ import type { FileItem } from "@/components/cabinet/types";
 
 function RootDirectoryContent() {
   const navigate = useNavigate();
-  const ensureDirectoryDecrypted = useDocumentsStore((s) => s.ensureDirectoryDecrypted);
+  const ensureDirectoryReady = useDocumentsStore((s) => s.ensureDirectoryReady);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
@@ -35,8 +35,8 @@ function RootDirectoryContent() {
   }, [readmeUri]);
 
   useEffect(() => {
-    void ensureDirectoryDecrypted(null);
-  }, [ensureDirectoryDecrypted]);
+    void ensureDirectoryReady(null);
+  }, [ensureDirectoryReady]);
 
   const navigateToChild = (item: FileItem) => {
     void navigate({

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
 import { getOpakeWorker } from "@/lib/worker";
-import { IndexedDbStorage } from "@/lib/indexeddbStorage";
+import { storage } from "@/lib/indexeddbStorage";
 import { formatFingerprint, rkeyFromUri } from "@/lib/encoding";
 import {
   createPairRequest,
@@ -14,8 +14,6 @@ import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
 
 const POLL_INTERVAL_MS = 3000;
-
-const storage = new IndexedDbStorage();
 
 // ---------------------------------------------------------------------------
 // Route
