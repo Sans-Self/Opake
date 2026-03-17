@@ -104,6 +104,14 @@ AI-assisted contributions are welcome. No special rules beyond:
 - All CI checks must pass (fmt, clippy, test).
 - Describe what changed and why in the PR body.
 
+## Security
+
+Found a vulnerability? **Do not open a public issue.** See [SECURITY.md](SECURITY.md) for reporting instructions.
+
+## License
+
+By submitting a pull request, you agree that your contribution is licensed under [AGPL-3.0](LICENSE), the same license as the rest of the project. See [docs/LICENSING.md](docs/LICENSING.md) for details on what AGPL means for different use cases.
+
 ## Project management
 
 This project uses [crosslink](https://github.com/forecast-bio/crosslink) for

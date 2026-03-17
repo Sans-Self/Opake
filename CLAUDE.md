@@ -33,6 +33,8 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 - **[docs/appview.md](docs/appview.md)** — AppView config, auth, API endpoints
 - **[lexicons/README.md](lexicons/README.md)** — Full lexicon schema reference
 - **[lexicons/EXAMPLES.md](lexicons/EXAMPLES.md)** — Annotated example records
+- **[docs/LICENSING.md](docs/LICENSING.md)** — AGPL-3.0 implications for self-hosters, plugin devs, contributors
+- **[SECURITY.md](SECURITY.md)** — Vulnerability reporting, scope, response timeline
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Code style, testing, architecture overview
 
 ## References
