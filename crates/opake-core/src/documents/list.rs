@@ -10,7 +10,8 @@ use super::DOCUMENT_COLLECTION;
 /// Contains only wire-format data: AT-URI, timestamps, encryption envelope,
 /// and the encrypted metadata blob. Callers must decrypt `encrypted_metadata`
 /// to obtain the document's name, MIME type, size, tags, and description.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentEntry {
     pub uri: String,
     pub created_at: String,

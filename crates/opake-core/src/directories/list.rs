@@ -6,7 +6,8 @@ use super::DIRECTORY_COLLECTION;
 
 /// A directory listing entry with its AT-URI and encrypted metadata.
 /// Callers decrypt the name using the encryption envelope.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DirectoryEntry {
     pub uri: String,
     pub encryption: Encryption,

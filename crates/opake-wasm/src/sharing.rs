@@ -1,11 +1,15 @@
 // WASM exports for sharing operations (grants).
 
+use opake_core::client::WasmTransport;
 use opake_core::crypto::OsRng;
+use opake_core::documents;
 use opake_core::sharing::{self, GrantParams};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use crate::wasm_util::{make_client, priv_key_from_slice, pub_key_from_slice, result_with_session};
+use crate::wasm_util::{
+    make_client, priv_key_from_slice, pub_key_from_slice, result_with_session, serde_bytes,
+};
 
 // ---------------------------------------------------------------------------
 // Create grant
@@ -156,4 +160,31 @@ pub async fn document_content_key_for_sharing(
             content_key: content_key.0.to_vec(),
         },
     )
+}
+
+// ---------------------------------------------------------------------------
+// Download from incoming grant (cross-PDS, unauthenticated)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadFromGrantResult {
+    filename: String,
+    #[serde(with = "serde_bytes")]
+    plaintext: Vec<u8>,
+}
+
+/// Download and decrypt a document shared via an incoming grant.
+/// Uses unauthenticated public PDS endpoints — no session needed.
+#[wasm_bindgen(js_name = downloadFromGrant)]
+pub async fn download_from_grant(grant_uri: &str, private_key: &[u8]) -> Result<JsValue, JsError> {
+    let privkey = priv_key_from_slice(private_key)?;
+    let transport = WasmTransport::new();
+    let (filename, plaintext) =
+        documents::download_from_grant(&transport, &privkey, grant_uri).await?;
+    serde_wasm_bindgen::to_value(&DownloadFromGrantResult {
+        filename,
+        plaintext,
+    })
+    .map_err(|e| JsError::new(&e.to_string()))
 }

@@ -23,6 +23,10 @@ import {
   grantCreate as wasmGrantCreate,
   grantRevoke as wasmGrantRevoke,
   fetchIncomingGrants as wasmFetchIncomingGrants,
+  listDocuments as wasmListDocuments,
+  listDirectories as wasmListDirectories,
+  listGrants as wasmListGrants,
+  downloadFromGrant as wasmDownloadFromGrant,
 } from "@/wasm/opake-wasm/opake";
 
 // WASM returns { result: T, session: unknown }. Flatten to { ...T, session }.
@@ -244,5 +248,35 @@ export const pdsApi = {
     return flatten(
       await wasmFetchIncomingGrants(pdsUrl, session, signingKey, did, defaultAppviewUrl),
     );
+  },
+
+  // List operations
+
+  async listDocuments(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{ records: readonly unknown[]; session: unknown }> {
+    return flatten(await wasmListDocuments(pdsUrl, session));
+  },
+
+  async listDirectories(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{ records: readonly unknown[]; session: unknown }> {
+    return flatten(await wasmListDirectories(pdsUrl, session));
+  },
+
+  async listGrants(
+    pdsUrl: string,
+    session: unknown,
+  ): Promise<{ records: readonly unknown[]; session: unknown }> {
+    return flatten(await wasmListGrants(pdsUrl, session));
+  },
+
+  async downloadFromGrant(
+    grantUri: string,
+    privateKey: Uint8Array,
+  ): Promise<{ filename: string; plaintext: Uint8Array }> {
+    return wasmDownloadFromGrant(grantUri, privateKey);
   },
 };
