@@ -72,4 +72,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit con
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE) — see [docs/LICENSING.md](docs/LICENSING.md) for what this means for self-hosters, plugin developers, and contributors.
