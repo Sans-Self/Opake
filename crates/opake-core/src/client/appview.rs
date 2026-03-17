@@ -3,19 +3,10 @@
 // Uses the Transport trait for WASM compatibility. Signs each request
 // with the caller's Ed25519 key via sign_appview_request.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::client::appview_auth::sign_appview_request;
 use crate::client::appview_types::{InboxGrant, InboxResponse};
 use crate::client::transport::{HttpMethod, HttpRequest, Transport};
 use crate::error::Error;
-
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before unix epoch")
-        .as_secs()
-}
 
 /// Check an appview JSON response for errors.
 fn check_appview_response(status: u16, body: &[u8]) -> Result<(), Error> {
@@ -46,7 +37,7 @@ pub async fn fetch_inbox(
     cursor: Option<&str>,
 ) -> Result<InboxResponse, Error> {
     let path = "/api/inbox";
-    let timestamp = now_unix();
+    let timestamp = super::time::unix_now() as u64;
     let auth = sign_appview_request("GET", path, did, signing_key, timestamp);
 
     let mut query = format!("did={did}");

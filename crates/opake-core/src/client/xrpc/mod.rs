@@ -251,7 +251,7 @@ impl<T: Transport> XrpcClient<T> {
                     HttpMethod::Get => "GET",
                     HttpMethod::Post => "POST",
                 };
-                let timestamp = unix_timestamp();
+                let timestamp = super::time::unix_now();
                 let proof = create_dpop_proof(
                     &s.dpop_key,
                     method,
@@ -348,13 +348,6 @@ impl<T: Transport> XrpcClient<T> {
         check_response(&response)?;
         Ok(response)
     }
-}
-
-fn unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_secs() as i64
 }
 
 #[cfg(test)]

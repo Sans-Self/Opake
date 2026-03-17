@@ -10,6 +10,7 @@ pub mod oauth_discovery;
 pub mod oauth_token;
 #[cfg(feature = "reqwest-transport")]
 mod reqwest_transport;
+mod time;
 mod transport;
 mod xrpc;
 

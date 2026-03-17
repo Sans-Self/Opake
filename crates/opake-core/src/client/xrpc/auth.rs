@@ -92,7 +92,7 @@ impl<T: Transport> super::XrpcClient<T> {
     async fn refresh_oauth(&mut self, mut session: super::OAuthSession) -> Result<(), Error> {
         info!("access token expired, refreshing OAuth session");
 
-        let timestamp = super::unix_timestamp();
+        let timestamp = super::super::time::unix_now();
         let result = oauth_token::refresh_token(
             &self.transport,
             &session.token_endpoint,

@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- Add web e2e tests with Playwright against fake-pds (#360)
+- Add web e2e tests with Playwright against fake-pds [#360](https://issues.opake.app/issues/360.html)
 - Add e2e test suite for CLI against fake-pds [#358](https://issues.opake.app/issues/358.html)
 - Add DID document resolution to fake-pds and CLI PLC directory override [#359](https://issues.opake.app/issues/359.html)
 - Add fake-pds: in-memory AT Protocol PDS for integration testing [#349](https://issues.opake.app/issues/349.html)
