@@ -5,7 +5,7 @@ import { immer } from "zustand/middleware/immer";
 import { castDraft } from "immer";
 import { useAuthStore } from "@/stores/auth";
 import { loading } from "@/stores/app";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import type { FileItem } from "@/components/cabinet/types";
 import type {
@@ -15,21 +15,27 @@ import type {
   DirectoryTreeSnapshot,
 } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
-import { downloadDocument } from "@/lib/download";
-import { deleteDocument } from "@/lib/delete";
-import { uploadDocument } from "@/lib/upload";
-import {
-  createDirectory,
-  deleteDirectory,
-  renameDirectory as renameDirectoryOnPds,
-} from "@/lib/directory";
-import { moveEntry as moveEntryOnPds } from "@/lib/move";
-import { updateDocumentMetadata } from "@/lib/metadata";
-import type { MetadataChanges } from "@/lib/metadata";
+import { triggerBrowserDownload } from "@/lib/download";
+import type { Session } from "@/lib/storageTypes";
 import { toastSuccess, toastError, toastInfo } from "@/stores/toast";
 import { storage, fetchAllRecords } from "./fetch";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
+
+// ---------------------------------------------------------------------------
+// Types & helpers
+// ---------------------------------------------------------------------------
+
+export interface MetadataChanges {
+  readonly name: string;
+  readonly tags?: string[];
+  readonly description?: string;
+}
+
+/** Persist the session returned by a WASM PDS operation (captures DPoP nonce updates + token refreshes). */
+async function persistSession(did: string, session: unknown): Promise<void> {
+  await storage.saveSession(did, session as Session);
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -119,7 +125,7 @@ export const useDocumentsStore = create<DocumentsState>()(
         const sharedDocumentUris = new Set(grantRecords.map((r) => r.value.document));
 
         // Build directory tree in WASM — decrypts all directory names in one call
-        const worker = getCryptoWorker();
+        const worker = getOpakeWorker();
         const snapshot = await worker.buildDirectoryTree(directoryRecords, did, privateKey);
 
         // Build a lookup for directory records by URI (for timestamps)
@@ -268,15 +274,6 @@ export const useDocumentsStore = create<DocumentsState>()(
       const authState = useAuthStore.getState();
       if (authState.session.status !== "active") return;
 
-      const record = get().documentRecords[documentUri];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-      if (!record) return;
-
-      if (record.value.encryption.$type !== "app.opake.document#directEncryption") {
-        console.warn("[documents] keyring-encrypted downloads not yet supported:", documentUri);
-        return;
-      }
-
       const done = loading(`download:${documentUri}`);
 
       try {
@@ -285,7 +282,12 @@ export const useDocumentsStore = create<DocumentsState>()(
         const identity = await storage.loadIdentity(did);
         const privateKey = base64ToUint8Array(identity.private_key);
 
-        await downloadDocument(record, pdsUrl, did, privateKey, session);
+        const worker = getOpakeWorker();
+        const result = await worker.documentDownload(pdsUrl, session, documentUri, privateKey, did);
+        await persistSession(did, result.session);
+
+        triggerBrowserDownload(result.plaintext, result.filename, "application/octet-stream");
+
         toastSuccess("Download started");
       } catch (error) {
         console.error("[documents] download failed:", documentUri, error);
@@ -305,11 +307,12 @@ export const useDocumentsStore = create<DocumentsState>()(
         const { did, pdsUrl } = authState.session;
         const session = await storage.loadSession(did);
 
-        // Find parent directory from tree snapshot
         const { treeSnapshot } = get();
         const parentUri = findParentUri(treeSnapshot, documentUri);
 
-        await deleteDocument(documentUri, parentUri ?? null, pdsUrl, did, session);
+        const worker = getOpakeWorker();
+        const result = await worker.documentDelete(pdsUrl, session, documentUri, parentUri ?? null);
+        await persistSession(did, result.session);
         toastSuccess("File deleted");
 
         // Optimistic removal from store — reuse cached parentUri
@@ -347,17 +350,42 @@ export const useDocumentsStore = create<DocumentsState>()(
 
       try {
         const { did, pdsUrl } = authState.session;
+        console.debug("[upload] loading session + identity for", did);
         const session = await storage.loadSession(did);
         const identity = await storage.loadIdentity(did);
         const publicKey = base64ToUint8Array(identity.public_key);
+        const plaintext = new Uint8Array(await file.arrayBuffer());
 
-        await uploadDocument(file, directoryUri, pdsUrl, did, publicKey, session);
+        console.debug("[upload] calling WASM documentUpload", {
+          pdsUrl,
+          did,
+          filename: file.name,
+          mimeType: file.type,
+          plaintextLen: plaintext.length,
+          publicKeyLen: publicKey.length,
+          directoryUri,
+          sessionType: (session as { type?: string }).type,
+        });
 
-        // Refresh the entire tree so the new file appears
+        const worker = getOpakeWorker();
+        const result = await worker.documentUpload(
+          pdsUrl,
+          session,
+          plaintext,
+          file.name,
+          file.type || "application/octet-stream",
+          null,
+          directoryUri,
+          publicKey,
+          did,
+        );
+        console.debug("[upload] WASM returned", { uri: result.uri, hasSession: !!result.session });
+        await persistSession(did, result.session);
+
         await get().fetchAll();
         toastSuccess("File uploaded");
       } catch (error) {
-        console.error("[documents] upload failed:", error);
+        console.error("[upload] FAILED:", error instanceof Error ? error.message : error);
         toastError("Upload failed");
       } finally {
         done();
@@ -376,7 +404,16 @@ export const useDocumentsStore = create<DocumentsState>()(
         const identity = await storage.loadIdentity(did);
         const publicKey = base64ToUint8Array(identity.public_key);
 
-        await createDirectory(name, directoryUri, pdsUrl, did, publicKey, session);
+        const worker = getOpakeWorker();
+        const result = await worker.directoryCreate(
+          pdsUrl,
+          session,
+          name,
+          directoryUri,
+          publicKey,
+          did,
+        );
+        await persistSession(did, result.session);
 
         await get().fetchAll();
         toastSuccess("Folder created");
@@ -394,19 +431,42 @@ export const useDocumentsStore = create<DocumentsState>()(
 
       const done = loading(`delete:${folderUri}`);
 
-      try {
-        const { did, pdsUrl } = authState.session;
-        const session = await storage.loadSession(did);
+      const { did, pdsUrl } = authState.session;
+      // eslint-disable-next-line functional/no-let -- session accumulates across sequential calls; hoisted for catch-block persistence
+      let currentSession: unknown = null;
 
-        // Find parent directory
+      try {
+        const session = await storage.loadSession(did);
+        currentSession = session;
+
         const { treeSnapshot } = get();
         const parentUri = findParentUri(treeSnapshot, folderUri);
 
-        // Collect all descendants from the WASM tree
-        const worker = getCryptoWorker();
+        const worker = getOpakeWorker();
         const descendants = await worker.treeCollectDescendants(folderUri);
 
-        await deleteDirectory(folderUri, parentUri ?? null, descendants, pdsUrl, did, session);
+        // Delete all descendants, then the directory itself, then remove from parent.
+        // Sequential because each call returns an updated session (DPoP nonce).
+        // eslint-disable-next-line functional/no-loop-statements -- sequential async with session chaining
+        for (const d of descendants) {
+          const dResult =
+            d.kind === "document"
+              ? await worker.documentDelete(pdsUrl, currentSession, d.uri, null)
+              : await worker.directoryDelete(pdsUrl, currentSession, d.uri);
+          currentSession = dResult.session;
+        }
+        const delResult = await worker.directoryDelete(pdsUrl, currentSession, folderUri);
+        currentSession = delResult.session;
+        if (parentUri) {
+          const rmResult = await worker.directoryRemoveEntry(
+            pdsUrl,
+            currentSession,
+            parentUri,
+            folderUri,
+          );
+          currentSession = rmResult.session;
+        }
+        await persistSession(did, currentSession);
 
         // Optimistic removal — remove the folder + all descendants from store
         const descendantUris = new Set(descendants.map((d) => d.uri));
@@ -448,6 +508,11 @@ export const useDocumentsStore = create<DocumentsState>()(
         toastSuccess("Folder deleted");
       } catch (error) {
         console.error("[documents] deleteFolder failed:", folderUri, error);
+        // Persist the last good session to avoid stale DPoP nonce after partial failure
+        if (currentSession) {
+          // eslint-disable-next-line @typescript-eslint/no-empty-function -- best-effort persistence, failure is non-fatal
+          await persistSession(did, currentSession).catch(() => {});
+        }
         toastError("Failed to delete folder");
       } finally {
         done();
@@ -458,15 +523,6 @@ export const useDocumentsStore = create<DocumentsState>()(
       const authState = useAuthStore.getState();
       if (authState.session.status !== "active") return;
 
-      const record = get().documentRecords[documentUri];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-      if (!record) return;
-
-      if (record.value.encryption.$type !== "app.opake.document#directEncryption") {
-        toastError("Cannot edit keyring-encrypted documents yet");
-        return;
-      }
-
       const done = loading(`metadata:${documentUri}`);
 
       try {
@@ -475,16 +531,18 @@ export const useDocumentsStore = create<DocumentsState>()(
         const identity = await storage.loadIdentity(did);
         const privateKey = base64ToUint8Array(identity.private_key);
 
-        const updatedRecord = await updateDocumentMetadata(
-          record,
-          changes,
+        const worker = getOpakeWorker();
+        const result = await worker.documentUpdateMetadata(
           pdsUrl,
-          did,
-          privateKey,
           session,
+          documentUri,
+          changes,
+          privateKey,
+          did,
         );
+        await persistSession(did, result.session);
 
-        // Update store item + cached record in place
+        // Optimistic store update
         set((draft) => {
           const item = draft.items[documentUri];
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
@@ -494,12 +552,6 @@ export const useDocumentsStore = create<DocumentsState>()(
             item.tags = changes.tags ?? [];
             item.description = changes.description;
             /* eslint-enable functional/immutable-data */
-          }
-          const storedRecord = draft.documentRecords[documentUri];
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-          if (storedRecord) {
-            // eslint-disable-next-line functional/immutable-data -- immer draft mutation
-            storedRecord.value = castDraft(updatedRecord);
           }
         });
 
@@ -519,7 +571,6 @@ export const useDocumentsStore = create<DocumentsState>()(
       const { treeSnapshot, items } = get();
       const currentParentUri = findParentUri(treeSnapshot, entryUri) ?? null;
 
-      // Noop if already in target
       if (currentParentUri === targetDirectoryUri) {
         toastInfo("Already in that folder");
         return;
@@ -532,16 +583,37 @@ export const useDocumentsStore = create<DocumentsState>()(
       try {
         const { did, pdsUrl } = authState.session;
         const session = await storage.loadSession(did);
+        const worker = getOpakeWorker();
 
-        await moveEntryOnPds(entryUri, currentParentUri, targetDirectoryUri, pdsUrl, did, session);
+        // Remove from source, add to target. Sequential — session must chain.
+        // eslint-disable-next-line functional/no-let -- accumulate session across sequential calls
+        let currentSession: unknown = session;
+        if (currentParentUri) {
+          const rmResult = await worker.directoryRemoveEntry(
+            pdsUrl,
+            currentSession,
+            currentParentUri,
+            entryUri,
+          );
+          currentSession = rmResult.session;
+        }
+        const targetUri = targetDirectoryUri ?? treeSnapshot?.rootUri;
+        if (targetUri) {
+          const addResult = await worker.directoryAddEntry(
+            pdsUrl,
+            currentSession,
+            targetUri,
+            entryUri,
+          );
+          currentSession = addResult.session;
+        }
+        await persistSession(did, currentSession);
 
-        // Rebuild tree to reflect the move
         await get().fetchAll();
         toastSuccess(`Moved "${entryName}"`);
       } catch (error) {
         console.error("[documents] moveEntry failed:", entryUri, error);
         toastError(`Failed to move "${entryName}"`);
-        // Rebuild tree to recover from potential partial state
         await get().fetchAll();
       } finally {
         done();
@@ -560,7 +632,16 @@ export const useDocumentsStore = create<DocumentsState>()(
         const identity = await storage.loadIdentity(did);
         const privateKey = base64ToUint8Array(identity.private_key);
 
-        await renameDirectoryOnPds(directoryUri, newName, pdsUrl, did, privateKey, session);
+        const worker = getOpakeWorker();
+        const result = await worker.directoryRename(
+          pdsUrl,
+          session,
+          directoryUri,
+          newName,
+          privateKey,
+          did,
+        );
+        await persistSession(did, result.session);
 
         // Update store item + tree snapshot in place
         set((draft) => {

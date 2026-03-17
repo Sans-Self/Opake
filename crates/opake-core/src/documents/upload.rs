@@ -118,6 +118,43 @@ pub async fn encrypt_and_upload(
     Ok(record_ref.uri)
 }
 
+/// Encrypt, upload, ensure the root directory exists, and add the document
+/// to the specified directory (or root if none). Returns the document AT-URI.
+///
+/// This is the high-level entry point that both CLI and WASM should use.
+pub async fn upload_to_directory(
+    client: &mut XrpcClient<impl Transport>,
+    params: &UploadParams<'_>,
+    directory_uri: Option<&str>,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<String, Error> {
+    use crate::directories;
+
+    // Ensure root directory exists (idempotent — no-op after first call)
+    let (root_enc, root_meta) = directories::encrypt_directory_envelope(
+        directories::ROOT_DIRECTORY_NAME,
+        params.owner_did,
+        params.owner_pubkey,
+        rng,
+    )?;
+    directories::get_or_create_root(
+        client,
+        params.owner_did,
+        root_enc,
+        root_meta,
+        params.created_at,
+    )
+    .await?;
+
+    let uri = encrypt_and_upload(client, params, rng).await?;
+
+    let root_uri = directories::root_directory_uri(params.owner_did);
+    let parent = directory_uri.unwrap_or(&root_uri);
+    directories::add_entry(client, parent, &uri, params.created_at).await?;
+
+    Ok(uri)
+}
+
 /// Parameters for keyring-based upload.
 pub struct KeyringUploadParams<'a> {
     pub plaintext: &'a [u8],

@@ -5,7 +5,7 @@ import { PanelShell } from "@/components/cabinet/PanelShell";
 import { useAuthStore } from "@/stores/auth";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { authenticatedGetRecord, authenticatedPutRecord } from "@/lib/api";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { truncateDid } from "@/lib/format";
 import { toastSuccess, toastError } from "@/stores/toast";
 import type { AccountConfigRecord } from "@/lib/pdsTypes";
@@ -34,7 +34,7 @@ function AccountConfigSection() {
     if (!did || !pdsUrl) return;
 
     const cancelled = { current: false };
-    const worker = getCryptoWorker();
+    const worker = getOpakeWorker();
 
     void (async () => {
       const [collection, rkey, sess] = await Promise.all([
@@ -75,7 +75,7 @@ function AccountConfigSection() {
 
       setSaving(true);
       try {
-        const worker = getCryptoWorker();
+        const worker = getOpakeWorker();
         const [collection, rkey, sess] = await Promise.all([
           worker.accountConfigCollection(),
           worker.accountConfigRkey(),

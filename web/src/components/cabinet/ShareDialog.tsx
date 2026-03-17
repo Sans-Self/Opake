@@ -3,7 +3,7 @@ import { ShareNetworkIcon } from "@phosphor-icons/react";
 import { resolveRecipient, createGrant } from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { authenticatedXrpc } from "@/lib/api";
 import { toastSuccess, toastError } from "@/stores/toast";
@@ -27,7 +27,7 @@ async function unwrapContentKey(
     throw new Error("Keyring-encrypted documents cannot be shared via ad-hoc grants yet");
   }
 
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const keys = encryption.envelope.keys;
 
   /* eslint-disable functional/no-loop-statements -- sequential try/catch unwrap */

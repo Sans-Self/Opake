@@ -17,7 +17,7 @@ import {
 } from "@/lib/api";
 import { resolveHandleToPds } from "@/lib/oauth";
 import { pdsUrlFromDid } from "@/lib/did";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
 import { triggerBrowserDownload } from "@/lib/download";
@@ -104,7 +104,7 @@ interface CreateGrantParams {
 
 /** Wrap the content key to the recipient and create a grant record on the PDS. */
 export async function createGrant(params: CreateGrantParams): Promise<string> {
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
 
   const wrappedKey = await worker.wrapKey(
     params.contentKey,
@@ -205,7 +205,7 @@ export async function listIncomingGrants(
   session: Session,
   signingKey: Uint8Array,
 ): Promise<InboxGrantItem[]> {
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const [collection, rkey] = await Promise.all([
     worker.accountConfigCollection(),
     worker.accountConfigRkey(),
@@ -309,7 +309,7 @@ export async function resolveIncomingGrant(
   const grantRecord = grantResult.value as GrantRecord;
 
   // Unwrap the content key with our private key
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const contentKey = await worker.unwrapKey(grantRecord.wrappedKey, privateKey);
 
   // Fetch the document record to decrypt its metadata
@@ -346,7 +346,7 @@ async function decryptIncomingBlob(resolved: ResolvedIncomingGrant): Promise<Dec
   const blobResponse = await fetch(blobUrl);
   if (!blobResponse.ok) throw new Error(`getBlob failed: HTTP ${blobResponse.status}`);
 
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const blobNonce = base64ToUint8Array(encryption.envelope.nonce.$bytes);
   const plaintext = await worker.decryptBlob(
     resolved.contentKey,

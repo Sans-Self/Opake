@@ -1,7 +1,7 @@
 // Document metadata decryption — unwrap content key, decrypt envelope,
 // update store items via the set callback.
 
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { mimeTypeToFileType, formatFileSize } from "@/lib/format";
 import type { FileItem } from "@/components/cabinet/types";
@@ -35,7 +35,7 @@ export async function unwrapDirectContentKey(
   did: string,
   privateKey: Uint8Array,
 ): Promise<Uint8Array> {
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const ourWrappedKey = encryption.envelope.keys.find((wk) => wk.did === did);
   if (!ourWrappedKey) throw new Error("No wrapped key for our DID");
   return worker.unwrapKey(ourWrappedKey, privateKey);
@@ -61,7 +61,7 @@ export async function decryptDocumentRecord(
 
   const contentKey = await unwrapDirectContentKey(encryption, did, privateKey);
   const { ciphertext, nonce } = decryptEnvelope(record.value.encryptedMetadata);
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const metadata: DocumentMetadata = await worker.decryptMetadata(contentKey, ciphertext, nonce);
 
   set((draft) => {

@@ -2,8 +2,8 @@
 
 import type { OAuthSession, Session } from "@/lib/storageTypes";
 import type { TokenResponse } from "@/lib/oauth";
-import type { BlobRef, PdsRecord } from "@/lib/pdsTypes";
-import { getCryptoWorker } from "@/lib/worker";
+import type { PdsRecord } from "@/lib/pdsTypes";
+import { getOpakeWorker } from "@/lib/worker";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 
 interface ApiConfig {
@@ -180,69 +180,12 @@ export async function authenticatedBlobFetch(
 }
 
 // ---------------------------------------------------------------------------
-// Authenticated blob upload (raw bytes → BlobRef)
-// ---------------------------------------------------------------------------
-
-interface BlobUploadParams {
-  pdsUrl: string;
-  data: Uint8Array;
-}
-
-export async function authenticatedBlobUpload(
-  params: BlobUploadParams,
-  session: Session,
-): Promise<BlobRef> {
-  const { pdsUrl, data } = params;
-  const url = `${pdsUrl.replace(/\/$/, "")}/xrpc/com.atproto.repo.uploadBlob`;
-
-  // Normalize to a real Uint8Array — Comlink may deliver typed arrays as plain Arrays
-  const bytes = new Uint8Array(data);
-
-  const response = await authenticatedRequest(
-    {
-      url,
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: new Blob([bytes]),
-      label: "uploadBlob",
-    },
-    session,
-  );
-
-  const result = (await response.json()) as { blob: BlobRef };
-  return result.blob;
-}
-
-// ---------------------------------------------------------------------------
-// Authenticated record creation + update
+// Authenticated record update
 // ---------------------------------------------------------------------------
 
 interface RecordRef {
   uri: string;
   cid: string;
-}
-
-interface CreateRecordParams {
-  pdsUrl: string;
-  did: string;
-  collection: string;
-  record: unknown;
-}
-
-export async function authenticatedCreateRecord(
-  params: CreateRecordParams,
-  session: Session,
-): Promise<RecordRef> {
-  const { pdsUrl, did, collection, record } = params;
-  return (await authenticatedXrpc(
-    {
-      pdsUrl,
-      lexicon: "com.atproto.repo.createRecord",
-      method: "POST",
-      body: { repo: did, collection, record: { $type: collection, ...(record as object) } },
-    },
-    session,
-  )) as RecordRef;
 }
 
 interface PutRecordParams {
@@ -325,7 +268,7 @@ const storage = new IndexedDbStorage();
 
 /** Refresh an expired OAuth access token. Mutates the session in place and persists to IndexedDB. */
 async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const url = session.tokenEndpoint;
 
   const body = new URLSearchParams({
@@ -412,7 +355,7 @@ async function attachDpopAuth(
   method: string,
   url: string,
 ): Promise<void> {
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const timestamp = Math.floor(Date.now() / 1000);
   const proof = await worker.createDpopProof(
     session.dpopKey,
@@ -439,7 +382,7 @@ interface AuthenticatedAppviewParams {
 
 export async function authenticatedAppview(params: AuthenticatedAppviewParams): Promise<unknown> {
   const { appviewUrl, path, did, signingKey } = params;
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const timestamp = Math.floor(Date.now() / 1000);
 
   // Signature covers only the path (no query string), matching appview's conn.request_path

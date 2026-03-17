@@ -10,7 +10,7 @@ import {
 } from "react";
 import { PencilSimpleIcon, XIcon } from "@phosphor-icons/react";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
-import type { MetadataChanges } from "@/lib/metadata";
+import type { MetadataChanges } from "@/stores/documents/store";
 import type { FileItem } from "./types";
 
 export type { MetadataChanges };

@@ -18,7 +18,7 @@ import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
 import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { useDocumentsStore } from "@/stores/documents/store";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { isPreviewable, type FileItem } from "./types";
 
 interface PanelContentProps {
@@ -56,7 +56,7 @@ export function PanelContent({
   const shareDialogRef = useRef<ShareDialogHandle>(null);
 
   const handleDeleteFolderClick = async (item: FileItem) => {
-    const worker = getCryptoWorker();
+    const worker = getOpakeWorker();
     const counts = await worker.treeCountDescendants(item.uri);
     deleteFolderDialogRef.current?.show(item.uri, item.name, counts.documents, counts.directories);
   };
@@ -73,7 +73,7 @@ export function PanelContent({
       item.kind === "folder"
         ? new Set([
             item.uri,
-            ...(await getCryptoWorker().treeCollectDescendants(item.uri)).map((d) => d.uri),
+            ...(await getOpakeWorker().treeCollectDescendants(item.uri)).map((d) => d.uri),
           ])
         : new Set();
 

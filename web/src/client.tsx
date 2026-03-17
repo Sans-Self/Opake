@@ -4,14 +4,14 @@ import { enableMapSet, enableArrayMethods } from "immer";
 import { StrictMode, startTransition } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { StartClient } from "@tanstack/react-start/client";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { useAuthStore } from "@/stores/auth";
 
 enableMapSet();
 enableArrayMethods();
 
 console.debug("[opake] app starting");
-getCryptoWorker(); // warm up WASM worker early
+getOpakeWorker(); // warm up WASM worker early
 void useAuthStore.getState().boot(); // start session restore from IndexedDB
 
 startTransition(() => {

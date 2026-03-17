@@ -17,7 +17,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { OAuthSession, Config } from "@/lib/storageTypes";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { authenticatedXrpc, authenticatedPutRecord } from "@/lib/api";
 import { loading } from "@/stores/app";
 import {
@@ -310,7 +310,7 @@ export const useAuthStore = create<AuthState>()(
       set((draft) => {
         draft.identity = { status: "checking" };
       });
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
 
       try {
         const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
@@ -333,7 +333,7 @@ export const useAuthStore = create<AuthState>()(
     },
 
     generateSeedPhrase: async () => {
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
       return worker.generateMnemonic();
     },
 
@@ -342,7 +342,7 @@ export const useAuthStore = create<AuthState>()(
       if (session.status !== "active") return;
 
       const done = loading("confirm-seed-phrase");
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
 
       try {
         const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
@@ -370,7 +370,7 @@ export const useAuthStore = create<AuthState>()(
       if (session.status !== "active") return { mismatch: false };
 
       const done = loading("recover-seed-phrase");
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
 
       try {
         const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
@@ -412,7 +412,7 @@ export const useAuthStore = create<AuthState>()(
       set((draft) => {
         draft.session = { status: "authenticating" };
       });
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
 
       try {
         const { pdsUrl } = await resolveHandleToPds(handle);
@@ -467,7 +467,7 @@ export const useAuthStore = create<AuthState>()(
       set((draft) => {
         draft.session = { status: "authenticating" };
       });
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
 
       try {
         const pending = loadPendingState();

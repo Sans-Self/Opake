@@ -48,12 +48,9 @@ pub async fn document_upload(
         created_at: &now,
     };
 
-    let uri = documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?;
-
-    // Add to directory (root if none specified)
-    let root_uri = opake_core::directories::root_directory_uri(did);
-    let parent = directory_uri.as_deref().unwrap_or(&root_uri);
-    opake_core::directories::add_entry(&mut client, parent, &uri, &now).await?;
+    let uri =
+        documents::upload_to_directory(&mut client, &params, directory_uri.as_deref(), &mut OsRng)
+            .await?;
 
     result_with_session(&client, &UploadResult { uri })
 }

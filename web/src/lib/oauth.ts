@@ -1,14 +1,14 @@
 // Browser OAuth 2.0 + DPoP orchestration for AT Protocol.
 //
 // HTTP calls use plain fetch. Crypto (DPoP proofs, PKCE, keypair gen) is
-// delegated to the WASM worker via the CryptoWorker type.
+// delegated to the WASM worker via the OpakeWorker type.
 
 import type { Remote } from "comlink";
-import type { CryptoApi } from "@/workers/crypto.worker";
+import type { OpakeApi } from "@/workers/opake.worker";
 import type { DpopKeyPair } from "@/lib/cryptoTypes";
 import { pdsUrlFromDid } from "@/lib/did";
 
-type CryptoWorker = Remote<CryptoApi>;
+type OpakeWorker = Remote<OpakeApi>;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -122,7 +122,7 @@ async function fetchWithDpop(
   dpopKey: DpopKeyPair,
   dpopNonce: string | null,
   accessToken: string | null,
-  worker: CryptoWorker,
+  worker: OpakeWorker,
 ): Promise<{ response: Response; dpopNonce: string | null }> {
   console.debug("[dpop] creating proof for", method, url);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -191,7 +191,7 @@ export async function pushedAuthorizationRequest(
   state: string,
   dpopKey: DpopKeyPair,
   dpopNonce: string | null,
-  worker: CryptoWorker,
+  worker: OpakeWorker,
   loginHint?: string,
 ): Promise<{ requestUri: string; expiresIn: number; dpopNonce: string | null }> {
   const body = new URLSearchParams({
@@ -253,7 +253,7 @@ export async function exchangeCode(
   pkceVerifier: string,
   dpopKey: DpopKeyPair,
   dpopNonce: string | null,
-  worker: CryptoWorker,
+  worker: OpakeWorker,
 ): Promise<{ tokenResponse: TokenResponse; dpopNonce: string | null }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -304,7 +304,7 @@ export async function publishPublicKey(
   accessToken: string,
   dpopKey: DpopKeyPair,
   dpopNonce: string | null,
-  worker: CryptoWorker,
+  worker: OpakeWorker,
 ): Promise<void> {
   const base = pdsUrl.replace(/\/$/, "");
   const url = `${base}/xrpc/com.atproto.repo.putRecord`;

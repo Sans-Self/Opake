@@ -66,9 +66,9 @@ vi.mock("../../src/lib/indexeddbStorage", () => ({
   IndexedDbStorage: MockIndexedDbStorage,
 }));
 
-// Mock crypto worker
+// Mock opake worker
 vi.mock("../../src/lib/worker", () => ({
-  getCryptoWorker: () => ({
+  getOpakeWorker: () => ({
     generateMnemonic: () => "abandon ".repeat(23).trim() + " art",
     validateMnemonic: () => true,
     deriveIdentityFromMnemonic: (_phrase: string, did: string) => ({

@@ -18,7 +18,8 @@ pub use download_grant::download_from_grant;
 pub use download_keyring::{download_from_keyring_member, KeyringDownloadResult};
 pub use list::{list_documents, DecryptedDocumentEntry, DocumentEntry};
 pub use upload::{
-    encrypt_and_upload, encrypt_and_upload_keyring, KeyringUploadParams, UploadParams,
+    encrypt_and_upload, encrypt_and_upload_keyring, upload_to_directory, KeyringUploadParams,
+    UploadParams,
 };
 
 pub const DOCUMENT_COLLECTION: &str = "app.opake.document";

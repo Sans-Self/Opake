@@ -2,7 +2,7 @@
 
 import { authenticatedBlobFetch } from "@/lib/api";
 import { base64ToUint8Array } from "@/lib/encoding";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
@@ -42,7 +42,7 @@ export async function decryptDocumentBlob(
     authenticatedBlobFetch({ pdsUrl, did, cid }, session),
   ]);
 
-  const worker = getCryptoWorker();
+  const worker = getOpakeWorker();
   const blobNonce = base64ToUint8Array(encryption.envelope.nonce.$bytes);
   const plaintext = await worker.decryptBlob(contentKey, new Uint8Array(encryptedBlob), blobNonce);
 

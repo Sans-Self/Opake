@@ -2,7 +2,7 @@
 // Consumes authenticatedXrpc from api.ts and crypto worker functions.
 
 import type { Remote } from "comlink";
-import type { CryptoApi } from "@/workers/crypto.worker";
+import type { OpakeApi } from "@/workers/opake.worker";
 import type { WrappedKey, AtBytes } from "@/lib/cryptoTypes";
 import type { Identity, Session } from "@/lib/storageTypes";
 import { authenticatedXrpc } from "@/lib/api";
@@ -166,7 +166,7 @@ export async function pollForPairResponse(
 export async function receivePairResponse(
   response: PairResponseRecord,
   ephemeralPrivKey: Uint8Array,
-  worker: Remote<CryptoApi>,
+  worker: Remote<OpakeApi>,
 ): Promise<Identity> {
   // Unwrap the content key using the ephemeral private key
   const contentKey = await worker.unwrapKey(response.wrappedKey, ephemeralPrivKey);
@@ -194,7 +194,7 @@ export async function approvePairRequest(
   ephemeralPubKey: Uint8Array,
   identity: Identity,
   session: Session,
-  worker: Remote<CryptoApi>,
+  worker: Remote<OpakeApi>,
 ): Promise<string> {
   // Generate a content key for encrypting the identity
   const contentKey = await worker.generateContentKey();

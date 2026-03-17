@@ -28,14 +28,20 @@ function loadState(): E2eState {
  * Perform a full browser-based OAuth login against fake-pds.
  * Waits for the redirect chain to complete and the devices page to render.
  */
-async function doLogin(page: Page, webUrl: string, handle: string): Promise<void> {
+async function doLogin(
+  page: Page,
+  webUrl: string,
+  handle: string,
+): Promise<void> {
   await page.goto(`${webUrl}/devices/login`);
   await page.getByLabel("AT Protocol handle").fill(handle);
   await page.getByRole("button", { name: /Sign in/ }).click();
 
   // Wait for OAuth redirect chain: login → PAR → authorize → callback → /devices
   await expect(
-    page.getByText(/Setting things up|Welcome to Opake|You're all set|Welcome back/),
+    page.getByText(
+      /Setting things up|Welcome to Opake|You're all set|Welcome back/,
+    ),
   ).toBeVisible({ timeout: 15_000 });
 }
 
@@ -64,9 +70,12 @@ export const test = base.extend<WebFixtures>({
     const accountPool = new AccountPool(accounts);
     const { account, release } = accountPool.acquire();
     // Clean up state from any prior test run (per-DID, not global reset)
-    await fetch(`${pdsUrl}/_test/cleanup?did=${encodeURIComponent(account.did)}`, {
-      method: "POST",
-    });
+    await fetch(
+      `${pdsUrl}/_test/cleanup?did=${encodeURIComponent(account.did)}`,
+      {
+        method: "POST",
+      },
+    );
     await use(account);
     release();
   },
@@ -78,6 +87,24 @@ export const test = base.extend<WebFixtures>({
   },
 
   browserLogin: async ({ page, webUrl, account }, use) => {
+    // Capture browser console for debugging WASM/worker issues
+    page.on("console", (msg) => {
+      const type = msg.type();
+      if (
+        type === "error" ||
+        type === "warning" ||
+        msg.text().includes("[upload]") ||
+        msg.text().includes("[worker:pds]") ||
+        msg.text().includes("[WasmTransport]") ||
+        msg.text().includes("[documents]")
+      ) {
+        console.log(`[browser:${type}] ${msg.text()}`);
+      }
+    });
+    page.on("pageerror", (err) => {
+      console.log(`[browser:pageerror] ${err.message}`);
+    });
+
     await use(async (handle?: string) => {
       await doLogin(page, webUrl, handle ?? account.handle);
     });

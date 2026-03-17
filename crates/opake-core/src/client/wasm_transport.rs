@@ -23,6 +23,11 @@ impl WasmTransport {
 
 impl Transport for WasmTransport {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let method_str = match request.method {
+            HttpMethod::Get => "GET",
+            HttpMethod::Post => "POST",
+        };
+        log::debug!("[WasmTransport] {} {}", method_str, &request.url);
         let mut opts = RequestInit::new();
         opts.method(match request.method {
             HttpMethod::Get => "GET",
@@ -92,6 +97,13 @@ impl Transport for WasmTransport {
             .await
             .map_err(js_err)?;
         let body = js_sys::Uint8Array::new(&body_buf).to_vec();
+
+        log::debug!(
+            "[WasmTransport] {} {} → {}",
+            method_str,
+            &request.url,
+            status
+        );
 
         Ok(HttpResponse {
             status,

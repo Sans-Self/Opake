@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
-import { getCryptoWorker } from "@/lib/worker";
+import { getOpakeWorker } from "@/lib/worker";
 import { IndexedDbStorage } from "@/lib/indexeddbStorage";
 import { formatFingerprint, rkeyFromUri } from "@/lib/encoding";
 import {
@@ -67,7 +67,7 @@ function PairRequestPage() {
       if (authState.session.status !== "active") return;
 
       const { did, pdsUrl } = authState.session;
-      const worker = getCryptoWorker();
+      const worker = getOpakeWorker();
       const session = await storage.loadSession(did);
 
       addLoading("pair-request-init");

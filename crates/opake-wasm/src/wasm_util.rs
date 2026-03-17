@@ -37,8 +37,7 @@ pub fn result_with_session<T: Serialize>(
 ) -> Result<JsValue, JsError> {
     #[derive(Serialize)]
     struct WasmResult<'a, T: Serialize> {
-        #[serde(flatten)]
-        payload: &'a T,
+        result: &'a T,
         session: Session,
     }
 
@@ -46,7 +45,10 @@ pub fn result_with_session<T: Serialize>(
         .session()
         .cloned()
         .ok_or_else(|| JsError::new("session lost"))?;
-    let result = WasmResult { payload, session };
+    let result = WasmResult {
+        result: payload,
+        session,
+    };
     serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
