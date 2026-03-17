@@ -1,20 +1,10 @@
 // Sharing helpers — resolve recipient, create/list/revoke grants.
 
 import type { WrappedKey } from "@/lib/cryptoTypes";
-import type {
-  AccountConfigRecord,
-  EncryptedMetadataEnvelope,
-  DocumentRecord,
-  DocumentMetadata,
-} from "@/lib/pdsTypes";
+import type { EncryptedMetadataEnvelope, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
 import type { DecryptedBlob } from "@/lib/preview";
 import type { Session } from "@/lib/storageTypes";
-import {
-  authenticatedXrpc,
-  authenticatedGetRecord,
-  authenticatedDeleteRecord,
-  authenticatedAppview,
-} from "@/lib/api";
+import { authenticatedXrpc, authenticatedDeleteRecord, DEFAULT_APPVIEW_URL } from "@/lib/api";
 import { resolveHandleToPds } from "@/lib/oauth";
 import { pdsUrlFromDid } from "@/lib/did";
 import { getOpakeWorker } from "@/lib/worker";
@@ -193,12 +183,7 @@ export async function listOutgoingGrants(
 // Grant listing (incoming — from AppView inbox)
 // ---------------------------------------------------------------------------
 
-interface InboxResponse {
-  readonly grants: InboxGrantItem[];
-  readonly cursor?: string;
-}
-
-/** Fetch incoming grants from the AppView inbox (authenticated). */
+/** Fetch incoming grants from the AppView inbox via WASM. */
 export async function listIncomingGrants(
   pdsUrl: string,
   did: string,
@@ -206,40 +191,14 @@ export async function listIncomingGrants(
   signingKey: Uint8Array,
 ): Promise<InboxGrantItem[]> {
   const worker = getOpakeWorker();
-  const [collection, rkey] = await Promise.all([
-    worker.accountConfigCollection(),
-    worker.accountConfigRkey(),
-  ]);
-  const accountConfig = await authenticatedGetRecord<AccountConfigRecord>(
-    { pdsUrl, did, collection, rkey },
+  const result = await worker.fetchIncomingGrants(
+    pdsUrl,
     session,
-  ).catch(() => null);
-  const appviewUrl =
-    accountConfig?.value.appviewUrl ??
-    (import.meta.env.VITE_APPVIEW_URL as string | undefined) ??
-    "https://appview.opake.app";
-
-  /* eslint-disable functional/no-loop-statements, functional/no-let, functional/immutable-data, functional/prefer-immutable-types -- paginated cursor loop */
-  const items: InboxGrantItem[] = [];
-  let cursor: string | undefined;
-
-  do {
-    const query = new URLSearchParams({ did, limit: "100" });
-    if (cursor) query.set("cursor", cursor);
-
-    const response = (await authenticatedAppview({
-      appviewUrl,
-      path: `/api/inbox?${query}`,
-      did,
-      signingKey,
-    })) as InboxResponse;
-
-    items.push(...response.grants);
-    cursor = response.cursor;
-  } while (cursor);
-  /* eslint-enable functional/no-loop-statements, functional/no-let, functional/immutable-data, functional/prefer-immutable-types */
-
-  return items;
+    signingKey,
+    did,
+    DEFAULT_APPVIEW_URL,
+  );
+  return result.grants as InboxGrantItem[];
 }
 
 // ---------------------------------------------------------------------------

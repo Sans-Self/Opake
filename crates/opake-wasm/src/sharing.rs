@@ -73,6 +73,57 @@ pub async fn grant_revoke(
 }
 
 // ---------------------------------------------------------------------------
+// Fetch incoming grants from appview
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InboxResult {
+    grants: Vec<opake_core::client::InboxGrant>,
+}
+
+/// Fetch all incoming grants from the appview inbox.
+///
+/// Resolves the appview URL from the user's account config on the PDS,
+/// falling back to the provided default. Paginates automatically.
+#[wasm_bindgen(js_name = fetchIncomingGrants)]
+pub async fn fetch_incoming_grants(
+    pds_url: &str,
+    session: JsValue,
+    signing_key: &[u8],
+    did: &str,
+    default_appview_url: &str,
+) -> Result<JsValue, JsError> {
+    let mut client = make_client(pds_url, session)?;
+    let key: [u8; 32] = signing_key
+        .try_into()
+        .map_err(|_| JsError::new("signing key must be 32 bytes"))?;
+
+    // Fetch account config to get custom appview URL (if set)
+    let appview_url = match client
+        .get_record(
+            did,
+            &opake_core::records::ACCOUNT_CONFIG_COLLECTION,
+            &opake_core::records::ACCOUNT_CONFIG_RKEY,
+        )
+        .await
+    {
+        Ok(entry) => {
+            serde_json::from_value::<opake_core::records::AccountConfigRecord>(entry.value)
+                .ok()
+                .and_then(|c| c.appview_url)
+                .unwrap_or_else(|| default_appview_url.to_string())
+        }
+        Err(_) => default_appview_url.to_string(),
+    };
+
+    let transport = opake_core::client::WasmTransport::new();
+    let grants = opake_core::client::fetch_inbox_all(&transport, &appview_url, did, &key).await?;
+
+    result_with_session(&client, &InboxResult { grants })
+}
+
+// ---------------------------------------------------------------------------
 // Fetch content key for sharing (unwrap from own document)
 // ---------------------------------------------------------------------------
 

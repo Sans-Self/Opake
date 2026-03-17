@@ -3,6 +3,10 @@
 // Each function calls real opake-core functions through XrpcClient<WasmTransport>.
 // WASM returns { result, session }. These wrappers flatten that to
 // { ...result, session } so the store can access fields directly.
+//
+// The `any` bridge through `flatten` is unavoidable at the WASM boundary —
+// serde_wasm_bindgen produces untyped JsValue that we cast to typed returns.
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 
 import {
   directoryCreate as wasmDirectoryCreate,
@@ -18,14 +22,20 @@ import {
   documentFetchContentKey as wasmDocumentFetchContentKey,
   grantCreate as wasmGrantCreate,
   grantRevoke as wasmGrantRevoke,
+  fetchIncomingGrants as wasmFetchIncomingGrants,
 } from "@/wasm/opake-wasm/opake";
 
 // WASM returns { result: T, session: unknown }. Flatten to { ...T, session }.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- WASM returns untyped JsValue
-function flatten(wasmResult: any): { session: unknown; [key: string]: unknown } {
-  const { result, session } = wasmResult as { result: Record<string, unknown>; session: unknown };
+/**
+ * WASM returns `{ result: T, session }`. Flatten to `{ ...T, session }`.
+ * The cast is safe — serde_wasm_bindgen produces the exact shape the caller expects.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- trusted WASM boundary */
+function flatten(wasmResult: any): any {
+  const { result, session } = wasmResult;
   return { ...result, session };
 }
+/* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
 
 export const pdsApi = {
   // Directories
@@ -114,7 +124,8 @@ export const pdsApi = {
       sessionKeys: Object.keys(session as object),
     });
     try {
-      const result = flatten<{ uri: string; session: unknown }>(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- flatten returns any from WASM boundary
+      const result: Readonly<{ uri: string; session: unknown }> = flatten(
         await wasmDocumentUpload(
           pdsUrl,
           session,
@@ -211,5 +222,27 @@ export const pdsApi = {
     grantUri: string,
   ): Promise<{ session: unknown }> {
     return flatten(await wasmGrantRevoke(pdsUrl, session, grantUri));
+  },
+
+  // Appview
+
+  async fetchIncomingGrants(
+    pdsUrl: string,
+    session: unknown,
+    signingKey: Uint8Array,
+    did: string,
+    defaultAppviewUrl: string,
+  ): Promise<{
+    grants: readonly {
+      uri: string;
+      ownerDid: string;
+      documentUri: string;
+      createdAt: string;
+    }[];
+    session: unknown;
+  }> {
+    return flatten(
+      await wasmFetchIncomingGrants(pdsUrl, session, signingKey, did, defaultAppviewUrl),
+    );
   },
 };

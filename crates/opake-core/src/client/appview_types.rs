@@ -3,9 +3,9 @@
 // These mirror the appview's server-side types but only carry Deserialize —
 // this crate doesn't need to serialize them.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InboxGrant {
     pub uri: String,

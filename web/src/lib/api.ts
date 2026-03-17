@@ -11,10 +11,12 @@ interface ApiConfig {
   appviewUrl: string;
 }
 
+export const DEFAULT_APPVIEW_URL =
+  (import.meta.env.VITE_APPVIEW_URL as string | undefined) ?? "https://appview.opake.app";
+
 const defaultConfig: Readonly<ApiConfig> = {
   pdsUrl: (import.meta.env.VITE_PDS_URL as string | undefined) ?? "https://pds.sans-self.org",
-  appviewUrl:
-    (import.meta.env.VITE_APPVIEW_URL as string | undefined) ?? "https://appview.opake.app",
+  appviewUrl: DEFAULT_APPVIEW_URL,
 };
 
 // ---------------------------------------------------------------------------
@@ -367,36 +369,4 @@ async function attachDpopAuth(
   );
   headers.Authorization = `DPoP ${session.accessToken}`;
   headers.DPoP = proof;
-}
-
-// ---------------------------------------------------------------------------
-// AppView (authenticated with Opake-Ed25519)
-// ---------------------------------------------------------------------------
-
-interface AuthenticatedAppviewParams {
-  readonly appviewUrl: string;
-  readonly path: string;
-  readonly did: string;
-  readonly signingKey: Uint8Array;
-}
-
-export async function authenticatedAppview(params: AuthenticatedAppviewParams): Promise<unknown> {
-  const { appviewUrl, path, did, signingKey } = params;
-  const worker = getOpakeWorker();
-  const timestamp = Math.floor(Date.now() / 1000);
-
-  // Signature covers only the path (no query string), matching appview's conn.request_path
-  const pathOnly = path.split("?")[0];
-  const authHeader = await worker.signAppviewRequest("GET", pathOnly, did, signingKey, timestamp);
-
-  const response = await fetch(`${appviewUrl}${path}`, {
-    headers: { Authorization: authHeader },
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`AppView ${path}: ${response.status} ${detail}`.trim());
-  }
-
-  return response.json();
 }
