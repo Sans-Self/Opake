@@ -26,11 +26,51 @@ pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";
 pub const ROOT_DIRECTORY_NAME: &str = "/";
 
+/// Build a direct encryption envelope for a directory.
+///
+/// Generates a fresh content key, encrypts the metadata, and wraps the key
+/// to the owner's public key. Returns the pair needed by `create_directory`
+/// and `get_or_create_root`.
+pub fn encrypt_directory_envelope(
+    name: &str,
+    owner_did: &str,
+    owner_pubkey: &crate::crypto::X25519PublicKey,
+    rng: &mut (impl crate::crypto::CryptoRng + crate::crypto::RngCore),
+) -> Result<
+    (
+        crate::records::Encryption,
+        crate::records::EncryptedMetadata,
+    ),
+    crate::error::Error,
+> {
+    use crate::crypto::{self, DirectoryMetadata};
+    use crate::records::{AtBytes, DirectEncryption, Encryption, EncryptionEnvelope};
+
+    let content_key = crypto::generate_content_key(rng);
+
+    let metadata = DirectoryMetadata {
+        name: name.into(),
+        description: None,
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, rng)?;
+    let wrapped_key = crypto::wrap_key(&content_key, owner_pubkey, owner_did, rng)?;
+
+    let encryption = Encryption::Direct(DirectEncryption {
+        envelope: EncryptionEnvelope {
+            algo: "aes-256-gcm".into(),
+            nonce: AtBytes::from_raw(&[0u8; 12]),
+            keys: vec![wrapped_key],
+        },
+    });
+
+    Ok((encryption, encrypted_metadata))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-    use crate::crypto::{self, DirectoryMetadata, OsRng};
-    use crate::records::{AtBytes, DirectEncryption, Directory, Encryption, EncryptionEnvelope};
+    use crate::crypto::{self, OsRng};
+    use crate::records::{Directory, Encryption};
     use crate::test_utils::MockTransport;
 
     use super::*;
@@ -50,22 +90,7 @@ pub(crate) mod tests {
     /// Build a dummy encrypted directory for tests.
     fn encrypt_dummy_directory(name: &str) -> (Encryption, crate::records::EncryptedMetadata) {
         let (pubkey, _) = test_keypair();
-        let content_key = crypto::generate_content_key(&mut OsRng);
-        let metadata = DirectoryMetadata {
-            name: name.into(),
-            description: None,
-        };
-        let encrypted_metadata =
-            crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng).unwrap();
-        let wrapped_key = crypto::wrap_key(&content_key, &pubkey, TEST_DID, &mut OsRng).unwrap();
-        let encryption = Encryption::Direct(DirectEncryption {
-            envelope: EncryptionEnvelope {
-                algo: "aes-256-gcm".into(),
-                nonce: AtBytes::from_raw(&[0u8; 12]),
-                keys: vec![wrapped_key],
-            },
-        });
-        (encryption, encrypted_metadata)
+        encrypt_directory_envelope(name, TEST_DID, &pubkey, &mut OsRng).unwrap()
     }
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {

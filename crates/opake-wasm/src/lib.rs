@@ -12,10 +12,21 @@ use opake_core::storage::Identity;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+mod directories;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod wasm_util;
+
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
     console_log::init_with_level(log::Level::Debug).ok();
+}
+
+/// ISO 8601 UTC timestamp via JS Date.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn now_iso() -> String {
+    js_sys::Date::new_0().to_iso_string().into()
 }
 
 #[wasm_bindgen(js_name = bindingCheck)]
