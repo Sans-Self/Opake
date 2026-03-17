@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add web e2e tests with Playwright against fake-pds (#360)
 - Add e2e test suite for CLI against fake-pds [#358](https://issues.opake.app/issues/358.html)
 - Add DID document resolution to fake-pds and CLI PLC directory override [#359](https://issues.opake.app/issues/359.html)
 - Add fake-pds: in-memory AT Protocol PDS for integration testing [#349](https://issues.opake.app/issues/349.html)
@@ -18,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 ### Changed
+- Document AGPLv3 implications for self-hosters and plugin developers [#312](https://issues.opake.app/issues/312.html)
 - Audit and improve command hierarchy for clarity [#306](https://issues.opake.app/issues/306.html)
 - Improve help text and examples for all commands [#307](https://issues.opake.app/issues/307.html)
 - Refactor stdin prompt handling: consolidate 4+ duplicated implementations [#334](https://issues.opake.app/issues/334.html)
@@ -32,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.1.0-alpha] - 2026-03-13 
 
 ### Security
+- Add owner authorization check to keyring membership operations [#44](https://issues.opake.app/issues/44.html)
+- Add SECURITY.md with responsible disclosure policy [#309](https://issues.opake.app/issues/309.html)
 - Fix ContentKey Debug impl to redact secret bytes [#49](https://issues.opake.app/issues/49.html)
 - Add file permission hardening for sensitive config and key files [#8](https://issues.opake.app/issues/8.html)
 - Remove bearer token authentication fallback from AppView [#26](https://issues.opake.app/issues/26.html)s
