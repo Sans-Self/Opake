@@ -38,14 +38,8 @@ impl Transport for ReqwestTransport {
                 RequestBody::Bytes { data, content_type } => {
                     builder.header("Content-Type", content_type).body(data)
                 }
-                RequestBody::Form(params) => {
-                    let encoded: String = params
-                        .iter()
-                        .map(|(k, v)| {
-                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                        })
-                        .collect::<Vec<_>>()
-                        .join("&");
+                RequestBody::Form(ref params) => {
+                    let encoded = RequestBody::encode_form(params);
                     builder
                         .header("Content-Type", "application/x-www-form-urlencoded")
                         .body(encoded)

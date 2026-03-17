@@ -1326,6 +1326,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "x25519-dalek",
  "zeroize",
 ]

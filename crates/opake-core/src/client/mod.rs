@@ -12,6 +12,8 @@ pub mod oauth_token;
 mod reqwest_transport;
 mod time;
 mod transport;
+#[cfg(all(feature = "wasm-transport", target_arch = "wasm32"))]
+mod wasm_transport;
 mod xrpc;
 
 pub use appview::*;
@@ -24,4 +26,6 @@ pub use list::*;
 #[cfg(feature = "reqwest-transport")]
 pub use reqwest_transport::ReqwestTransport;
 pub use transport::*;
+#[cfg(all(feature = "wasm-transport", target_arch = "wasm32"))]
+pub use wasm_transport::WasmTransport;
 pub use xrpc::*;
