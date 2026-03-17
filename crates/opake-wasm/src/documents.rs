@@ -66,7 +66,7 @@ pub async fn document_upload(
 #[serde(rename_all = "camelCase")]
 struct DownloadResult {
     filename: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "crate::wasm_util::serde_bytes")]
     plaintext: Vec<u8>,
 }
 
@@ -185,7 +185,7 @@ pub async fn document_update_metadata(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ContentKeyResult {
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "crate::wasm_util::serde_bytes")]
     content_key: Vec<u8>,
 }
 
@@ -213,12 +213,4 @@ pub async fn document_fetch_content_key(
             content_key: content_key.0.to_vec(),
         },
     )
-}
-
-mod serde_bytes {
-    use serde::Serializer;
-
-    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes)
-    }
 }

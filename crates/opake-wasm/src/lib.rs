@@ -17,6 +17,8 @@ mod directories;
 #[cfg(target_arch = "wasm32")]
 mod documents;
 #[cfg(target_arch = "wasm32")]
+mod sharing;
+#[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_util;
 
 #[wasm_bindgen(start)]

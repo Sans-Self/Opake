@@ -63,3 +63,16 @@ pub fn priv_key_from_slice(bytes: &[u8]) -> Result<X25519PrivateKey, JsError> {
         .try_into()
         .map_err(|_| JsError::new("private key must be 32 bytes"))
 }
+
+/// Serde helper: serialize `Vec<u8>` as `Uint8Array` via serde_wasm_bindgen.
+///
+/// Without this, serde serializes `Vec<u8>` element-by-element as a JS Array
+/// of Numbers. `serialize_bytes` triggers serde_wasm_bindgen's bytes path,
+/// producing a proper Uint8Array.
+pub mod serde_bytes {
+    use serde::Serializer;
+
+    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(bytes)
+    }
+}
