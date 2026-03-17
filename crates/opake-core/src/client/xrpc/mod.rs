@@ -271,7 +271,7 @@ impl<T: Transport> XrpcClient<T> {
         Ok(())
     }
 
-    fn did(&self) -> Result<&str, Error> {
+    pub fn did(&self) -> Result<&str, Error> {
         self.session
             .as_ref()
             .map(|s| s.did())

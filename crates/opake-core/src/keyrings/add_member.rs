@@ -23,6 +23,14 @@ pub async fn add_member(
 ) -> Result<(), Error> {
     let at_uri = atproto::parse_at_uri(keyring_uri)?;
 
+    let caller_did = client.did()?;
+    if at_uri.authority != caller_did {
+        return Err(Error::Auth(format!(
+            "cannot modify keyring owned by {}, logged in as {caller_did}",
+            at_uri.authority
+        )));
+    }
+
     debug!("fetching keyring record {}", keyring_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
@@ -189,6 +197,32 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("already a member"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn rejects_non_owner() {
+        let (pubkey, _) = test_keypair();
+        let group_key = crypto::generate_content_key(&mut OsRng);
+
+        let mock = MockTransport::new();
+        let mut client = mock_client(mock);
+
+        let err = add_member(
+            &mut client,
+            "at://did:plc:someone-else/app.opake.keyring/kr1",
+            &group_key,
+            "did:plc:newmember",
+            &pubkey,
+            "2026-03-01T12:00:00Z",
+            &mut OsRng,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("cannot modify keyring"),
+            "got: {err}"
+        );
     }
 
     #[tokio::test]

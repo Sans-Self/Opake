@@ -42,6 +42,14 @@ pub async fn remove_member(
 ) -> Result<(ContentKey, u64), Error> {
     let at_uri = atproto::parse_at_uri(keyring_uri)?;
 
+    let caller_did = client.did()?;
+    if at_uri.authority != caller_did {
+        return Err(Error::Auth(format!(
+            "cannot modify keyring owned by {}, logged in as {caller_did}",
+            at_uri.authority
+        )));
+    }
+
     debug!("fetching keyring record {}", keyring_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)

@@ -139,6 +139,36 @@ async fn happy_path_removes_and_rotates() {
 }
 
 #[tokio::test]
+async fn rejects_non_owner() {
+    let (owner_pubkey, _) = test_keypair();
+    let group_key = crypto::generate_content_key(&mut OsRng);
+
+    let mock = MockTransport::new();
+    let remaining = [MemberKey {
+        did: TEST_DID,
+        public_key: &owner_pubkey,
+    }];
+
+    let mut client = mock_client(mock);
+    let err = remove_member(
+        &mut client,
+        "at://did:plc:someone-else/app.opake.keyring/kr1",
+        "did:plc:bob",
+        &remaining,
+        &group_key,
+        "2026-03-01T12:00:00Z",
+        &mut OsRng,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("cannot modify keyring"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
 async fn rejects_nonexistent_member() {
     let (keyring, old_group_key) = two_member_keyring();
     let (owner_pubkey, _) = test_keypair();
