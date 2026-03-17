@@ -26,6 +26,11 @@ pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";
 pub const ROOT_DIRECTORY_NAME: &str = "/";
 
+/// AT-URI for a DID's root directory (`at://{did}/app.opake.directory/self`).
+pub fn root_directory_uri(did: &str) -> String {
+    format!("at://{did}/{DIRECTORY_COLLECTION}/{ROOT_DIRECTORY_RKEY}")
+}
+
 /// Build a direct encryption envelope for a directory.
 ///
 /// Generates a fresh content key, encrypts the metadata, and wraps the key

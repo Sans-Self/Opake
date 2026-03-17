@@ -43,11 +43,7 @@ pub async fn directory_create(
     let directory_uri = directories::create_directory(&mut client, dir_enc, dir_meta, &now).await?;
 
     // Add to parent (or root if no parent specified)
-    let root_uri = format!(
-        "at://{did}/{}/{}",
-        directories::DIRECTORY_COLLECTION,
-        directories::ROOT_DIRECTORY_RKEY,
-    );
+    let root_uri = directories::root_directory_uri(did);
     let parent = parent_uri.as_deref().unwrap_or(&root_uri);
     directories::add_entry(&mut client, parent, &directory_uri, &now).await?;
 

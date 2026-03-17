@@ -15,6 +15,8 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 mod directories;
 #[cfg(target_arch = "wasm32")]
+mod documents;
+#[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_util;
 
 #[wasm_bindgen(start)]
