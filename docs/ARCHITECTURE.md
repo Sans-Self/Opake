@@ -341,17 +341,17 @@ All three are unauthenticated reads — AT Protocol records and blobs are public
 
 Config, identity, and session types live in `opake-core/src/storage.rs` alongside the `Storage` trait. This lets both platforms share the same data model and mutation logic (e.g. `Config::add_account`, `Config::remove_account`, `Config::set_default`).
 
-| Method                            | Contract                                                             |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `load_config` / `save_config`     | Read/write the global config (accounts map, default DID)             |
-| `load_identity` / `save_identity` | Read/write per-account encryption keypairs                           |
-| `load_session` / `save_session`   | Read/write per-account JWT tokens                                    |
-| `remove_account`                  | Full cleanup: mutate config + delete identity/session data + persist |
-| `cache_get_record` / `cache_put_records` | Record-level cache: look up or upsert individual PDS records   |
-| `cache_remove_record`             | Remove a single cached record (e.g. after deletion or metadata update) |
-| `cache_get_collection` / `cache_put_collection` | Collection-level cache: all records + `fetched_at` timestamp |
-| `cache_invalidate_collection`     | Clear `fetched_at` (records stay for offline/record-level use)       |
-| `cache_clear`                     | Remove all cached data for an account                                |
+| Method                                          | Contract                                                               |
+| ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `load_config` / `save_config`                   | Read/write the global config (accounts map, default DID)               |
+| `load_identity` / `save_identity`               | Read/write per-account encryption keypairs                             |
+| `load_session` / `save_session`                 | Read/write per-account JWT tokens                                      |
+| `remove_account`                                | Full cleanup: mutate config + delete identity/session data + persist   |
+| `cache_get_record` / `cache_put_records`        | Record-level cache: look up or upsert individual PDS records           |
+| `cache_remove_record`                           | Remove a single cached record (e.g. after deletion or metadata update) |
+| `cache_get_collection` / `cache_put_collection` | Collection-level cache: all records + `fetched_at` timestamp           |
+| `cache_invalidate_collection`                   | Clear `fetched_at` (records stay for offline/record-level use)         |
+| `cache_clear`                                   | Remove all cached data for an account                                  |
 
 `Config` includes a `cache_enabled: bool` field (defaults `true`) for per-device cache control.
 
@@ -403,13 +403,13 @@ The cache separates the **UI path** (what the user sees) from the **warming path
 
 Mutations invalidate affected caches so stale data isn't shown on the next load:
 
-| Mutation | Invalidation |
-|----------|-------------|
-| Delete file | `cacheRemoveRecord` (document) + `cacheInvalidateCollection` (directories) |
-| Delete folder | `cacheInvalidateCollection` (documents + directories) |
-| Update metadata | `cacheRemoveRecord` (document) |
-| Rename directory | `cacheInvalidateCollection` (directories) |
-| Upload / create folder / move | Triggers `loadCabinet` which re-warms the cache |
+| Mutation                      | Invalidation                                                               |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| Delete file                   | `cacheRemoveRecord` (document) + `cacheInvalidateCollection` (directories) |
+| Delete folder                 | `cacheInvalidateCollection` (documents + directories)                      |
+| Update metadata               | `cacheRemoveRecord` (document)                                             |
+| Rename directory              | `cacheInvalidateCollection` (directories)                                  |
+| Upload / create folder / move | Triggers `loadCabinet` which re-warms the cache                            |
 
 #### Future: Daemon Warming
 
@@ -465,26 +465,26 @@ When a user logs in on a new device, they can recover their identity either by e
 
 The protocol uses ephemeral X25519 Diffie-Hellman to establish a shared secret. The identity payload is encrypted with AES-256-GCM and the content key is wrapped to the ephemeral public key using the same `x25519-hkdf-a256kw` scheme as document encryption. Both `pairRequest` and `pairResponse` records are deleted after a successful transfer.
 
-```
-Device B (new)                    PDS                    Device A (existing)
-     |                             |                              |
-     |-- createRecord pairReq --->|                              |
-     |   { ephemeralKey }          |                              |
-     |                             |<--- listRecords pairReq ----|
-     |                             |--- return pairRequest ------>|
-     |                             |                              |
-     |                             |          DH + encrypt identity
-     |                             |                              |
-     |                             |<--- createRecord pairResp --|
-     |-- listRecords pairResp --->|   { wrappedKey, ciphertext } |
-     |<-- return pairResponse ----|                              |
-     |                             |                              |
-     |  unwrap + decrypt identity  |                              |
-     |  verify pubkey matches      |                              |
-     |  save identity.json         |                              |
-     |                             |                              |
-     |-- deleteRecord pairReq --->|                              |
-     |-- deleteRecord pairResp -->|                              |
+```mermaid
+sequenceDiagram
+    participant B as Device B (new)
+    participant PDS
+    participant A as Device A (existing)
+
+    B->>PDS: createRecord pairReq<br/>{ ephemeralKey }
+    A->>PDS: listRecords pairReq
+    PDS->>A: return pairRequest
+
+    Note right of A: DH + encrypt identity
+
+    A->>PDS: createRecord pairResp<br/>{ wrappedKey, ciphertext }
+    B->>PDS: listRecords pairResp
+    PDS->>B: return pairResponse
+
+    Note left of B: unwrap + decrypt identity<br/>verify pubkey matches<br/>save identity.json
+
+    B->>PDS: deleteRecord pairReq
+    B->>PDS: deleteRecord pairResp
 ```
 
 Login on a second device detects an existing `publicKey/self` record and offers three options: `opake pair request` (transfer from existing device), `opake recover` (enter seed phrase), or `opake login --force` (overwrite with new identity). This prevents accidental key overwrites.
