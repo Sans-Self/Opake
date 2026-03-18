@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add web markdown editor [#153](https://issues.opake.app/issues/153.html)
 - Add Zod validation at WASM, IndexedDB, and appview API boundaries [#369](https://issues.opake.app/issues/369.html)
 - Add web e2e tests with Playwright against fake-pds [#360](https://issues.opake.app/issues/360.html)
 - Add e2e test suite for CLI against fake-pds [#358](https://issues.opake.app/issues/358.html)
