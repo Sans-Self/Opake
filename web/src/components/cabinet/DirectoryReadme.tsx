@@ -111,7 +111,7 @@ export function DirectoryReadme({ documentUri }: DirectoryReadmeProps) {
           className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
           style={{ maxHeight }}
         >
-          <MarkdownPreview data={result.data} />
+          <MarkdownPreview data={result.data} editorStyle />
         </div>
 
         {/* Fade + expand button */}

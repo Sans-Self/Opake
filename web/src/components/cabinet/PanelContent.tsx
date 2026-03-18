@@ -19,7 +19,7 @@ import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { getOpakeWorker } from "@/lib/worker";
-import { isPreviewable, type FileItem } from "./types";
+import { isPreviewable, isEditable, type FileItem } from "./types";
 
 interface PanelContentProps {
   readonly items: readonly FileItem[];
@@ -27,6 +27,7 @@ interface PanelContentProps {
   readonly activeUri?: string;
   readonly onOpen: (item: FileItem) => void;
   readonly onPreview?: (item: FileItem) => void;
+  readonly onEdit?: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
   readonly onDelete: (uri: string) => void;
   readonly onDeleteFolder: (uri: string) => void;
@@ -41,6 +42,7 @@ export function PanelContent({
   activeUri,
   onOpen,
   onPreview,
+  onEdit,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -106,6 +108,9 @@ export function PanelContent({
     (item) => item.kind === "file" && item.decrypted && /^readme\.md$/i.test(item.name),
   );
 
+  const editHandler = (item: FileItem) =>
+    onEdit && isEditable(item) ? () => onEdit(item) : undefined;
+
   const FileListComponent = viewMode === "list" ? FileListRow : FileGridCard;
   const fileList = items.map((item) => (
     <FileListComponent
@@ -113,6 +118,7 @@ export function PanelContent({
       item={item}
       isActive={item.uri === activeUri}
       onClick={() => handleItemClick(item)}
+      onDoubleClick={editHandler(item)}
       onPreview={previewHandler(item)}
       onEditMetadata={() => metadataDialogRef.current?.show(item)}
       onRename={() => renameDialogRef.current?.show(item.uri, item.name)}

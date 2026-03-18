@@ -10,6 +10,7 @@ mod download;
 mod download_grant;
 mod download_keyring;
 mod list;
+mod update;
 mod upload;
 
 pub use delete::delete_document;
@@ -17,6 +18,7 @@ pub use download::{download, download_with_group_key, fetch_content_key};
 pub use download_grant::download_from_grant;
 pub use download_keyring::{download_from_keyring_member, KeyringDownloadResult};
 pub use list::{list_documents, DecryptedDocumentEntry, DocumentEntry};
+pub use update::update_content;
 pub use upload::{
     encrypt_and_upload, encrypt_and_upload_keyring, upload_to_directory, KeyringUploadParams,
     UploadParams,

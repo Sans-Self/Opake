@@ -83,6 +83,13 @@ function SubdirectoryContent() {
       activeUri={isPreview && lastDocumentUri ? lastDocumentUri : undefined}
       onOpen={navigateToChild}
       onPreview={navigateToChild}
+      onEdit={(item) =>
+        void navigate({
+          to: "/cabinet/editor/$rkey",
+          params: { rkey: rkeyFromUri(item.uri) },
+          search: currentDirectoryUri ? { directoryUri: currentDirectoryUri } : {},
+        })
+      }
       onDownload={(uri) => void downloadFile(uri)}
       onDelete={(uri) => void deleteFile(uri)}
       onDeleteFolder={(uri) => void deleteFolder(uri)}

@@ -156,7 +156,7 @@ async function fetchUpstreamPublicKey(
     if (raw == null) return null;
     return typeof raw === "string" ? raw : raw.$bytes;
   } catch (error) {
-    console.warn("[auth] publicKey/self lookup failed (treating as absent):", error);
+    console.debug("[auth] publicKey/self lookup failed (treating as absent):", error);
     return null;
   }
 }

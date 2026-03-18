@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add Zod validation at WASM, IndexedDB, and appview API boundaries [#369](https://issues.opake.app/issues/369.html)
 - Add web e2e tests with Playwright against fake-pds [#360](https://issues.opake.app/issues/360.html)
 - Add e2e test suite for CLI against fake-pds [#358](https://issues.opake.app/issues/358.html)
 - Add DID document resolution to fake-pds and CLI PLC directory override [#359](https://issues.opake.app/issues/359.html)
@@ -19,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 ### Changed
+- Installation guide: direct users to package managers (brew, flatpak, AUR, crates.io) [#320](https://issues.opake.app/issues/320.html)
 - Document AGPLv3 implications for self-hosters and plugin developers [#312](https://issues.opake.app/issues/312.html)
 - Audit and improve command hierarchy for clarity [#306](https://issues.opake.app/issues/306.html)
 - Improve help text and examples for all commands [#307](https://issues.opake.app/issues/307.html)

@@ -66,6 +66,8 @@ interface DocumentsState {
   /** Directories whose documents have been fetched AND decrypted. */
   readyDirectories: Set<string>;
   error: string | null;
+  /** URI of the document currently being saved (save lock). */
+  savingUri: string | null;
   activeTagFilters: string[];
   viewMode: "list" | "grid";
 
@@ -80,6 +82,14 @@ interface DocumentsState {
   readonly createFolder: (name: string, directoryUri: string | null) => Promise<void>;
   readonly deleteFolder: (directoryUri: string) => Promise<void>;
   readonly updateMetadata: (documentUri: string, changes: MetadataChanges) => Promise<void>;
+  readonly updateContent: (documentUri: string, newPlaintext: Uint8Array) => Promise<string>;
+  /** Upload a new document and return its AT-URI (used by the editor's first-save flow). */
+  readonly uploadDocument: (
+    plaintext: Uint8Array,
+    filename: string,
+    mimeType: string,
+    directoryUri: string | null,
+  ) => Promise<string>;
   readonly moveEntry: (entryUri: string, targetDirectoryUri: string | null) => Promise<void>;
   readonly renameDirectory: (directoryUri: string, newName: string) => Promise<void>;
   readonly ancestorsOf: (directoryUri: string | null) => readonly DirectoryAncestor[];
@@ -115,6 +125,7 @@ export const useDocumentsStore = create<DocumentsState>()(
     cacheEnabled: true,
     readyDirectories: new Set<string>(),
     error: null,
+    savingUri: null,
     activeTagFilters: [],
     viewMode: "list",
 
@@ -722,6 +733,95 @@ export const useDocumentsStore = create<DocumentsState>()(
       } catch (error) {
         console.error("[cabinet] updateMetadata failed:", documentUri, error);
         toastError("Failed to update metadata");
+      } finally {
+        done();
+      }
+    },
+
+    updateContent: async (documentUri: string, newPlaintext: Uint8Array): Promise<string> => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") throw new Error("Not authenticated");
+
+      // Save lock — prevent concurrent saves to the same document.
+      if (get().savingUri === documentUri) throw new Error("Save already in progress");
+      set((draft) => {
+        draft.savingUri = documentUri;
+      });
+
+      const done = loading(`save:${documentUri}`);
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const privateKey = base64ToUint8Array(identity.private_key);
+
+        const worker = getOpakeWorker();
+        const result = await worker.documentUpdateContent(
+          pdsUrl,
+          session,
+          documentUri,
+          newPlaintext,
+          privateKey,
+          did,
+        );
+        await persistSession(did, result.session);
+        await storage.cacheRemoveRecord(did, DOCUMENT_COLLECTION, documentUri);
+
+        toastSuccess("Document saved");
+        return result.modifiedAt;
+      } catch (error) {
+        console.error("[cabinet] updateContent failed:", documentUri, error);
+        toastError("Failed to save document");
+        throw error;
+      } finally {
+        set((draft) => {
+          draft.savingUri = null;
+        });
+        done();
+      }
+    },
+
+    uploadDocument: async (
+      plaintext: Uint8Array,
+      filename: string,
+      mimeType: string,
+      directoryUri: string | null,
+    ): Promise<string> => {
+      const authState = useAuthStore.getState();
+      if (authState.session.status !== "active") throw new Error("Not authenticated");
+
+      const done = loading("upload");
+
+      try {
+        const { did, pdsUrl } = authState.session;
+        const session = await storage.loadSession(did);
+        const identity = await storage.loadIdentity(did);
+        const publicKey = base64ToUint8Array(identity.public_key);
+
+        const worker = getOpakeWorker();
+        const result = await worker.documentUpload(
+          pdsUrl,
+          session,
+          plaintext,
+          filename,
+          mimeType,
+          null,
+          directoryUri,
+          publicKey,
+          did,
+        );
+        await persistSession(did, result.session);
+
+        // Reload cabinet to pick up the new document.
+        void get().loadCabinet();
+
+        toastSuccess("Document created");
+        return result.uri;
+      } catch (error) {
+        console.error("[cabinet] uploadDocument failed:", error);
+        toastError("Failed to create document");
+        throw error;
       } finally {
         done();
       }

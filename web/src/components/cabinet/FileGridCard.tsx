@@ -9,6 +9,7 @@ interface FileGridCardProps {
   readonly item: FileItem;
   readonly isActive?: boolean;
   readonly onClick: () => void;
+  readonly onDoubleClick?: () => void;
   readonly renderActions?: () => ReactNode;
   readonly hideStatus?: boolean;
   readonly onPreview?: () => void;
@@ -26,6 +27,7 @@ export function FileGridCard({
   item,
   isActive,
   onClick,
+  onDoubleClick,
   renderActions,
   hideStatus,
   onPreview,
@@ -50,6 +52,7 @@ export function FileGridCard({
   return (
     <div
       onClick={isClickable ? onClick : undefined}
+      onDoubleClick={onDoubleClick}
       onKeyDown={
         isClickable
           ? (e) => {

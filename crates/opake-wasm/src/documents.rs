@@ -176,6 +176,49 @@ pub async fn document_update_metadata(
 }
 
 // ---------------------------------------------------------------------------
+// Update content (replace blob)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateContentResult {
+    modified_at: String,
+}
+
+/// Replace a document's encrypted blob content on the PDS.
+///
+/// Re-encrypts the new plaintext with the existing content key, uploads the
+/// new ciphertext blob, updates metadata (size), and writes the record back.
+/// Returns `{ modifiedAt, session }`.
+#[wasm_bindgen(js_name = documentUpdateContent)]
+pub async fn document_update_content(
+    pds_url: &str,
+    session: JsValue,
+    document_uri: &str,
+    new_plaintext: &[u8],
+    private_key: &[u8],
+    did: &str,
+) -> Result<JsValue, JsError> {
+    let mut client = make_client(pds_url, session)?;
+    let privkey = priv_key_from_slice(private_key)?;
+    let now = crate::now_iso();
+
+    let modified_at = documents::update_content(
+        &mut client,
+        document_uri,
+        did,
+        &privkey,
+        None, // group_key — keyring-encrypted docs not yet supported
+        new_plaintext,
+        &now,
+        &mut OsRng,
+    )
+    .await?;
+
+    result_with_session(&client, &UpdateContentResult { modified_at })
+}
+
+// ---------------------------------------------------------------------------
 // Fetch content key (for editor save flow)
 // ---------------------------------------------------------------------------
 

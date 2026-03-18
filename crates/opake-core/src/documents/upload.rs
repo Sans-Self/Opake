@@ -12,7 +12,7 @@ use crate::records::{
 use super::DOCUMENT_COLLECTION;
 
 /// Maximum blob size accepted by a standard PDS (50 MB).
-const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
+pub(super) const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
 
 /// Build a `DocumentMetadata` from upload parameters and encrypt it.
 fn build_encrypted_metadata(

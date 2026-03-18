@@ -97,7 +97,7 @@ export function FilePreview({ cacheKey, decrypt, onDownload }: FilePreviewProps)
   }
 
   if (isMarkdownMime(mime, blob.metadata.name)) {
-    return <MarkdownPreview data={blob.plaintext} />;
+    return <MarkdownPreview data={blob.plaintext} editorStyle />;
   }
 
   return null;

@@ -31,3 +31,8 @@ export function isPreviewable(item: FileItem): boolean {
     PREVIEWABLE_FILE_TYPES.has(item.fileType)
   );
 }
+
+/** Whether a file item can be opened in the markdown editor. */
+export function isEditable(item: FileItem): boolean {
+  return item.kind === "file" && item.decrypted && item.fileType === "note";
+}

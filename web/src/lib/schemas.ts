@@ -274,6 +274,9 @@ export const ContentKeyResultSchema = withSession({
 export const MetadataUpdateResultSchema = withSession({
   metadata: z.unknown(),
 });
+export const UpdateContentResultSchema = withSession({
+  modifiedAt: z.string(),
+});
 
 export const IncomingGrantSchema = z.object({
   uri: z.string(),

@@ -32,6 +32,8 @@ import { Route as PublicDocsIndexRouteImport } from './routes/_public/docs/index
 import { Route as DevicesPairRequestRouteImport } from './routes/devices/pair.request'
 import { Route as DevicesPairAcceptRouteImport } from './routes/devices/pair.accept'
 import { Route as CabinetFilesSplatRouteImport } from './routes/cabinet/files/$'
+import { Route as CabinetEditorNewRouteImport } from './routes/cabinet/editor/new'
+import { Route as CabinetEditorRkeyRouteImport } from './routes/cabinet/editor/$rkey'
 import { Route as CabinetDocsSlugRouteImport } from './routes/cabinet/docs/$slug'
 import { Route as PublicDocsSlugRouteImport } from './routes/_public/docs/$slug'
 
@@ -149,6 +151,16 @@ const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => CabinetFilesRouteRoute,
 } as any)
+const CabinetEditorNewRoute = CabinetEditorNewRouteImport.update({
+  id: '/editor/new',
+  path: '/editor/new',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetEditorRkeyRoute = CabinetEditorRkeyRouteImport.update({
+  id: '/editor/$rkey',
+  path: '/editor/$rkey',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
 const CabinetDocsSlugRoute = CabinetDocsSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
@@ -179,6 +191,8 @@ export interface FileRoutesByFullPath {
   '/devices/': typeof DevicesIndexRoute
   '/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
+  '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
+  '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
@@ -201,6 +215,8 @@ export interface FileRoutesByTo {
   '/devices': typeof DevicesIndexRoute
   '/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
+  '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
+  '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
@@ -229,6 +245,8 @@ export interface FileRoutesById {
   '/devices/': typeof DevicesIndexRoute
   '/_public/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
+  '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
+  '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
@@ -257,6 +275,8 @@ export interface FileRouteTypes {
     | '/devices/'
     | '/docs/$slug'
     | '/cabinet/docs/$slug'
+    | '/cabinet/editor/$rkey'
+    | '/cabinet/editor/new'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
@@ -279,6 +299,8 @@ export interface FileRouteTypes {
     | '/devices'
     | '/docs/$slug'
     | '/cabinet/docs/$slug'
+    | '/cabinet/editor/$rkey'
+    | '/cabinet/editor/new'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
@@ -306,6 +328,8 @@ export interface FileRouteTypes {
     | '/devices/'
     | '/_public/docs/$slug'
     | '/cabinet/docs/$slug'
+    | '/cabinet/editor/$rkey'
+    | '/cabinet/editor/new'
     | '/cabinet/files/$'
     | '/devices/pair/accept'
     | '/devices/pair/request'
@@ -483,6 +507,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetFilesSplatRouteImport
       parentRoute: typeof CabinetFilesRouteRoute
     }
+    '/cabinet/editor/new': {
+      id: '/cabinet/editor/new'
+      path: '/editor/new'
+      fullPath: '/cabinet/editor/new'
+      preLoaderRoute: typeof CabinetEditorNewRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/editor/$rkey': {
+      id: '/cabinet/editor/$rkey'
+      path: '/editor/$rkey'
+      fullPath: '/cabinet/editor/$rkey'
+      preLoaderRoute: typeof CabinetEditorRkeyRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
     '/cabinet/docs/$slug': {
       id: '/cabinet/docs/$slug'
       path: '/$slug'
@@ -534,6 +572,8 @@ interface CabinetRouteRouteChildren {
   CabinetSharedRoute: typeof CabinetSharedRoute
   CabinetTrashRoute: typeof CabinetTrashRoute
   CabinetIndexRoute: typeof CabinetIndexRoute
+  CabinetEditorRkeyRoute: typeof CabinetEditorRkeyRoute
+  CabinetEditorNewRoute: typeof CabinetEditorNewRoute
 }
 
 const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
@@ -544,6 +584,8 @@ const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
   CabinetSharedRoute: CabinetSharedRoute,
   CabinetTrashRoute: CabinetTrashRoute,
   CabinetIndexRoute: CabinetIndexRoute,
+  CabinetEditorRkeyRoute: CabinetEditorRkeyRoute,
+  CabinetEditorNewRoute: CabinetEditorNewRoute,
 }
 
 const CabinetRouteRouteWithChildren = CabinetRouteRoute._addFileChildren(

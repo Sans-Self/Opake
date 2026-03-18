@@ -27,7 +27,7 @@ import { NewFolderDialog, type NewFolderDialogHandle } from "@/components/cabine
 import { useDocumentsStore } from "@/stores/documents/store";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
-import { directoryUri, documentUri } from "@/lib/atUri";
+import { directoryUri, documentUri, rkeyFromUri } from "@/lib/atUri";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import type { FileItem } from "@/components/cabinet/types";
 
@@ -262,7 +262,15 @@ function FileBrowserLayout() {
               label: "New folder",
               onClick: () => newFolderDialogRef.current?.show(),
             },
-            { icon: FileTextIcon, label: "New document" },
+            {
+              icon: FileTextIcon,
+              label: "New document",
+              onClick: () =>
+                void navigate({
+                  to: "/cabinet/editor/new",
+                  search: contextDirectoryUri ? { directoryUri: contextDirectoryUri } : {},
+                }),
+            },
             { icon: BookOpenIcon, label: "New note" },
           ]}
         />
@@ -287,12 +295,29 @@ function FileBrowserLayout() {
 
   const outletContent = documentsLoading ? <PanelSkeleton /> : <Outlet />;
 
+  const isMarkdownPreview =
+    previewDocumentItem?.mimeType === "text/markdown" ||
+    previewDocumentItem?.name.endsWith(".md") === true;
+
+  const handleEditMarkdown =
+    isMarkdownPreview && currentDocumentUri
+      ? () => {
+          const docRkey = rkeyFromUri(currentDocumentUri);
+          void navigate({
+            to: "/cabinet/editor/$rkey",
+            params: { rkey: docRkey },
+            search: contextDirectoryUri ? { directoryUri: contextDirectoryUri } : {},
+          });
+        }
+      : undefined;
+
   const previewPanel =
     isPreviewMode && currentDocumentUri ? (
       <>
         <PreviewPaneHeader
           documentName={previewDocumentName}
           onDownload={() => void downloadFile(currentDocumentUri)}
+          onEdit={handleEditMarkdown}
           onClose={handleClosePreview}
         />
         <div className="min-h-0 flex-1 overflow-hidden">

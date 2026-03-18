@@ -46,6 +46,12 @@ function RootDirectoryContent() {
       viewMode={viewMode}
       onOpen={navigateToChild}
       onPreview={navigateToChild}
+      onEdit={(item) =>
+        void navigate({
+          to: "/cabinet/editor/$rkey",
+          params: { rkey: rkeyFromUri(item.uri) },
+        })
+      }
       onDownload={(uri) => void downloadFile(uri)}
       onDelete={(uri) => void deleteFile(uri)}
       onDeleteFolder={(uri) => void deleteFolder(uri)}

@@ -25,7 +25,10 @@ export const treeApi = {
 
     const input = records.map((r) => ({ uri: r.uri, value: r.value }));
     directoryTree = new DirectoryTreeHandle(input, did, privateKey);
-    return DirectoryTreeSnapshotSchema.parse(directoryTree.snapshot());
+    const raw = directoryTree.snapshot() as Record<string, unknown>;
+    // WASM returns undefined for rootUri when no directories exist — normalize to null for Zod
+    const normalized = raw.rootUri === undefined ? { ...raw, rootUri: null } : raw;
+    return DirectoryTreeSnapshotSchema.parse(normalized);
   },
 
   treeRootUri(): string | undefined {

@@ -16,6 +16,7 @@ import {
   documentDownload as wasmDocumentDownload,
   documentDelete as wasmDocumentDelete,
   documentUpdateMetadata as wasmDocumentUpdateMetadata,
+  documentUpdateContent as wasmDocumentUpdateContent,
   documentFetchContentKey as wasmDocumentFetchContentKey,
   grantCreate as wasmGrantCreate,
   grantRevoke as wasmGrantRevoke,
@@ -34,6 +35,7 @@ import {
   UriResultSchema,
   DownloadResultSchema,
   ContentKeyResultSchema,
+  UpdateContentResultSchema,
   MetadataUpdateResultSchema,
   IncomingGrantsResultSchema,
   RawListResultSchema,
@@ -227,6 +229,20 @@ export const pdsApi = {
     return flatten(
       await wasmDocumentFetchContentKey(pdsUrl, session, documentUri, privateKey, did),
       ContentKeyResultSchema,
+    );
+  },
+
+  async documentUpdateContent(
+    pdsUrl: string,
+    session: unknown,
+    documentUri: string,
+    newPlaintext: Uint8Array,
+    privateKey: Uint8Array,
+    did: string,
+  ) {
+    return flatten(
+      await wasmDocumentUpdateContent(pdsUrl, session, documentUri, newPlaintext, privateKey, did),
+      UpdateContentResultSchema,
     );
   },
 
