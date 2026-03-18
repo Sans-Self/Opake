@@ -87,18 +87,14 @@ export const test = base.extend<WebFixtures>({
   },
 
   browserLogin: async ({ page, webUrl, account }, use) => {
-    // Capture browser console for debugging WASM/worker issues
+    // Surface browser errors (not warnings or debug noise) for test diagnostics.
     page.on("console", (msg) => {
-      const type = msg.type();
-      if (
-        type === "error" ||
-        type === "warning" ||
-        msg.text().includes("[upload]") ||
-        msg.text().includes("[worker:pds]") ||
-        msg.text().includes("[WasmTransport]") ||
-        msg.text().includes("[documents]")
-      ) {
-        console.log(`[browser:${type}] ${msg.text()}`);
+      if (msg.type() === "error") {
+        const text = msg.text();
+        // Suppress known non-errors
+        if (text.startsWith("Failed to load resource")) return;
+        if (text.includes("no identity for")) return;
+        console.log(`[browser:error] ${text}`);
       }
     });
     page.on("pageerror", (err) => {

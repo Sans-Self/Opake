@@ -208,21 +208,27 @@ pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {
 // Ephemeral keypair (for device pairing)
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EphemeralKeypairDto {
-    public_key: Vec<u8>,
-    private_key: Vec<u8>,
-}
-
 #[wasm_bindgen(js_name = generateEphemeralKeypair)]
 pub fn generate_ephemeral_keypair() -> Result<JsValue, JsError> {
     let kp = opake_core::crypto::generate_ephemeral_keypair(&mut OsRng);
-    let dto = EphemeralKeypairDto {
-        public_key: kp.public_key.to_vec(),
-        private_key: kp.private_key.to_vec(),
-    };
-    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
+
+    // Build the JS object manually so the byte fields are Uint8Array, not Array<number>.
+    // (serde_wasm_bindgen serializes Vec<u8> as Array by default unless serialize_bytes is used,
+    // and #[serde(with)] can't resolve crate-local modules from lib.rs.)
+    let obj = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &obj,
+        &"publicKey".into(),
+        &js_sys::Uint8Array::from(&kp.public_key[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"privateKey".into(),
+        &js_sys::Uint8Array::from(&kp.private_key[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    Ok(obj.into())
 }
 
 // ---------------------------------------------------------------------------

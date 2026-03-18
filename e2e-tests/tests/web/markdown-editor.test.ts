@@ -1,18 +1,35 @@
 // Markdown editor: create, edit, save, preview toggle, toolbar actions.
+//
+// Tests are grouped to minimize login + seed phrase setup overhead.
+// Each describe block does one setup and covers multiple assertions.
 
 import { test, expect } from "../../helpers/web-fixture.js";
 import { completeSeedPhraseSetup } from "../../helpers/seed-phrase.js";
 
-/** Log in, set up identity, navigate to cabinet. */
+/** Log in, set up identity, navigate to cabinet, wait for empty state. */
 async function setupCabinet(
   page: import("@playwright/test").Page,
   opts: { webUrl: string; pdsUrl: string; handle: string; did: string },
   browserLogin: () => Promise<void>,
 ) {
   await browserLogin();
-  await completeSeedPhraseSetup(page, { pdsUrl: opts.pdsUrl, handle: opts.handle, did: opts.did });
+  await completeSeedPhraseSetup(page, {
+    pdsUrl: opts.pdsUrl,
+    handle: opts.handle,
+    did: opts.did,
+  });
   await page.goto(`${opts.webUrl}/cabinet/files`);
   await expect(page.getByText("Nothing here yet")).toBeVisible({ timeout: 15_000 });
+}
+
+/** Navigate to the "New document" editor from the cabinet file list. */
+async function openNewDocumentEditor(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New document" }).click();
+  await expect(page).toHaveURL(/\/cabinet\/editor\/new/);
+  const editor = page.locator('[aria-label="Document editor"]');
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+  return editor;
 }
 
 /** Upload a markdown file and wait for it to appear in the file list. */
@@ -31,15 +48,14 @@ async function uploadMarkdownFile(
     buffer: Buffer.from(content),
   });
 
-  // Wait for upload toast, then for decrypted file name to appear
   await expect(page.getByText("File uploaded").first()).toBeVisible({ timeout: 30_000 });
   const fileRow = page.locator(`[aria-label*="${name.replace(".md", "")}"]`).first();
   await expect(fileRow).toBeVisible({ timeout: 30_000 });
   return fileRow;
 }
 
-test.describe("new document", () => {
-  test("create a markdown document via toolbar", async ({
+test.describe("new document flow", () => {
+  test("create, save, verify promotion, save button state, and close", async ({
     page,
     webUrl,
     pdsUrl,
@@ -48,66 +64,39 @@ test.describe("new document", () => {
   }, testInfo) => {
     testInfo.setTimeout(90_000);
     await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
+    const editor = await openNewDocumentEditor(page);
 
-    // Open "New" dropdown and click "New document"
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
-    // Should navigate to editor route
-    await expect(page).toHaveURL(/\/cabinet\/editor\/new/);
-
-    // Name input should be visible with default value
+    // Name input defaults to "Untitled.md"
     const nameInput = page.getByPlaceholder("document-name.md").first();
-    await expect(nameInput).toBeVisible();
     await expect(nameInput).toHaveValue("Untitled.md");
-
-    // Change the name
     await nameInput.clear();
     await nameInput.fill("test-note.md");
 
-    // Type in the editor
-    const editor = page.locator('[aria-label="Document editor"]');
-    await expect(editor).toBeVisible({ timeout: 10_000 });
-    await editor.click();
-    await page.keyboard.type("# Hello World\n\nThis is a test document.");
-
-    // Save with Cmd+S
-    await page.keyboard.press("Meta+s");
-
-    // Should see success toast
-    await expect(page.getByText("Document created").first()).toBeVisible({ timeout: 15_000 });
-
-    // URL should have changed to the rkey route (silent promotion)
-    await expect(page).toHaveURL(/\/cabinet\/editor\/[a-z0-9]+/);
-    await expect(page).not.toHaveURL(/\/new/);
-  });
-
-  test("save button disabled when no changes", async ({
-    page,
-    webUrl,
-    pdsUrl,
-    account,
-    browserLogin,
-  }) => {
-    await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
-
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
+    // Save button disabled when empty
     const saveButton = page.getByRole("button", { name: "Save" });
     await expect(saveButton).toBeDisabled();
 
-    // Type something — save should enable
-    const editor = page.locator('[aria-label="Document editor"]');
+    // Type content — save enables
     await editor.click();
-    await page.keyboard.type("some content");
-
+    await page.keyboard.type("# Hello World\n\nThis is a test document.");
     await expect(saveButton).toBeEnabled();
+
+    // Save with Cmd+S
+    await page.keyboard.press("Meta+s");
+    await expect(page.getByText("Document created").first()).toBeVisible({ timeout: 15_000 });
+
+    // URL promoted silently from /new to /$rkey
+    await expect(page).toHaveURL(/\/cabinet\/editor\/[a-z0-9]+/);
+    await expect(page).not.toHaveURL(/\/new/);
+
+    // Close returns to file browser
+    await page.getByRole("button", { name: "Close editor" }).click();
+    await expect(page).toHaveURL(/\/cabinet\/files/, { timeout: 10_000 });
   });
 });
 
 test.describe("edit existing document", () => {
-  test("open markdown file in editor via double-click", async ({
+  test("double-click to open, edit, save, reopen to verify persistence", async ({
     page,
     webUrl,
     pdsUrl,
@@ -117,57 +106,30 @@ test.describe("edit existing document", () => {
     testInfo.setTimeout(90_000);
     await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
 
-    await uploadMarkdownFile(page, "edit-test.md", "# Original Content\n\nHello.");
+    // Upload a markdown file
+    const fileRow = await uploadMarkdownFile(page, "edit-test.md", "# Before Edit");
 
-    // Double-click the file to open editor
-    const fileRow = page.locator('[aria-label*="edit-test"]').first();
+    // Double-click to open in editor
     await fileRow.dblclick();
-
-    // Should navigate to editor route
-    await expect(page).toHaveURL(/\/cabinet\/editor\/[a-z0-9]+/, { timeout: 10_000 });
-
-    // Editor should load with the original content
-    const editor = page.locator('[aria-label="Document editor"]');
-    await expect(editor).toBeVisible({ timeout: 15_000 });
-    await expect(editor).toContainText("Original Content");
-  });
-
-  test("edit and save changes to existing document", async ({
-    page,
-    webUrl,
-    pdsUrl,
-    account,
-    browserLogin,
-  }, testInfo) => {
-    testInfo.setTimeout(90_000);
-    await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
-
-    await uploadMarkdownFile(page, "save-test.md", "# Before Edit");
-
-    const fileRow = page.locator('[aria-label*="save-test"]').first();
-    await fileRow.dblclick();
-
     await expect(page).toHaveURL(/\/cabinet\/editor\/[a-z0-9]+/, { timeout: 10_000 });
 
     const editor = page.locator('[aria-label="Document editor"]');
     await expect(editor).toBeVisible({ timeout: 15_000 });
     await expect(editor).toContainText("Before Edit");
 
-    // Append text
+    // Append text and save
     await editor.click();
     await page.keyboard.press("End");
     await page.keyboard.type("\n\nAfter Edit");
-
-    // Save
     await page.keyboard.press("Meta+s");
     await expect(page.getByText("Document saved").first()).toBeVisible({ timeout: 15_000 });
 
-    // Navigate back and reopen to verify persistence
+    // Navigate back
     await page.getByRole("button", { name: "Close editor" }).click();
     await expect(page).toHaveURL(/\/cabinet\/files/, { timeout: 10_000 });
 
-    // Re-open
-    const fileRowAgain = page.locator('[aria-label*="save-test"]').first();
+    // Reopen and verify the edit persisted
+    const fileRowAgain = page.locator('[aria-label*="edit-test"]').first();
     await expect(fileRowAgain).toBeVisible({ timeout: 10_000 });
     await fileRowAgain.dblclick();
 
@@ -177,8 +139,8 @@ test.describe("edit existing document", () => {
   });
 });
 
-test.describe("preview toggle", () => {
-  test("escape switches to preview, click returns to editor", async ({
+test.describe("preview toggle and toolbar", () => {
+  test("escape to preview, click to edit, eye toggle, toolbar visibility", async ({
     page,
     webUrl,
     pdsUrl,
@@ -187,84 +149,42 @@ test.describe("preview toggle", () => {
   }, testInfo) => {
     testInfo.setTimeout(90_000);
     await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
+    const editor = await openNewDocumentEditor(page);
 
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
-    const editor = page.locator('[aria-label="Document editor"]');
-    await expect(editor).toBeVisible({ timeout: 10_000 });
+    // Type content with formatting
     await editor.click();
     await page.keyboard.type("# Preview Test\n\nSome **bold** text.");
 
-    // Press Escape to switch to preview
-    await page.keyboard.press("Escape");
+    // Toolbar should be visible in edit mode
+    const toolbar = page.locator('[role="toolbar"][aria-label="Formatting"]');
+    await expect(toolbar).toBeVisible();
 
-    // Preview should be visible (rendered markdown), editor should be hidden
+    // Escape switches to preview
+    await page.keyboard.press("Escape");
     const previewArea = page.locator('[aria-label="Click to edit"]');
     await expect(previewArea).toBeVisible({ timeout: 5_000 });
-
-    // The rendered preview should show the bold text as actual bold
     await expect(previewArea.locator("strong")).toContainText("bold");
 
-    // Click to return to editor
+    // Toolbar hidden in preview mode
+    await expect(toolbar).not.toBeVisible();
+
+    // Click preview to return to editor
     await previewArea.click();
     await expect(editor).toBeVisible({ timeout: 5_000 });
-  });
+    await expect(toolbar).toBeVisible();
 
-  test("eye button toggles between edit and preview", async ({
-    page,
-    webUrl,
-    pdsUrl,
-    account,
-    browserLogin,
-  }) => {
-    await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
-
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
-    const editor = page.locator('[aria-label="Document editor"]');
-    await expect(editor).toBeVisible({ timeout: 10_000 });
-    await editor.click();
-    await page.keyboard.type("content");
-
-    // Click eye icon to switch to preview
+    // Eye button toggles to preview
     await page.getByRole("button", { name: "Switch to preview" }).click();
-    await expect(page.locator('[aria-label="Click to edit"]')).toBeVisible();
+    await expect(previewArea).toBeVisible();
 
-    // Click pencil icon to switch back
+    // Pencil button toggles back
     await page.getByRole("button", { name: "Switch to editor" }).click();
     await expect(editor).toBeVisible({ timeout: 5_000 });
   });
 });
 
-test.describe("toolbar", () => {
-  test("formatting toolbar visible in edit mode, hidden in preview", async ({
-    page,
-    webUrl,
-    pdsUrl,
-    account,
-    browserLogin,
-  }) => {
-    await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
-
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
-    const toolbar = page.locator('[role="toolbar"][aria-label="Formatting"]');
-    await expect(toolbar).toBeVisible({ timeout: 10_000 });
-
-    // Switch to preview
-    const editor = page.locator('[aria-label="Document editor"]');
-    await editor.click();
-    await page.keyboard.press("Escape");
-
-    await expect(toolbar).not.toBeVisible();
-  });
-});
-
 test.describe("edit button in preview pane", () => {
-  test("edit pencil appears for markdown files", async ({
+  test("pencil icon appears for markdown files and navigates to editor", async ({
     page,
     webUrl,
     pdsUrl,
@@ -287,25 +207,5 @@ test.describe("edit button in preview pane", () => {
     // Click it — should navigate to editor
     await editButton.click();
     await expect(page).toHaveURL(/\/cabinet\/editor\/[a-z0-9]+/, { timeout: 10_000 });
-  });
-});
-
-test.describe("close navigation", () => {
-  test("close button returns to file browser", async ({
-    page,
-    webUrl,
-    pdsUrl,
-    account,
-    browserLogin,
-  }) => {
-    await setupCabinet(page, { webUrl, pdsUrl, ...account }, browserLogin);
-
-    await page.getByRole("button", { name: "New" }).click();
-    await page.getByRole("button", { name: "New document" }).click();
-
-    await expect(page).toHaveURL(/\/cabinet\/editor\/new/);
-
-    await page.getByRole("button", { name: "Close editor" }).click();
-    await expect(page).toHaveURL(/\/cabinet\/files/, { timeout: 10_000 });
   });
 });
