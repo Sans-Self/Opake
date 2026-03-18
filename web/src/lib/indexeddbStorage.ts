@@ -4,6 +4,7 @@
 import Dexie, { type EntityTable, type Table } from "dexie";
 import type { CachedCollection, CachedRecord, Config, Identity, Session } from "./storageTypes";
 import { type Storage, StorageError, sanitizeDid } from "./storage";
+import { ConfigSchema, IdentitySchema, SessionSchema, CachedProfileSchema } from "./schemas";
 
 const CONFIG_KEY = "global";
 
@@ -105,7 +106,7 @@ export class IndexedDbStorage implements Storage {
     if (!row) {
       throw new StorageError("no config found — log in first");
     }
-    return row.value;
+    return ConfigSchema.parse(row.value);
   }
 
   async saveConfig(config: Config): Promise<void> {
@@ -118,7 +119,7 @@ export class IndexedDbStorage implements Storage {
     if (!row) {
       throw new StorageError(`no identity for ${did} — log in first`);
     }
-    return row.value;
+    return IdentitySchema.parse(row.value);
   }
 
   async saveIdentity(did: string, identity: Identity): Promise<void> {
@@ -132,7 +133,7 @@ export class IndexedDbStorage implements Storage {
     if (!row) {
       throw new StorageError(`no session for ${did} — log in first`);
     }
-    return row.value;
+    return SessionSchema.parse(row.value);
   }
 
   async saveSession(did: string, session: Session): Promise<void> {
@@ -145,7 +146,8 @@ export class IndexedDbStorage implements Storage {
   async loadProfile(did: string): Promise<CachedProfile | null> {
     const key = sanitizeDid(did);
     const row = await this.db.profiles.get(key);
-    return row?.value ?? null;
+    if (!row) return null;
+    return CachedProfileSchema.parse(row.value);
   }
 
   async saveProfile(did: string, profile: CachedProfile): Promise<void> {

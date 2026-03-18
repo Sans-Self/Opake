@@ -5,6 +5,8 @@ import type { TokenResponse } from "@/lib/oauth";
 import type { PdsRecord } from "@/lib/pdsTypes";
 import { getOpakeWorker } from "@/lib/worker";
 import { storage } from "@/lib/indexeddbStorage";
+import { RecordRefSchema, PdsRecordSchema } from "@/lib/schemas";
+import { z } from "zod";
 
 interface ApiConfig {
   pdsUrl: string;
@@ -203,7 +205,7 @@ export async function authenticatedPutRecord(
   session: Session,
 ): Promise<RecordRef> {
   const { pdsUrl, did, collection, rkey, record } = params;
-  return (await authenticatedXrpc(
+  const result = await authenticatedXrpc(
     {
       pdsUrl,
       lexicon: "com.atproto.repo.putRecord",
@@ -211,7 +213,8 @@ export async function authenticatedPutRecord(
       body: { repo: did, collection, rkey, record: { $type: collection, ...(record as object) } },
     },
     session,
-  )) as RecordRef;
+  );
+  return RecordRefSchema.parse(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,13 +233,14 @@ export async function authenticatedGetRecord<T>(
   session: Session,
 ): Promise<PdsRecord<T>> {
   const { pdsUrl, did, collection, rkey } = params;
-  return (await authenticatedXrpc(
+  const result = await authenticatedXrpc(
     {
       pdsUrl,
       lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`,
     },
     session,
-  )) as PdsRecord<T>;
+  );
+  return PdsRecordSchema(z.unknown()).parse(result) as PdsRecord<T>;
 }
 
 interface DeleteRecordParams {

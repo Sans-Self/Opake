@@ -21,10 +21,17 @@ import {
 import type { DpopKeyPair, PkceChallenge, EphemeralKeypair } from "@/lib/cryptoTypes";
 import type { AccountConfigRecord } from "@/lib/pdsTypes";
 import type { Identity } from "@/lib/storageTypes";
+import {
+  DpopKeyPairSchema,
+  PkceChallengeSchema,
+  IdentitySchema,
+  EphemeralKeypairSchema,
+  AccountConfigRecordSchema,
+} from "@/lib/schemas";
 
 export const identityApi = {
   generateDpopKeyPair(): DpopKeyPair {
-    return wasmGenerateDpopKeyPair() as DpopKeyPair;
+    return DpopKeyPairSchema.parse(wasmGenerateDpopKeyPair());
   },
 
   createDpopProof(
@@ -46,11 +53,11 @@ export const identityApi = {
   },
 
   generatePkce(): PkceChallenge {
-    return wasmGeneratePkce() as PkceChallenge;
+    return PkceChallengeSchema.parse(wasmGeneratePkce());
   },
 
   generateIdentity(did: string): Identity {
-    return wasmGenerateIdentity(did) as Identity;
+    return IdentitySchema.parse(wasmGenerateIdentity(did));
   },
 
   generateMnemonic(): string {
@@ -62,11 +69,11 @@ export const identityApi = {
   },
 
   deriveIdentityFromMnemonic(phrase: string, did: string): Identity {
-    return wasmDeriveIdentityFromMnemonic(phrase, did) as Identity;
+    return IdentitySchema.parse(wasmDeriveIdentityFromMnemonic(phrase, did));
   },
 
   generateEphemeralKeypair(): EphemeralKeypair {
-    return wasmGenerateEphemeralKeypair() as EphemeralKeypair;
+    return EphemeralKeypairSchema.parse(wasmGenerateEphemeralKeypair());
   },
 
   signAppviewRequest(
@@ -100,6 +107,6 @@ export const identityApi = {
   },
 
   newAccountConfig(modifiedAt: string): AccountConfigRecord {
-    return wasmNewAccountConfig(modifiedAt) as AccountConfigRecord;
+    return AccountConfigRecordSchema.parse(wasmNewAccountConfig(modifiedAt));
   },
 };

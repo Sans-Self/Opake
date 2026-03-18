@@ -20,13 +20,15 @@ import { triggerBrowserDownload } from "@/lib/download";
 import type { Session } from "@/lib/storageTypes";
 import { toastSuccess, toastError, toastInfo } from "@/stores/toast";
 import { storage } from "@/lib/indexeddbStorage";
-import { documentCollection, directoryCollection, grantCollection } from "@/wasm/opake-wasm/opake";
 import { decryptDocumentRecord, markDecryptionFailed } from "./decrypt";
 import { directoryItemFromSnapshot, documentPlaceholder, applyTagFilter } from "./file-items";
 
-const DOCUMENT_COLLECTION = documentCollection();
-const DIRECTORY_COLLECTION = directoryCollection();
-const GRANT_COLLECTION = grantCollection();
+// These match the Rust constants in documents/mod.rs, directories/mod.rs, sharing/mod.rs.
+// Can't call WASM at module scope (main thread) — WASM isn't initialized during import.
+// The WASM exports (documentCollection, etc.) are available in the worker context only.
+const DOCUMENT_COLLECTION = "app.opake.document";
+const DIRECTORY_COLLECTION = "app.opake.directory";
+const GRANT_COLLECTION = "app.opake.grant";
 
 // ---------------------------------------------------------------------------
 // Types & helpers

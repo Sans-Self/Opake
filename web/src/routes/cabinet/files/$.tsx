@@ -24,7 +24,6 @@ function SubdirectoryContent() {
 
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
   const documentRecords = useDocumentsStore((s) => s.documentRecords);
-  const ensureDirectoryReady = useDocumentsStore((s) => s.ensureDirectoryReady);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
@@ -58,13 +57,6 @@ function SubdirectoryContent() {
     }
     readmeUriRef.current = readmeUri;
   }, [readmeUri]);
-
-  // Decrypt the resolved directory — works for both directory browsing and preview mode.
-  // Fixes the breadcrumb bug: on direct navigation to a preview URL, the parent
-  // directory's documents get decrypted, populating the file list and names.
-  useEffect(() => {
-    void ensureDirectoryReady(currentDirectoryUri);
-  }, [currentDirectoryUri, ensureDirectoryReady]);
 
   // Evict decrypted blob from cache when navigating away from a preview
   useEffect(() => {
@@ -101,6 +93,42 @@ function SubdirectoryContent() {
   );
 }
 
+/** Wait for the tree to be available (loadCabinet runs as a useEffect in the parent). */
+async function waitForTree(): Promise<void> {
+  if (useDocumentsStore.getState().treeSnapshot) return;
+  return new Promise((resolve) => {
+    const unsub = useDocumentsStore.subscribe((state) => {
+      if (state.treeSnapshot) {
+        unsub();
+        resolve();
+      }
+    });
+  });
+}
+
 export const Route = createFileRoute("/cabinet/files/$")({
+  loader: async ({ params }) => {
+    const session = useAuthStore.getState().session;
+    if (session.status !== "active") return;
+
+    await waitForTree();
+
+    const splat = params._splat ?? "";
+    const segments = splat.split("/").filter(Boolean);
+    const lastRkey = segments[segments.length - 1];
+    if (!lastRkey) return;
+
+    const { did } = session;
+    const treeSnapshot = useDocumentsStore.getState().treeSnapshot;
+
+    // Determine if the last segment is a directory or a document (preview)
+    const lastDirUri = directoryUri(did, lastRkey);
+    const isDirectory = !!treeSnapshot?.directories[lastDirUri];
+    const dirSegments = isDirectory ? segments : segments.slice(0, -1);
+    const dirRkey = dirSegments.length > 0 ? dirSegments[dirSegments.length - 1] : undefined;
+    const targetUri = dirRkey ? directoryUri(did, dirRkey) : null;
+
+    await useDocumentsStore.getState().ensureDirectoryReady(targetUri);
+  },
   component: SubdirectoryContent,
 });

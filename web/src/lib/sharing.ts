@@ -12,6 +12,9 @@ import { base64ToUint8Array, uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
 import { triggerBrowserDownload } from "@/lib/download";
 import { decryptEnvelope } from "@/stores/documents/decrypt";
+import { GrantRecordSchema, DocumentRecordSchema, ListRecordsResponseSchema } from "@/lib/schemas";
+
+const GrantListResponseSchema = ListRecordsResponseSchema(GrantRecordSchema);
 const GRANT_COLLECTION = "app.opake.grant";
 const PUBLIC_KEY_COLLECTION = "app.opake.publicKey";
 
@@ -140,11 +143,6 @@ export async function createGrant(params: CreateGrantParams): Promise<string> {
 // Grant listing (outgoing — from own PDS)
 // ---------------------------------------------------------------------------
 
-interface ListRecordsResponse {
-  readonly records: readonly { uri: string; cid: string; value: GrantRecord }[];
-  readonly cursor?: string;
-}
-
 /** List all outgoing grants from the owner's PDS. */
 export async function listOutgoingGrants(
   pdsUrl: string,
@@ -163,10 +161,12 @@ export async function listOutgoingGrants(
     });
     if (cursor) params.set("cursor", cursor);
 
-    const response = (await authenticatedXrpc(
-      { pdsUrl, lexicon: `com.atproto.repo.listRecords?${params}` },
-      session,
-    )) as ListRecordsResponse;
+    const response = GrantListResponseSchema.parse(
+      await authenticatedXrpc(
+        { pdsUrl, lexicon: `com.atproto.repo.listRecords?${params}` },
+        session,
+      ),
+    );
 
     for (const r of response.records) {
       entries.push({ uri: r.uri, cid: r.cid, record: r.value });
@@ -265,7 +265,7 @@ export async function resolveIncomingGrant(
     GRANT_COLLECTION,
     rkeyFromUri(grant.uri),
   );
-  const grantRecord = grantResult.value as GrantRecord;
+  const grantRecord = GrantRecordSchema.parse(grantResult.value);
 
   // Unwrap the content key with our private key
   const worker = getOpakeWorker();
@@ -278,7 +278,7 @@ export async function resolveIncomingGrant(
     DOCUMENT_COLLECTION,
     rkeyFromUri(grantRecord.document),
   );
-  const documentRecord = docResult.value as DocumentRecord;
+  const documentRecord = DocumentRecordSchema.parse(docResult.value);
 
   // Decrypt document metadata using the content key
   const { ciphertext, nonce } = decryptEnvelope(documentRecord.encryptedMetadata);

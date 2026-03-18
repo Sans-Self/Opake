@@ -2,6 +2,12 @@
 
 import { DirectoryTreeHandle } from "@/wasm/opake-wasm/opake";
 import type { DirectoryTreeSnapshot, PdsRecord, DirectoryRecord } from "@/lib/pdsTypes";
+import {
+  DirectoryTreeSnapshotSchema,
+  DescendantCountSchema,
+  DescendantEntrySchema,
+} from "@/lib/schemas";
+import { z } from "zod";
 
 // eslint-disable-next-line functional/no-let -- stateful WASM handle held across calls
 let directoryTree: DirectoryTreeHandle | null = null;
@@ -19,7 +25,7 @@ export const treeApi = {
 
     const input = records.map((r) => ({ uri: r.uri, value: r.value }));
     directoryTree = new DirectoryTreeHandle(input, did, privateKey);
-    return directoryTree.snapshot() as DirectoryTreeSnapshot;
+    return DirectoryTreeSnapshotSchema.parse(directoryTree.snapshot());
   },
 
   treeRootUri(): string | undefined {
@@ -27,7 +33,9 @@ export const treeApi = {
   },
 
   treeEntriesFor(uri: string): readonly string[] | null {
-    return (directoryTree?.entriesFor(uri) as string[] | null) ?? null;
+    const raw: unknown = directoryTree?.entriesFor(uri) ?? null;
+    if (!raw) return null;
+    return z.array(z.string()).parse(raw);
   },
 
   treeDirectoryName(uri: string): string | undefined {
@@ -44,12 +52,12 @@ export const treeApi = {
 
   treeCountDescendants(uri: string): { documents: number; directories: number } {
     if (!directoryTree) return { documents: 0, directories: 0 };
-    return directoryTree.countDescendants(uri) as { documents: number; directories: number };
+    return DescendantCountSchema.parse(directoryTree.countDescendants(uri));
   },
 
   treeCollectDescendants(uri: string): readonly { uri: string; kind: string }[] {
     if (!directoryTree) return [];
-    return directoryTree.collectDescendants(uri) as { uri: string; kind: string }[];
+    return z.array(DescendantEntrySchema).parse(directoryTree.collectDescendants(uri));
   },
 
   destroyDirectoryTree(): void {

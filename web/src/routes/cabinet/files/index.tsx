@@ -9,7 +9,6 @@ import type { FileItem } from "@/components/cabinet/types";
 
 function RootDirectoryContent() {
   const navigate = useNavigate();
-  const ensureDirectoryReady = useDocumentsStore((s) => s.ensureDirectoryReady);
   const viewMode = useDocumentsStore((s) => s.viewMode);
   const downloadFile = useDocumentsStore((s) => s.downloadFile);
   const deleteFile = useDocumentsStore((s) => s.deleteFile);
@@ -34,10 +33,6 @@ function RootDirectoryContent() {
     readmeUriRef.current = readmeUri;
   }, [readmeUri]);
 
-  useEffect(() => {
-    void ensureDirectoryReady(null);
-  }, [ensureDirectoryReady]);
-
   const navigateToChild = (item: FileItem) => {
     void navigate({
       to: "/cabinet/files/$",
@@ -61,6 +56,23 @@ function RootDirectoryContent() {
   );
 }
 
+/** Wait for the tree to be available (loadCabinet runs as a useEffect in the parent). */
+async function waitForTree(): Promise<void> {
+  if (useDocumentsStore.getState().treeSnapshot) return;
+  return new Promise((resolve) => {
+    const unsub = useDocumentsStore.subscribe((state) => {
+      if (state.treeSnapshot) {
+        unsub();
+        resolve();
+      }
+    });
+  });
+}
+
 export const Route = createFileRoute("/cabinet/files/")({
+  loader: async () => {
+    await waitForTree();
+    await useDocumentsStore.getState().ensureDirectoryReady(null);
+  },
   component: RootDirectoryContent,
 });

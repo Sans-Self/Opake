@@ -1,13 +1,10 @@
 // PDS operations via WasmTransport — directories, documents, sharing.
 //
-// Each function calls real opake-core functions through XrpcClient<WasmTransport>.
-// WASM returns { result, session }. These wrappers flatten that to
-// { ...result, session } so the store can access fields directly.
-//
-// The `any` bridge through `flatten` is unavoidable at the WASM boundary —
-// serde_wasm_bindgen produces untyped JsValue that we cast to typed returns.
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+// Each function calls opake-core through XrpcClient<WasmTransport>.
+// WASM returns { result, session }. The flatten() helper spreads the
+// result and validates the shape with a Zod schema — no `as` casts.
 
+import { z } from "zod";
 import {
   directoryCreate as wasmDirectoryCreate,
   directoryGetOrCreateRoot as wasmDirectoryGetOrCreateRoot,
@@ -32,18 +29,38 @@ import {
   getRecordRaw as wasmGetRecordRaw,
   downloadFromGrant as wasmDownloadFromGrant,
 } from "@/wasm/opake-wasm/opake";
+import {
+  SessionResultSchema,
+  UriResultSchema,
+  DownloadResultSchema,
+  ContentKeyResultSchema,
+  MetadataUpdateResultSchema,
+  IncomingGrantsResultSchema,
+  RawListResultSchema,
+  RawGetRecordResultSchema,
+  DownloadFromGrantResultSchema,
+} from "@/lib/schemas";
 
-// WASM returns { result: T, session: unknown }. Flatten to { ...T, session }.
+/** Outer shape of every WASM PDS result — validated before destructuring. */
+const WasmResultEnvelope = z.object({
+  result: z.record(z.string(), z.unknown()),
+  session: z.unknown(),
+});
+
 /**
- * WASM returns `{ result: T, session }`. Flatten to `{ ...T, session }`.
- * The cast is safe — serde_wasm_bindgen produces the exact shape the caller expects.
+ * WASM returns `{ result: T, session }`. Flatten to `{ ...T, session }`
+ * and validate against a Zod schema.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- trusted WASM boundary */
-function flatten(wasmResult: any): any {
-  const { result, session } = wasmResult;
-  return { ...result, session };
+function flatten<T>(wasmResult: unknown, schema: z.ZodType<T>): T {
+  const raw = WasmResultEnvelope.parse(wasmResult);
+  return schema.parse({ ...raw.result, session: raw.session });
 }
-/* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
+
+// Typed list results use the same raw schema — records are opaque at the worker level
+const TypedListResultSchema = z.object({
+  records: z.array(z.unknown()),
+  session: z.unknown(),
+});
 
 export const pdsApi = {
   // Directories
@@ -55,9 +72,10 @@ export const pdsApi = {
     parentUri: string | null,
     publicKey: Uint8Array,
     did: string,
-  ): Promise<{ uri: string; session: unknown }> {
+  ) {
     return flatten(
       await wasmDirectoryCreate(pdsUrl, session, name, parentUri ?? undefined, publicKey, did),
+      UriResultSchema,
     );
   },
 
@@ -66,8 +84,11 @@ export const pdsApi = {
     session: unknown,
     publicKey: Uint8Array,
     did: string,
-  ): Promise<{ uri: string; session: unknown }> {
-    return flatten(await wasmDirectoryGetOrCreateRoot(pdsUrl, session, publicKey, did));
+  ) {
+    return flatten(
+      await wasmDirectoryGetOrCreateRoot(pdsUrl, session, publicKey, did),
+      UriResultSchema,
+    );
   },
 
   async directoryAddEntry(
@@ -75,8 +96,11 @@ export const pdsApi = {
     session: unknown,
     directoryUri: string,
     entryUri: string,
-  ): Promise<{ session: unknown }> {
-    return flatten(await wasmDirectoryAddEntry(pdsUrl, session, directoryUri, entryUri));
+  ) {
+    return flatten(
+      await wasmDirectoryAddEntry(pdsUrl, session, directoryUri, entryUri),
+      SessionResultSchema,
+    );
   },
 
   async directoryRemoveEntry(
@@ -84,16 +108,15 @@ export const pdsApi = {
     session: unknown,
     directoryUri: string,
     entryUri: string,
-  ): Promise<{ session: unknown }> {
-    return flatten(await wasmDirectoryRemoveEntry(pdsUrl, session, directoryUri, entryUri));
+  ) {
+    return flatten(
+      await wasmDirectoryRemoveEntry(pdsUrl, session, directoryUri, entryUri),
+      SessionResultSchema,
+    );
   },
 
-  async directoryDelete(
-    pdsUrl: string,
-    session: unknown,
-    directoryUri: string,
-  ): Promise<{ session: unknown }> {
-    return flatten(await wasmDirectoryDelete(pdsUrl, session, directoryUri));
+  async directoryDelete(pdsUrl: string, session: unknown, directoryUri: string) {
+    return flatten(await wasmDirectoryDelete(pdsUrl, session, directoryUri), SessionResultSchema);
   },
 
   async directoryRename(
@@ -103,9 +126,10 @@ export const pdsApi = {
     newName: string,
     privateKey: Uint8Array,
     did: string,
-  ): Promise<{ session: unknown }> {
+  ) {
     return flatten(
       await wasmDirectoryRename(pdsUrl, session, directoryUri, newName, privateKey, did),
+      SessionResultSchema,
     );
   },
 
@@ -121,7 +145,7 @@ export const pdsApi = {
     directoryUri: string | null,
     publicKey: Uint8Array,
     did: string,
-  ): Promise<{ uri: string; session: unknown }> {
+  ) {
     console.debug("[worker:pds] documentUpload called", {
       pdsUrl,
       did,
@@ -132,8 +156,7 @@ export const pdsApi = {
       sessionKeys: Object.keys(session as object),
     });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- flatten returns any from WASM boundary
-      const result: Readonly<{ uri: string; session: unknown }> = flatten(
+      const result = flatten(
         await wasmDocumentUpload(
           pdsUrl,
           session,
@@ -145,6 +168,7 @@ export const pdsApi = {
           publicKey,
           did,
         ),
+        UriResultSchema,
       );
       console.debug("[worker:pds] documentUpload succeeded", { uri: result.uri });
       return result;
@@ -160,8 +184,11 @@ export const pdsApi = {
     documentUri: string,
     privateKey: Uint8Array,
     did: string,
-  ): Promise<{ filename: string; plaintext: Uint8Array; session: unknown }> {
-    return flatten(await wasmDocumentDownload(pdsUrl, session, documentUri, privateKey, did));
+  ) {
+    return flatten(
+      await wasmDocumentDownload(pdsUrl, session, documentUri, privateKey, did),
+      DownloadResultSchema,
+    );
   },
 
   async documentDelete(
@@ -169,8 +196,11 @@ export const pdsApi = {
     session: unknown,
     documentUri: string,
     parentDirectoryUri: string | null,
-  ): Promise<{ session: unknown }> {
-    return flatten(await wasmDocumentDelete(pdsUrl, session, documentUri, parentDirectoryUri));
+  ) {
+    return flatten(
+      await wasmDocumentDelete(pdsUrl, session, documentUri, parentDirectoryUri),
+      SessionResultSchema,
+    );
   },
 
   async documentUpdateMetadata(
@@ -180,9 +210,10 @@ export const pdsApi = {
     changes: { name?: string; tags?: string[]; description?: string },
     privateKey: Uint8Array,
     did: string,
-  ): Promise<{ metadata: unknown; session: unknown }> {
+  ) {
     return flatten(
       await wasmDocumentUpdateMetadata(pdsUrl, session, documentUri, changes, privateKey, did),
+      MetadataUpdateResultSchema,
     );
   },
 
@@ -192,9 +223,10 @@ export const pdsApi = {
     documentUri: string,
     privateKey: Uint8Array,
     did: string,
-  ): Promise<{ contentKey: Uint8Array; session: unknown }> {
+  ) {
     return flatten(
       await wasmDocumentFetchContentKey(pdsUrl, session, documentUri, privateKey, did),
+      ContentKeyResultSchema,
     );
   },
 
@@ -209,7 +241,7 @@ export const pdsApi = {
     recipientPublicKey: Uint8Array,
     permissions: string,
     note: string | null,
-  ): Promise<{ uri: string; session: unknown }> {
+  ) {
     return flatten(
       await wasmGrantCreate(
         pdsUrl,
@@ -221,15 +253,12 @@ export const pdsApi = {
         permissions,
         note,
       ),
+      UriResultSchema,
     );
   },
 
-  async grantRevoke(
-    pdsUrl: string,
-    session: unknown,
-    grantUri: string,
-  ): Promise<{ session: unknown }> {
-    return flatten(await wasmGrantRevoke(pdsUrl, session, grantUri));
+  async grantRevoke(pdsUrl: string, session: unknown, grantUri: string) {
+    return flatten(await wasmGrantRevoke(pdsUrl, session, grantUri), SessionResultSchema);
   },
 
   // Appview
@@ -240,87 +269,46 @@ export const pdsApi = {
     signingKey: Uint8Array,
     did: string,
     defaultAppviewUrl: string,
-  ): Promise<{
-    grants: readonly {
-      uri: string;
-      ownerDid: string;
-      documentUri: string;
-      createdAt: string;
-    }[];
-    session: unknown;
-  }> {
+  ) {
     return flatten(
       await wasmFetchIncomingGrants(pdsUrl, session, signingKey, did, defaultAppviewUrl),
+      IncomingGrantsResultSchema,
     );
   },
 
   // List operations
 
-  async listDocuments(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{ records: readonly unknown[]; session: unknown }> {
-    return flatten(await wasmListDocuments(pdsUrl, session));
+  async listDocuments(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListDocuments(pdsUrl, session), TypedListResultSchema);
   },
 
-  async listDirectories(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{ records: readonly unknown[]; session: unknown }> {
-    return flatten(await wasmListDirectories(pdsUrl, session));
+  async listDirectories(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListDirectories(pdsUrl, session), TypedListResultSchema);
   },
 
-  async listGrants(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{ records: readonly unknown[]; session: unknown }> {
-    return flatten(await wasmListGrants(pdsUrl, session));
+  async listGrants(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListGrants(pdsUrl, session), TypedListResultSchema);
   },
 
   // Raw list operations (for caching — preserves uri + cid + value)
 
-  async listDocumentsRaw(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{
-    records: readonly { uri: string; cid: string; value: unknown }[];
-    session: unknown;
-  }> {
-    return flatten(await wasmListDocumentsRaw(pdsUrl, session));
+  async listDocumentsRaw(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListDocumentsRaw(pdsUrl, session), RawListResultSchema);
   },
 
-  async listDirectoriesRaw(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{
-    records: readonly { uri: string; cid: string; value: unknown }[];
-    session: unknown;
-  }> {
-    return flatten(await wasmListDirectoriesRaw(pdsUrl, session));
+  async listDirectoriesRaw(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListDirectoriesRaw(pdsUrl, session), RawListResultSchema);
   },
 
-  async listGrantsRaw(
-    pdsUrl: string,
-    session: unknown,
-  ): Promise<{
-    records: readonly { uri: string; cid: string; value: unknown }[];
-    session: unknown;
-  }> {
-    return flatten(await wasmListGrantsRaw(pdsUrl, session));
+  async listGrantsRaw(pdsUrl: string, session: unknown) {
+    return flatten(await wasmListGrantsRaw(pdsUrl, session), RawListResultSchema);
   },
 
-  async getRecordRaw(
-    pdsUrl: string,
-    session: unknown,
-    uri: string,
-  ): Promise<{ record: { uri: string; cid: string; value: unknown }; session: unknown }> {
-    return flatten(await wasmGetRecordRaw(pdsUrl, session, uri));
+  async getRecordRaw(pdsUrl: string, session: unknown, uri: string) {
+    return flatten(await wasmGetRecordRaw(pdsUrl, session, uri), RawGetRecordResultSchema);
   },
 
-  async downloadFromGrant(
-    grantUri: string,
-    privateKey: Uint8Array,
-  ): Promise<{ filename: string; plaintext: Uint8Array }> {
-    return wasmDownloadFromGrant(grantUri, privateKey);
+  async downloadFromGrant(grantUri: string, privateKey: Uint8Array) {
+    return DownloadFromGrantResultSchema.parse(await wasmDownloadFromGrant(grantUri, privateKey));
   },
 };
