@@ -7,7 +7,6 @@ import {
   XIcon,
   UploadSimpleIcon,
   FolderIcon,
-  FileTextIcon,
   BookOpenIcon,
 } from "@phosphor-icons/react";
 import { DropdownMenu } from "@/components/DropdownMenu";
@@ -263,15 +262,14 @@ function FileBrowserLayout() {
               onClick: () => newFolderDialogRef.current?.show(),
             },
             {
-              icon: FileTextIcon,
-              label: "New document",
+              icon: BookOpenIcon,
+              label: "New note",
               onClick: () =>
                 void navigate({
                   to: "/cabinet/editor/new",
                   search: contextDirectoryUri ? { directoryUri: contextDirectoryUri } : {},
                 }),
             },
-            { icon: BookOpenIcon, label: "New note" },
           ]}
         />
       </div>

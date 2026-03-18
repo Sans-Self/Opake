@@ -22,10 +22,10 @@ async function setupCabinet(
   await expect(page.getByText("Nothing here yet")).toBeVisible({ timeout: 15_000 });
 }
 
-/** Navigate to the "New document" editor from the cabinet file list. */
+/** Navigate to the "New note" editor from the cabinet file list. */
 async function openNewDocumentEditor(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "New" }).click();
-  await page.getByRole("button", { name: "New document" }).click();
+  await page.getByRole("button", { name: "New note" }).click();
   await expect(page).toHaveURL(/\/cabinet\/editor\/new/);
   const editor = page.locator('[aria-label="Document editor"]');
   await expect(editor).toBeVisible({ timeout: 10_000 });

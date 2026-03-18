@@ -66,7 +66,7 @@ function NewEditorPage() {
       </li>
       <BreadcrumbActive>
         <PencilSimpleIcon size={13} className="mr-1 inline" />
-        New document
+        New note
       </BreadcrumbActive>
     </Breadcrumbs>
   );
@@ -90,7 +90,7 @@ function NewEditorPage() {
       depth={1}
       breadcrumbs={breadcrumbs}
       toolbar={nameInput}
-      footer="End-to-end encrypted · New document"
+      footer="End-to-end encrypted · New note"
     >
       <MarkdownEditor
         initialContent=""
