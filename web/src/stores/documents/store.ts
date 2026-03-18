@@ -73,6 +73,8 @@ interface DocumentsState {
 
   readonly loadCabinet: () => Promise<void>;
   readonly ensureDirectoryReady: (directoryUri: string | null) => Promise<void>;
+  /** Load and decrypt documents for every directory in the tree (for global search). */
+  readonly ensureAllDirectoriesReady: () => Promise<void>;
   readonly itemsForDirectory: (directoryUri: string | null) => FileItem[];
   readonly setTagFilters: (tags: string[]) => void;
   readonly setViewMode: (mode: "list" | "grid") => void;
@@ -102,7 +104,7 @@ interface DocumentsState {
 // ---------------------------------------------------------------------------
 
 /** Find the parent directory URI for a given entry URI within a tree snapshot. */
-function findParentUri(
+export function findParentUri(
   snapshot: DirectoryTreeSnapshot | null,
   entryUri: string,
 ): string | undefined {
@@ -396,6 +398,18 @@ export const useDocumentsStore = create<DocumentsState>()(
       }, Promise.resolve());
 
       done();
+    },
+
+    ensureAllDirectoriesReady: async () => {
+      const { treeSnapshot } = get();
+      if (!treeSnapshot) return;
+
+      // Process directories sequentially — each is fast when cached.
+      // Items update after each directory, so search results appear progressively.
+      // eslint-disable-next-line functional/no-loop-statements -- sequential async processing
+      for (const uri of Object.keys(treeSnapshot.directories)) {
+        await get().ensureDirectoryReady(uri);
+      }
     },
 
     itemsForDirectory: (directoryUri: string | null): FileItem[] => {

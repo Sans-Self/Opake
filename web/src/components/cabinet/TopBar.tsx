@@ -11,14 +11,15 @@ import {
 import { Link } from "@tanstack/react-router";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { useAuthStore } from "@/stores/auth";
+import { useSearchInput } from "@/hooks/useSearchInput";
 import { truncateDid } from "@/lib/format";
 
-interface TopBarProps {
-  readonly searchQuery: string;
-  readonly onSearchChange: (query: string) => void;
-}
-
-export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
+export function TopBar() {
+  const {
+    query: searchQuery,
+    handleChange: handleSearchChange,
+    handleClear: handleSearchClear,
+  } = useSearchInput();
   const session = useAuthStore((s) => s.session);
   // eslint-disable-next-line @typescript-eslint/unbound-method -- Zustand actions don't use `this`
   const logout = useAuthStore((s) => s.logout);
@@ -57,14 +58,11 @@ export function TopBar({ searchQuery, onSearchChange }: TopBarProps) {
           type="text"
           placeholder="Search your cabinet…"
           value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           className="text-secondary grow bg-transparent"
         />
         {searchQuery && (
-          <button
-            onClick={() => onSearchChange("")}
-            className="btn btn-ghost btn-xs text-text-faint p-0"
-          >
+          <button onClick={handleSearchClear} className="btn btn-ghost btn-xs text-text-faint p-0">
             <XIcon size={12} />
           </button>
         )}

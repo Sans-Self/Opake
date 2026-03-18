@@ -25,7 +25,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { decryptDocumentRecord } from "@/stores/documents/decrypt";
 import { storage } from "@/lib/indexeddbStorage";
-import { truncateDid, formatRelativeDate, mimeTypeToFileType, formatFileSize } from "@/lib/format";
+import { truncateDid, formatRelativeDate } from "@/lib/format";
 import { handleFromDid, pdsUrlFromDid } from "@/lib/did";
 import { loading as trackLoading } from "@/stores/app";
 import {
@@ -35,6 +35,7 @@ import {
   resolveIncomingGrant,
   downloadIncomingGrant,
   decryptIncomingDocument,
+  incomingGrantToFileItem,
   type GrantEntry,
   type InboxGrantItem,
   type ResolvedIncomingGrant,
@@ -96,30 +97,6 @@ function outgoingGrantToFileItem(
     decrypted: true,
     tags: [],
     subtitle: `shared with ${recipientDisplay}`,
-  };
-}
-
-function incomingGrantToFileItem(
-  grant: InboxGrantItem,
-  ownerDisplay: string,
-  resolved?: ResolvedIncomingGrant,
-): FileItem {
-  return {
-    id: grant.uri,
-    uri: grant.uri,
-    name: resolved?.metadata.name ?? "Shared file",
-    kind: "file",
-    fileType: resolved?.metadata.mimeType
-      ? mimeTypeToFileType(resolved.metadata.mimeType)
-      : undefined,
-    mimeType: resolved?.metadata.mimeType ?? undefined,
-    size: resolved?.metadata.size != null ? formatFileSize(resolved.metadata.size) : undefined,
-    encrypted: true,
-    status: "shared",
-    modified: formatRelativeDate(grant.createdAt),
-    decrypted: resolved !== undefined,
-    tags: [],
-    subtitle: `from ${ownerDisplay}`,
   };
 }
 

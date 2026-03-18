@@ -9,6 +9,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
+import { useSearchInput } from "@/hooks/useSearchInput";
 import { SidebarItem } from "./SidebarItem";
 
 const MAIN_NAV = [
@@ -28,12 +29,15 @@ const WORKSPACES = [
 
 interface SidebarProps {
   readonly onNavigate?: () => void;
-  readonly searchQuery?: string;
-  readonly onSearchChange?: (query: string) => void;
 }
 
-export function Sidebar({ onNavigate, searchQuery, onSearchChange }: SidebarProps) {
+export function Sidebar({ onNavigate }: SidebarProps) {
   const anyLoading = useAppStore((s) => s.anythingLoading());
+  const {
+    query: searchQuery,
+    handleChange: handleSearchChange,
+    handleClear: handleSearchClear,
+  } = useSearchInput();
 
   return (
     <aside className="border-base-300/50 bg-base-200 flex h-full w-53 shrink-0 flex-col border-r px-3 py-4">
@@ -45,26 +49,21 @@ export function Sidebar({ onNavigate, searchQuery, onSearchChange }: SidebarProp
       </div>
 
       {/* Search — mobile only */}
-      {onSearchChange && (
-        <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui mb-3 flex items-center gap-2 rounded-lg py-1.75 md:hidden">
-          <MagnifyingGlassIcon size={13} className="text-text-faint" />
-          <input
-            type="text"
-            placeholder="Search…"
-            value={searchQuery ?? ""}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="text-secondary grow bg-transparent"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => onSearchChange("")}
-              className="btn btn-ghost btn-xs text-text-faint p-0"
-            >
-              <XIcon size={12} />
-            </button>
-          )}
-        </label>
-      )}
+      <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui mb-3 flex items-center gap-2 rounded-lg py-1.75 md:hidden">
+        <MagnifyingGlassIcon size={13} className="text-text-faint" />
+        <input
+          type="text"
+          placeholder="Search…"
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          className="text-secondary grow bg-transparent"
+        />
+        {searchQuery && (
+          <button onClick={handleSearchClear} className="btn btn-ghost btn-xs text-text-faint p-0">
+            <XIcon size={12} />
+          </button>
+        )}
+      </label>
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">

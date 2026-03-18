@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createFileRoute, redirect, Outlet, Link } from "@tanstack/react-router";
 import { Sidebar } from "@/components/cabinet/Sidebar";
 import { TopBar } from "@/components/cabinet/TopBar";
@@ -8,7 +8,6 @@ import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
 
 function CabinetLayout() {
-  const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const loadCabinet = useDocumentsStore((s) => s.loadCabinet);
   const anyLoading = useAppStore((s) => s.anythingLoading());
@@ -52,15 +51,11 @@ function CabinetLayout() {
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
-        <Sidebar
-          onNavigate={closeSidebar}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-        />
+        <Sidebar onNavigate={closeSidebar} />
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden pt-14 md:pt-0">
-        <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+        <TopBar />
         <Outlet />
       </main>
     </div>

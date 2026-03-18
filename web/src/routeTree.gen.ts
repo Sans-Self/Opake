@@ -21,6 +21,7 @@ import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-cal
 import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
 import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
 import { Route as CabinetSettingsRouteImport } from './routes/cabinet/settings'
+import { Route as CabinetSearchRouteImport } from './routes/cabinet/search'
 import { Route as CabinetEncryptedRouteImport } from './routes/cabinet/encrypted'
 import { Route as PublicTroubleshootingRouteImport } from './routes/_public/troubleshooting'
 import { Route as PublicFaqRouteImport } from './routes/_public/faq'
@@ -94,6 +95,11 @@ const CabinetSharedRoute = CabinetSharedRouteImport.update({
 const CabinetSettingsRoute = CabinetSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetSearchRoute = CabinetSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => CabinetRouteRoute,
 } as any)
 const CabinetEncryptedRoute = CabinetEncryptedRouteImport.update({
@@ -181,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/faq': typeof PublicFaqRoute
   '/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/trash': typeof CabinetTrashRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByTo {
   '/faq': typeof PublicFaqRoute
   '/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/trash': typeof CabinetTrashRoute
@@ -234,6 +242,7 @@ export interface FileRoutesById {
   '/_public/faq': typeof PublicFaqRoute
   '/_public/troubleshooting': typeof PublicTroubleshootingRoute
   '/cabinet/encrypted': typeof CabinetEncryptedRoute
+  '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/trash': typeof CabinetTrashRoute
@@ -265,6 +274,7 @@ export interface FileRouteTypes {
     | '/faq'
     | '/troubleshooting'
     | '/cabinet/encrypted'
+    | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/trash'
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/faq'
     | '/troubleshooting'
     | '/cabinet/encrypted'
+    | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/trash'
@@ -317,6 +328,7 @@ export interface FileRouteTypes {
     | '/_public/faq'
     | '/_public/troubleshooting'
     | '/cabinet/encrypted'
+    | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/trash'
@@ -428,6 +440,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/cabinet/settings'
       preLoaderRoute: typeof CabinetSettingsRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/search': {
+      id: '/cabinet/search'
+      path: '/search'
+      fullPath: '/cabinet/search'
+      preLoaderRoute: typeof CabinetSearchRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
     '/cabinet/encrypted': {
@@ -568,6 +587,7 @@ interface CabinetRouteRouteChildren {
   CabinetDocsRouteRoute: typeof CabinetDocsRouteRouteWithChildren
   CabinetFilesRouteRoute: typeof CabinetFilesRouteRouteWithChildren
   CabinetEncryptedRoute: typeof CabinetEncryptedRoute
+  CabinetSearchRoute: typeof CabinetSearchRoute
   CabinetSettingsRoute: typeof CabinetSettingsRoute
   CabinetSharedRoute: typeof CabinetSharedRoute
   CabinetTrashRoute: typeof CabinetTrashRoute
@@ -580,6 +600,7 @@ const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
   CabinetDocsRouteRoute: CabinetDocsRouteRouteWithChildren,
   CabinetFilesRouteRoute: CabinetFilesRouteRouteWithChildren,
   CabinetEncryptedRoute: CabinetEncryptedRoute,
+  CabinetSearchRoute: CabinetSearchRoute,
   CabinetSettingsRoute: CabinetSettingsRoute,
   CabinetSharedRoute: CabinetSharedRoute,
   CabinetTrashRoute: CabinetTrashRoute,

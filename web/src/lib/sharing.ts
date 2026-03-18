@@ -10,7 +10,9 @@ import { pdsUrlFromDid } from "@/lib/did";
 import { getOpakeWorker } from "@/lib/worker";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@/lib/encoding";
 import { rkeyFromUri } from "@/lib/atUri";
+import { formatRelativeDate, mimeTypeToFileType, formatFileSize } from "@/lib/format";
 import { triggerBrowserDownload } from "@/lib/download";
+import type { FileItem } from "@/components/cabinet/types";
 import { decryptEnvelope } from "@/stores/documents/decrypt";
 import { GrantRecordSchema, DocumentRecordSchema, ListRecordsResponseSchema } from "@/lib/schemas";
 
@@ -50,6 +52,35 @@ export interface InboxGrantItem {
   readonly ownerDid: string;
   readonly documentUri: string;
   readonly createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Grant → FileItem conversion
+// ---------------------------------------------------------------------------
+
+/** Build a FileItem from an incoming grant, optionally with resolved metadata. */
+export function incomingGrantToFileItem(
+  grant: InboxGrantItem,
+  ownerDisplay: string,
+  resolved?: ResolvedIncomingGrant,
+): FileItem {
+  return {
+    id: grant.uri,
+    uri: grant.uri,
+    name: resolved?.metadata.name ?? "Shared file",
+    kind: "file",
+    fileType: resolved?.metadata.mimeType
+      ? mimeTypeToFileType(resolved.metadata.mimeType)
+      : undefined,
+    mimeType: resolved?.metadata.mimeType ?? undefined,
+    size: resolved?.metadata.size != null ? formatFileSize(resolved.metadata.size) : undefined,
+    encrypted: true,
+    status: "shared",
+    modified: formatRelativeDate(grant.createdAt),
+    decrypted: resolved !== undefined,
+    tags: [],
+    subtitle: `from ${ownerDisplay}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
