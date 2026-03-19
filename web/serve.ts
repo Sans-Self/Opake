@@ -51,13 +51,18 @@ async function tryStaticFile(pathname: string): Promise<Response | null> {
 
   const body = readFileSync(filePath);
   const isHashed = pathname.startsWith("/assets/");
+  const isServiceWorker = pathname.includes("service-worker");
 
-  return new Response(body, {
-    headers: {
-      "content-type": getMimeType(filePath),
-      "cache-control": isHashed ? IMMUTABLE_CACHE : NO_CACHE,
-    },
-  });
+  const headers: Record<string, string> = {
+    "content-type": getMimeType(filePath),
+    "cache-control": isHashed ? IMMUTABLE_CACHE : NO_CACHE,
+  };
+
+  if (isServiceWorker) {
+    headers["Service-Worker-Allowed"] = "/";
+  }
+
+  return new Response(body, { headers });
 }
 
 Bun.serve({

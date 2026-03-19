@@ -3,7 +3,7 @@ use opake_core::client::Session;
 
 use crate::config::FileStorage;
 
-use super::{accounts, login, logout, set_default};
+use super::{accounts, login, logout, session_cmd, set_default};
 
 /// Manage accounts and authentication
 #[derive(Args)]
@@ -22,6 +22,8 @@ enum AccountAction {
     List(accounts::AccountsCommand),
     /// Set the default account (used when --as is omitted)
     SetDefault(set_default::SetDefaultCommand),
+    /// Manage session tokens
+    Session(session_cmd::SessionCommand),
 }
 
 impl AccountCommand {
@@ -40,6 +42,7 @@ impl AccountCommand {
                 cmd.run(storage)?;
                 Ok(None)
             }
+            AccountAction::Session(cmd) => cmd.execute(storage).await,
         }
     }
 }

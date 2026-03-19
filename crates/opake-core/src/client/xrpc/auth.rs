@@ -107,13 +107,7 @@ impl<T: Transport> super::XrpcClient<T> {
 
         match result {
             Ok(token_response) => {
-                session.access_token = token_response.access_token;
-                if let Some(rt) = token_response.refresh_token {
-                    session.refresh_token = rt;
-                }
-                if let Some(expires_in) = token_response.expires_in {
-                    session.expires_at = Some(timestamp + expires_in as i64);
-                }
+                session.apply_token_response(&token_response, timestamp);
                 info!("OAuth session refreshed for {}", session.handle);
                 self.session = Some(Session::OAuth(session));
                 self.session_refreshed = true;

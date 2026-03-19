@@ -65,6 +65,7 @@ struct Cli {
 enum Command {
     // --- Grouped commands ---
     Account(commands::account::AccountCommand),
+    Daemon(commands::daemon::DaemonCommand),
     Share(commands::share_group::ShareGroupCommand),
     Keyring(commands::keyring::KeyringCommand),
     Metadata(commands::metadata::MetadataCommand),
@@ -136,6 +137,8 @@ async fn main() -> anyhow::Result<()> {
                 session::persist_session(&storage, s.did(), s)?;
             }
         }
+
+        Command::Daemon(cmd) => cmd.execute(&storage).await?,
 
         Command::Upload(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Download(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,

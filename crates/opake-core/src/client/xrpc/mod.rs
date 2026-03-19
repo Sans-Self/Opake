@@ -64,6 +64,24 @@ pub struct OAuthSession {
     pub client_id: String,
 }
 
+impl OAuthSession {
+    /// Apply a token response to this session, updating tokens and expiry.
+    /// Shared by both the reactive refresh (XrpcClient) and proactive refresh (daemon/SW).
+    pub fn apply_token_response(
+        &mut self,
+        response: &crate::client::oauth_token::TokenResponse,
+        now: i64,
+    ) {
+        self.access_token.clone_from(&response.access_token);
+        if let Some(ref rt) = response.refresh_token {
+            self.refresh_token.clone_from(rt);
+        }
+        if let Some(expires_in) = response.expires_in {
+            self.expires_at = Some(now + expires_in as i64);
+        }
+    }
+}
+
 impl Session {
     pub fn did(&self) -> &str {
         match self {
@@ -76,6 +94,30 @@ impl Session {
         match self {
             Session::Legacy(s) => &s.handle,
             Session::OAuth(s) => &s.handle,
+        }
+    }
+
+    /// Unix timestamp when the access token expires, if known.
+    pub fn expires_at(&self) -> Option<i64> {
+        match self {
+            Session::Legacy(_) => None,
+            Session::OAuth(s) => s.expires_at,
+        }
+    }
+
+    /// Whether the session's access token will expire within `threshold_seconds`.
+    ///
+    /// Returns `true` if:
+    /// - OAuth session with `expires_at` set and within threshold of `now`
+    /// - OAuth session without `expires_at` (unknown expiry — refresh to be safe)
+    /// - Legacy session (always true — no expiry info, refresh is a health check)
+    pub fn needs_refresh(&self, threshold_seconds: i64, now: i64) -> bool {
+        match self {
+            Session::Legacy(_) => true,
+            Session::OAuth(s) => match s.expires_at {
+                Some(expires_at) => now + threshold_seconds >= expires_at,
+                None => true,
+            },
         }
     }
 }

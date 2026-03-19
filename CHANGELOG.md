@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 ### Changed
+- Add proactive session token rotation before expiry (#242)
 - Installation guide: direct users to package managers (brew, flatpak, AUR, crates.io) [#320](https://issues.opake.app/issues/320.html)
 - Document AGPLv3 implications for self-hosters and plugin developers [#312](https://issues.opake.app/issues/312.html)
 - Audit and improve command hierarchy for clarity [#306](https://issues.opake.app/issues/306.html)

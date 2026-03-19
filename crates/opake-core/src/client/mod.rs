@@ -10,7 +10,8 @@ pub mod oauth_discovery;
 pub mod oauth_token;
 #[cfg(feature = "reqwest-transport")]
 mod reqwest_transport;
-mod time;
+pub mod session_refresh;
+pub mod time;
 mod transport;
 #[cfg(all(feature = "wasm-transport", target_arch = "wasm32"))]
 mod wasm_transport;

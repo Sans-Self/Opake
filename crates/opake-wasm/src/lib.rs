@@ -19,6 +19,8 @@ mod documents;
 #[cfg(target_arch = "wasm32")]
 mod list;
 #[cfg(target_arch = "wasm32")]
+mod session;
+#[cfg(target_arch = "wasm32")]
 mod sharing;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_util;

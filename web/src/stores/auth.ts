@@ -69,6 +69,7 @@ interface AuthActions {
   generateSeedPhrase(): Promise<string>;
   confirmSeedPhrase(phrase: string): Promise<void>;
   recoverFromSeedPhrase(phrase: string, force?: boolean): Promise<{ mismatch: boolean }>;
+  onExternalSessionRefresh(): void;
   logout(): Promise<void>;
 }
 
@@ -551,6 +552,16 @@ export const useAuthStore = create<AuthState>()(
       } finally {
         done();
       }
+    },
+
+    // Called by the SW message bridge when the Service Worker refreshes the
+    // session externally. The session is already updated in IndexedDB — this
+    // hook is for in-memory state invalidation if we ever cache tokens in the
+    // store. Currently a no-op beyond logging.
+    onExternalSessionRefresh: () => {
+      const { session } = get();
+      if (session.status !== "active") return;
+      console.debug("[auth] session refreshed externally by Service Worker");
     },
 
     logout: async () => {

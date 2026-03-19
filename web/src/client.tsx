@@ -6,6 +6,7 @@ import { hydrateRoot } from "react-dom/client";
 import { StartClient } from "@tanstack/react-start/client";
 import { getOpakeWorker } from "@/lib/worker";
 import { useAuthStore } from "@/stores/auth";
+import { registerSessionRefreshWorker } from "@/lib/service-worker-registration";
 
 enableMapSet();
 enableArrayMethods();
@@ -13,6 +14,7 @@ enableArrayMethods();
 console.debug("[opake] app starting");
 getOpakeWorker(); // warm up WASM worker early
 void useAuthStore.getState().boot(); // start session restore from IndexedDB
+registerSessionRefreshWorker();
 
 startTransition(() => {
   hydrateRoot(

@@ -270,8 +270,29 @@ export async function authenticatedDeleteRecord(
 // Token refresh
 // ---------------------------------------------------------------------------
 
-/** Refresh an expired OAuth access token. Mutates the session in place and persists to IndexedDB. */
+/** Refresh an expired OAuth access token. Mutates the session in place and persists to IndexedDB.
+ *
+ * Before attempting a refresh, re-reads the session from IndexedDB. If the
+ * tokens differ (i.e. the Service Worker already refreshed), adopts the fresh
+ * tokens and returns true without calling the token endpoint. This prevents
+ * consuming a single-use refresh token that the SW already rotated.
+ */
 async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
+  // Check if the SW already refreshed for us
+  try {
+    const stored = await storage.loadSession(session.did);
+    if (stored.type === "oauth" && stored.accessToken !== session.accessToken) {
+      console.debug("[api] SW already refreshed — adopting stored tokens");
+      session.accessToken = stored.accessToken;
+      session.refreshToken = stored.refreshToken;
+      session.dpopNonce = stored.dpopNonce;
+      session.expiresAt = stored.expiresAt;
+      return true;
+    }
+  } catch (err) {
+    console.warn("[api] failed to re-read session from IndexedDB:", err);
+  }
+
   const worker = getOpakeWorker();
   const url = session.tokenEndpoint;
 
