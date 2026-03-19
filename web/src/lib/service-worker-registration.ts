@@ -1,16 +1,16 @@
-// Service Worker registration + session-refresh message bridge.
+// Service Worker registration + task scheduling.
 //
-// The main thread posts periodic `check-session` messages to the Service
-// Worker, which handles the actual refresh via WASM. When the worker
-// refreshes tokens, it posts `session-refreshed` back and we notify the
-// auth store.
+// Reads the daemon task registry from WASM (same definitions as the CLI
+// daemon) and posts task-specific messages on independent intervals. The
+// Service Worker handles each message type with the corresponding WASM export.
 
-interface ServiceWorkerMessage {
-  readonly type: string;
-  readonly did?: string;
+import { getOpakeWorker } from "@/lib/worker";
+
+interface TaskDef {
+  readonly name: string;
+  readonly intervalSeconds: number;
+  readonly description: string;
 }
-
-const REFRESH_INTERVAL_MS = 30_000;
 
 export function registerSessionRefreshWorker(): void {
   if (!("serviceWorker" in navigator)) return;
@@ -20,24 +20,34 @@ export function registerSessionRefreshWorker(): void {
       type: "module",
       scope: "/",
     })
-    .then((registration) => {
+    .then(async (registration) => {
       console.debug("[service-worker-reg] registered:", registration.scope);
 
-      const sendCheck = (): void => {
-        const controller = navigator.serviceWorker.controller;
-        if (!controller) return;
+      // Load task definitions from the core registry via WASM
+      const worker = getOpakeWorker();
+      const tasks = (await worker.daemonTaskDefs()) as readonly TaskDef[];
 
-        // Skip if not logged in — avoid waking the worker for nothing
-        void import("@/stores/auth").then(({ useAuthStore }) => {
-          if (useAuthStore.getState().session.status === "active") {
-            controller.postMessage({ type: "check-session" });
-          }
-        });
-      };
+      tasks.map((task) => {
+        const intervalMs = task.intervalSeconds * 1000;
 
-      // First check after a short delay (let the app boot)
-      setTimeout(sendCheck, 5_000);
-      setInterval(sendCheck, REFRESH_INTERVAL_MS);
+        const sendMessage = (): void => {
+          const controller = navigator.serviceWorker.controller;
+          if (!controller) return;
+
+          void import("@/stores/auth").then(({ useAuthStore }) => {
+            if (useAuthStore.getState().session.status === "active") {
+              controller.postMessage({ type: task.name });
+            }
+          });
+        };
+
+        setTimeout(sendMessage, 5_000);
+        setInterval(sendMessage, intervalMs);
+
+        console.debug(
+          `[service-worker-reg] scheduled "${task.name}" every ${task.intervalSeconds}s`,
+        );
+      });
     })
     .catch((err: unknown) => {
       console.warn("[service-worker-reg] registration failed:", err);
@@ -45,7 +55,7 @@ export function registerSessionRefreshWorker(): void {
 
   // Listen for session-refreshed messages from the worker
   navigator.serviceWorker.addEventListener("message", (event) => {
-    const data = event.data as ServiceWorkerMessage | undefined;
+    const data = event.data as { type?: string; did?: string } | undefined;
     if (data?.type === "session-refreshed") {
       console.debug("[service-worker-reg] session refreshed externally for", data.did);
       void import("@/stores/auth").then(({ useAuthStore }) => {

@@ -8,7 +8,7 @@ import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_KEY_AGE_MINUTES = 30;
+const MAX_KEY_AGE_MINUTES = 15;
 const MAX_KEY_AGE = 1000 * 60 * MAX_KEY_AGE_MINUTES;
 
 // ---------------------------------------------------------------------------

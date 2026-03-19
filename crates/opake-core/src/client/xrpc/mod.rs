@@ -267,6 +267,12 @@ impl<T: Transport> XrpcClient<T> {
         self.session.as_ref()
     }
 
+    /// Access the underlying transport for unauthenticated requests
+    /// (e.g. cross-PDS DID resolution, public record fetches).
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+
     /// Whether the session was refreshed during this client's lifetime.
     /// The CLI uses this to persist updated tokens to disk.
     pub fn session_refreshed(&self) -> bool {

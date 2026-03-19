@@ -5,10 +5,12 @@
 // app.opake.grant record on the owner's PDS.
 
 mod create;
+mod heal;
 mod list;
 mod revoke;
 
 pub use create::{create_grant, GrantParams};
+pub use heal::{heal_stale_grants, HealResult};
 pub use list::{list_grants, GrantEntry};
 pub use revoke::revoke_grant;
 

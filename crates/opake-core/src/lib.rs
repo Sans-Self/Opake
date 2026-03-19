@@ -23,6 +23,7 @@ pub mod account_config;
 pub mod atproto;
 pub mod client;
 pub mod crypto;
+pub mod daemon;
 pub mod directories;
 pub mod documents;
 pub mod error;

@@ -132,8 +132,6 @@ describe("opake daemon run", () => {
         fx.ctx.configDir,
         "daemon",
         "run",
-        "--interval",
-        "1",
         "--threshold",
         "99999",
       ],

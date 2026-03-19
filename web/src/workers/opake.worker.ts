@@ -7,7 +7,7 @@
 //   pds       — PDS operations via WasmTransport
 
 import * as Comlink from "comlink";
-import init, { bindingCheck } from "@/wasm/opake-wasm/opake";
+import init, { bindingCheck, daemonTaskDefs } from "@/wasm/opake-wasm/opake";
 import { cryptoApi } from "./api/crypto";
 import { identityApi } from "./api/identity";
 import { treeApi } from "./api/tree";
@@ -25,6 +25,8 @@ const opakeApi = {
   bindingCheck(): string {
     return bindingCheck();
   },
+
+  daemonTaskDefs,
 
   ...cryptoApi,
   ...identityApi,

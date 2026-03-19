@@ -1,15 +1,18 @@
 /// <reference lib="webworker" />
-// Service Worker — proactive session refresh.
+// Service Worker — background maintenance tasks.
 //
 // Loads the WASM module directly (not via Comlink — a Service Worker is a
-// separate execution context from the Web Worker). On `check-session`
-// messages from the main thread, reads the session from IndexedDB, refreshes
-// if expiring, and writes the updated session back. Posts `session-refreshed`
-// to all clients.
+// separate execution context from the Web Worker). The main thread posts
+// task-specific messages on independent intervals (derived from the core
+// task registry). Each handler reads state from IndexedDB, calls the
+// corresponding WASM export, and writes results back.
 
 import init, {
   proactiveSessionRefresh,
   defaultRefreshThresholdSeconds,
+  cleanupExpiredPairRequests,
+  defaultPairRequestTtlSeconds,
+  healStaleGrants,
 } from "./wasm/opake-wasm/opake";
 import { IndexedDbStorage } from "./lib/indexeddbStorage";
 import type { Session } from "./lib/storageTypes";
@@ -35,48 +38,132 @@ interface ServiceWorkerMessage {
   readonly [key: string]: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Message dispatch — one handler per daemon task
+// ---------------------------------------------------------------------------
+
 self.addEventListener("message", (event: ExtendableMessageEvent) => {
   const data = event.data as ServiceWorkerMessage | undefined;
-  if (data?.type === "check-session") {
-    event.waitUntil(checkAndRefresh());
+  switch (data?.type) {
+    case "session-refresh":
+      event.waitUntil(runSessionRefresh());
+      break;
+    case "pair-cleanup":
+      event.waitUntil(runPairCleanup());
+      break;
+    case "grant-healing":
+      event.waitUntil(runGrantHealing());
+      break;
+    default:
+      if (data?.type) {
+        console.warn("[service-worker] unknown message type:", data.type);
+      }
   }
 });
 
-async function checkAndRefresh(): Promise<void> {
+// ---------------------------------------------------------------------------
+// Shared: load active account context from IndexedDB
+// ---------------------------------------------------------------------------
+
+interface AccountContext {
+  readonly did: string;
+  readonly pdsUrl: string;
+  readonly session: Session;
+}
+
+async function loadAccountContext(): Promise<AccountContext | null> {
+  const config = await storage.loadConfig();
+  if (!config.defaultDid) return null;
+
+  const did = config.defaultDid;
+  const account = config.accounts[did];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record index may be missing at runtime
+  if (!account) return null;
+
+  const session = await storage.loadSession(did);
+  return { did, pdsUrl: account.pdsUrl, session };
+}
+
+// ---------------------------------------------------------------------------
+// Task: session refresh
+// ---------------------------------------------------------------------------
+
+async function runSessionRefresh(): Promise<void> {
   try {
     await ensureWasm();
-
-    const config = await storage.loadConfig();
-    if (!config.defaultDid) return;
-
-    const did = config.defaultDid;
-    const account = config.accounts[did];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record index may be missing at runtime
-    if (!account) return;
-
-    const session = await storage.loadSession(did);
+    const ctx = await loadAccountContext();
+    if (!ctx) return;
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- WASM return is typed as `any` by wasm-bindgen
     const result: Readonly<Session> | null = await proactiveSessionRefresh(
-      session,
-      account.pdsUrl,
+      ctx.session,
+      ctx.pdsUrl,
       defaultRefreshThresholdSeconds(),
     );
 
     if (result !== null) {
-      await storage.saveSession(did, result);
-      console.debug("[service-worker] session refreshed for", did);
+      await storage.saveSession(ctx.did, result);
+      console.debug("[service-worker] session refreshed for", ctx.did);
 
       const clients = await self.clients.matchAll();
-      clients.map((client) => client.postMessage({ type: "session-refreshed", did }));
+      clients.forEach((client) => client.postMessage({ type: "session-refreshed", did: ctx.did }));
     }
   } catch (err) {
-    console.warn("[service-worker] refresh check failed:", err);
+    console.warn("[service-worker] session refresh failed:", err);
   }
 }
 
-// Front-load WASM init during activation so it's ready before the first
-// check-session message arrives.
+// ---------------------------------------------------------------------------
+// Task: pair request cleanup
+// ---------------------------------------------------------------------------
+
+async function runPairCleanup(): Promise<void> {
+  try {
+    await ensureWasm();
+    const ctx = await loadAccountContext();
+    if (!ctx) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- WASM returns { result, session }
+    const response: Readonly<{ session?: Session }> = await cleanupExpiredPairRequests(
+      ctx.session,
+      ctx.pdsUrl,
+      defaultPairRequestTtlSeconds(),
+    );
+    if (response.session) {
+      await storage.saveSession(ctx.did, response.session);
+    }
+  } catch (err) {
+    console.warn("[service-worker] pair cleanup failed:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task: grant healing
+// ---------------------------------------------------------------------------
+
+async function runGrantHealing(): Promise<void> {
+  try {
+    await ensureWasm();
+    const ctx = await loadAccountContext();
+    if (!ctx) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- WASM returns { result, session }
+    const response: Readonly<{ session?: Session }> = await healStaleGrants(
+      ctx.session,
+      ctx.pdsUrl,
+    );
+    if (response.session) {
+      await storage.saveSession(ctx.did, response.session);
+    }
+  } catch (err) {
+    console.warn("[service-worker] grant healing failed:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
 self.addEventListener("activate", (event: ExtendableEvent) => {
   event.waitUntil(Promise.all([self.clients.claim(), ensureWasm()]));
 });

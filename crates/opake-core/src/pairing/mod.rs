@@ -14,7 +14,10 @@ mod receive;
 mod request;
 mod respond;
 
-pub use cleanup::cleanup_pair_records;
+pub use cleanup::{
+    cleanup_expired_pair_requests, cleanup_pair_records, CleanupResult,
+    DEFAULT_PAIR_REQUEST_TTL_SECONDS,
+};
 pub use receive::receive_pair_response;
 pub use request::create_pair_request;
 pub use respond::respond_to_pair_request;

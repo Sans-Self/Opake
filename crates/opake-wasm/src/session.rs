@@ -1,23 +1,65 @@
-// WASM export for proactive session refresh (used by the Service Worker).
+// WASM exports for Service Worker maintenance tasks:
+// session refresh, pair request cleanup, stale grant healing.
 
 use opake_core::client::session_refresh::{
     proactive_refresh, RefreshOutcome, DEFAULT_REFRESH_THRESHOLD_SECONDS,
 };
 use opake_core::client::{time, Session, WasmTransport};
 use opake_core::crypto::OsRng;
+use opake_core::pairing::DEFAULT_PAIR_REQUEST_TTL_SECONDS;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+use opake_core::daemon;
+
+use crate::wasm_util;
+
+// ---------------------------------------------------------------------------
+// Constants (exported so the Service Worker uses the same values as the CLI)
+// ---------------------------------------------------------------------------
+
+/// Returns the daemon task registry as a JSON array:
+/// `[{ name, intervalSeconds, description }, ...]`
+#[wasm_bindgen(js_name = daemonTaskDefs)]
+pub fn daemon_task_defs() -> Result<JsValue, JsError> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TaskDefJs {
+        name: &'static str,
+        interval_seconds: i64,
+        description: &'static str,
+    }
+
+    let defs: Vec<TaskDefJs> = daemon::TASKS
+        .iter()
+        .map(|t| TaskDefJs {
+            name: t.name,
+            interval_seconds: t.interval_seconds,
+            description: t.description,
+        })
+        .collect();
+
+    serde_wasm_bindgen::to_value(&defs).map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[wasm_bindgen(js_name = defaultRefreshThresholdSeconds)]
 pub fn default_refresh_threshold_seconds() -> f64 {
-    DEFAULT_REFRESH_THRESHOLD_SECONDS as f64
+    daemon::SESSION_REFRESH_THRESHOLD as f64
 }
+
+#[wasm_bindgen(js_name = defaultPairRequestTtlSeconds)]
+pub fn default_pair_request_ttl_seconds() -> f64 {
+    DEFAULT_PAIR_REQUEST_TTL_SECONDS as f64
+}
+
+// ---------------------------------------------------------------------------
+// Session refresh
+// ---------------------------------------------------------------------------
 
 /// Check whether a session needs refreshing and, if so, refresh it.
 ///
 /// Returns the updated session as a JS object, or `null` if no refresh was
-/// needed. Throws on failure. The caller (Service Worker) is responsible for
-/// persisting the returned session to IndexedDB.
+/// needed. Throws on failure.
 #[wasm_bindgen(js_name = proactiveSessionRefresh)]
 pub async fn proactive_session_refresh(
     session_js: JsValue,
@@ -49,4 +91,49 @@ pub async fn proactive_session_refresh(
         RefreshOutcome::NotNeeded => Ok(JsValue::NULL),
         RefreshOutcome::Failed(e) => Err(JsError::new(&e.to_string())),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pair request cleanup
+// ---------------------------------------------------------------------------
+
+/// Delete expired pair requests and orphaned pair responses.
+///
+/// Returns `{ result: { requestsDeleted, responsesDeleted }, session }`.
+/// The caller must persist the returned session (DPoP nonce or token may
+/// have been updated during the XRPC calls).
+#[wasm_bindgen(js_name = cleanupExpiredPairRequests)]
+pub async fn cleanup_expired_pair_requests_js(
+    session_js: JsValue,
+    pds_url: &str,
+    ttl_seconds: f64,
+) -> Result<JsValue, JsError> {
+    let mut client = wasm_util::make_client(pds_url, session_js)?;
+    let now = time::unix_now();
+
+    let result =
+        opake_core::pairing::cleanup_expired_pair_requests(&mut client, now, ttl_seconds as i64)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+    wasm_util::result_with_session(&client, &result)
+}
+
+// ---------------------------------------------------------------------------
+// Stale grant healing
+// ---------------------------------------------------------------------------
+
+/// Check all grants and delete any whose recipient has no valid public key.
+///
+/// Returns `{ result: { grantsChecked, grantsDeleted, grantsFailed }, session }`.
+/// The caller must persist the returned session.
+#[wasm_bindgen(js_name = healStaleGrants)]
+pub async fn heal_stale_grants_js(session_js: JsValue, pds_url: &str) -> Result<JsValue, JsError> {
+    let mut client = wasm_util::make_client(pds_url, session_js)?;
+
+    let result = opake_core::sharing::heal_stale_grants(&mut client)
+        .await
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    wasm_util::result_with_session(&client, &result)
 }

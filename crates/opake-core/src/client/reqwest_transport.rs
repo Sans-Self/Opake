@@ -3,6 +3,7 @@
 use crate::client::{HttpMethod, HttpRequest, HttpResponse, RequestBody, Transport};
 use crate::error::Error;
 
+#[derive(Clone)]
 pub struct ReqwestTransport {
     http: reqwest::Client,
 }
