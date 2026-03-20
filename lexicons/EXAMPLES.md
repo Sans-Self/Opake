@@ -256,6 +256,32 @@ The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and w
 Both records are deleted after successful transfer. The ephemeral keypair is never persisted — it exists only in memory during the pairing session.
 
 
+## 8. Pending share (recipient hasn't set up Opake yet)
+
+When sharing with someone who hasn't logged into Opake, a `pendingShare` record is created instead of a grant. The daemon retries periodically until the recipient publishes their public key.
+
+```json
+{
+  "$type": "app.opake.pendingShare",
+  "opakeVersion": 1,
+  "document": "at://did:plc:alice123/app.opake.document/3mhborqwpxn22",
+  "recipient": "bob.bsky.social",
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-grant-metadata" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
+  "createdAt": "2026-03-20T12:00:00.000Z"
+}
+```
+
+**Key points:**
+- `recipient` stores the handle or DID as the user entered it (not necessarily a DID)
+- `encryptedMetadata` contains `{ permissions: "read", note: "..." }` encrypted with the document's content key — same format as a grant's metadata
+- No `wrappedKey` — the content key can't be wrapped until the recipient publishes their public key
+- The daemon re-derives the content key from the document at retry time using the owner's identity
+- Records expire after 7 days and are automatically deleted by the daemon
+- Cross-device: created from any device, retried by any device with the daemon running
+
 ## Design Decisions & Notes
 
 ### Why encrypted metadata?

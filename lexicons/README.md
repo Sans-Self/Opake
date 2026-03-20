@@ -28,6 +28,7 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
 | `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
+| `app.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
 | `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
 | `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
 

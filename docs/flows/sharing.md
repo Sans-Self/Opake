@@ -89,3 +89,50 @@ sequenceDiagram
 ```
 
 For true forward secrecy, the document should also be re-encrypted with a new content key — the schema supports this but the CLI doesn't automate it yet.
+
+## Pending Share (recipient not ready)
+
+When the recipient hasn't set up Opake yet (no `publicKey/self`), the share is queued as a `pendingShare` record on the PDS. The daemon retries periodically.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant PDS as Own PDS
+    participant PLC as PLC Directory
+    participant RecipientPDS as Recipient's PDS
+
+    User->>CLI: opake share photo.jpg bob.test
+
+    CLI->>CLI: Resolve filename → AT-URI
+    CLI->>PLC: DID document for recipient
+    PLC-->>CLI: { pds_url }
+    CLI->>RecipientPDS: getRecord (publicKey/self)
+    RecipientPDS-->>CLI: 404 Not Found
+
+    Note over CLI,PDS: Recipient hasn't set up Opake — queue for retry
+    CLI->>PDS: createRecord (pendingShare)
+    PDS-->>CLI: { uri }
+    CLI->>User: Share queued — will complete when they log in
+
+    Note over CLI: Later, daemon tick...
+    CLI->>PDS: listRecords (pendingShare)
+    PDS-->>CLI: [ pendingShare record ]
+
+    CLI->>PLC: DID document for recipient
+    PLC-->>CLI: { pds_url }
+    CLI->>RecipientPDS: getRecord (publicKey/self)
+    RecipientPDS-->>CLI: PublicKeyRecord { publicKey }
+
+    Note over CLI: Recipient is ready — complete the share
+    CLI->>PDS: getRecord (document)
+    PDS-->>CLI: Document with owner's wrappedKey
+    CLI->>CLI: unwrap content key, wrap to recipient
+
+    CLI->>PDS: createRecord (grant)
+    PDS-->>CLI: { uri }
+    CLI->>PDS: deleteRecord (pendingShare)
+    PDS-->>CLI: 200 OK
+```
+
+Pending shares expire after 7 days. The daemon also deletes expired records on each pass.
