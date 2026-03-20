@@ -13,9 +13,12 @@ import init, {
   cleanupExpiredPairRequests,
   defaultPairRequestTtlSeconds,
   healStaleGrants,
+  retryPendingShares,
+  defaultPendingShareTtlSeconds,
 } from "./wasm/opake-wasm/opake";
 import { IndexedDbStorage } from "./lib/indexeddbStorage";
 import type { Session } from "./lib/storageTypes";
+import { base64ToUint8Array } from "./lib/encoding";
 
 declare const self: Readonly<ServiceWorkerGlobalScope>;
 
@@ -53,6 +56,9 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
       break;
     case "grant-healing":
       event.waitUntil(runGrantHealing());
+      break;
+    case "share-retry":
+      event.waitUntil(runShareRetry());
       break;
     default:
       if (data?.type) {
@@ -157,6 +163,36 @@ async function runGrantHealing(): Promise<void> {
     }
   } catch (err) {
     console.warn("[service-worker] grant healing failed:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task: pending share retry
+// ---------------------------------------------------------------------------
+
+async function runShareRetry(): Promise<void> {
+  try {
+    await ensureWasm();
+    const ctx = await loadAccountContext();
+    if (!ctx) return;
+
+    const identity = await storage.loadIdentity(ctx.did);
+    const privateKeyBytes = base64ToUint8Array(identity.private_key);
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- WASM returns { result, session }
+    const response: Readonly<{ session?: Session }> = await retryPendingShares(
+      ctx.session,
+      ctx.pdsUrl,
+      ctx.did,
+      privateKeyBytes,
+      defaultPendingShareTtlSeconds(),
+    );
+    if (response.session) {
+      await storage.saveSession(ctx.did, response.session);
+    }
+  } catch (err) {
+    // No identity = can't retry (new device without keys)
+    console.warn("[service-worker] share retry failed:", err);
   }
 }
 

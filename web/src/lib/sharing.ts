@@ -87,6 +87,19 @@ export function incomingGrantToFileItem(
 // Recipient resolution
 // ---------------------------------------------------------------------------
 
+/** Thrown when the recipient exists on atproto but hasn't set up Opake yet. */
+export class RecipientNotReadyError extends Error {
+  readonly recipientDid: string;
+  readonly recipientHandle: string;
+
+  constructor(handle: string, did: string) {
+    super(`${handle} hasn't set up Opake yet — they need to log in on any device first`);
+    this.name = "RecipientNotReadyError";
+    this.recipientDid = did;
+    this.recipientHandle = handle;
+  }
+}
+
 /** Resolve a handle to a DID + PDS URL + X25519 public key. */
 export async function resolveRecipient(handle: string): Promise<RecipientInfo> {
   const { did, pdsUrl } = await resolveHandleToPds(handle);
@@ -95,7 +108,7 @@ export async function resolveRecipient(handle: string): Promise<RecipientInfo> {
   const url = `${base}/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=${encodeURIComponent(PUBLIC_KEY_COLLECTION)}&rkey=self`;
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`${handle} hasn't signed in to Opake yet — they need to log in at least once`);
+    throw new RecipientNotReadyError(handle, did);
   }
 
   const record = (await response.json()) as {
@@ -103,7 +116,7 @@ export async function resolveRecipient(handle: string): Promise<RecipientInfo> {
   };
   const raw = record.value?.publicKey;
   if (!raw) {
-    throw new Error(`${handle} hasn't signed in to Opake yet — they need to log in at least once`);
+    throw new RecipientNotReadyError(handle, did);
   }
 
   const b64 = typeof raw === "string" ? raw : raw.$bytes;
@@ -126,6 +139,20 @@ interface CreateGrantParams {
   readonly session: Session;
 }
 
+/** Encrypt grant/pending-share metadata (permissions + note) with a content key. */
+async function encryptShareMetadata(
+  worker: Awaited<ReturnType<typeof getOpakeWorker>>,
+  contentKey: Uint8Array,
+): Promise<{ ciphertext: { $bytes: string }; nonce: { $bytes: string } }> {
+  const metadata = { permissions: "read", note: null };
+  const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
+  const encryptedMeta = await worker.encryptBlob(contentKey, metadataBytes);
+  return {
+    ciphertext: { $bytes: uint8ArrayToBase64(encryptedMeta.ciphertext) },
+    nonce: { $bytes: uint8ArrayToBase64(encryptedMeta.nonce) },
+  };
+}
+
 /** Wrap the content key to the recipient and create a grant record on the PDS. */
 export async function createGrant(params: CreateGrantParams): Promise<string> {
   const worker = getOpakeWorker();
@@ -136,9 +163,7 @@ export async function createGrant(params: CreateGrantParams): Promise<string> {
     params.recipientDid,
   );
 
-  const metadata = { permissions: "read", note: null };
-  const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
-  const encryptedMeta = await worker.encryptBlob(params.contentKey, metadataBytes);
+  const encryptedMetadata = await encryptShareMetadata(worker, params.contentKey);
 
   const record = {
     $type: GRANT_COLLECTION,
@@ -146,10 +171,7 @@ export async function createGrant(params: CreateGrantParams): Promise<string> {
     document: params.documentUri,
     recipient: params.recipientDid,
     wrappedKey,
-    encryptedMetadata: {
-      ciphertext: { $bytes: uint8ArrayToBase64(encryptedMeta.ciphertext) },
-      nonce: { $bytes: uint8ArrayToBase64(encryptedMeta.nonce) },
-    },
+    encryptedMetadata,
     createdAt: new Date().toISOString(),
   };
 
@@ -161,6 +183,53 @@ export async function createGrant(params: CreateGrantParams): Promise<string> {
       body: {
         repo: params.ownerDid,
         collection: GRANT_COLLECTION,
+        record,
+      },
+    },
+    params.session,
+  )) as { uri: string };
+
+  return result.uri;
+}
+
+// ---------------------------------------------------------------------------
+// Pending share creation (recipient not ready)
+// ---------------------------------------------------------------------------
+
+const PENDING_SHARE_COLLECTION = "app.opake.pendingShare";
+
+interface CreatePendingShareParams {
+  readonly pdsUrl: string;
+  readonly ownerDid: string;
+  readonly documentUri: string;
+  readonly recipient: string;
+  readonly contentKey: Uint8Array;
+  readonly session: Session;
+}
+
+/** Create a pendingShare record when the recipient hasn't set up Opake yet. */
+export async function createPendingShare(params: CreatePendingShareParams): Promise<string> {
+  const worker = getOpakeWorker();
+
+  const encryptedMetadata = await encryptShareMetadata(worker, params.contentKey);
+
+  const record = {
+    $type: PENDING_SHARE_COLLECTION,
+    opakeVersion: await worker.schemaVersion(),
+    document: params.documentUri,
+    recipient: params.recipient,
+    encryptedMetadata,
+    createdAt: new Date().toISOString(),
+  };
+
+  const result = (await authenticatedXrpc(
+    {
+      pdsUrl: params.pdsUrl,
+      lexicon: "com.atproto.repo.createRecord",
+      method: "POST",
+      body: {
+        repo: params.ownerDid,
+        collection: PENDING_SHARE_COLLECTION,
         record,
       },
     },

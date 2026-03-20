@@ -52,6 +52,11 @@ pub fn default_pair_request_ttl_seconds() -> f64 {
     DEFAULT_PAIR_REQUEST_TTL_SECONDS as f64
 }
 
+#[wasm_bindgen(js_name = defaultPendingShareTtlSeconds)]
+pub fn default_pending_share_ttl_seconds() -> f64 {
+    opake_core::sharing::DEFAULT_PENDING_SHARE_TTL_SECONDS as f64
+}
+
 // ---------------------------------------------------------------------------
 // Session refresh
 // ---------------------------------------------------------------------------
@@ -132,6 +137,44 @@ pub async fn heal_stale_grants_js(session_js: JsValue, pds_url: &str) -> Result<
     let mut client = wasm_util::make_client(pds_url, session_js)?;
 
     let result = opake_core::sharing::heal_stale_grants(&mut client)
+        .await
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    wasm_util::result_with_session(&client, &result)
+}
+
+// ---------------------------------------------------------------------------
+// Pending share retry
+// ---------------------------------------------------------------------------
+
+/// Retry all pending shares for the authenticated account.
+///
+/// Returns `{ result: { checked, completed, expired, stillPending, failed }, session }`.
+/// The caller must persist the returned session.
+#[wasm_bindgen(js_name = retryPendingShares)]
+pub async fn retry_pending_shares_js(
+    session_js: JsValue,
+    pds_url: &str,
+    owner_did: &str,
+    private_key: &[u8],
+    ttl_seconds: f64,
+) -> Result<JsValue, JsError> {
+    use opake_core::sharing::{retry_pending_shares, RetryParams};
+
+    let privkey = wasm_util::priv_key_from_slice(private_key)?;
+    let mut client = wasm_util::make_client(pds_url, session_js)?;
+    let transport = opake_core::client::WasmTransport::new();
+    let now = time::unix_now();
+
+    let params = RetryParams {
+        caller_pds_url: pds_url,
+        owner_did,
+        owner_private_key: &privkey,
+        now,
+        ttl_seconds: ttl_seconds as i64,
+    };
+
+    let result = retry_pending_shares(&mut client, &transport, &params, &mut OsRng)
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 

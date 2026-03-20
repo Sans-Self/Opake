@@ -1,6 +1,11 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ShareNetworkIcon } from "@phosphor-icons/react";
-import { resolveRecipient, createGrant } from "@/lib/sharing";
+import {
+  resolveRecipient,
+  createGrant,
+  createPendingShare,
+  RecipientNotReadyError,
+} from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
 import { storage } from "@/lib/indexeddbStorage";
 import { getOpakeWorker } from "@/lib/worker";
@@ -86,21 +91,12 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
     setErrorMessage("");
 
     try {
-      // Resolve recipient
-      const recipient = await resolveRecipient(handle);
-
-      if (recipient.did === session.did) {
-        throw new Error("You can't share a file with yourself");
-      }
-
-      setStatus("sharing");
-
-      // Load identity + session for crypto
+      // Load identity + session for crypto (needed by both paths)
       const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
       const identity = await storage.loadIdentity(session.did);
       const privateKey = base64ToUint8Array(identity.private_key);
 
-      // Fetch the document record to get the encryption envelope
+      // Fetch the document record to get the content key
       const docResponse = (await authenticatedXrpc(
         {
           pdsUrl: session.pdsUrl,
@@ -111,15 +107,46 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
 
       const contentKey = await unwrapContentKey(docResponse.value.encryption, privateKey);
 
-      await createGrant({
-        pdsUrl: session.pdsUrl,
-        ownerDid: session.did,
-        documentUri,
-        recipientDid: recipient.did,
-        contentKey,
-        recipientPublicKey: recipient.publicKey,
-        session: oauthSession,
-      });
+      // Resolve recipient — may throw RecipientNotReadyError
+      try {
+        const recipient = await resolveRecipient(handle);
+
+        if (recipient.did === session.did) {
+          throw new Error("You can't share a file with yourself");
+        }
+
+        setStatus("sharing");
+
+        await createGrant({
+          pdsUrl: session.pdsUrl,
+          ownerDid: session.did,
+          documentUri,
+          recipientDid: recipient.did,
+          contentKey,
+          recipientPublicKey: recipient.publicKey,
+          session: oauthSession,
+        });
+      } catch (resolveError) {
+        if (resolveError instanceof RecipientNotReadyError) {
+          // Recipient hasn't set up Opake — queue for retry
+          setStatus("sharing");
+          await createPendingShare({
+            pdsUrl: session.pdsUrl,
+            ownerDid: session.did,
+            documentUri,
+            recipient: handle,
+            contentKey,
+            session: oauthSession,
+          });
+          setStatus("done");
+          toastSuccess(
+            `${handle} hasn't set up Opake yet. Share queued — it will complete automatically once they log in on any device. Your device needs to be powered on for this.`,
+          );
+          dismiss();
+          return;
+        }
+        throw resolveError;
+      }
 
       // Optimistically mark the item as shared in the store
       const { items } = useDocumentsStore.getState();
