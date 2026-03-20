@@ -38,6 +38,11 @@ pub const TASKS: &[TaskDef] = &[
         interval_seconds: 20 * 60,
         description: "Delete grants whose recipient has no valid public key",
     },
+    TaskDef {
+        name: "share-retry",
+        interval_seconds: 300,
+        description: "Retry pending shares for recipients who haven't set up yet",
+    },
 ];
 
 /// Look up a task by name.

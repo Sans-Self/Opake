@@ -14,6 +14,7 @@ mod grant;
 mod keyring;
 mod pair_request;
 mod pair_response;
+mod pending_share;
 mod public_key;
 
 use crate::error::Error;
@@ -31,6 +32,7 @@ pub use grant::Grant;
 pub use keyring::{KeyHistoryEntry, Keyring};
 pub use pair_request::{PairRequest, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
+pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
 /// The current app.opake.* schema version this client understands.
@@ -58,7 +60,8 @@ impl_versioned!(
     Grant,
     Keyring,
     PairRequest,
-    PairResponse
+    PairResponse,
+    PendingShare
 );
 
 fn default_version() -> u32 {

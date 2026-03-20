@@ -22,6 +22,8 @@ enum ShareAction {
     ///
     /// Resolves the recipient's encryption key from their PDS and wraps
     /// the document's content key for them. Works across PDS instances.
+    /// If the recipient hasn't set up Opake yet, the share is queued
+    /// for automatic retry.
     New(share::NewShareCommand),
     /// List grants you've shared with others
     List(shared::SharedCommand),
@@ -33,6 +35,12 @@ enum ShareAction {
     /// the content key. Note: if the recipient already downloaded and
     /// cached the document, revocation cannot undo that access.
     Revoke(revoke::RevokeCommand),
+    /// List pending shares (queued for recipients who haven't set up Opake yet)
+    Pending(share::PendingSharesCommand),
+    /// Retry all pending shares now
+    Retry(share::RetrySharesCommand),
+    /// Cancel a pending share
+    Cancel(share::CancelShareCommand),
 }
 
 impl Execute for ShareGroupCommand {
@@ -42,6 +50,9 @@ impl Execute for ShareGroupCommand {
             ShareAction::List(cmd) => cmd.execute(ctx).await,
             ShareAction::Inbox(cmd) => cmd.execute(ctx).await,
             ShareAction::Revoke(cmd) => cmd.execute(ctx).await,
+            ShareAction::Pending(cmd) => cmd.execute(ctx).await,
+            ShareAction::Retry(cmd) => cmd.execute(ctx).await,
+            ShareAction::Cancel(cmd) => cmd.execute(ctx).await,
         }
     }
 }

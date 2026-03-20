@@ -10,7 +10,8 @@ use opake_core::client::{time, ReqwestTransport, Session};
 use opake_core::crypto::OsRng;
 use opake_core::daemon::{self, TASKS};
 use opake_core::pairing::cleanup_expired_pair_requests;
-use opake_core::sharing::heal_stale_grants;
+use opake_core::sharing::{heal_stale_grants, retry_pending_shares, RetryParams};
+use opake_core::storage::Identity;
 
 use crate::config::FileStorage;
 use crate::session;
@@ -77,6 +78,7 @@ async fn run_daemon(storage: &FileStorage, args: RunArgs) -> Result<()> {
     let mut session_tick = tokio::time::interval(task_interval("session-refresh"));
     let mut pair_tick = tokio::time::interval(task_interval("pair-cleanup"));
     let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
+    let mut share_tick = tokio::time::interval(task_interval("share-retry"));
 
     loop {
         tokio::select! {
@@ -88,6 +90,9 @@ async fn run_daemon(storage: &FileStorage, args: RunArgs) -> Result<()> {
             }
             _ = grant_tick.tick() => {
                 run_grant_healing(storage, &transport).await;
+            }
+            _ = share_tick.tick() => {
+                run_share_retry(storage, &transport).await;
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("received SIGINT, shutting down");
@@ -200,6 +205,58 @@ async fn run_grant_healing(storage: &FileStorage, transport: &ReqwestTransport) 
 
         if let Err(e) = heal_stale_grants(&mut client).await {
             warn!("grant-heal: failed for {did}: {e}");
+        }
+
+        persist_if_refreshed(storage, did, &client);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task: pending share retry
+// ---------------------------------------------------------------------------
+
+async fn run_share_retry(storage: &FileStorage, transport: &ReqwestTransport) {
+    let Some(config) = load_config_or_warn(storage, "share-retry") else {
+        return;
+    };
+
+    let now = time::unix_now();
+
+    for (did, account) in &config.accounts {
+        let mut client = match build_client(storage, transport, did, &account.pds_url) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("share-retry: failed to build client for {did}: {e}");
+                continue;
+            }
+        };
+
+        let identity: Identity = match storage.load_account_json(did, "identity.json") {
+            Ok(id) => id,
+            Err(e) => {
+                warn!("share-retry: no identity for {did}, skipping: {e}");
+                continue;
+            }
+        };
+
+        let private_key = match identity.private_key_bytes() {
+            Ok(k) => k,
+            Err(e) => {
+                warn!("share-retry: can't read private key for {did}: {e}");
+                continue;
+            }
+        };
+
+        let params = RetryParams {
+            caller_pds_url: &account.pds_url,
+            owner_did: did,
+            owner_private_key: &private_key,
+            now,
+            ttl_seconds: opake_core::sharing::DEFAULT_PENDING_SHARE_TTL_SECONDS,
+        };
+
+        if let Err(e) = retry_pending_shares(&mut client, transport, &params, &mut OsRng).await {
+            warn!("share-retry: failed for {did}: {e}");
         }
 
         persist_if_refreshed(storage, did, &client);

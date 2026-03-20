@@ -21,7 +21,7 @@ use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RK
 pub type Ed25519PublicKeyBytes = [u8; 32];
 
 /// Everything we learn about a remote user during resolution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedIdentity {
     pub did: String,
     pub handle: Option<String>,

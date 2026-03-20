@@ -86,7 +86,7 @@ impl<const N: usize> std::fmt::Debug for Redacted<'_, [u8; N]> {
 }
 
 /// A 256-bit AES content encryption key.
-#[derive(crate::RedactedDebug)]
+#[derive(Clone, crate::RedactedDebug)]
 pub struct ContentKey(#[redact] pub [u8; CONTENT_KEY_LEN]);
 
 /// An X25519 public key: 32 raw bytes.
