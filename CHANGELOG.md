@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 ### Changed
+- Add retry queue for uploads to previously-unresolvable DIDs (#240)
 - Add stale grant detection for rotated or removed public keys [#241](https://issues.opake.app/issues/241.html)
 - Add pair request expiry enforcement with automatic cleanup [#243](https://issues.opake.app/issues/243.html)
 - Add proactive session token rotation before expiry [#242](https://issues.opake.app/issues/242.html)
