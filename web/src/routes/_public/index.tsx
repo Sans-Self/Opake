@@ -40,7 +40,7 @@ function LandingPage() {
         </HeroSubtext>
 
         <CtaGroup>
-          <PrimaryCta href="/devices/login">
+          <PrimaryCta href="/cabinet">
             Open your cabinet <ArrowRightIcon size="1em" />
           </PrimaryCta>
           <SecondaryCta href="/docs">Learn more</SecondaryCta>
@@ -140,7 +140,7 @@ function LandingPage() {
         subtext="Take back your data. No surveillance, no compromise. Just your files, exactly as private as you choose."
       >
         <Link
-          to="/devices/login"
+          to="/cabinet"
           className="bg-base-100 text-base-content hover:bg-accent inline-flex items-center gap-2.5 rounded-lg px-7 py-3.5 text-sm font-medium transition-colors"
         >
           Open your cabinet <ArrowRightIcon size="1em" />

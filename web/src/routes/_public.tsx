@@ -31,7 +31,7 @@ const FOOTER_GROUPS: readonly FooterGroup[] = [
   {
     heading: "Product",
     links: [
-      { label: "Open your cabinet", href: "/devices/login", internal: true },
+      { label: "Open your cabinet", href: "/cabinet", internal: true },
       { label: "Handbook", href: "/docs/", internal: true },
       { label: "FAQ", href: "/faq", internal: true },
     ],

@@ -73,6 +73,10 @@ export const Route = createFileRoute("/cabinet")({
     if (useAuthStore.getState().session.status !== "active") {
       throw redirect({ to: "/devices/login" });
     }
+
+    // Kick off loadCabinet so child loaders (waitForTree) can resolve.
+    // Fire-and-forget — the child loaders subscribe to the store.
+    void useDocumentsStore.getState().loadCabinet();
   },
   component: CabinetLayout,
 });
