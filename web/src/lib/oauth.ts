@@ -104,7 +104,7 @@ export async function discoverAuthorizationServer(
 // ---------------------------------------------------------------------------
 
 export function buildClientId(redirectUri: string): string {
-  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  return `http://localhost?redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent("atproto transition:generic")}`;
 }
 
 export function buildRedirectUri(): string {
@@ -198,7 +198,7 @@ export async function pushedAuthorizationRequest(
     client_id: clientId,
     response_type: "code",
     redirect_uri: redirectUri,
-    scope: "atproto",
+    scope: "atproto transition:generic",
     state,
     code_challenge: pkceChallenge,
     code_challenge_method: "S256",

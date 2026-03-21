@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add BIP-39 seed phrase recovery for account identity (24 words) [#211](https://issues.opake.app/issues/211.html)
 
 ### Fixed
+- Add 'start fresh' option to identity recovery screen (#383)
 
 ### Changed
 - Add retry queue for uploads to previously-unresolvable DIDs [#240](https://issues.opake.app/issues/240.html)
