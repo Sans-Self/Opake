@@ -32,6 +32,11 @@ export default defineConfig({
     format: "es",
     plugins: () => [wasm(), comlink()],
   },
+  server: {
+    // Listen on all interfaces so 127.0.0.1:5173 works (required for
+    // atproto OAuth — RFC 8252 rejects "localhost", needs loopback IP)
+    host: true,
+  },
   resolve: {
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
