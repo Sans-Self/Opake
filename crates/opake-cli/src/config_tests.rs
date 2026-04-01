@@ -98,7 +98,7 @@ fn load_account_json_missing_file_errors() {
     let result: anyhow::Result<serde_json::Value> =
         storage.load_account_json("did:plc:nobody", "nope.json");
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("opake login"), "expected login hint: {err}");
+    assert!(err.contains("log in first"), "expected login hint: {err}");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn load_config_without_file_errors() {
     let result = storage.load_config_anyhow();
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("opake login"), "expected login hint: {err}");
+    assert!(err.contains("log in first"), "expected login hint: {err}");
 }
 
 #[test]
@@ -272,57 +272,6 @@ fn remove_account_without_dir_still_works() {
 
     let loaded = storage.load_config_anyhow().unwrap();
     assert!(!loaded.accounts.contains_key(did));
-}
-
-// -- resolve_appview_url --
-
-use super::resolve_appview_url;
-use opake_core::records::AccountConfigRecord;
-
-#[test]
-fn resolve_appview_url_explicit_flag_wins() {
-    std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
-    let account = AccountConfigRecord {
-        appview_url: Some("https://pds.test".into()),
-        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
-    };
-    let result = resolve_appview_url(Some("https://flag.test"), Some(&account)).unwrap();
-    assert_eq!(result, "https://flag.test");
-    std::env::remove_var("OPAKE_APPVIEW_URL");
-}
-
-#[test]
-fn resolve_appview_url_env_over_account_config() {
-    std::env::set_var("OPAKE_APPVIEW_URL", "https://env.test");
-    let account = AccountConfigRecord {
-        appview_url: Some("https://pds.test".into()),
-        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
-    };
-    let result = resolve_appview_url(None, Some(&account)).unwrap();
-    assert_eq!(result, "https://env.test");
-    std::env::remove_var("OPAKE_APPVIEW_URL");
-}
-
-#[test]
-fn resolve_appview_url_account_config_fallback() {
-    std::env::remove_var("OPAKE_APPVIEW_URL");
-    let account = AccountConfigRecord {
-        appview_url: Some("https://account.test".into()),
-        ..AccountConfigRecord::new("2026-01-01T00:00:00Z")
-    };
-    let result = resolve_appview_url(None, Some(&account)).unwrap();
-    assert_eq!(result, "https://account.test");
-}
-
-#[test]
-fn resolve_appview_url_missing_gives_clear_error() {
-    std::env::remove_var("OPAKE_APPVIEW_URL");
-    let err = resolve_appview_url(None, None).unwrap_err().to_string();
-    assert!(err.contains("--appview"), "expected usage hint: {err}");
-    assert!(
-        err.contains("OPAKE_APPVIEW_URL"),
-        "expected env hint: {err}"
-    );
 }
 
 // -- permission hardening --

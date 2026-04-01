@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add workspace invitation flow with shareable links [#394](https://issues.opake.app/issues/394.html)
+- Add workspace member list, role management, and member removal UI [#387](https://issues.opake.app/issues/387.html)
 - Add web markdown editor [#153](https://issues.opake.app/issues/153.html)
 - Add Zod validation at WASM, IndexedDB, and appview API boundaries [#369](https://issues.opake.app/issues/369.html)
 - Add web e2e tests with Playwright against fake-pds [#360](https://issues.opake.app/issues/360.html)
@@ -19,7 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add BIP-39 seed phrase recovery for account identity (24 words) [#211](https://issues.opake.app/issues/211.html)
 
 ### Fixed
-- Add 'start fresh' option to identity recovery screen (#383)
+- Fix service worker cacheGetCollection crash in syncOwnedWorkspaces [#397](https://issues.opake.app/issues/397.html)
+- Add 'start fresh' option to identity recovery screen [#383](https://issues.opake.app/issues/383.html)
 
 ### Changed
 - Add retry queue for uploads to previously-unresolvable DIDs [#240](https://issues.opake.app/issues/240.html)

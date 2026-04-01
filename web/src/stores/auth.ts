@@ -18,7 +18,7 @@ import { immer } from "zustand/middleware/immer";
 import type { OAuthSession, Config } from "@/lib/storageTypes";
 import { storage } from "@/lib/indexeddbStorage";
 import { getOpakeWorker } from "@/lib/worker";
-import { authenticatedXrpc, authenticatedPutRecord } from "@/lib/api";
+import { uint8ArrayToBase64 } from "@/lib/encoding";
 import { loading } from "@/stores/app";
 import {
   resolveHandleToPds,
@@ -137,53 +137,23 @@ function loadAndRefreshProfile(
 }
 
 /** Check if publicKey/self already exists on the PDS. */
-async function fetchUpstreamPublicKey(
-  pdsUrl: string,
-  did: string,
-  session: OAuthSession,
-): Promise<string | null> {
+/** Check the published publicKey/self record on the PDS via core. */
+async function fetchUpstreamPublicKey(did: string): Promise<string | null> {
   try {
-    const response = await authenticatedXrpc(
-      {
-        pdsUrl,
-        lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=app.opake.publicKey&rkey=self`,
-        method: "GET",
-      },
-      session,
-    );
-    // atproto encodes byte fields as { $bytes: "<base64>" }
-    const record = (response as { value?: { publicKey?: { $bytes: string } | string } }).value;
-    const raw = record?.publicKey;
-    if (raw == null) return null;
-    return typeof raw === "string" ? raw : raw.$bytes;
-  } catch (error) {
-    console.debug("[auth] publicKey/self lookup failed (treating as absent):", error);
+    const worker = getOpakeWorker();
+    const resolved = (await worker.resolveIdentity(did)) as {
+      public_key: Uint8Array;
+    };
+    return uint8ArrayToBase64(resolved.public_key);
+  } catch {
     return null;
   }
 }
 
-/** Publish an identity's public key to the PDS via authenticated putRecord.
- *  Uses the token-refresh-aware `authenticatedPutRecord` path. */
-async function publishIdentityKey(
-  pdsUrl: string,
-  did: string,
-  identity: { readonly public_key: string; readonly verify_key: string | null },
-  session: OAuthSession,
-): Promise<void> {
-  const record: Record<string, unknown> = {
-    opakeVersion: 1,
-    algo: "x25519",
-    publicKey: { $bytes: identity.public_key },
-    createdAt: new Date().toISOString(),
-    ...(identity.verify_key
-      ? { signingKey: { $bytes: identity.verify_key }, signingAlgo: "ed25519" }
-      : {}),
-  };
-
-  await authenticatedPutRecord(
-    { pdsUrl, did, collection: "app.opake.publicKey", rkey: "self", record },
-    session,
-  );
+/** Publish the caller's public key record on the PDS via core. */
+async function publishIdentityKey(): Promise<void> {
+  const worker = getOpakeWorker();
+  await worker.publishPublicKey();
 }
 
 // ---------------------------------------------------------------------------
@@ -195,60 +165,71 @@ export const useAuthStore = create<AuthState>()(
     session: { status: "initializing" },
     identity: { status: "unchecked" },
 
-    boot: async () => {
-      const done = loading("boot");
+    boot: (() => {
+      // eslint-disable-next-line functional/no-let -- dedup: memoized promise needs reassignment
+      let pending: Promise<void> | null = null;
+      return () => {
+        pending ??= (async () => {
+          const done = loading("boot");
 
-      try {
-        const config = await storage.loadConfig();
-        if (!config.defaultDid) {
-          set((draft) => {
-            draft.session = { status: "none" };
-          });
-          return;
-        }
-
-        const did = config.defaultDid;
-        const account = config.accounts[did] as
-          | import("@/lib/storageTypes").AccountEntry
-          | undefined;
-        if (!account) {
-          set((draft) => {
-            draft.session = { status: "none" };
-          });
-          return;
-        }
-
-        // Verify session exists
-        await storage.loadSession(did);
-
-        set((draft) => {
-          draft.session = {
-            status: "active",
-            did,
-            handle: account.handle,
-            pdsUrl: account.pdsUrl,
-            avatarUrl: null,
-            bannerUrl: null,
-          };
-        });
-
-        // Fire-and-forget — don't block boot on profile images
-        loadAndRefreshProfile(account.pdsUrl, did, ({ avatarUrl, bannerUrl }) => {
-          set((draft) => {
-            if (draft.session.status === "active") {
-              draft.session.avatarUrl = avatarUrl;
-              draft.session.bannerUrl = bannerUrl;
+          try {
+            const config = await storage.loadConfig();
+            if (!config.default_did) {
+              set((draft) => {
+                draft.session = { status: "none" };
+              });
+              return;
             }
-          });
-        });
-      } catch {
-        set((draft) => {
-          draft.session = { status: "none" };
-        });
-      } finally {
-        done();
-      }
-    },
+
+            const did = config.default_did;
+            const account = config.accounts[did] as
+              | import("@/lib/storageTypes").AccountEntry
+              | undefined;
+            if (!account) {
+              set((draft) => {
+                draft.session = { status: "none" };
+              });
+              return;
+            }
+
+            // Verify session exists
+            await storage.loadSession(did);
+
+            set((draft) => {
+              draft.session = {
+                status: "active",
+                did,
+                handle: account.handle,
+                pdsUrl: account.pds_url,
+                avatarUrl: null,
+                bannerUrl: null,
+              };
+            });
+
+            const worker = getOpakeWorker();
+            console.info("[auth] calling worker.setAccount for", did);
+            void worker.setAccount(did);
+
+            // Fire-and-forget — don't block boot on profile images
+            loadAndRefreshProfile(account.pds_url, did, ({ avatarUrl, bannerUrl }) => {
+              set((draft) => {
+                if (draft.session.status === "active") {
+                  draft.session.avatarUrl = avatarUrl;
+                  draft.session.bannerUrl = bannerUrl;
+                }
+              });
+            });
+          } catch {
+            set((draft) => {
+              draft.session = { status: "none" };
+            });
+          } finally {
+            done();
+          }
+        })();
+        return pending;
+      };
+    })(),
 
     checkIdentity: async () => {
       const { session } = get();
@@ -260,11 +241,9 @@ export const useAuthStore = create<AuthState>()(
       });
 
       try {
-        const oauthSession = await storage.loadSession(session.did);
-
         const [localIdentity, upstreamKey] = await Promise.all([
           storage.loadIdentity(session.did).catch(() => null),
-          fetchUpstreamPublicKey(session.pdsUrl, session.did, oauthSession as OAuthSession),
+          fetchUpstreamPublicKey(session.did),
         ]);
 
         const hasLocal = localIdentity !== null;
@@ -308,11 +287,9 @@ export const useAuthStore = create<AuthState>()(
       const worker = getOpakeWorker();
 
       try {
-        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
         const identity = await worker.generateIdentity(session.did);
-
-        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
         await storage.saveIdentity(session.did, identity);
+        await publishIdentityKey();
 
         set((draft) => {
           draft.identity = { status: "ready" };
@@ -340,11 +317,9 @@ export const useAuthStore = create<AuthState>()(
       const worker = getOpakeWorker();
 
       try {
-        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
         const identity = await worker.deriveIdentityFromMnemonic(phrase, session.did);
-
-        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
         await storage.saveIdentity(session.did, identity);
+        await publishIdentityKey();
 
         set((draft) => {
           draft.identity = { status: "ready" };
@@ -368,11 +343,10 @@ export const useAuthStore = create<AuthState>()(
       const worker = getOpakeWorker();
 
       try {
-        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
         const identity = await worker.deriveIdentityFromMnemonic(phrase, session.did);
 
         // Compare against published key.
-        const upstreamKey = await fetchUpstreamPublicKey(session.pdsUrl, session.did, oauthSession);
+        const upstreamKey = await fetchUpstreamPublicKey(session.did);
 
         if (upstreamKey && identity.public_key !== upstreamKey && !force) {
           return { mismatch: true };
@@ -382,8 +356,8 @@ export const useAuthStore = create<AuthState>()(
           draft.identity = { status: "checking" };
         });
 
-        await publishIdentityKey(session.pdsUrl, session.did, identity, oauthSession);
         await storage.saveIdentity(session.did, identity);
+        await publishIdentityKey();
 
         set((draft) => {
           draft.identity = { status: "ready" };
@@ -434,12 +408,12 @@ export const useAuthStore = create<AuthState>()(
         savePendingState({
           pdsUrl,
           handle,
-          dpopKey,
+          dpop_key: dpopKey,
           pkceVerifier: pkce.verifier,
           csrfState,
-          tokenEndpoint: asm.token_endpoint,
-          clientId,
-          dpopNonce,
+          token_endpoint: asm.token_endpoint,
+          client_id: clientId,
+          dpop_nonce: dpopNonce,
         });
 
         const authUrl = buildAuthorizationUrl(asm.authorization_endpoint, clientId, requestUri);
@@ -476,13 +450,13 @@ export const useAuthStore = create<AuthState>()(
         const redirectUri = buildRedirectUri();
 
         const { tokenResponse, dpopNonce } = await exchangeCode(
-          pending.tokenEndpoint,
-          pending.clientId,
+          pending.token_endpoint,
+          pending.client_id,
           code,
           redirectUri,
           pending.pkceVerifier,
-          pending.dpopKey,
-          pending.dpopNonce,
+          pending.dpop_key,
+          pending.dpop_nonce,
           worker,
         );
 
@@ -490,31 +464,32 @@ export const useAuthStore = create<AuthState>()(
         if (!did) throw new Error("Token response missing `sub` claim");
 
         const timestamp = Math.floor(Date.now() / 1000);
-        const expiresAt = tokenResponse.expires_in ? timestamp + tokenResponse.expires_in : null;
+        const expiresAt = tokenResponse.expires_in
+          ? timestamp + tokenResponse.expires_in
+          : undefined;
 
         const oauthSession: Readonly<OAuthSession> = {
           type: "oauth",
           did,
           handle: pending.handle,
-          accessToken: tokenResponse.access_token,
-          refreshToken: tokenResponse.refresh_token ?? "",
-          dpopKey: pending.dpopKey,
-          tokenEndpoint: pending.tokenEndpoint,
-          dpopNonce,
-          expiresAt,
-          clientId: pending.clientId,
+          access_token: tokenResponse.access_token,
+          refresh_token: tokenResponse.refresh_token ?? "",
+          dpop_key: pending.dpop_key,
+          token_endpoint: pending.token_endpoint,
+          dpop_nonce: dpopNonce ?? undefined,
+          expires_at: expiresAt,
+          client_id: pending.client_id,
         };
 
         const existingConfig: Readonly<Config> = await storage.loadConfig().catch(() => ({
-          defaultDid: null,
           accounts: {},
         }));
         const config: Readonly<Config> = {
           ...existingConfig,
-          defaultDid: did,
+          default_did: did,
           accounts: {
             ...existingConfig.accounts,
-            [did]: { pdsUrl: pending.pdsUrl, handle: pending.handle },
+            [did]: { pds_url: pending.pdsUrl, handle: pending.handle },
           },
         };
 
@@ -533,6 +508,8 @@ export const useAuthStore = create<AuthState>()(
           };
           draft.identity = { status: "unchecked" };
         });
+
+        await worker.setAccount(did);
 
         loadAndRefreshProfile(pending.pdsUrl, did, ({ avatarUrl, bannerUrl }) => {
           set((draft) => {
@@ -573,6 +550,9 @@ export const useAuthStore = create<AuthState>()(
           // best-effort cleanup
         }
       }
+      const worker = getOpakeWorker();
+      void worker.clearAccount();
+
       set((draft) => {
         draft.session = { status: "none" };
         draft.identity = { status: "unchecked" };

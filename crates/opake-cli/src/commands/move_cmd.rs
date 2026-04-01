@@ -1,13 +1,10 @@
 use anyhow::Result;
-use chrono::Utc;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::directories::{check_cycle, move_entry, DirectoryTree, EntryKind};
+use opake_core::directories::{check_cycle, EntryKind};
 
 use crate::commands::Execute;
-use crate::document_resolve;
-use crate::identity;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 
 /// Move a document or directory into another directory
 ///
@@ -27,36 +24,27 @@ pub struct MoveCommand {
 
 impl Execute for MoveCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
-        let private_key = id.private_key_bytes()?;
-        let now = Utc::now().to_rfc3339();
+        let mut opake = ctx.opake().await?;
+        let context = opake.cabinet_context()?;
+        let mut mgr = opake.file_manager(&context);
 
-        let mut tree = DirectoryTree::load(&mut client).await?;
-        tree.decrypt_names(&ctx.did, &private_key);
-
-        let mut resolver = document_resolve::CliDocumentNameResolver::new(
-            &mut client,
-            &ctx.did,
-            &private_key,
-            &ctx.storage,
-        );
-
-        let source = tree.resolve(&mut resolver, &self.source).await?;
-        let dest = tree.resolve(&mut resolver, &self.destination).await?;
-
-        if dest.kind != EntryKind::Directory {
-            anyhow::bail!("{:?} is not a directory", self.destination);
-        }
+        let tree = mgr.load_tree().await?;
+        let source = mgr.resolve_entry(&tree, &self.source).await?;
+        let dest = tree.resolve_directory(&self.destination)?;
 
         if source.kind == EntryKind::Directory {
             check_cycle(&tree, &source.uri, &dest.uri)?;
         }
 
-        move_entry(&mut client, &source, &dest.uri, &now).await?;
+        let source_dir = source
+            .parent_uri
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("{:?} has no parent directory", self.source))?;
+
+        mgr.move_entry(&source.uri, source_dir, &dest.uri).await?;
 
         println!("moved {:?} → {}", source.name, self.destination);
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }

@@ -40,12 +40,12 @@ export interface TokenResponse {
 export interface OAuthPendingState {
   pdsUrl: string;
   handle: string;
-  dpopKey: DpopKeyPair;
+  dpop_key: DpopKeyPair;
   pkceVerifier: string;
   csrfState: string;
-  tokenEndpoint: string;
-  clientId: string;
-  dpopNonce: string | null;
+  token_endpoint: string;
+  client_id: string;
+  dpop_nonce: string | null;
 }
 
 const PENDING_STATE_KEY = "opake:oauth_pending";

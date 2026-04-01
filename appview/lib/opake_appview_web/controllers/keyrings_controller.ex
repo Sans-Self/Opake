@@ -1,8 +1,8 @@
 defmodule OpakeAppviewWeb.KeyringsController do
   @moduledoc """
-  Returns keyrings that include the authenticated DID as a member. Used by
-  clients to discover which keyrings they need to fetch wrapped keys from.
-  Same pagination pattern as the inbox endpoint.
+  Returns full keyring records for keyrings where the authenticated DID is a
+  member. Joins `keyring_members` (membership + wrapped keys) with `keyrings`
+  (rotation, encrypted metadata) so clients get everything in one call.
   """
 
   use OpakeAppviewWeb, :controller
@@ -10,20 +10,32 @@ defmodule OpakeAppviewWeb.KeyringsController do
   alias OpakeAppview.Queries.KeyringQueries
   import OpakeAppviewWeb.PaginationHelpers
 
+  @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, params) do
-    with {:ok, did} <- require_did(params),
-         {:ok, limit} <- parse_limit(params) do
+    did = conn.assigns.authenticated_did
+
+    with {:ok, limit} <- parse_limit(params) do
       cursor = params["cursor"]
-      {keyrings, next_cursor} = KeyringQueries.list_keyrings_for_member(did, limit: limit, cursor: cursor)
+      {pairs, next_cursor} = KeyringQueries.list_keyrings_full(did, limit: limit, cursor: cursor)
 
       response =
         %{
           keyrings:
-            Enum.map(keyrings, fn k ->
+            Enum.map(pairs, fn {k, members} ->
               %{
                 uri: k.uri,
-                ownerDid: k.owner_did,
-                indexedAt: DateTime.to_iso8601(k.indexed_at)
+                owner_did: k.owner_did,
+                rotation: k.rotation,
+                members:
+                  Enum.map(members, fn m ->
+                    %{
+                      "wrappedKey" => m.wrapped_key,
+                      "role" => m.role
+                    }
+                  end),
+                encrypted_metadata: k.encrypted_metadata,
+                created_at: k.created_at,
+                indexed_at: DateTime.to_iso8601(k.indexed_at)
               }
             end)
         }

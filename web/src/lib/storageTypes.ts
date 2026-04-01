@@ -4,10 +4,10 @@
 import type { DpopKeyPair } from "./cryptoTypes";
 
 export interface Config {
-  readonly defaultDid: string | null;
+  readonly default_did?: string;
   readonly accounts: Readonly<Record<string, AccountEntry>>;
   /** Whether to cache PDS records locally. Defaults to true when absent. */
-  readonly cacheEnabled?: boolean;
+  readonly cache_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -22,11 +22,11 @@ export interface CachedRecord<T = unknown> {
 
 export interface CachedCollection<T = unknown> {
   readonly records: readonly CachedRecord<T>[];
-  readonly fetchedAt: number;
+  readonly fetched_at: number;
 }
 
 export interface AccountEntry {
-  readonly pdsUrl: string;
+  readonly pds_url: string;
   readonly handle: string;
 }
 
@@ -34,8 +34,8 @@ export interface Identity {
   readonly did: string;
   readonly public_key: string; // base64 X25519
   readonly private_key: string; // base64 X25519
-  readonly signing_key: string | null; // base64 Ed25519
-  readonly verify_key: string | null; // base64 Ed25519
+  readonly signing_key?: string; // base64 Ed25519
+  readonly verify_key?: string; // base64 Ed25519
 }
 
 // Mirrors: opake-core Session enum (client/xrpc/mod.rs)
@@ -45,21 +45,21 @@ export interface LegacySession {
   readonly type: "legacy";
   readonly did: string;
   readonly handle: string;
-  readonly accessJwt: string;
-  readonly refreshJwt: string;
+  readonly access_jwt: string;
+  readonly refresh_jwt: string;
 }
 
 export interface OAuthSession {
   readonly type: "oauth";
   readonly did: string;
   readonly handle: string;
-  accessToken: string;
-  refreshToken: string;
-  readonly dpopKey: DpopKeyPair;
-  readonly tokenEndpoint: string;
-  dpopNonce: string | null;
-  expiresAt: number | null;
-  readonly clientId: string;
+  access_token: string;
+  refresh_token: string;
+  readonly dpop_key: DpopKeyPair;
+  readonly token_endpoint: string;
+  dpop_nonce?: string;
+  expires_at?: number;
+  readonly client_id: string;
 }
 
 export type Session = LegacySession | OAuthSession;

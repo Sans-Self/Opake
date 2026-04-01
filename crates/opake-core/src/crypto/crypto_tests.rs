@@ -149,9 +149,15 @@ fn create_group_key_wraps_to_all_members() {
     let (priv_a, pub_a) = test_keypair();
     let (priv_b, pub_b) = test_keypair();
 
-    let members: Vec<(&str, &[u8; 32])> = vec![
-        ("did:plc:alice", pub_a.as_bytes()),
-        ("did:plc:bob", pub_b.as_bytes()),
+    let members = vec![
+        DidMember {
+            did: "did:plc:alice",
+            public_key: pub_a.as_bytes(),
+        },
+        DidMember {
+            did: "did:plc:bob",
+            public_key: pub_b.as_bytes(),
+        },
     ];
 
     let (group_key, wrapped_keys) = create_group_key(&members, &mut OsRng).unwrap();

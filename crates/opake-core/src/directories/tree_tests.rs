@@ -464,3 +464,131 @@ async fn getters_return_expected_values() {
     );
     assert!(tree.find_parent(ROOT_URI).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// decrypt_names_with_group_keys
+// ---------------------------------------------------------------------------
+
+use crate::crypto::{self as crypto_mod, ContentKey};
+// KeyWrapping types used by the keyring directory test helper (via encrypt_keyring_directory_envelope)
+
+/// Build a keyring-encrypted directory for testing.
+fn keyring_directory(
+    name: &str,
+    keyring_uri: &str,
+    group_key: &ContentKey,
+    entries: Vec<String>,
+) -> Directory {
+    let (encryption, encrypted_metadata) = crate::directories::encrypt_keyring_directory_envelope(
+        name,
+        None,
+        keyring_uri,
+        group_key,
+        0,
+        &mut crypto_mod::OsRng,
+    )
+    .unwrap();
+
+    Directory {
+        entries,
+        ..Directory::new(
+            encryption,
+            encrypted_metadata,
+            "2026-03-21T00:00:00Z".into(),
+        )
+    }
+}
+
+#[test]
+fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
+    let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
+    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+
+    let root = keyring_directory(
+        "/",
+        keyring_uri,
+        &group_key,
+        vec!["at://did:plc:test/app.opake.directory/sub1".into()],
+    );
+    let sub = keyring_directory("Projects", keyring_uri, &group_key, vec![]);
+
+    let records = vec![
+        ("at://did:plc:test/app.opake.directory/wsroot".into(), root),
+        ("at://did:plc:test/app.opake.directory/sub1".into(), sub),
+    ];
+
+    let mut tree = DirectoryTree::from_records(records);
+    let (_, private_key) = test_keypair();
+
+    let mut group_keys = HashMap::new();
+    group_keys.insert(keyring_uri.to_string(), group_key);
+
+    tree.decrypt_names_with_group_keys(TEST_DID, &private_key, &group_keys);
+
+    assert_eq!(
+        tree.directory_name("at://did:plc:test/app.opake.directory/sub1"),
+        Some("Projects")
+    );
+}
+
+#[test]
+fn decrypt_names_with_group_keys_handles_mixed_encryption() {
+    let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
+    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+
+    // One keyring-encrypted directory
+    let keyring_dir = keyring_directory("Workspace", keyring_uri, &group_key, vec![]);
+
+    // One direct-encrypted directory (from test helpers)
+    let direct_dir = super::super::tests::dummy_directory("Personal");
+
+    let records = vec![
+        (
+            "at://did:plc:test/app.opake.directory/ws".into(),
+            keyring_dir,
+        ),
+        (
+            "at://did:plc:test/app.opake.directory/personal".into(),
+            direct_dir,
+        ),
+    ];
+
+    let mut tree = DirectoryTree::from_records(records);
+    let (_, private_key) = test_keypair();
+
+    let mut group_keys = HashMap::new();
+    group_keys.insert(keyring_uri.to_string(), group_key);
+
+    tree.decrypt_names_with_group_keys(TEST_DID, &private_key, &group_keys);
+
+    assert_eq!(
+        tree.directory_name("at://did:plc:test/app.opake.directory/ws"),
+        Some("Workspace")
+    );
+    assert_eq!(
+        tree.directory_name("at://did:plc:test/app.opake.directory/personal"),
+        Some("Personal")
+    );
+}
+
+#[test]
+fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
+    let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
+    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+
+    let dir = keyring_directory("Secret", keyring_uri, &group_key, vec![]);
+
+    let records = vec![("at://did:plc:test/app.opake.directory/secret".into(), dir)];
+
+    let mut tree = DirectoryTree::from_records(records);
+    let (_, private_key) = test_keypair();
+
+    // Empty group keys map — keyring not known
+    let group_keys = HashMap::new();
+    tree.decrypt_names_with_group_keys(TEST_DID, &private_key, &group_keys);
+
+    assert_eq!(
+        tree.directory_name("at://did:plc:test/app.opake.directory/secret"),
+        Some("?")
+    );
+}

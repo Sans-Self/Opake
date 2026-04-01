@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PrivateKey};
@@ -42,14 +42,14 @@ pub async fn update_content(
     let mut doc = result.document;
     let mut metadata = result.metadata;
 
-    debug!(
+    trace!(
         "re-encrypting blob for {} ({} bytes)",
         uri,
         new_plaintext.len()
     );
     let payload = crypto::encrypt_blob(&result.content_key, new_plaintext, rng)?;
 
-    debug!(
+    trace!(
         "uploading new encrypted blob ({} bytes)",
         payload.ciphertext.len()
     );

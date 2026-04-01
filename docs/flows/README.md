@@ -9,7 +9,7 @@ Sequence diagrams for every CLI operation. All crypto happens client-side — th
 | [directories.md](directories.md) | Create, delete, recursive delete, path resolution |
 | [sharing.md](sharing.md) | Resolve, share, revoke |
 | [crypto.md](crypto.md) | Key wrapping, content encryption primitives |
-| [keyrings.md](keyrings.md) | Create, list, add/remove member, keyring upload/download |
-| [revisions.md](revisions.md) | Collaborative editing via revision records (planned) |
+| [keyrings.md](keyrings.md) | Create, list, add/remove member (with roles), keyring upload/download |
+| [revisions.md](revisions.md) | Collaborative editing via documentUpdate records, document adoption |
 | [pairing.md](pairing.md) | Device-to-device identity transfer via PDS relay |
 | [seed-phrase-recovery.md](seed-phrase-recovery.md) | Seed phrase derivation, identity recovery |

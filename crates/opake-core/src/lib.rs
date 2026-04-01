@@ -12,15 +12,17 @@
 // matching the path the RedactedDebug derive macro generates.
 extern crate self as opake_core;
 
+pub use opake_derive::signoff;
 pub use opake_derive::RedactedDebug;
 
 pub fn binding_check() -> &'static str {
-    log::debug!("binding_check called");
+    log::trace!("binding_check called");
     "WORKS"
 }
 
 pub mod account_config;
 pub mod atproto;
+pub mod cabinet;
 pub mod client;
 pub mod crypto;
 pub mod daemon;
@@ -28,13 +30,18 @@ pub mod directories;
 pub mod documents;
 pub mod error;
 pub mod keyrings;
+pub mod manager;
 pub mod metadata;
+pub mod opake;
 pub mod pairing;
 pub mod paths;
 pub mod records;
+pub mod reencryption;
 pub mod resolve;
 pub mod sharing;
 pub mod storage;
+pub mod tid;
+pub mod workspace;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

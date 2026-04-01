@@ -8,18 +8,6 @@ import remarkGfm from "remark-gfm";
 
 export default defineConfig({
   plugins: [
-    // Allow the Service Worker (served from /src/) to control scope "/"
-    {
-      name: "service-worker-scope",
-      configureServer(server) {
-        server.middlewares.use((req, res, next) => {
-          if (req.url?.includes("service-worker")) {
-            res.setHeader("Service-Worker-Allowed", "/");
-          }
-          next();
-        });
-      },
-    },
     // MDX must run before React transform
     { enforce: "pre" as const, ...mdx({ remarkPlugins: [remarkGfm] }) },
     tailwindcss(),

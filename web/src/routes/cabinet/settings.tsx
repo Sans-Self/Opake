@@ -3,8 +3,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { UserIcon, FloppyDiskIcon, GearIcon } from "@phosphor-icons/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { useAuthStore } from "@/stores/auth";
-import { storage } from "@/lib/indexeddbStorage";
-import { authenticatedGetRecord, authenticatedPutRecord } from "@/lib/api";
 import { getOpakeWorker } from "@/lib/worker";
 import { truncateDid } from "@/lib/format";
 import { toastSuccess, toastError } from "@/stores/toast";
@@ -14,50 +12,38 @@ import type { AccountConfigRecord } from "@/lib/pdsTypes";
 // Helpers
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Account Config Section (PDS-synced preferences)
-// ---------------------------------------------------------------------------
-
-function AccountConfigSection() {
+function SettingsPage() {
   const session = useAuthStore((s) => s.session);
+  const did = session.status === "active" ? session.did : null;
+  const handle = session.status === "active" ? session.handle : null;
+  const pdsUrl = session.status === "active" ? session.pdsUrl : null;
+
   const [config, setConfig] = useState<AccountConfigRecord | null>(null);
   const [appviewUrl, setAppviewUrl] = useState("");
   const [savedAppviewUrl, setSavedAppviewUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const did = session.status === "active" ? session.did : null;
-  const pdsUrl = session.status === "active" ? session.pdsUrl : null;
-
   useEffect(() => {
-    if (!did || !pdsUrl) return;
+    if (!did) return;
 
     const cancelled = { current: false };
     const worker = getOpakeWorker();
 
     void (async () => {
-      const [collection, rkey, sess] = await Promise.all([
-        worker.accountConfigCollection(),
-        worker.accountConfigRkey(),
-        storage.loadSession(did),
-      ]);
       try {
-        const record = await authenticatedGetRecord<AccountConfigRecord>(
-          { pdsUrl, did, collection, rkey },
-          sess,
-        );
+        const result = (await worker.getAccountConfig()) as AccountConfigRecord | null;
         if (cancelled.current) return;
-        setConfig(record.value);
-        const url = record.value.appviewUrl ?? "";
-        setAppviewUrl(url);
-        setSavedAppviewUrl(url);
-      } catch (err: unknown) {
-        if (cancelled.current) return;
-        const is404 = err instanceof Error && err.message.includes("404");
-        if (is404) {
+        if (result) {
+          setConfig(result);
+          const url = result.appviewUrl ?? "";
+          setAppviewUrl(url);
+          setSavedAppviewUrl(url);
+        } else {
           const defaults = await worker.newAccountConfig(new Date().toISOString());
           setConfig(defaults);
-          return;
         }
+      } catch (err: unknown) {
+        if (cancelled.current) return;
         console.error("[settings] failed to load account config:", err);
       }
     })();
@@ -65,26 +51,21 @@ function AccountConfigSection() {
     return () => {
       cancelled.current = true;
     };
-  }, [did, pdsUrl]);
+  }, [did]);
 
   const saveConfig = useCallback(
     async (updates: Partial<AccountConfigRecord>) => {
-      if (!did || !pdsUrl || !config) return;
+      if (!did || !config) return;
 
       setSaving(true);
       try {
         const worker = getOpakeWorker();
-        const [collection, rkey, sess] = await Promise.all([
-          worker.accountConfigCollection(),
-          worker.accountConfigRkey(),
-          storage.loadSession(did),
-        ]);
         const updated: AccountConfigRecord = {
           ...config,
           ...updates,
           modifiedAt: new Date().toISOString(),
         };
-        await authenticatedPutRecord({ pdsUrl, did, collection, rkey, record: updated }, sess);
+        await worker.setAccountConfig(updated);
         setConfig(updated);
         return updated;
       } catch (error) {
@@ -95,147 +76,84 @@ function AccountConfigSection() {
         setSaving(false);
       }
     },
-    [did, pdsUrl, config],
+    [did, config],
   );
 
-  const handleToggleTelemetry = useCallback(async () => {
-    if (!config) return;
-    const result = await saveConfig({ telemetryEnabled: !config.telemetryEnabled });
-    if (result) toastSuccess(`Telemetry ${result.telemetryEnabled ? "enabled" : "disabled"}`);
-  }, [config, saveConfig]);
-
-  const handleSaveAppviewUrl = useCallback(async () => {
-    const url = appviewUrl.trim() || undefined;
-    const result = await saveConfig({ appviewUrl: url });
+  const handleAppviewSave = useCallback(async () => {
+    const result = await saveConfig({
+      appviewUrl: appviewUrl.trim() || undefined,
+    });
     if (result) {
-      setSavedAppviewUrl(appviewUrl);
+      setSavedAppviewUrl(result.appviewUrl ?? "");
       toastSuccess("AppView URL saved");
     }
   }, [appviewUrl, saveConfig]);
 
-  if (!config) return null;
-
   const appviewDirty = appviewUrl !== savedAppviewUrl;
 
+  if (!did || !handle || !pdsUrl) {
+    return (
+      <PanelShell depth={0} breadcrumbs={<span>Settings</span>} footer="">
+        <div className="text-base-content/50 flex h-full items-center justify-center">
+          Log in to view settings
+        </div>
+      </PanelShell>
+    );
+  }
+
   return (
-    <div className="card card-bordered border-base-300/50 bg-base-100 p-4">
-      <div className="mb-3 flex items-center gap-2.5">
-        <div className="bg-bg-stone flex size-8 shrink-0 items-center justify-center rounded-lg">
-          <GearIcon size={14} className="text-text-muted" />
-        </div>
-        <div>
-          <div className="text-ui text-base-content font-medium">Preferences</div>
-          <div className="text-caption text-text-muted">Synced to your PDS across devices.</div>
-        </div>
-      </div>
+    <PanelShell depth={0} breadcrumbs={<span>Settings</span>} footer="">
+      <div className="mx-auto max-w-2xl space-y-8 p-6">
+        <h1 className="flex items-center gap-2 text-2xl font-bold">
+          <GearIcon size={24} /> Settings
+        </h1>
 
-      <div className="flex flex-col gap-3">
-        <label className="flex cursor-pointer items-center justify-between gap-3">
-          <div>
-            <div className="text-ui text-base-content">Telemetry</div>
-            <div className="text-caption text-text-muted">Usage analytics — not yet active</div>
+        {/* Account info */}
+        <section className="card bg-base-200 space-y-2 p-4">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <UserIcon size={18} /> Account
+          </h2>
+          <div className="space-y-1 text-sm">
+            <div>
+              <span className="text-base-content/60">Handle:</span>{" "}
+              <span className="font-mono">{handle}</span>
+            </div>
+            <div>
+              <span className="text-base-content/60">DID:</span>{" "}
+              <span className="font-mono text-xs">{truncateDid(did)}</span>
+            </div>
+            <div>
+              <span className="text-base-content/60">PDS:</span>{" "}
+              <span className="font-mono text-xs">{pdsUrl}</span>
+            </div>
           </div>
-          <input
-            type="checkbox"
-            className="toggle toggle-sm toggle-primary"
-            checked={config.telemetryEnabled}
-            disabled={saving}
-            onChange={() => void handleToggleTelemetry()}
-            aria-label="Enable telemetry"
-          />
-        </label>
+        </section>
 
-        <div>
-          <div className="text-ui text-base-content mb-1">AppView URL</div>
-          <div className="flex items-center gap-2">
+        {/* AppView URL */}
+        <section className="card bg-base-200 space-y-3 p-4">
+          <h2 className="font-semibold">AppView URL</h2>
+          <p className="text-base-content/60 text-sm">
+            The AppView indexes workspace membership and incoming shares. Leave blank to use the
+            default.
+          </p>
+          <div className="flex gap-2">
             <input
               type="url"
+              className="input input-bordered input-sm flex-1"
               placeholder="https://appview.opake.app"
               value={appviewUrl}
               onChange={(e) => setAppviewUrl(e.target.value)}
-              className="input input-bordered input-sm border-base-300/50 bg-base-200/50 text-ui flex-1"
-              aria-label="AppView URL"
             />
             <button
-              onClick={() => void handleSaveAppviewUrl()}
+              type="button"
+              className="btn btn-sm btn-primary"
               disabled={!appviewDirty || saving}
-              className="btn btn-primary btn-sm gap-1.5"
+              onClick={() => void handleAppviewSave()}
             >
-              <FloppyDiskIcon size={13} />
-              {saving ? "Saving…" : "Save"}
+              <FloppyDiskIcon size={16} /> Save
             </button>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Account Section
-// ---------------------------------------------------------------------------
-
-function AccountSection() {
-  const session = useAuthStore((s) => s.session);
-
-  if (session.status !== "active") return null;
-
-  return (
-    <div className="card card-bordered border-base-300/50 bg-base-100 p-4">
-      <div className="mb-3 flex items-center gap-2.5">
-        <div className="bg-bg-stone flex size-8 shrink-0 items-center justify-center rounded-lg">
-          <UserIcon size={14} className="text-text-muted" />
-        </div>
-        <div>
-          <div className="text-ui text-base-content font-medium">Account</div>
-          <div className="text-caption text-text-muted">Your AT Protocol identity</div>
-        </div>
-      </div>
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-        <dt className="text-text-faint font-medium">Handle</dt>
-        <dd className="text-base-content font-mono">{session.handle}</dd>
-
-        <dt className="text-text-faint font-medium">DID</dt>
-        <dd className="text-base-content font-mono" title={session.did}>
-          {truncateDid(session.did)}
-        </dd>
-
-        <dt className="text-text-faint font-medium">PDS</dt>
-        <dd className="text-base-content font-mono">{session.pdsUrl}</dd>
-      </dl>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Settings Page
-// ---------------------------------------------------------------------------
-
-function SettingsPage() {
-  const breadcrumbs = (
-    <div className="breadcrumbs text-ui min-w-0 flex-1 overflow-hidden">
-      <ul>
-        <li>
-          <span className="text-base-content font-medium">Settings</span>
-        </li>
-      </ul>
-    </div>
-  );
-
-  return (
-    <PanelShell depth={1} breadcrumbs={breadcrumbs} footer="Account settings">
-      <div className="p-5">
-        <div className="mb-5">
-          <div className="text-ui text-base-content mb-1 font-medium">Settings</div>
-          <div className="text-text-muted text-xs">Manage your account, keys, and preferences.</div>
-        </div>
-        <div className="divider mt-0 mb-4" />
-
-        <div className="flex flex-col gap-3">
-          <AccountSection />
-          <AccountConfigSection />
-        </div>
+        </section>
       </div>
     </PanelShell>
   );

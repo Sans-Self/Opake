@@ -9,32 +9,25 @@ mod delete;
 mod download;
 mod download_grant;
 mod download_keyring;
-mod list;
 mod update;
 mod upload;
 
 pub use delete::delete_document;
-pub use download::{download, download_with_group_key, fetch_content_key};
+pub use download::fetch_content_key;
+pub(crate) use download::fetch_content_key_with_group_key;
+pub(crate) use download::{download, download_with_group_key};
 pub use download_grant::download_from_grant;
+pub(crate) use download_grant::resolve_grant_metadata;
 pub use download_keyring::{download_from_keyring_member, KeyringDownloadResult};
-pub use list::{list_documents, DecryptedDocumentEntry, DocumentEntry};
 pub use update::update_content;
-pub use upload::{
-    encrypt_and_upload, encrypt_and_upload_keyring, upload_to_directory, KeyringUploadParams,
-    UploadParams,
-};
+pub(crate) use upload::{prepare_upload, prepare_upload_keyring};
+pub use upload::{KeyringUploadParams, UploadParams};
 
 pub const DOCUMENT_COLLECTION: &str = "app.opake.document";
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-
-    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-    use crate::records::{
-        AtBytes, BlobRef, CidLink, DirectEncryption, Document, EncryptedMetadata, Encryption,
-        EncryptionEnvelope, WrappedKey,
-    };
+    use crate::client::{LegacySession, Session, XrpcClient};
     use crate::test_utils::MockTransport;
 
     pub const TEST_DID: &str = "did:plc:test";
@@ -48,73 +41,5 @@ pub(crate) mod tests {
             refresh_jwt: "test-refresh".into(),
         });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
-    }
-
-    pub fn dummy_encrypted_metadata() -> EncryptedMetadata {
-        EncryptedMetadata {
-            ciphertext: AtBytes {
-                encoded: BASE64.encode([0u8; 32]),
-            },
-            nonce: AtBytes {
-                encoded: BASE64.encode([0u8; 12]),
-            },
-        }
-    }
-
-    pub fn dummy_document() -> Document {
-        Document {
-            visibility: Some("private".into()),
-            ..Document::new(
-                BlobRef {
-                    blob_type: "blob".into(),
-                    reference: CidLink {
-                        cid: "bafytest".into(),
-                    },
-                    mime_type: "application/octet-stream".into(),
-                    size: 1024,
-                },
-                Encryption::Direct(DirectEncryption {
-                    envelope: EncryptionEnvelope {
-                        algo: "aes-256-gcm".into(),
-                        nonce: AtBytes {
-                            encoded: BASE64.encode([0u8; 12]),
-                        },
-                        keys: vec![WrappedKey {
-                            did: TEST_DID.into(),
-                            ciphertext: AtBytes {
-                                encoded: BASE64.encode([0u8; 72]),
-                            },
-                            algo: "x25519-hkdf-a256kw".into(),
-                        }],
-                    },
-                }),
-                dummy_encrypted_metadata(),
-                "2026-03-01T00:00:00Z".into(),
-            )
-        }
-    }
-
-    pub fn list_records_response(docs: &[(&str, Document)], cursor: Option<&str>) -> HttpResponse {
-        let records: Vec<serde_json::Value> = docs
-            .iter()
-            .map(|(rkey, doc)| {
-                serde_json::json!({
-                    "uri": format!("at://{}/app.opake.document/{}", TEST_DID, rkey),
-                    "cid": "bafyrecord",
-                    "value": doc,
-                })
-            })
-            .collect();
-
-        let mut body = serde_json::json!({ "records": records });
-        if let Some(c) = cursor {
-            body["cursor"] = serde_json::Value::String(c.into());
-        }
-
-        HttpResponse {
-            status: 200,
-            headers: vec![],
-            body: serde_json::to_vec(&body).unwrap(),
-        }
     }
 }

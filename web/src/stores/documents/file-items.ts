@@ -8,7 +8,7 @@ export function directoryItemFromSnapshot(
   uri: string,
   name: string,
   entryCount: number,
-  record: PdsRecord<DirectoryRecord>,
+  record?: PdsRecord<DirectoryRecord>,
 ): FileItem {
   return {
     id: uri,
@@ -18,7 +18,7 @@ export function directoryItemFromSnapshot(
     encrypted: true,
     status: "private",
     items: entryCount,
-    modified: formatRelativeDate(record.value.modifiedAt ?? record.value.createdAt),
+    modified: record ? formatRelativeDate(record.value.modifiedAt ?? record.value.createdAt) : "",
     decrypted: true,
     tags: [],
   };

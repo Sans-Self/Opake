@@ -1,0 +1,272 @@
+# Opake — Slumber Request Collection
+#
+# Workflow:
+#   1. Fire `resolve_handle` → prompts account select, resolves DID
+#   2. Fire `resolve_did` → fetches DID doc, resolves PDS
+#   3. All XRPC recipes now work with dynamic PDS + DID
+#   4. Fire `keyrings` → workspace recipes prompt you to pick one
+#
+# Auth helpers (pip install cryptography tomli):
+#   tools/appview-auth.py  — signs Opake-Ed25519 headers for appview endpoints
+#   tools/xrpc-auth.py     — generates DPoP proof JWTs for XRPC/PDS endpoints
+#
+# Appview auth reads default_did from ~/.config/opake/config.toml.
+# XRPC auth reads the OAuth session for the selected account.
+
+profiles:
+  dev:
+    name: Development
+    default: true
+    data:
+      appview: "http://localhost:6100"
+      # interactive account select — only triggered when firing resolve_handle
+      account: '{{select([{"label": "sans-self.org", "value": "sans-self.org"}, {"label": "annoiiyed.bsky.social", "value": "annoiiyed.bsky.social"}], message="Account")}}'
+      # chained resolution: resolve_handle → resolve_did → PDS
+      did: "{{response('resolve_handle') | json_parse() | jq('.did')}}"
+      pds: "{{response('resolve_did') | json_parse() | jq('.service[] | select(.type == \"AtprotoPersonalDataServer\") | .serviceEndpoint')}}"
+      keyring_uri: "{{response('keyrings') | json_parse() | jq('[.keyrings[].uri]') | select(message='Workspace')}}"
+
+  production:
+    name: Production
+    data:
+      appview: "https://appview.opake.app"
+      account: '{{select([{"label": "sans-self.org", "value": "sans-self.org"}, {"label": "annoiiyed.bsky.social", "value": "annoiiyed.bsky.social"}], message="Account")}}'
+      did: "{{response('resolve_handle') | json_parse() | jq('.did')}}"
+      pds: "{{response('resolve_did') | json_parse() | jq('.service[] | select(.type == \"AtprotoPersonalDataServer\") | .serviceEndpoint')}}"
+      keyring_uri: "{{response('keyrings') | json_parse() | jq('[.keyrings[].uri]') | select(message='Workspace')}}"
+
+requests:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AppView — Opake-Ed25519 authenticated
+  # ════════════════════════════════════════════════════════════════════════════
+
+  appview:
+    name: AppView
+    requests:
+
+      health:
+        name: Health Check
+        method: GET
+        url: "{{appview}}/api/health"
+
+      inbox:
+        name: Inbox (grants shared with you)
+        method: GET
+        url: "{{appview}}/api/inbox"
+        query:
+          limit: "50"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/inbox'])}}"
+
+      keyrings:
+        name: Keyrings (your memberships)
+        method: GET
+        url: "{{appview}}/api/keyrings"
+        query:
+          limit: "50"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/keyrings'])}}"
+
+      # ── Cabinet (personal file tree) ──────────────────────────────────────
+
+      cabinet_snapshot:
+        name: Cabinet Snapshot
+        method: GET
+        url: "{{appview}}/api/cabinet/snapshot"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/cabinet/snapshot'])}}"
+
+      cabinet_sync:
+        name: Cabinet Sync (since timestamp)
+        method: GET
+        url: "{{appview}}/api/cabinet/sync"
+        query:
+          since: "2026-01-01T00:00:00Z"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/cabinet/sync'])}}"
+
+      # ── Workspace (shared keyring-scoped) ─────────────────────────────────
+
+      workspace_snapshot:
+        name: Workspace Snapshot
+        method: GET
+        url: "{{appview}}/api/workspace/snapshot"
+        query:
+          keyring: "{{keyring_uri}}"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/workspace/snapshot'])}}"
+
+      workspace_sync:
+        name: Workspace Sync (since timestamp)
+        method: GET
+        url: "{{appview}}/api/workspace/sync"
+        query:
+          keyring: "{{keyring_uri}}"
+          since: "2026-01-01T00:00:00Z"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/workspace/sync'])}}"
+
+      workspace_documents:
+        name: Workspace Documents
+        method: GET
+        url: "{{appview}}/api/workspace"
+        query:
+          keyring: "{{keyring_uri}}"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/workspace'])}}"
+
+      workspace_updates:
+        name: Workspace Document Updates
+        method: GET
+        url: "{{appview}}/api/workspace/updates"
+        query:
+          limit: "50"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/workspace/updates'])}}"
+
+      workspace_directory_updates:
+        name: Workspace Directory Updates
+        method: GET
+        url: "{{appview}}/api/workspace/directory-updates"
+        query:
+          keyring: "{{keyring_uri}}"
+          limit: "50"
+        headers:
+          Authorization: "{{command(['python3', 'tools/appview-auth.py', 'GET', '/api/workspace/directory-updates'])}}"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # XRPC — PDS endpoints with OAuth DPoP
+  # ════════════════════════════════════════════════════════════════════════════
+
+  xrpc:
+    name: XRPC (PDS)
+    requests:
+
+      # ── Identity resolution — fire these first ───────────────────────────
+
+      resolve_handle:
+        name: "① Resolve Handle → DID"
+        method: GET
+        url: "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle"
+        query:
+          handle: "{{account}}"
+
+      resolve_did:
+        name: "② Resolve DID → PDS"
+        method: GET
+        url: "https://plc.directory/{{did}}"
+
+      login:
+        name: "③ OAuth Login → Get Session"
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.server.getSession"
+        headers:
+          Authorization: "{{command(['python3', 'tools/oauth-login.py', '--for-request', 'GET', concat([pds, '/xrpc/com.atproto.server.getSession']), account]) | json_parse() | jq('.authorization')}}"
+          DPoP: "{{command(['python3', 'tools/oauth-login.py', '--for-request', 'GET', concat([pds, '/xrpc/com.atproto.server.getSession']), account]) | json_parse() | jq('.dpop')}}"
+
+      # ── Repo reads ───────────────────────────────────────────────────────
+
+      get_record:
+        name: Get Record
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.repo.getRecord"
+        query:
+          repo: "{{did}}"
+          collection: "app.opake.publicKey"
+          rkey: "self"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.getRecord'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.repo.getRecord'])])}}"
+
+      list_records:
+        name: List Records
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
+        query:
+          repo: "{{did}}"
+          collection: "app.opake.document"
+          limit: "100"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+
+      list_grants:
+        name: List Grants
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
+        query:
+          repo: "{{did}}"
+          collection: "app.opake.grant"
+          limit: "100"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+
+      list_keyrings:
+        name: List Keyrings
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
+        query:
+          repo: "{{did}}"
+          collection: "app.opake.keyring"
+          limit: "100"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+
+      list_directories:
+        name: List Directories
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
+        query:
+          repo: "{{did}}"
+          collection: "app.opake.directory"
+          limit: "100"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
+
+      # ── Repo writes ──────────────────────────────────────────────────────
+
+      delete_record:
+        name: Delete Record
+        method: POST
+        url: "{{pds}}/xrpc/com.atproto.repo.deleteRecord"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'POST', concat([pds, '/xrpc/com.atproto.repo.deleteRecord'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'POST', concat([pds, '/xrpc/com.atproto.repo.deleteRecord'])])}}"
+        body:
+          type: json
+          data:
+            repo: "{{did}}"
+            collection: "app.opake.document"
+            rkey: "CHANGEME"
+
+      # ── Blobs ────────────────────────────────────────────────────────────
+
+      get_blob:
+        name: Get Blob
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.sync.getBlob"
+        query:
+          did: "{{did}}"
+          cid: "CHANGEME"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.sync.getBlob'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.sync.getBlob'])])}}"
+
+      # ── Session ──────────────────────────────────────────────────────────
+
+      get_session:
+        name: Get Session
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.server.getSession"
+        headers:
+          Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.server.getSession'])])}}"
+          DPoP: "{{command(['python3', 'tools/xrpc-auth.py', '--header=dpop', 'GET', concat([pds, '/xrpc/com.atproto.server.getSession'])])}}"
+
+      describe_server:
+        name: Describe Server
+        method: GET
+        url: "{{pds}}/xrpc/com.atproto.server.describeServer"

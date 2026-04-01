@@ -9,7 +9,8 @@ defmodule OpakeAppview.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      listeners: [Phoenix.CodeReloader]
     ]
   end
 
@@ -34,7 +35,8 @@ defmodule OpakeAppview.MixProject do
       {:websockex, "~> 0.4.3"},
       {:hammer, "~> 6.2"},
       {:req, "~> 0.5"},
-      {:mox, "~> 1.2", only: :test}
+      {:mox, "~> 1.2", only: :test},
+      {:stream_data, "~> 1.0", only: :test}
     ]
   end
 

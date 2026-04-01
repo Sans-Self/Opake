@@ -50,20 +50,29 @@ export function FileActionMenu({
     );
   }
 
-  const items = isFolder
+  const isProposal = item.proposal != null;
+
+  const items = isProposal
     ? [
-        { icon: PencilSimpleIcon, label: "Rename", onClick: onRename },
-        { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
-        { icon: TrashIcon, label: "Delete", onClick: onDeleteFolder },
-      ]
-    : [
         ...(onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: onPreview }] : []),
-        { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
-        { icon: ShareNetworkIcon, label: "Share\u2026", onClick: onShare },
-        { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
-        { icon: DownloadSimpleIcon, label: "Download", onClick: onDownload },
-        { icon: TrashIcon, label: "Delete", onClick: onDelete },
-      ];
+        ...(!isFolder
+          ? [{ icon: DownloadSimpleIcon, label: "Download", onClick: onDownload }]
+          : []),
+      ]
+    : isFolder
+      ? [
+          { icon: PencilSimpleIcon, label: "Rename", onClick: onRename },
+          { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
+          { icon: TrashIcon, label: "Delete", onClick: onDeleteFolder },
+        ]
+      : [
+          ...(onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: onPreview }] : []),
+          { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
+          { icon: ShareNetworkIcon, label: "Share\u2026", onClick: onShare },
+          { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
+          { icon: DownloadSimpleIcon, label: "Download", onClick: onDownload },
+          { icon: TrashIcon, label: "Delete", onClick: onDelete },
+        ];
 
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- stopPropagation wrapper to prevent folder row navigation

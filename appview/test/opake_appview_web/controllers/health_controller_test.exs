@@ -7,9 +7,9 @@ defmodule OpakeAppviewWeb.HealthControllerTest do
     conn = get(conn, "/api/health")
 
     response = json_response(conn, 200)
-    assert response["indexerConnected"] == false
-    assert response["cursorTime"] == nil
-    assert response["cursorAgeSecs"] == nil
+    assert response["indexer_connected"] == false
+    assert response["cursor_time"] == nil
+    assert response["cursor_age_secs"] == nil
   end
 
   test "health omits counts", %{conn: conn} do
@@ -26,7 +26,7 @@ defmodule OpakeAppviewWeb.HealthControllerTest do
     conn = get(conn, "/api/health")
 
     response = json_response(conn, 200)
-    refute Map.has_key?(response, "grantCount")
-    refute Map.has_key?(response, "keyringCount")
+    refute Map.has_key?(response, "grant_count")
+    refute Map.has_key?(response, "keyring_count")
   end
 end

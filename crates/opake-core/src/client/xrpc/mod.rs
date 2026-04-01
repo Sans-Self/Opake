@@ -8,6 +8,8 @@ mod auth;
 mod blobs;
 mod repo;
 
+pub use repo::ApplyWriteOp;
+
 use serde::{Deserialize, Serialize};
 
 use super::dpop::{create_dpop_proof, extract_dpop_nonce, is_use_dpop_nonce_error, DpopKeyPair};
@@ -25,16 +27,17 @@ use crate::error::Error;
 /// Custom deserializer: JSON without a `"type"` field deserializes as `Legacy`
 /// for backward compat with existing session.json files.
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type")]
 #[allow(clippy::large_enum_variant)]
 pub enum Session {
+    #[serde(rename = "legacy")]
     Legacy(LegacySession),
+    #[serde(rename = "oauth")]
     OAuth(OAuthSession),
 }
 
 /// Legacy password-based session (createSession / refreshSession).
 #[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LegacySession {
     pub did: String,
     pub handle: String,
@@ -46,7 +49,6 @@ pub struct LegacySession {
 
 /// OAuth 2.0 + DPoP session.
 #[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct OAuthSession {
     pub did: String,
     pub handle: String,
@@ -132,7 +134,7 @@ impl<'de> Deserialize<'de> for Session {
         let value = serde_json::Value::deserialize(deserializer)?;
 
         match value.get("type").and_then(|t| t.as_str()) {
-            Some("oauth" | "oAuth") => {
+            Some("oauth") => {
                 let oauth: OAuthSession =
                     serde_json::from_value(value).map_err(serde::de::Error::custom)?;
                 Ok(Session::OAuth(oauth))
@@ -271,6 +273,11 @@ impl<T: Transport> XrpcClient<T> {
     /// (e.g. cross-PDS DID resolution, public record fetches).
     pub fn transport(&self) -> &T {
         &self.transport
+    }
+
+    /// The PDS base URL this client is connected to.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// Whether the session was refreshed during this client's lifetime.

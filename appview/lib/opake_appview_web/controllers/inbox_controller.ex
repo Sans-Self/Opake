@@ -1,7 +1,6 @@
 defmodule OpakeAppviewWeb.InboxController do
   @moduledoc """
-  Returns incoming grants for the authenticated DID. The `?did=` parameter
-  must match the authenticated DID (enforced by the auth plug's scope check).
+  Returns incoming grants for the authenticated DID.
   Supports cursor-based pagination with configurable limit (1-100, default 50).
   """
 
@@ -11,8 +10,9 @@ defmodule OpakeAppviewWeb.InboxController do
   import OpakeAppviewWeb.PaginationHelpers
 
   def index(conn, params) do
-    with {:ok, did} <- require_did(params),
-         {:ok, limit} <- parse_limit(params) do
+    did = conn.assigns.authenticated_did
+
+    with {:ok, limit} <- parse_limit(params) do
       cursor = params["cursor"]
       {grants, next_cursor} = GrantQueries.list_inbox(did, limit: limit, cursor: cursor)
 
@@ -22,9 +22,9 @@ defmodule OpakeAppviewWeb.InboxController do
             Enum.map(grants, fn g ->
               %{
                 uri: g.uri,
-                ownerDid: g.owner_did,
-                documentUri: g.document_uri,
-                createdAt: g.created_at
+                owner_did: g.owner_did,
+                document_uri: g.document_uri,
+                created_at: g.created_at
               }
             end)
         }

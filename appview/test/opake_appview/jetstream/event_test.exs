@@ -44,10 +44,72 @@ defmodule OpakeAppview.Jetstream.EventTest do
         "cid" => "bafydef",
         "record" => %{
           "members" => [
-            %{"did" => "did:plc:alice", "wrappedKey" => %{"$bytes" => "AAAA"}},
-            %{"did" => "did:plc:bob", "wrappedKey" => %{"$bytes" => "BBBB"}}
+            %{
+              "wrappedKey" => %{
+                "did" => "did:plc:alice",
+                "ciphertext" => %{"$bytes" => "AAAA"},
+                "algo" => "x25519-hkdf-a256kw"
+              },
+              "role" => "manager"
+            },
+            %{
+              "wrappedKey" => %{
+                "did" => "did:plc:bob",
+                "ciphertext" => %{"$bytes" => "BBBB"},
+                "algo" => "x25519-hkdf-a256kw"
+              },
+              "role" => "editor"
+            }
           ],
           "rotation" => 0
+        }
+      }
+    })
+  end
+
+  defp directory_event_json(operation, key_wrapping) do
+    Jason.encode!(%{
+      "did" => "did:plc:owner123",
+      "time_us" => 1_709_330_600_000_000,
+      "kind" => "commit",
+      "commit" => %{
+        "rev" => "3l3qo2vutsw2b",
+        "operation" => operation,
+        "collection" => "app.opake.directory",
+        "rkey" => "3dir",
+        "cid" => "bafydir",
+        "record" => %{
+          "entries" => [
+            "at://did:plc:owner123/app.opake.document/3xyz",
+            "at://did:plc:owner123/app.opake.directory/3sub"
+          ],
+          "encryptedMetadata" => %{"ciphertext" => "AAAA", "nonce" => "BBBB"},
+          "keyWrapping" => key_wrapping
+        }
+      }
+    })
+  end
+
+  defp document_event_json(operation, encryption) do
+    Jason.encode!(%{
+      "did" => "did:plc:owner123",
+      "time_us" => 1_709_330_700_000_000,
+      "kind" => "commit",
+      "commit" => %{
+        "rev" => "3l3qo2vutsw2b",
+        "operation" => operation,
+        "collection" => "app.opake.document",
+        "rkey" => "3doc",
+        "cid" => "bafydoc",
+        "record" => %{
+          "encryptedMetadata" => %{"ciphertext" => "CCCC", "nonce" => "DDDD"},
+          "encryption" => encryption,
+          "blob" => %{
+            "$type" => "blob",
+            "ref" => %{"$link" => "bafyblob"},
+            "mimeType" => "application/octet-stream",
+            "size" => 1024
+          }
         }
       }
     })
@@ -67,6 +129,8 @@ defmodule OpakeAppview.Jetstream.EventTest do
       }
     })
   end
+
+  # Grant tests
 
   test "parses grant create" do
     json = grant_event_json("create")
@@ -92,6 +156,8 @@ defmodule OpakeAppview.Jetstream.EventTest do
     assert uri == "at://did:plc:owner123/app.opake.grant/3abc"
   end
 
+  # Keyring tests
+
   test "parses keyring create" do
     json = keyring_event_json("create")
 
@@ -99,7 +165,11 @@ defmodule OpakeAppview.Jetstream.EventTest do
     assert attrs.time_us == 1_709_330_500_000_000
     assert attrs.uri == "at://did:plc:owner123/app.opake.keyring/3def"
     assert attrs.owner_did == "did:plc:owner123"
-    assert attrs.member_dids == ["did:plc:alice", "did:plc:bob"]
+
+    assert attrs.member_entries == [
+             %{did: "did:plc:alice", role: "manager"},
+             %{did: "did:plc:bob", role: "editor"}
+           ]
   end
 
   test "parses keyring delete" do
@@ -108,6 +178,128 @@ defmodule OpakeAppview.Jetstream.EventTest do
     assert {:delete_keyring, %{uri: uri}} = Event.parse(json)
     assert uri == "at://did:plc:owner123/app.opake.keyring/3def"
   end
+
+  # Directory tests — keyring-wrapped (workspace)
+
+  test "parses directory create with keyringKeyWrapping" do
+    key_wrapping = %{
+      "$type" => "app.opake.directory#keyringKeyWrapping",
+      "keyringRef" => %{
+        "keyring" => "at://did:plc:owner123/app.opake.keyring/3def",
+        "rotation" => 0
+      },
+      "wrappedKey" => %{"$bytes" => "AAAA"}
+    }
+
+    json = directory_event_json("create", key_wrapping)
+
+    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert attrs.directory_uri == "at://did:plc:owner123/app.opake.directory/3dir"
+    assert attrs.owner_did == "did:plc:owner123"
+    assert attrs.keyring_uri == "at://did:plc:owner123/app.opake.keyring/3def"
+    assert length(attrs.entries) == 2
+    assert attrs.encrypted_metadata == %{"ciphertext" => "AAAA", "nonce" => "BBBB"}
+    assert attrs.key_wrapping == key_wrapping
+  end
+
+  # Directory tests — directly wrapped (cabinet)
+
+  test "parses directory create with directKeyWrapping" do
+    key_wrapping = %{
+      "$type" => "app.opake.directory#directKeyWrapping",
+      "wrappedKey" => %{"$bytes" => "DDDD"}
+    }
+
+    json = directory_event_json("create", key_wrapping)
+
+    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert attrs.directory_uri == "at://did:plc:owner123/app.opake.directory/3dir"
+    assert attrs.owner_did == "did:plc:owner123"
+    assert attrs.keyring_uri == nil
+    assert length(attrs.entries) == 2
+    assert attrs.key_wrapping == key_wrapping
+  end
+
+  test "parses directory delete" do
+    json = delete_event_json("app.opake.directory", "3dir")
+
+    assert {:delete_directory, %{directory_uri: uri}} = Event.parse(json)
+    assert uri == "at://did:plc:owner123/app.opake.directory/3dir"
+  end
+
+  test "directory entries filters non-string values" do
+    json =
+      Jason.encode!(%{
+        "did" => "did:plc:owner123",
+        "time_us" => 1_709_330_600_000_000,
+        "kind" => "commit",
+        "commit" => %{
+          "rev" => "abc",
+          "operation" => "create",
+          "collection" => "app.opake.directory",
+          "rkey" => "3dir",
+          "record" => %{
+            "entries" => ["at://valid", 42, nil, "at://also-valid"],
+            "keyWrapping" => %{"$type" => "app.opake.directory#directKeyWrapping"}
+          }
+        }
+      })
+
+    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert attrs.entries == ["at://valid", "at://also-valid"]
+  end
+
+  # Document tests — keyring-encrypted (workspace)
+
+  test "parses document create with keyringEncryption" do
+    encryption = %{
+      "$type" => "app.opake.document#keyringEncryption",
+      "keyringRef" => %{
+        "keyring" => "at://did:plc:owner123/app.opake.keyring/3def",
+        "rotation" => 2
+      },
+      "nonce" => "AABBCC"
+    }
+
+    json = document_event_json("create", encryption)
+
+    assert {:upsert_document, attrs} = Event.parse(json)
+    assert attrs.document_uri == "at://did:plc:owner123/app.opake.document/3doc"
+    assert attrs.owner_did == "did:plc:owner123"
+    assert attrs.keyring_uri == "at://did:plc:owner123/app.opake.keyring/3def"
+    assert attrs.rotation == 2
+    assert attrs.encrypted_metadata == %{"ciphertext" => "CCCC", "nonce" => "DDDD"}
+    assert attrs.encryption == encryption
+    assert attrs.blob_ref != nil
+  end
+
+  # Document tests — directly encrypted (cabinet)
+
+  test "parses document create with directEncryption" do
+    encryption = %{
+      "$type" => "app.opake.document#directEncryption",
+      "wrappedKey" => %{"$bytes" => "EEEE"},
+      "nonce" => "FFFF"
+    }
+
+    json = document_event_json("create", encryption)
+
+    assert {:upsert_document, attrs} = Event.parse(json)
+    assert attrs.document_uri == "at://did:plc:owner123/app.opake.document/3doc"
+    assert attrs.owner_did == "did:plc:owner123"
+    assert attrs.keyring_uri == nil
+    assert attrs.rotation == nil
+    assert attrs.encryption == encryption
+  end
+
+  test "parses document delete" do
+    json = delete_event_json("app.opake.document", "3doc")
+
+    assert {:delete_document, %{document_uri: uri}} = Event.parse(json)
+    assert uri == "at://did:plc:owner123/app.opake.document/3doc"
+  end
+
+  # General tests
 
   test "ignores identity events" do
     json = Jason.encode!(%{"kind" => "identity", "did" => "did:plc:test"})

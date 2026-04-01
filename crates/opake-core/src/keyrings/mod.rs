@@ -10,10 +10,10 @@ mod create;
 mod list;
 mod remove_member;
 
-pub use add_member::add_member;
+pub use add_member::{add_member, AddMemberParams};
 pub use create::{create_keyring, CreateKeyringParams};
 pub use list::{list_keyrings, KeyringEntry};
-pub use remove_member::{remove_member, MemberKey};
+pub use remove_member::remove_member;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, KeyringMetadata, X25519PrivateKey};
@@ -67,9 +67,19 @@ pub fn decrypt_keyring_name(
     did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<String> {
-    let wrapped = entry.members.iter().find(|m| m.did == did)?;
-    let group_key = crypto::unwrap_key(wrapped, private_key).ok()?;
+    let member = entry.members.iter().find(|m| m.did() == did)?;
+    let group_key = crypto::unwrap_key(&member.wrapped_key, private_key).ok()?;
     let metadata: KeyringMetadata =
         crypto::decrypt_metadata(&group_key, &entry.encrypted_metadata).ok()?;
+    Some(metadata.name)
+}
+
+/// Decrypt a keyring name from a raw Keyring record using an already-unwrapped group key.
+pub fn decrypt_keyring_name_from_record(
+    keyring: &crate::records::Keyring,
+    group_key: &crypto::ContentKey,
+) -> Option<String> {
+    let metadata: KeyringMetadata =
+        crypto::decrypt_metadata(group_key, &keyring.encrypted_metadata).ok()?;
     Some(metadata.name)
 }

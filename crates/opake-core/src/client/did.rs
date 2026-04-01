@@ -4,11 +4,11 @@
 // Used for resolving handles, fetching DID documents, and reading public
 // records from other users' PDSes.
 
-use log::debug;
+use log::trace;
 use serde::Deserialize;
 
 use super::transport::*;
-use super::xrpc::{check_response, RecordEntry};
+use super::xrpc::{check_response, RecordEntry, RecordPage};
 use crate::error::Error;
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ pub async fn resolve_handle_wellknown(
     transport: &impl Transport,
     handle: &str,
 ) -> Result<String, Error> {
-    debug!("resolving handle {} via .well-known/atproto-did", handle);
+    trace!("resolving handle {} via .well-known/atproto-did", handle);
 
     let response = transport
         .send(HttpRequest {
@@ -74,7 +74,7 @@ pub async fn resolve_handle(
     pds_url: &str,
     handle: &str,
 ) -> Result<String, Error> {
-    debug!("resolving handle {} via {}", handle, pds_url);
+    trace!("resolving handle {} via {}", handle, pds_url);
 
     let response = transport
         .send(HttpRequest {
@@ -107,9 +107,12 @@ pub async fn get_record_public(
     collection: &str,
     rkey: &str,
 ) -> Result<RecordEntry, Error> {
-    debug!(
+    trace!(
         "fetching public record {}/{}/{} from {}",
-        did, collection, rkey, pds_url,
+        did,
+        collection,
+        rkey,
+        pds_url,
     );
 
     let response = transport
@@ -128,6 +131,79 @@ pub async fn get_record_public(
     Ok(serde_json::from_slice(&response.body)?)
 }
 
+/// Paginate through a collection on any PDS. Unauthenticated.
+///
+/// Like `list_collection` but uses a bare transport instead of an XrpcClient,
+/// and version-checks via `opakeVersion` peek (same as `list_collection_raw`).
+pub async fn list_collection_public(
+    transport: &impl Transport,
+    pds_url: &str,
+    did: &str,
+    collection: &str,
+) -> Result<Vec<RecordEntry>, Error> {
+    use crate::records;
+
+    trace!(
+        "listing public records {}/{} from {}",
+        did,
+        collection,
+        pds_url,
+    );
+
+    let mut entries = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let mut url = format!(
+            "{}/xrpc/com.atproto.repo.listRecords?repo={}&collection={}&limit=100",
+            pds_url, did, collection,
+        );
+        if let Some(ref c) = cursor {
+            url.push_str(&format!("&cursor={c}"));
+        }
+
+        let response = transport
+            .send(HttpRequest {
+                method: HttpMethod::Get,
+                url,
+                headers: vec![],
+                body: None,
+            })
+            .await?;
+
+        check_response(&response)?;
+        let page: RecordPage = serde_json::from_slice(&response.body)?;
+
+        for record in page.records {
+            let version = match record.value.get("opakeVersion").and_then(|v| v.as_u64()) {
+                Some(v) => v as u32,
+                None => {
+                    trace!("skipping record {} without opakeVersion", record.uri);
+                    continue;
+                }
+            };
+
+            if records::check_version(version).is_err() {
+                trace!(
+                    "skipping record {} with unsupported version {}",
+                    record.uri,
+                    version
+                );
+                continue;
+            }
+
+            entries.push(record);
+        }
+
+        match page.cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+
+    Ok(entries)
+}
+
 /// Fetch a blob from any PDS by DID + CID. Unauthenticated.
 pub async fn get_blob_public(
     transport: &impl Transport,
@@ -135,9 +211,11 @@ pub async fn get_blob_public(
     did: &str,
     cid: &str,
 ) -> Result<Vec<u8>, Error> {
-    debug!(
+    trace!(
         "fetching public blob did={} cid={} from {}",
-        did, cid, pds_url
+        did,
+        cid,
+        pds_url
     );
 
     let response = transport
@@ -171,7 +249,7 @@ pub async fn resolve_did_document(
 ) -> Result<DidDocument, Error> {
     let url = did_document_url(did)?;
 
-    debug!("fetching DID document from {}", url);
+    trace!("fetching DID document from {}", url);
 
     let response = transport
         .send(HttpRequest {

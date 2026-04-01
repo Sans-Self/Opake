@@ -15,6 +15,19 @@ pub fn unix_now() -> i64 {
     (js_sys::Date::now() / 1000.0) as i64
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn unix_now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_millis() as u64
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn unix_now_millis() -> u64 {
+    js_sys::Date::now() as u64
+}
+
 /// Parse an RFC 3339 / ISO 8601 datetime string to a Unix timestamp (seconds).
 ///
 /// Handles the common atproto formats:

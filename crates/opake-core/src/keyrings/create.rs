@@ -1,9 +1,9 @@
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore, X25519PublicKey};
 use crate::error::Error;
-use crate::records::Keyring;
+use crate::records::{Keyring, KeyringMember, Role};
 
 use super::KEYRING_COLLECTION;
 
@@ -25,23 +25,37 @@ pub async fn create_keyring(
     params: &CreateKeyringParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(String, ContentKey), Error> {
-    debug!("generating group key for keyring {:?}", params.name);
-    let members = [(params.owner_did, params.owner_public_key)];
+    trace!("generating group key for keyring {:?}", params.name);
+    let members = [crypto::DidMember {
+        did: params.owner_did,
+        public_key: params.owner_public_key,
+    }];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, rng)?;
+
+    let keyring_members: Vec<KeyringMember> = wrapped_keys
+        .into_iter()
+        .map(|wk| KeyringMember {
+            wrapped_key: wk,
+            role: Role::Manager,
+        })
+        .collect();
 
     let metadata = KeyringMetadata {
         name: params.name.to_string(),
         description: params.description.map(String::from),
+        icon: None,
+        enforce_revocation: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, rng)?;
 
     let keyring = Keyring::new(
-        wrapped_keys,
+        params.owner_did.to_string(),
+        keyring_members,
         encrypted_metadata,
         params.created_at.to_string(),
     );
 
-    debug!("creating keyring record");
+    trace!("creating keyring record");
     let record_ref = client.create_record(KEYRING_COLLECTION, &keyring).await?;
 
     Ok((record_ref.uri, group_key))
@@ -51,7 +65,7 @@ pub async fn create_keyring(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
+    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey};
     use crate::records::Keyring;
     use crate::test_utils::MockTransport;
 
@@ -67,7 +81,7 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn test_pubkey() -> (X25519PublicKey, [u8; 32]) {
+    fn test_pubkey() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
         let public = X25519DalekPublicKey::from(&secret);
         (public.to_bytes(), secret.to_bytes())
@@ -119,10 +133,11 @@ mod tests {
                 assert_eq!(record.algo, "aes-256-gcm");
                 assert_eq!(record.rotation, 0);
                 assert_eq!(record.members.len(), 1);
-                assert_eq!(record.members[0].did, TEST_DID);
+                assert_eq!(record.members[0].wrapped_key.did, TEST_DID);
 
                 // Verify the wrapped group key is unwrappable
-                let unwrapped = crypto::unwrap_key(&record.members[0], &privkey).unwrap();
+                let unwrapped =
+                    crypto::unwrap_key(&record.members[0].wrapped_key, &privkey).unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
             }
             _ => panic!("expected JSON body"),

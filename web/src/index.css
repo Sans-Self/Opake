@@ -251,6 +251,15 @@
 
 /* ─── Utilities ──────────────────────────────────────────────────────────── */
 
+/* Two-click destructive action: ghost on idle, filled error on confirm. */
+@utility btn-confirm-danger {
+  @apply btn-ghost;
+
+  &[data-confirming="true"] {
+    @apply btn-error;
+  }
+}
+
 @utility bg-encrypted-pattern {
   background-image: repeating-linear-gradient(
     0deg,
@@ -267,6 +276,16 @@
   body {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* Soften DaisyUI form element focus rings */
+  .input,
+  .textarea,
+  .select {
+    &:focus,
+    &:focus-within {
+      @apply border-primary/40! ring-primary/15 shadow-none ring-1 outline-none!;
+    }
   }
 
   /* Scoped prose — for MDX content blocks */

@@ -1,14 +1,10 @@
 use anyhow::Result;
-use chrono::Utc;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::directories::{self, DirectoryTree, EntryKind, ResolvedPath};
-use opake_core::{atproto, documents};
+use opake_core::directories::EntryKind;
 
 use crate::commands::Execute;
-use crate::document_resolve;
-use crate::identity;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 
 #[derive(Args)]
 /// Delete a document or directory
@@ -25,59 +21,14 @@ pub struct RmCommand {
     yes: bool,
 }
 
-/// Check if a reference is a document AT-URI that can skip tree loading.
-///
-/// Document AT-URIs don't need the tree — no parent cleanup on fast-path
-/// deletion. Everything else (paths, bare names, directory URIs) goes
-/// through the tree with lazy document name resolution.
-fn try_fast_resolve(reference: &str) -> Option<ResolvedPath> {
-    if !reference.starts_with("at://") {
-        return None;
-    }
-
-    let at_uri = atproto::parse_at_uri(reference).ok()?;
-    if at_uri.collection == directories::DIRECTORY_COLLECTION {
-        return None;
-    }
-
-    Some(ResolvedPath {
-        uri: reference.to_owned(),
-        kind: EntryKind::Document,
-        name: at_uri.rkey.clone(),
-        parent_uri: None,
-    })
-}
-
 impl Execute for RmCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let now = Utc::now().to_rfc3339();
+        let mut opake = ctx.opake().await?;
+        let context = opake.cabinet_context()?;
+        let mut mgr = opake.file_manager(&context);
 
-        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
-        let private_key = id.private_key_bytes()?;
-
-        // Fast path: document AT-URI — no tree needed, no parent cleanup.
-        if let Some(resolved) = try_fast_resolve(&self.reference) {
-            if !self.yes && !crate::prompt::confirm(&format!("delete {}?", resolved.name))? {
-                println!("aborted");
-                return Ok(session::refreshed_session(&client));
-            }
-
-            documents::delete_document(&mut client, &resolved.uri).await?;
-            println!("deleted {}", resolved.uri);
-            return Ok(session::refreshed_session(&client));
-        }
-
-        // Full tree path: paths, directories, recursive deletion.
-        let mut tree = DirectoryTree::load(&mut client).await?;
-        tree.decrypt_names(&ctx.did, &private_key);
-        let mut resolver = document_resolve::CliDocumentNameResolver::new(
-            &mut client,
-            &ctx.did,
-            &private_key,
-            &ctx.storage,
-        );
-        let resolved = tree.resolve(&mut resolver, &self.reference).await?;
+        let tree = mgr.load_tree().await?;
+        let resolved = mgr.resolve_entry(&tree, &self.reference).await?;
 
         if !self.yes {
             let prompt = match resolved.kind {
@@ -99,12 +50,13 @@ impl Execute for RmCommand {
 
             if !crate::prompt::confirm(&prompt)? {
                 println!("aborted");
-                return Ok(session::refreshed_session(&client));
+                return Ok(None);
             }
         }
 
-        let result =
-            directories::remove(&mut client, &tree, &resolved, self.recursive, &now).await?;
+        let result = mgr
+            .delete_recursive(&tree, &resolved, self.recursive)
+            .await?;
 
         match resolved.kind {
             EntryKind::Document => println!("deleted {}", resolved.uri),
@@ -120,6 +72,6 @@ impl Execute for RmCommand {
             }
         }
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }

@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{
@@ -52,12 +52,12 @@ pub async fn download_from_keyring_member(
 
     // Resolve the owner's PDS from their DID
     let owner_did = &doc_at.authority;
-    debug!("resolving PDS for owner {}", owner_did);
+    trace!("resolving PDS for owner {}", owner_did);
     let did_doc = resolve_did_document(transport, owner_did).await?;
     let owner_pds = pds_from_did_document(&did_doc)?;
 
     // Fetch the document record
-    debug!("fetching document from {}", owner_pds);
+    trace!("fetching document from {}", owner_pds);
     let doc_entry = get_record_public(
         transport,
         &owner_pds,
@@ -84,7 +84,7 @@ pub async fn download_from_keyring_member(
 
     // Parse keyring URI and fetch the keyring record
     let kr_at = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-    debug!("fetching keyring {} from {}", kr_at.rkey, owner_pds);
+    trace!("fetching keyring {} from {}", kr_at.rkey, owner_pds);
     let kr_entry = get_record_public(
         transport,
         &owner_pds,
@@ -102,13 +102,13 @@ pub async fn download_from_keyring_member(
     // older rotation.
     let doc_rotation = kr_enc.keyring_ref.rotation;
     let member_wrapped = if doc_rotation == keyring.rotation {
-        keyring.members.iter().find(|m| m.did == member_did)
+        keyring.members.iter().find(|m| m.did() == member_did)
     } else {
         keyring
             .key_history
             .iter()
             .find(|h| h.rotation == doc_rotation)
-            .and_then(|h| h.members.iter().find(|m| m.did == member_did))
+            .and_then(|h| h.members.iter().find(|m| m.did() == member_did))
     }
     .ok_or_else(|| {
         Error::InvalidRecord(format!(
@@ -118,8 +118,8 @@ pub async fn download_from_keyring_member(
     })?;
 
     // Asymmetric unwrap: member's private key → group key
-    debug!("unwrapping group key for {}", member_did);
-    let group_key = crypto::unwrap_key(member_wrapped, private_key)?;
+    trace!("unwrapping group key for {}", member_did);
+    let group_key = crypto::unwrap_key(&member_wrapped.wrapped_key, private_key)?;
 
     // Symmetric unwrap: group key → content key
     let wrapped_ck_bytes = kr_enc
@@ -130,9 +130,10 @@ pub async fn download_from_keyring_member(
     let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, &group_key)?;
 
     // Fetch and decrypt the blob
-    debug!(
+    trace!(
         "fetching blob did={} cid={}",
-        owner_did, doc.blob.reference.cid
+        owner_did,
+        doc.blob.reference.cid
     );
     let ciphertext =
         get_blob_public(transport, &owner_pds, owner_did, &doc.blob.reference.cid).await?;

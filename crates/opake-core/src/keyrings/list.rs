@@ -1,6 +1,6 @@
 use crate::client::{list_collection, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{EncryptedMetadata, Keyring};
+use crate::records::{EncryptedMetadata, Keyring, KeyringMember};
 
 use super::KEYRING_COLLECTION;
 
@@ -11,7 +11,7 @@ pub struct KeyringEntry {
     pub member_count: usize,
     pub rotation: u64,
     pub encrypted_metadata: EncryptedMetadata,
-    pub members: Vec<crate::records::WrappedKey>,
+    pub members: Vec<KeyringMember>,
     pub created_at: String,
 }
 
@@ -36,7 +36,7 @@ pub async fn list_keyrings(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-    use crate::records::{self, AtBytes, Keyring, WrappedKey};
+    use crate::records::{self, AtBytes, Keyring, KeyringMember, Role, WrappedKey};
     use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
     const TEST_DID: &str = "did:plc:owner";
@@ -52,19 +52,23 @@ mod tests {
     }
 
     fn dummy_keyring(member_count: usize) -> Keyring {
-        let members: Vec<WrappedKey> = (0..member_count)
-            .map(|i| WrappedKey {
-                did: format!("did:plc:member{i}"),
-                ciphertext: AtBytes {
-                    encoded: "AAAA".into(),
+        let members: Vec<KeyringMember> = (0..member_count)
+            .map(|i| KeyringMember {
+                wrapped_key: WrappedKey {
+                    did: format!("did:plc:member{i}"),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-hkdf-a256kw".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                role: Role::Manager,
             })
             .collect();
 
         Keyring {
             opake_version: records::SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
+            owner: "did:plc:owner".into(),
             members,
             rotation: 0,
             key_history: Vec::new(),

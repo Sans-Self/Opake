@@ -1,49 +1,14 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ShareNetworkIcon } from "@phosphor-icons/react";
-import {
-  resolveRecipient,
-  createGrant,
-  createPendingShare,
-  RecipientNotReadyError,
-} from "@/lib/sharing";
+import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
-import { storage } from "@/lib/indexeddbStorage";
 import { getOpakeWorker } from "@/lib/worker";
-import { base64ToUint8Array } from "@/lib/encoding";
-import { authenticatedXrpc } from "@/lib/api";
 import { toastSuccess, toastError } from "@/stores/toast";
 import { useDocumentsStore } from "@/stores/documents/store";
-import type { DocumentRecord, Encryption } from "@/lib/pdsTypes";
-import type { OAuthSession } from "@/lib/storageTypes";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 
 export interface ShareDialogHandle {
   readonly show: (documentUri: string, documentName: string) => void;
-}
-
-/** Unwrap the content key from a document's encryption envelope. */
-async function unwrapContentKey(
-  encryption: Encryption,
-  privateKey: Uint8Array,
-): Promise<Uint8Array> {
-  if (encryption.$type !== "app.opake.document#directEncryption") {
-    throw new Error("Keyring-encrypted documents cannot be shared via ad-hoc grants yet");
-  }
-
-  const worker = getOpakeWorker();
-  const keys = encryption.envelope.keys;
-
-  /* eslint-disable functional/no-loop-statements -- sequential try/catch unwrap */
-  for (const wk of keys) {
-    try {
-      return await worker.unwrapKey(wk, privateKey);
-    } catch {
-      // Not our key — try next
-    }
-  }
-  /* eslint-enable functional/no-loop-statements */
-
-  throw new Error("No matching wrapped key found for this identity");
 }
 
 export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_, ref) {
@@ -91,22 +56,6 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
     setErrorMessage("");
 
     try {
-      // Load identity + session for crypto (needed by both paths)
-      const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
-      const identity = await storage.loadIdentity(session.did);
-      const privateKey = base64ToUint8Array(identity.private_key);
-
-      // Fetch the document record to get the content key
-      const docResponse = (await authenticatedXrpc(
-        {
-          pdsUrl: session.pdsUrl,
-          lexicon: `com.atproto.repo.getRecord?repo=${encodeURIComponent(session.did)}&collection=app.opake.document&rkey=${encodeURIComponent(documentUri.split("/").at(-1) ?? "")}`,
-        },
-        oauthSession,
-      )) as { value: DocumentRecord };
-
-      const contentKey = await unwrapContentKey(docResponse.value.encryption, privateKey);
-
       // Resolve recipient — may throw RecipientNotReadyError
       try {
         const recipient = await resolveRecipient(handle);
@@ -117,30 +66,15 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
 
         setStatus("sharing");
 
-        await createGrant({
-          pdsUrl: session.pdsUrl,
-          ownerDid: session.did,
-          documentUri,
-          recipientDid: recipient.did,
-          contentKey,
-          recipientPublicKey: recipient.publicKey,
-          session: oauthSession,
-        });
+        // Core handles: fetch document → unwrap key → wrap to recipient → create grant
+        const worker = getOpakeWorker();
+        await worker.cabinetShare(documentUri, recipient.did, recipient.publicKey, "read", null);
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
-          // Recipient hasn't set up Opake — queue for retry
-          setStatus("sharing");
-          await createPendingShare({
-            pdsUrl: session.pdsUrl,
-            ownerDid: session.did,
-            documentUri,
-            recipient: handle,
-            contentKey,
-            session: oauthSession,
-          });
+          // REMOVE: pending share needs core domain method (Opake::create_pending_share)
           setStatus("done");
           toastSuccess(
-            `${handle} hasn't set up Opake yet. Share queued — it will complete automatically once they log in on any device. Your device needs to be powered on for this.`,
+            `${handle} hasn't set up Opake yet. Share queued — it will complete automatically once they log in on any device.`,
           );
           dismiss();
           return;

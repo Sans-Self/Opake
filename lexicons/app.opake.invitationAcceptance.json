@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.invitationAcceptance",
+  "description": "Records that a user has accepted an invitation. Written to the acceptor's own PDS. In v1, the workspace owner's UI discovers this and manually completes the add-member flow. In v2, the daemon auto-processes acceptances.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["opakeVersion", "invitation", "createdAt"],
+        "properties": {
+          "opakeVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Schema version for forward compatibility."
+          },
+          "invitation": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT URI of the invitation record being accepted."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this acceptance was created."
+          }
+        }
+      }
+    }
+  }
+}

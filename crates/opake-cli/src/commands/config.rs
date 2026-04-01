@@ -1,11 +1,10 @@
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
-use opake_core::account_config;
 use opake_core::client::Session;
 use opake_core::records::AccountConfigRecord;
 
 use crate::commands::Execute;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 
 /// View or modify account config synced to your PDS
 ///
@@ -48,16 +47,17 @@ fn parse_bool(value: &str) -> Result<bool> {
 
 impl Execute for ConfigCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
+        let mut opake = ctx.opake().await?;
 
         match self.action {
             None => {
-                let config = account_config::fetch_account_config(&mut client, &ctx.did).await?;
+                let config = opake.get_account_config().await?;
                 print_config(config.as_ref());
             }
             Some(ConfigAction::Set(args)) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                let mut config = account_config::fetch_account_config(&mut client, &ctx.did)
+                let now = opake.now();
+                let mut config = opake
+                    .get_account_config()
                     .await?
                     .unwrap_or_else(|| AccountConfigRecord::new(&now));
 
@@ -77,13 +77,13 @@ impl Execute for ConfigCommand {
                 }
 
                 config.modified_at = now;
-                account_config::publish_account_config(&mut client, &config).await?;
+                opake.set_account_config(&config).await?;
 
                 print_config(Some(&config));
             }
         }
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 

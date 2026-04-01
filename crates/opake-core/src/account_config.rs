@@ -4,7 +4,7 @@
 // cross-device user preferences. Falls back to defaults when the record
 // doesn't exist yet.
 
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
@@ -18,14 +18,14 @@ pub async fn fetch_account_config(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
 ) -> Result<Option<AccountConfigRecord>, Error> {
-    debug!("fetching account config for {}", did);
+    trace!("fetching account config for {}", did);
     let entry = match client
         .get_record(did, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY)
         .await
     {
         Ok(entry) => entry,
         Err(Error::NotFound(_)) => {
-            debug!("no account config record on PDS");
+            trace!("no account config record on PDS");
             return Ok(None);
         }
         Err(e) => return Err(e),

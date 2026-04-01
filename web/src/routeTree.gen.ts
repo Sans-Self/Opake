@@ -19,6 +19,7 @@ import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
 import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-callback'
 import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
+import { Route as CabinetTasksRouteImport } from './routes/cabinet/tasks'
 import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
 import { Route as CabinetSettingsRouteImport } from './routes/cabinet/settings'
 import { Route as CabinetSearchRouteImport } from './routes/cabinet/search'
@@ -32,11 +33,16 @@ import { Route as CabinetDocsIndexRouteImport } from './routes/cabinet/docs/inde
 import { Route as PublicDocsIndexRouteImport } from './routes/_public/docs/index'
 import { Route as DevicesPairRequestRouteImport } from './routes/devices/pair.request'
 import { Route as DevicesPairAcceptRouteImport } from './routes/devices/pair.accept'
+import { Route as CabinetWorkspaceSettingsRkeyRouteImport } from './routes/cabinet/workspace-settings/$rkey'
 import { Route as CabinetFilesSplatRouteImport } from './routes/cabinet/files/$'
 import { Route as CabinetEditorNewRouteImport } from './routes/cabinet/editor/new'
 import { Route as CabinetEditorRkeyRouteImport } from './routes/cabinet/editor/$rkey'
 import { Route as CabinetDocsSlugRouteImport } from './routes/cabinet/docs/$slug'
 import { Route as PublicDocsSlugRouteImport } from './routes/_public/docs/$slug'
+import { Route as CabinetWorkspaceRkeyRouteRouteImport } from './routes/cabinet/workspace/$rkey/route'
+import { Route as CabinetWorkspaceRkeySplatRouteImport } from './routes/cabinet/workspace/$rkey/$'
+import { Route as CabinetWorkspaceEditorRkeyNewRouteImport } from './routes/cabinet/workspace-editor/$rkey/new'
+import { Route as CabinetWorkspaceEditorRkeyDocRkeyRouteImport } from './routes/cabinet/workspace-editor/$rkey/$docRkey'
 
 const PublicRoute = PublicRouteImport.update({
   id: '/_public',
@@ -85,6 +91,11 @@ const DevicesCliCallbackRoute = DevicesCliCallbackRouteImport.update({
 const CabinetTrashRoute = CabinetTrashRouteImport.update({
   id: '/trash',
   path: '/trash',
+  getParentRoute: () => CabinetRouteRoute,
+} as any)
+const CabinetTasksRoute = CabinetTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
   getParentRoute: () => CabinetRouteRoute,
 } as any)
 const CabinetSharedRoute = CabinetSharedRouteImport.update({
@@ -152,6 +163,12 @@ const DevicesPairAcceptRoute = DevicesPairAcceptRouteImport.update({
   path: '/pair/accept',
   getParentRoute: () => DevicesRouteRoute,
 } as any)
+const CabinetWorkspaceSettingsRkeyRoute =
+  CabinetWorkspaceSettingsRkeyRouteImport.update({
+    id: '/workspace-settings/$rkey',
+    path: '/workspace-settings/$rkey',
+    getParentRoute: () => CabinetRouteRoute,
+  } as any)
 const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -177,6 +194,30 @@ const PublicDocsSlugRoute = PublicDocsSlugRouteImport.update({
   path: '/docs/$slug',
   getParentRoute: () => PublicRoute,
 } as any)
+const CabinetWorkspaceRkeyRouteRoute =
+  CabinetWorkspaceRkeyRouteRouteImport.update({
+    id: '/workspace/$rkey',
+    path: '/workspace/$rkey',
+    getParentRoute: () => CabinetRouteRoute,
+  } as any)
+const CabinetWorkspaceRkeySplatRoute =
+  CabinetWorkspaceRkeySplatRouteImport.update({
+    id: '/$',
+    path: '/$',
+    getParentRoute: () => CabinetWorkspaceRkeyRouteRoute,
+  } as any)
+const CabinetWorkspaceEditorRkeyNewRoute =
+  CabinetWorkspaceEditorRkeyNewRouteImport.update({
+    id: '/workspace-editor/$rkey/new',
+    path: '/workspace-editor/$rkey/new',
+    getParentRoute: () => CabinetRouteRoute,
+  } as any)
+const CabinetWorkspaceEditorRkeyDocRkeyRoute =
+  CabinetWorkspaceEditorRkeyDocRkeyRouteImport.update({
+    id: '/workspace-editor/$rkey/$docRkey',
+    path: '/workspace-editor/$rkey/$docRkey',
+    getParentRoute: () => CabinetRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/cabinet': typeof CabinetRouteRouteWithChildren
@@ -190,22 +231,28 @@ export interface FileRoutesByFullPath {
   '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   '/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
   '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
+  '/cabinet/workspace-settings/$rkey': typeof CabinetWorkspaceSettingsRkeyRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
   '/docs/': typeof PublicDocsIndexRoute
   '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
+  '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
+  '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
+  '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
 }
 export interface FileRoutesByTo {
   '/faq': typeof PublicFaqRoute
@@ -214,6 +261,7 @@ export interface FileRoutesByTo {
   '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
@@ -221,16 +269,21 @@ export interface FileRoutesByTo {
   '/': typeof PublicIndexRoute
   '/cabinet': typeof CabinetIndexRoute
   '/devices': typeof DevicesIndexRoute
+  '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   '/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
   '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
+  '/cabinet/workspace-settings/$rkey': typeof CabinetWorkspaceSettingsRkeyRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
   '/docs': typeof PublicDocsIndexRoute
   '/cabinet/docs': typeof CabinetDocsIndexRoute
   '/cabinet/files': typeof CabinetFilesIndexRoute
+  '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
+  '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
+  '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -245,6 +298,7 @@ export interface FileRoutesById {
   '/cabinet/search': typeof CabinetSearchRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
+  '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
@@ -252,16 +306,21 @@ export interface FileRoutesById {
   '/_public/': typeof PublicIndexRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
+  '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   '/_public/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
   '/cabinet/editor/new': typeof CabinetEditorNewRoute
   '/cabinet/files/$': typeof CabinetFilesSplatRoute
+  '/cabinet/workspace-settings/$rkey': typeof CabinetWorkspaceSettingsRkeyRoute
   '/devices/pair/accept': typeof DevicesPairAcceptRoute
   '/devices/pair/request': typeof DevicesPairRequestRoute
   '/_public/docs/': typeof PublicDocsIndexRoute
   '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
+  '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
+  '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
+  '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -277,22 +336,28 @@ export interface FileRouteTypes {
     | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
+    | '/cabinet/tasks'
     | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
     | '/cabinet/'
     | '/devices/'
+    | '/cabinet/workspace/$rkey'
     | '/docs/$slug'
     | '/cabinet/docs/$slug'
     | '/cabinet/editor/$rkey'
     | '/cabinet/editor/new'
     | '/cabinet/files/$'
+    | '/cabinet/workspace-settings/$rkey'
     | '/devices/pair/accept'
     | '/devices/pair/request'
     | '/docs/'
     | '/cabinet/docs/'
     | '/cabinet/files/'
+    | '/cabinet/workspace-editor/$rkey/$docRkey'
+    | '/cabinet/workspace-editor/$rkey/new'
+    | '/cabinet/workspace/$rkey/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/faq'
@@ -301,6 +366,7 @@ export interface FileRouteTypes {
     | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
+    | '/cabinet/tasks'
     | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
@@ -308,16 +374,21 @@ export interface FileRouteTypes {
     | '/'
     | '/cabinet'
     | '/devices'
+    | '/cabinet/workspace/$rkey'
     | '/docs/$slug'
     | '/cabinet/docs/$slug'
     | '/cabinet/editor/$rkey'
     | '/cabinet/editor/new'
     | '/cabinet/files/$'
+    | '/cabinet/workspace-settings/$rkey'
     | '/devices/pair/accept'
     | '/devices/pair/request'
     | '/docs'
     | '/cabinet/docs'
     | '/cabinet/files'
+    | '/cabinet/workspace-editor/$rkey/$docRkey'
+    | '/cabinet/workspace-editor/$rkey/new'
+    | '/cabinet/workspace/$rkey/$'
   id:
     | '__root__'
     | '/cabinet'
@@ -331,6 +402,7 @@ export interface FileRouteTypes {
     | '/cabinet/search'
     | '/cabinet/settings'
     | '/cabinet/shared'
+    | '/cabinet/tasks'
     | '/cabinet/trash'
     | '/devices/cli-callback'
     | '/devices/login'
@@ -338,16 +410,21 @@ export interface FileRouteTypes {
     | '/_public/'
     | '/cabinet/'
     | '/devices/'
+    | '/cabinet/workspace/$rkey'
     | '/_public/docs/$slug'
     | '/cabinet/docs/$slug'
     | '/cabinet/editor/$rkey'
     | '/cabinet/editor/new'
     | '/cabinet/files/$'
+    | '/cabinet/workspace-settings/$rkey'
     | '/devices/pair/accept'
     | '/devices/pair/request'
     | '/_public/docs/'
     | '/cabinet/docs/'
     | '/cabinet/files/'
+    | '/cabinet/workspace-editor/$rkey/$docRkey'
+    | '/cabinet/workspace-editor/$rkey/new'
+    | '/cabinet/workspace/$rkey/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -426,6 +503,13 @@ declare module '@tanstack/react-router' {
       path: '/trash'
       fullPath: '/cabinet/trash'
       preLoaderRoute: typeof CabinetTrashRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/tasks': {
+      id: '/cabinet/tasks'
+      path: '/tasks'
+      fullPath: '/cabinet/tasks'
+      preLoaderRoute: typeof CabinetTasksRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
     '/cabinet/shared': {
@@ -519,6 +603,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevicesPairAcceptRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
+    '/cabinet/workspace-settings/$rkey': {
+      id: '/cabinet/workspace-settings/$rkey'
+      path: '/workspace-settings/$rkey'
+      fullPath: '/cabinet/workspace-settings/$rkey'
+      preLoaderRoute: typeof CabinetWorkspaceSettingsRkeyRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
     '/cabinet/files/$': {
       id: '/cabinet/files/$'
       path: '/$'
@@ -554,6 +645,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicDocsSlugRouteImport
       parentRoute: typeof PublicRoute
     }
+    '/cabinet/workspace/$rkey': {
+      id: '/cabinet/workspace/$rkey'
+      path: '/workspace/$rkey'
+      fullPath: '/cabinet/workspace/$rkey'
+      preLoaderRoute: typeof CabinetWorkspaceRkeyRouteRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/workspace/$rkey/$': {
+      id: '/cabinet/workspace/$rkey/$'
+      path: '/$'
+      fullPath: '/cabinet/workspace/$rkey/$'
+      preLoaderRoute: typeof CabinetWorkspaceRkeySplatRouteImport
+      parentRoute: typeof CabinetWorkspaceRkeyRouteRoute
+    }
+    '/cabinet/workspace-editor/$rkey/new': {
+      id: '/cabinet/workspace-editor/$rkey/new'
+      path: '/workspace-editor/$rkey/new'
+      fullPath: '/cabinet/workspace-editor/$rkey/new'
+      preLoaderRoute: typeof CabinetWorkspaceEditorRkeyNewRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
+    '/cabinet/workspace-editor/$rkey/$docRkey': {
+      id: '/cabinet/workspace-editor/$rkey/$docRkey'
+      path: '/workspace-editor/$rkey/$docRkey'
+      fullPath: '/cabinet/workspace-editor/$rkey/$docRkey'
+      preLoaderRoute: typeof CabinetWorkspaceEditorRkeyDocRkeyRouteImport
+      parentRoute: typeof CabinetRouteRoute
+    }
   }
 }
 
@@ -583,6 +702,20 @@ const CabinetFilesRouteRouteChildren: CabinetFilesRouteRouteChildren = {
 const CabinetFilesRouteRouteWithChildren =
   CabinetFilesRouteRoute._addFileChildren(CabinetFilesRouteRouteChildren)
 
+interface CabinetWorkspaceRkeyRouteRouteChildren {
+  CabinetWorkspaceRkeySplatRoute: typeof CabinetWorkspaceRkeySplatRoute
+}
+
+const CabinetWorkspaceRkeyRouteRouteChildren: CabinetWorkspaceRkeyRouteRouteChildren =
+  {
+    CabinetWorkspaceRkeySplatRoute: CabinetWorkspaceRkeySplatRoute,
+  }
+
+const CabinetWorkspaceRkeyRouteRouteWithChildren =
+  CabinetWorkspaceRkeyRouteRoute._addFileChildren(
+    CabinetWorkspaceRkeyRouteRouteChildren,
+  )
+
 interface CabinetRouteRouteChildren {
   CabinetDocsRouteRoute: typeof CabinetDocsRouteRouteWithChildren
   CabinetFilesRouteRoute: typeof CabinetFilesRouteRouteWithChildren
@@ -590,10 +723,15 @@ interface CabinetRouteRouteChildren {
   CabinetSearchRoute: typeof CabinetSearchRoute
   CabinetSettingsRoute: typeof CabinetSettingsRoute
   CabinetSharedRoute: typeof CabinetSharedRoute
+  CabinetTasksRoute: typeof CabinetTasksRoute
   CabinetTrashRoute: typeof CabinetTrashRoute
   CabinetIndexRoute: typeof CabinetIndexRoute
+  CabinetWorkspaceRkeyRouteRoute: typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   CabinetEditorRkeyRoute: typeof CabinetEditorRkeyRoute
   CabinetEditorNewRoute: typeof CabinetEditorNewRoute
+  CabinetWorkspaceSettingsRkeyRoute: typeof CabinetWorkspaceSettingsRkeyRoute
+  CabinetWorkspaceEditorRkeyDocRkeyRoute: typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
+  CabinetWorkspaceEditorRkeyNewRoute: typeof CabinetWorkspaceEditorRkeyNewRoute
 }
 
 const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
@@ -603,10 +741,16 @@ const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
   CabinetSearchRoute: CabinetSearchRoute,
   CabinetSettingsRoute: CabinetSettingsRoute,
   CabinetSharedRoute: CabinetSharedRoute,
+  CabinetTasksRoute: CabinetTasksRoute,
   CabinetTrashRoute: CabinetTrashRoute,
   CabinetIndexRoute: CabinetIndexRoute,
+  CabinetWorkspaceRkeyRouteRoute: CabinetWorkspaceRkeyRouteRouteWithChildren,
   CabinetEditorRkeyRoute: CabinetEditorRkeyRoute,
   CabinetEditorNewRoute: CabinetEditorNewRoute,
+  CabinetWorkspaceSettingsRkeyRoute: CabinetWorkspaceSettingsRkeyRoute,
+  CabinetWorkspaceEditorRkeyDocRkeyRoute:
+    CabinetWorkspaceEditorRkeyDocRkeyRoute,
+  CabinetWorkspaceEditorRkeyNewRoute: CabinetWorkspaceEditorRkeyNewRoute,
 }
 
 const CabinetRouteRouteWithChildren = CabinetRouteRoute._addFileChildren(

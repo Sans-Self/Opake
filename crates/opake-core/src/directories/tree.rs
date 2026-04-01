@@ -6,14 +6,15 @@
 
 use std::collections::HashMap;
 
-use log::debug;
+use log::trace;
 
 use crate::atproto;
-use crate::client::{list_collection, Transport, XrpcClient};
+use crate::client::TreeDirectory;
 use crate::crypto::{self, DirectoryMetadata, X25519PrivateKey};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
-use crate::records::{Directory, Document, EncryptedMetadata, Encryption};
+use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
+use crate::storage::CachedRecord;
 
 use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};
 
@@ -47,7 +48,7 @@ pub struct ResolvedPath {
 struct DirectoryInfo {
     /// Decrypted name. Empty until `decrypt_names()` is called.
     name: String,
-    encryption: Encryption,
+    key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     entries: Vec<String>,
 }
@@ -83,7 +84,7 @@ impl DirectoryTree {
                     uri,
                     DirectoryInfo {
                         name: String::new(),
-                        encryption: dir.encryption,
+                        key_wrapping: dir.key_wrapping,
                         encrypted_metadata: dir.encrypted_metadata,
                         entries: dir.entries,
                     },
@@ -100,7 +101,7 @@ impl DirectoryTree {
             })
             .cloned();
 
-        debug!(
+        trace!(
             "built tree: {} directories, root={}",
             directories.len(),
             root_uri.as_deref().unwrap_or("none"),
@@ -112,14 +113,29 @@ impl DirectoryTree {
         }
     }
 
-    /// Load the directory hierarchy from the PDS.
+    /// Override the root directory URI.
     ///
-    /// Makes one paginated API call (all directories). Documents are NOT
-    /// loaded — callers provide document names separately via `resolve()`.
-    /// The root is detected from the listing by its rkey ("self").
-    pub async fn load(client: &mut XrpcClient<impl Transport>) -> Result<Self, Error> {
+    /// Used for workspace trees where the root is not `directory/self` but
+    /// a deterministic `directory/ws-{keyring_rkey}`. Returns false if the
+    /// URI isn't in the tree (caller should handle the error).
+    pub fn set_root(&mut self, uri: &str) -> bool {
+        if self.directories.contains_key(uri) {
+            self.root_uri = Some(uri.to_owned());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Load the directory hierarchy from the PDS (test use only).
+    ///
+    /// Production code uses AppView snapshots via `from_cached_records()`.
+    #[cfg(test)]
+    pub(crate) async fn load(
+        client: &mut crate::client::XrpcClient<impl crate::client::Transport>,
+    ) -> Result<Self, Error> {
         let dir_entries: Vec<(String, Directory)> =
-            list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
+            crate::client::list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
                 (uri.to_owned(), dir)
             })
             .await?;
@@ -134,20 +150,34 @@ impl DirectoryTree {
     /// whose keys can't be unwrapped (wrong DID, keyring not available)
     /// get a fallback name of "?".
     pub fn decrypt_names(&mut self, did: &str, private_key: &X25519PrivateKey) {
+        self.decrypt_names_with_group_keys(did, private_key, &HashMap::new());
+    }
+
+    /// Decrypt all directory names in-place, with group key support.
+    ///
+    /// Like [`decrypt_names`], but also handles keyring-encrypted directories
+    /// using the provided group key map (keyring URI → group key).
+    pub fn decrypt_names_with_group_keys(
+        &mut self,
+        did: &str,
+        private_key: &X25519PrivateKey,
+        group_keys: &HashMap<String, crypto::ContentKey>,
+    ) {
         for info in self.directories.values_mut() {
-            let content_key = match &info.encryption {
-                Encryption::Direct(direct) => {
-                    let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
+            let content_key = match &info.key_wrapping {
+                KeyWrapping::Direct(direct) => {
+                    let wrapped = direct.keys.iter().find(|k| k.did == did);
                     match wrapped {
                         Some(w) => crypto::unwrap_key(w, private_key).ok(),
                         None => None,
                     }
                 }
-                Encryption::Keyring(_) => {
-                    // Keyring-encrypted directories require a group key,
-                    // which isn't available here. Future: accept optional
-                    // group key map (#191).
-                    None
+                KeyWrapping::Keyring(kr) => {
+                    let keyring_uri = &kr.keyring_ref.keyring;
+                    group_keys.get(keyring_uri).and_then(|gk| {
+                        let wrapped_bytes = kr.keyring_ref.wrapped_content_key.decode().ok()?;
+                        crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk).ok()
+                    })
                 }
             };
 
@@ -229,27 +259,6 @@ impl DirectoryTree {
         }
 
         self.resolve_bare_name(resolver, reference).await
-    }
-
-    /// Load the full directory hierarchy including document URIs.
-    ///
-    /// Makes two paginated API calls: one for all directories, one for all
-    /// documents. Returns a tree and a set of document URIs. Callers must
-    /// build the name map separately by decrypting metadata.
-    pub async fn load_full(
-        client: &mut XrpcClient<impl Transport>,
-    ) -> Result<(Self, Vec<String>), Error> {
-        let tree = Self::load(client).await?;
-
-        let doc_uris: Vec<String> =
-            list_collection(client, DOCUMENT_COLLECTION, |uri, _doc: Document| {
-                uri.to_owned()
-            })
-            .await?;
-
-        debug!("loaded {} document URIs for full tree", doc_uris.len());
-
-        Ok((tree, doc_uris))
     }
 
     /// Build a tree-formatted string of the entire hierarchy.
@@ -374,6 +383,11 @@ impl DirectoryTree {
         self.directories.contains_key(uri)
     }
 
+    /// Whether the given URI looks like a document URI (by collection segment).
+    pub fn is_document_uri(&self, uri: &str) -> bool {
+        entry_kind_from_uri(uri) == Some(EntryKind::Document)
+    }
+
     /// Iterate over all directory URIs in the tree.
     pub fn all_directory_uris(&self) -> impl Iterator<Item = &str> {
         self.directories.keys().map(String::as_str)
@@ -407,29 +421,64 @@ impl DirectoryTree {
 
     /// Collect all descendant URIs in post-order (children before parents)
     /// for correct deletion ordering.
-    pub fn collect_descendants(&self, uri: &str) -> Vec<(String, EntryKind)> {
-        let mut result = Vec::new();
-        self.collect_descendants_recursive(uri, &mut result);
-        result
+    /// Collect all document URIs reachable from the current root.
+    ///
+    /// Walks the directory subtree from root and returns only document URIs.
+    /// Useful for scoping document name resolution to just the visible tree.
+    pub fn document_uris_in_subtree(&self) -> Vec<String> {
+        let root = match &self.root_uri {
+            Some(uri) => uri.as_str(),
+            None => return Vec::new(),
+        };
+        self.collect_descendants(root)
+            .into_iter()
+            .filter(|(_, kind)| *kind == EntryKind::Document)
+            .map(|(uri, _)| uri)
+            .collect()
     }
 
-    fn collect_descendants_recursive(&self, uri: &str, result: &mut Vec<(String, EntryKind)>) {
-        if let Some(dir) = self.directories.get(uri) {
-            for entry_uri in &dir.entries {
+    /// Collect all descendant URIs in post-order (children before parents).
+    ///
+    /// Uses an explicit stack instead of recursion. Post-order ensures
+    /// directories appear after their contents — correct for deletion.
+    pub fn collect_descendants(&self, uri: &str) -> Vec<(String, EntryKind)> {
+        let mut result = Vec::new();
+        let mut stack: Vec<(String, bool)> = vec![(uri.to_owned(), false)];
+
+        while let Some((current, visited)) = stack.pop() {
+            let Some(dir) = self.directories.get(&current) else {
+                continue;
+            };
+
+            if visited {
+                // Post-order: emit the directory after its children
+                if current != uri {
+                    result.push((current, EntryKind::Directory));
+                }
+                continue;
+            }
+
+            // Push self back as visited, then push children
+            stack.push((current.clone(), true));
+
+            for entry_uri in dir.entries.iter().rev() {
                 match entry_kind_from_uri(entry_uri) {
                     Some(EntryKind::Document) => {
                         result.push((entry_uri.clone(), EntryKind::Document));
                     }
                     Some(EntryKind::Directory) => {
                         if self.directories.contains_key(entry_uri.as_str()) {
-                            self.collect_descendants_recursive(entry_uri, result);
+                            stack.push((entry_uri.clone(), false));
+                        } else {
+                            result.push((entry_uri.clone(), EntryKind::Directory));
                         }
-                        result.push((entry_uri.clone(), EntryKind::Directory));
                     }
                     None => {}
                 }
             }
         }
+
+        result
     }
 
     async fn resolve_path(
@@ -586,6 +635,83 @@ impl DirectoryTree {
         }
     }
 
+    /// Resolve a path to a directory. Fails if any segment is not a directory.
+    ///
+    /// Unlike `resolve()`, this never needs a `DocumentNameResolver` — directory
+    /// names are already decrypted in the tree. Use this when you know the target
+    /// must be a directory (e.g., `--dir` flags, parent resolution).
+    pub fn resolve_directory(&self, path: &str) -> Result<ResolvedPath, Error> {
+        // "/" or "///" → root
+        if path.chars().all(|c| c == '/') && !path.is_empty() {
+            let root_uri = self.root_uri.as_ref().ok_or_else(|| {
+                Error::NotFound("no root directory — run `opake mkdir` first".into())
+            })?;
+            return Ok(ResolvedPath {
+                uri: root_uri.clone(),
+                kind: EntryKind::Directory,
+                name: ROOT_DIRECTORY_NAME.into(),
+                parent_uri: None,
+            });
+        }
+
+        // AT-URI passthrough
+        if path.starts_with("at://") {
+            let info = self
+                .directories
+                .get(path)
+                .ok_or_else(|| Error::NotFound(format!("directory not found: {path}")))?;
+            return Ok(ResolvedPath {
+                uri: path.to_owned(),
+                kind: EntryKind::Directory,
+                name: info.name.clone(),
+                parent_uri: self.find_parent(path),
+            });
+        }
+
+        let root_uri = self
+            .root_uri
+            .as_ref()
+            .ok_or_else(|| Error::NotFound("no root directory — run `opake mkdir` first".into()))?;
+
+        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.is_empty() {
+            return Err(Error::InvalidRecord("empty path".into()));
+        }
+
+        let mut current_uri = root_uri.clone();
+        let mut parent_uri: Option<String> = None;
+
+        for &segment in &segments {
+            parent_uri = Some(current_uri.clone());
+            current_uri = self.find_child_directory(&current_uri, segment)?;
+        }
+
+        let name = self
+            .directories
+            .get(&current_uri)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| "?".into());
+
+        Ok(ResolvedPath {
+            uri: current_uri,
+            kind: EntryKind::Directory,
+            name,
+            parent_uri,
+        })
+    }
+
+    /// Check whether a directory has a child directory with the given name.
+    pub fn has_child_directory(&self, parent_uri: &str, name: &str) -> bool {
+        let Some(parent) = self.directories.get(parent_uri) else {
+            return false;
+        };
+        parent.entries.iter().any(|entry_uri| {
+            self.directories
+                .get(entry_uri.as_str())
+                .is_some_and(|info| info.name == name)
+        })
+    }
+
     /// Scan all directories to find which one contains the given URI as an entry.
     pub fn find_parent(&self, child_uri: &str) -> Option<String> {
         for (dir_uri, info) in &self.directories {
@@ -594,6 +720,65 @@ impl DirectoryTree {
             }
         }
         None
+    }
+
+    // -----------------------------------------------------------------------
+    // Cache integration
+    // -----------------------------------------------------------------------
+
+    /// Build a tree from cached records stored via `Storage::cache_put_collection`.
+    ///
+    /// Each `CachedRecord.value` is deserialized as a `Directory`. Records
+    /// that fail deserialization are silently skipped (stale cache entries).
+    pub fn from_cached_records(records: &[CachedRecord]) -> Self {
+        let pairs: Vec<(String, Directory)> = records
+            .iter()
+            .filter(|r| r.uri != "__sync__")
+            .filter_map(|r| {
+                let dir: Directory = serde_json::from_value(r.value.clone()).ok()?;
+                Some((r.uri.clone(), dir))
+            })
+            .collect();
+        trace!(
+            "building tree from {} cached records ({} valid)",
+            records.len(),
+            pairs.len(),
+        );
+        Self::from_records(pairs)
+    }
+
+    /// Apply a delta from the AppView to cached records, returning a new set.
+    ///
+    /// Deleted directories are filtered out. New/updated directories replace
+    /// existing records by URI. Pure function — no mutation.
+    pub fn with_delta(
+        records: &[CachedRecord],
+        directories: &[TreeDirectory],
+    ) -> Vec<CachedRecord> {
+        use std::collections::HashSet;
+
+        let deleted: HashSet<&str> = directories
+            .iter()
+            .filter(|d| d.deleted_at.is_some())
+            .map(|d| d.directory_uri.as_str())
+            .collect();
+
+        let upserted: HashMap<&str, CachedRecord> = directories
+            .iter()
+            .filter(|d| d.deleted_at.is_none())
+            .map(|d| (d.directory_uri.as_str(), d.to_cached_record()))
+            .collect();
+
+        let updated_uris: HashSet<&str> = upserted.keys().copied().collect();
+
+        // Keep existing records that aren't deleted or replaced, then append upserts
+        records
+            .iter()
+            .filter(|r| !deleted.contains(r.uri.as_str()))
+            .filter(|r| !updated_uris.contains(r.uri.as_str()))
+            .cloned()
+            .chain(upserted.into_values())
+            .collect()
     }
 }
 

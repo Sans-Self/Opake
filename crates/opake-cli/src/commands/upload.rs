@@ -2,19 +2,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use clap::Args;
-use opake_core::atproto;
-use opake_core::crypto::OsRng;
-use opake_core::directories::{self, DirectoryTree, EntryKind};
-use opake_core::documents::{self, KeyringUploadParams, UploadParams};
-use opake_core::keyrings;
-
 use opake_core::client::Session;
 
-use crate::commands::{encrypt_directory, Execute};
-use crate::session::{self, CommandContext};
-use crate::{document_resolve, identity, keyring_store};
+use crate::commands::Execute;
+use crate::session::CommandContext;
 
 /// Upload and encrypt a file
 ///
@@ -25,15 +17,15 @@ use crate::{document_resolve, identity, keyring_store};
 Examples:
   opake upload photo.jpg
   opake upload doc.pdf --dir projects/
-  opake upload data.csv --keyring team
+  opake upload data.csv --workspace team
   opake upload notes.md --description \"meeting notes\"")]
 pub struct UploadCommand {
     /// Path to the file to encrypt and upload
     path: PathBuf,
 
-    /// Encrypt under a keyring instead of direct keys
+    /// Encrypt under a workspace (shared keyring)
     #[arg(long)]
-    keyring: Option<String>,
+    workspace: Option<String>,
 
     /// Optional description for the document
     #[arg(long)]
@@ -46,9 +38,6 @@ pub struct UploadCommand {
 
 impl Execute for UploadCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let id = identity::load_identity(&ctx.storage, &ctx.did)?;
-
         let plaintext =
             fs::read(&self.path).context(format!("failed to read {}", self.path.display()))?;
 
@@ -62,79 +51,28 @@ impl Execute for UploadCommand {
             .first_raw()
             .unwrap_or("application/octet-stream");
 
-        let now = Utc::now().to_rfc3339();
+        let mut opake = ctx.opake().await?;
+        let context = opake.file_context(self.workspace.as_deref()).await?;
+        let mut mgr = opake.file_manager(&context);
 
-        let uri = if let Some(keyring_name) = &self.keyring {
-            let private_key = id.private_key_bytes()?;
-            let entry =
-                keyrings::resolve_keyring_uri(&mut client, keyring_name, &id.did, &private_key)
-                    .await?;
-            let at_uri = atproto::parse_at_uri(&entry.uri)?;
-            let group_key = keyring_store::load_group_key(
-                &ctx.storage,
-                &ctx.did,
-                &at_uri.rkey,
-                entry.rotation,
-            )?;
-
-            let params = KeyringUploadParams {
-                plaintext: &plaintext,
-                filename: &filename,
+        let result = mgr
+            .upload_at(
+                &plaintext,
+                &filename,
                 mime_type,
-                keyring_uri: &entry.uri,
-                group_key: &group_key,
-                rotation: entry.rotation,
-                description: self.description.as_deref(),
-                created_at: &now,
-            };
+                self.description.as_deref(),
+                self.dir.as_deref(),
+            )
+            .await?;
 
-            documents::encrypt_and_upload_keyring(&mut client, &params, &mut OsRng).await?
+        let dir_label = self.dir.as_deref().unwrap_or("/");
+        if result.outcome.is_proposed() {
+            println!("{} → {} (proposed in {})", filename, result.uri, dir_label);
         } else {
-            let owner_pubkey = id.public_key_bytes()?;
+            println!("{} → {} (in {})", filename, result.uri, dir_label);
+        }
 
-            let params = UploadParams {
-                plaintext: &plaintext,
-                filename: &filename,
-                mime_type,
-                owner_did: &id.did,
-                owner_pubkey: &owner_pubkey,
-                description: self.description.as_deref(),
-                created_at: &now,
-            };
-
-            documents::encrypt_and_upload(&mut client, &params, &mut OsRng).await?
-        };
-
-        let (directory_uri, dir_label) = if let Some(dir_path) = &self.dir {
-            let private_key = id.private_key_bytes()?;
-            let mut tree = DirectoryTree::load(&mut client).await?;
-            tree.decrypt_names(&ctx.did, &private_key);
-            let mut resolver = document_resolve::CliDocumentNameResolver::new(
-                &mut client,
-                &ctx.did,
-                &private_key,
-                &ctx.storage,
-            );
-            let resolved = tree.resolve(&mut resolver, dir_path).await?;
-
-            if resolved.kind != EntryKind::Directory {
-                anyhow::bail!("{dir_path:?} is not a directory");
-            }
-
-            (resolved.uri, dir_path.clone())
-        } else {
-            let pubkey = id.public_key_bytes()?;
-            let (root_enc, root_meta) = encrypt_directory("/", &ctx.did, &pubkey, &mut OsRng)?;
-            let root_uri =
-                directories::get_or_create_root(&mut client, &ctx.did, root_enc, root_meta, &now)
-                    .await?;
-            (root_uri, "/".into())
-        };
-
-        directories::add_entry(&mut client, &directory_uri, &uri, &now).await?;
-        println!("{} → {} (in {})", filename, uri, dir_label);
-
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 
@@ -149,7 +87,7 @@ mod tests {
         let (_dir, storage) = test_storage();
         let cmd = UploadCommand {
             path: PathBuf::from("/tmp/opake-test-nonexistent-file-abc123"),
-            keyring: None,
+            workspace: None,
             description: None,
             dir: None,
         };
@@ -163,7 +101,7 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("failed to read")
-                || err.contains("run `opake login` first")
+                || err.contains("log in first")
                 || err.contains("config.toml"),
             "unexpected error: {err}"
         );

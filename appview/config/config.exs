@@ -19,6 +19,7 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, Jason
 
 config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: :timer.minutes(2), cleanup_interval_ms: :timer.minutes(1)]}
+  backend:
+    {Hammer.Backend.ETS, [expiry_ms: :timer.minutes(2), cleanup_interval_ms: :timer.minutes(1)]}
 
 import_config "#{config_env()}.exs"

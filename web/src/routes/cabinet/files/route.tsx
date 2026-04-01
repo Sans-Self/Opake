@@ -40,7 +40,7 @@ function computeAvailableTags(
   items: Readonly<Record<string, FileItem>>,
 ): readonly string[] {
   if (!treeSnapshot) return [];
-  const targetUri = contextDirectoryUri ?? treeSnapshot.rootUri;
+  const targetUri = contextDirectoryUri ?? treeSnapshot.root_uri;
   if (!targetUri) return [];
   const dirEntry = treeSnapshot.directories[targetUri];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
@@ -60,7 +60,7 @@ function computeFooterText(
   contextRkey: string | undefined,
   treeSnapshot: DirectoryTreeSnapshot | null,
 ): string {
-  const targetUri = contextDirectoryUri ?? treeSnapshot?.rootUri;
+  const targetUri = contextDirectoryUri ?? treeSnapshot?.root_uri;
   if (!targetUri || !treeSnapshot) return "Loading\u2026";
   const dirEntry = treeSnapshot.directories[targetUri];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
@@ -103,14 +103,12 @@ function FileBrowserLayout() {
   const ancestorsOf = useDocumentsStore((s) => s.ancestorsOf);
   const items = useDocumentsStore((s) => s.items);
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
-  const documentRecords = useDocumentsStore((s) => s.documentRecords);
   const activeTagFilters = useDocumentsStore((s) => s.activeTagFilters);
   const setTagFilters = useDocumentsStore((s) => s.setTagFilters);
 
   // Detect whether the last segment is a document (preview mode)
   const isDirectory = !!(currentDirectoryUri && treeSnapshot?.directories[currentDirectoryUri]);
-  const isDocument = !!(currentDocumentUri && documentRecords[currentDocumentUri]);
-  const isPreviewMode = rkey != null && !isDirectory && isDocument;
+  const isPreviewMode = !!(rkey && treeSnapshot && !isDirectory);
 
   // In preview mode, the directory context is the parent
   const parentSegments = isPreviewMode ? segments.slice(0, -1) : segments;

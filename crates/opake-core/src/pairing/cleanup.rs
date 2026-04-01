@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::{list_collection, time, Transport, XrpcClient};
@@ -65,7 +65,7 @@ pub async fn cleanup_expired_pair_requests(
                     continue;
                 }
             };
-            debug!("deleting expired pair request {uri}");
+            trace!("deleting expired pair request {uri}");
             match client.delete_record(PAIR_REQUEST_COLLECTION, &rkey).await {
                 Ok(()) => result.requests_deleted += 1,
                 Err(e) => warn!("failed to delete pair request {uri}: {e}"),
@@ -92,7 +92,7 @@ pub async fn cleanup_expired_pair_requests(
                     continue;
                 }
             };
-            debug!("deleting orphaned pair response {uri}");
+            trace!("deleting orphaned pair response {uri}");
             match client.delete_record(PAIR_RESPONSE_COLLECTION, &rkey).await {
                 Ok(()) => result.responses_deleted += 1,
                 Err(e) => warn!("failed to delete pair response {uri}: {e}"),
@@ -112,7 +112,6 @@ pub async fn cleanup_expired_pair_requests(
 
 /// Summary of what the cleanup deleted.
 #[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CleanupResult {
     pub requests_deleted: usize,
     pub responses_deleted: usize,

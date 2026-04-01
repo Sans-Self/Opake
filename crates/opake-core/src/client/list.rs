@@ -4,7 +4,7 @@
 // pagination-parse-version-check loop over `listRecords`. This module
 // extracts that into a single reusable function.
 
-use log::debug;
+use log::trace;
 use serde::de::DeserializeOwned;
 
 use super::{RecordEntry, RecordPage, Transport, XrpcClient};
@@ -29,7 +29,7 @@ where
     let mut cursor: Option<String> = None;
 
     loop {
-        debug!("listing {}, cursor={:?}", collection, cursor);
+        trace!("listing {}, cursor={:?}", collection, cursor);
         let page: RecordPage = client
             .list_records(collection, Some(100), cursor.as_deref())
             .await?;
@@ -38,13 +38,13 @@ where
             let parsed: R = match serde_json::from_value(record.value.clone()) {
                 Ok(v) => v,
                 Err(e) => {
-                    debug!("skipping unparseable record {}: {}", record.uri, e);
+                    trace!("skipping unparseable record {}: {}", record.uri, e);
                     continue;
                 }
             };
 
             if records::check_version(parsed.opake_version()).is_err() {
-                debug!(
+                trace!(
                     "skipping record {} with unsupported version {}",
                     record.uri,
                     parsed.opake_version()
@@ -77,7 +77,7 @@ pub async fn list_collection_raw(
     let mut cursor: Option<String> = None;
 
     loop {
-        debug!("listing {} (raw), cursor={:?}", collection, cursor);
+        trace!("listing {} (raw), cursor={:?}", collection, cursor);
         let page: RecordPage = client
             .list_records(collection, Some(100), cursor.as_deref())
             .await?;
@@ -86,15 +86,16 @@ pub async fn list_collection_raw(
             let version = match record.value.get("opakeVersion").and_then(|v| v.as_u64()) {
                 Some(v) => v as u32,
                 None => {
-                    debug!("skipping record {} without opakeVersion", record.uri);
+                    trace!("skipping record {} without opakeVersion", record.uri);
                     continue;
                 }
             };
 
             if records::check_version(version).is_err() {
-                debug!(
+                trace!(
                     "skipping record {} with unsupported version {}",
-                    record.uri, version
+                    record.uri,
+                    version
                 );
                 continue;
             }

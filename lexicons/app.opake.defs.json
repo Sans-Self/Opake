@@ -27,6 +27,28 @@
       }
     },
 
+    "keyringMember": {
+      "type": "object",
+      "description": "A keyring member: a wrapped group key paired with the member's workspace role. Role is plaintext because the AppView needs it for authorization decisions.",
+      "required": ["wrappedKey", "role"],
+      "properties": {
+        "wrappedKey": {
+          "type": "ref",
+          "ref": "#wrappedKey",
+          "description": "The group key wrapped to this member's public key."
+        },
+        "role": {
+          "type": "string",
+          "description": "The member's role in the workspace.",
+          "knownValues": [
+            "manager",
+            "editor",
+            "viewer"
+          ]
+        }
+      }
+    },
+
     "encryptionEnvelope": {
       "type": "object",
       "description": "Describes how a blob's content was encrypted. Contains the algorithm, nonce/IV, and one or more wrapped copies of the content encryption key.",
@@ -88,6 +110,34 @@
           "type": "bytes",
           "description": "12-byte initialization vector for AES-256-GCM.",
           "maxLength": 24
+        }
+      }
+    },
+
+    "directKeyWrapping": {
+      "type": "object",
+      "description": "Content key wrapped directly to individual DIDs. Used by records without blobs (directories, grants) where only the key material is needed — no cipher algorithm or nonce.",
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "description": "One or more wrapped copies of the content key, each encrypted to a different DID.",
+          "items": { "type": "ref", "ref": "#wrappedKey" },
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+
+    "keyringKeyWrapping": {
+      "type": "object",
+      "description": "Content key wrapped under a keyring's group key. Used by records without blobs (directories) where only the keyring reference is needed — no cipher algorithm or nonce.",
+      "required": ["keyringRef"],
+      "properties": {
+        "keyringRef": {
+          "type": "ref",
+          "ref": "#keyringRef",
+          "description": "Reference to the keyring whose group key protects the content key."
         }
       }
     },

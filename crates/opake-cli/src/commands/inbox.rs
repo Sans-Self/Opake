@@ -1,13 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
-use opake_core::client::{fetch_inbox_all, InboxGrant, Session};
+use opake_core::client::{InboxGrant, Session};
 
 use crate::commands::Execute;
-use crate::config::resolve_appview_url;
-use crate::identity;
-use crate::session::{self, CommandContext};
-use opake_core::account_config;
-use opake_core::client::ReqwestTransport;
+use crate::session::CommandContext;
 
 #[derive(Args)]
 /// List grants shared with you (via appview)
@@ -44,18 +40,13 @@ fn format_long(grants: &[InboxGrant]) -> String {
 
 impl Execute for InboxCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let account_config = account_config::fetch_account_config(&mut client, &ctx.did).await?;
-        let appview_url = resolve_appview_url(self.appview.as_deref(), account_config.as_ref())?;
+        let mut opake = ctx.opake().await?;
 
-        let id = identity::load_identity(&ctx.storage, &ctx.did)
-            .context("no identity found — run `opake login` first")?;
-        let signing_key = id
-            .signing_key_bytes()?
-            .context("no signing key in identity — re-run `opake login` to migrate")?;
+        // CLI: flag → env var → account config (core handles the last one).
+        let env_url = std::env::var("OPAKE_APPVIEW_URL").ok();
+        let appview_url = self.appview.as_deref().or(env_url.as_deref());
 
-        let transport = ReqwestTransport::new();
-        let grants = fetch_inbox_all(&transport, &appview_url, &ctx.did, &signing_key).await?;
+        let grants = opake.list_inbox(appview_url).await?;
 
         if grants.is_empty() {
             println!("no incoming grants");
@@ -70,7 +61,7 @@ impl Execute for InboxCommand {
 
         println!("\n{} grant(s)", grants.len());
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 

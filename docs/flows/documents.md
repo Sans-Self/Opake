@@ -8,29 +8,34 @@ Encrypts a file and uploads it as an opaque blob with a metadata record.
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant Crypto
     participant PDS
 
     User->>CLI: opake upload photo.jpg
 
     CLI->>CLI: Read file from disk, detect MIME type
-    CLI->>Crypto: generate_content_key()
-    Crypto-->>CLI: random AES-256-GCM key K
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
 
-    CLI->>Crypto: encrypt_blob(K, plaintext)
-    Crypto-->>CLI: { ciphertext, nonce }
+    Opake->>Crypto: generate_content_key()
+    Crypto-->>Opake: random AES-256-GCM key K
 
-    CLI->>PDS: com.atproto.repo.uploadBlob (ciphertext)
-    PDS-->>CLI: blob ref { $link, size }
+    Opake->>Crypto: encrypt_blob(K, plaintext)
+    Crypto-->>Opake: { ciphertext, nonce }
 
-    CLI->>Crypto: wrap_key(K, owner_pubkey, owner_did)
-    Crypto-->>CLI: wrappedKey (x25519-hkdf-a256kw)
+    Opake->>PDS: com.atproto.repo.uploadBlob (ciphertext)
+    PDS-->>Opake: blob ref { $link, size }
 
-    CLI->>Crypto: encrypt_metadata(K, {name, mimeType, size, tags, ...})
-    Crypto-->>CLI: encryptedMetadata { ciphertext, nonce }
+    Opake->>Crypto: wrap_key(K, owner_pubkey, owner_did)
+    Crypto-->>Opake: wrappedKey (x25519-hkdf-a256kw)
 
-    CLI->>PDS: com.atproto.repo.createRecord (document)
-    PDS-->>CLI: { uri, cid }
+    Opake->>Crypto: encrypt_metadata(K, {name, mimeType, size, tags, ...})
+    Crypto-->>Opake: encryptedMetadata { ciphertext, nonce }
+
+    Opake->>PDS: com.atproto.repo.createRecord (document)
+    PDS-->>Opake: { uri, cid }
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: Uploaded: at://did/app.opake.document/<tid>
 ```
@@ -43,25 +48,29 @@ Fetches a document you own, unwraps the content key, and decrypts.
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
     participant Crypto
 
     User->>CLI: opake download photo.jpg
 
-    CLI->>CLI: Resolve filename → AT-URI (via listRecords if needed)
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.download_at("photo.jpg") — resolve name/path/URI
 
-    CLI->>PDS: com.atproto.repo.getRecord (document)
-    PDS-->>CLI: Document record (envelope, blob ref)
+    Opake->>PDS: com.atproto.repo.getRecord (document)
+    PDS-->>Opake: Document record (envelope, blob ref)
 
-    CLI->>CLI: Find wrappedKey matching own DID
-    CLI->>Crypto: unwrap_key(wrappedKey, private_key)
-    Crypto-->>CLI: content key K
+    Opake->>Opake: Find wrappedKey matching own DID
+    Opake->>Crypto: unwrap_key(wrappedKey, private_key)
+    Crypto-->>Opake: content key K
 
-    CLI->>PDS: com.atproto.sync.getBlob (did, cid)
-    PDS-->>CLI: ciphertext bytes
+    Opake->>PDS: com.atproto.sync.getBlob (did, cid)
+    PDS-->>Opake: ciphertext bytes
 
-    CLI->>Crypto: decrypt_blob(K, nonce, ciphertext)
-    Crypto-->>CLI: plaintext
+    Opake->>Crypto: decrypt_blob(K, nonce, ciphertext)
+    Crypto-->>Opake: plaintext
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>CLI: Write plaintext to disk
     CLI->>User: Saved to ./photo.jpg
@@ -109,24 +118,26 @@ Data never leaves the owner's PDS. The recipient fetches everything directly fro
 
 ## List
 
-Lists document records on your PDS with optional tag filtering.
+Directory-aware listing with optional workspace, path, tag filter, and long format.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
 
-    User->>CLI: opake ls --tag vacation --long
+    User->>CLI: opake ls Photos --tag vacation --long --workspace family
 
-    loop Paginate until no cursor
-        CLI->>PDS: com.atproto.repo.listRecords (collection, cursor)
-        PDS-->>CLI: { records: [...], cursor? }
-    end
+    CLI->>Opake: ctx.opake() + file_context(Some("family")) + file_manager(&ctx)
+    Opake->>Opake: mgr.load_tree() — fetch directory tree
+    Opake->>Opake: Resolve "Photos" path in tree
 
-    CLI->>CLI: For each document, unwrap content key
-    CLI->>Crypto: decrypt_metadata(K, encryptedMetadata)
-    Crypto-->>CLI: { name, mimeType, size, tags, description }
+    Opake->>Opake: mgr.resolve_document_names_in(&tree, dir_uri)
+    Note over Opake: Lazy per-directory metadata decryption
+
+    Opake->>PDS: getRecord per document child (decrypt name)
+    PDS-->>Opake: Document records
 
     CLI->>CLI: Filter by tag, format output
     CLI->>User: Display table (name, size, tags, URI)
@@ -136,27 +147,30 @@ sequenceDiagram
 
 Deletes a document record. The blob becomes orphaned and is eventually garbage-collected by the PDS. If the document is tracked in a directory, the parent's entry list is updated.
 
-For path-based deletion (`Photos/beach.jpg`), recursive directory deletion, and directory-related flows, see [directories.md](directories.md).
+For recursive directory deletion, see [directories.md](directories.md).
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
 
     User->>CLI: opake rm photo.jpg
 
-    Note over CLI: Bare name → fast path (document-only resolution)
-    CLI->>PDS: listRecords (document collection, paginated)
-    PDS-->>CLI: match found → AT-URI
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.load_tree() + mgr.resolve_entry(&tree, "photo.jpg")
+    Note over Opake: Lazy resolution — documents resolved one at a time with early exit
 
     CLI->>User: delete photo.jpg? [y/N]
     User-->>CLI: y
 
-    CLI->>PDS: com.atproto.repo.deleteRecord (collection, rkey)
-    PDS-->>CLI: 200 OK
+    Opake->>PDS: applyWrites (deleteRecord document + update parent entries)
+    PDS-->>Opake: 200 OK
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: deleted at://did/.../document/<rkey>
 ```
 
-The fast path resolves bare document names with a single paginated `listRecords` call, the same cost as the pre-directory implementation. AT-URIs skip resolution entirely. Only path references (`dir/file`) and directory targets trigger a full tree load — see [directories.md](directories.md#path-resolution) for details.
+For recursive deletion (`rm -r`), `delete_recursive` walks the directory tree in post-order (children before parents), deleting all descendants before the target directory itself. See [directories.md](directories.md#delete-recursive) for details.

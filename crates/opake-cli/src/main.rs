@@ -1,6 +1,5 @@
 mod commands;
 mod config;
-mod document_resolve;
 mod identity;
 mod keyring_store;
 mod oauth;
@@ -67,7 +66,11 @@ enum Command {
     Account(commands::account::AccountCommand),
     Daemon(commands::daemon::DaemonCommand),
     Share(commands::share_group::ShareGroupCommand),
-    Keyring(commands::keyring::KeyringCommand),
+    /// Manage workspaces (shared encrypted file spaces)
+    Workspace(commands::workspace::WorkspaceCommand),
+    /// Alias for workspace (low-level keyring access)
+    #[command(hide = true)]
+    Keyring(commands::workspace::WorkspaceCommand),
     Metadata(commands::metadata::MetadataCommand),
     Pair(commands::pair::PairCommand),
 
@@ -151,7 +154,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Tree(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
 
         Command::Share(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
-        Command::Keyring(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Workspace(cmd) | Command::Keyring(cmd) => {
+            run_with_context(&storage, as_flag.as_deref(), cmd).await?
+        }
 
         Command::Config(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,

@@ -8,19 +8,19 @@
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "encryption", "encryptedMetadata", "createdAt"],
+        "required": ["opakeVersion", "keyWrapping", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
             "description": "Schema version for the app.opake.* namespace.",
             "minimum": 1
           },
-          "encryption": {
+          "keyWrapping": {
             "type": "union",
-            "description": "How to decrypt the directory metadata. Either a full encryption envelope (with per-directory wrapped keys) or a keyring reference (for group-based access).",
+            "description": "How to unwrap the content key that protects encryptedMetadata. Directories have no blob, so only key material is needed — no cipher algorithm or nonce.",
             "refs": [
-              "app.opake.document#directEncryption",
-              "app.opake.document#keyringEncryption"
+              "app.opake.defs#directKeyWrapping",
+              "app.opake.defs#keyringKeyWrapping"
             ]
           },
           "encryptedMetadata": {

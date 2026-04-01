@@ -123,6 +123,6 @@ export interface DirectorySnapshotEntry {
 }
 
 export interface DirectoryTreeSnapshot {
-  readonly rootUri: string | null;
+  readonly root_uri?: string;
   readonly directories: Readonly<Record<string, DirectorySnapshotEntry>>;
 }

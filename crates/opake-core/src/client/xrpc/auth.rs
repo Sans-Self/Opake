@@ -76,7 +76,7 @@ impl<T: Transport> super::XrpcClient<T> {
             // Put the old session back so the user can still try other things
             self.session = Some(Session::Legacy(session));
             return Err(Error::Auth(format!(
-                "session refresh failed (HTTP {}) — run `opake login` again",
+                "session refresh failed (HTTP {})",
                 response.status
             )));
         }

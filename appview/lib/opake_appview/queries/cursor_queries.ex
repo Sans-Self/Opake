@@ -9,10 +9,12 @@ defmodule OpakeAppview.Queries.CursorQueries do
 
   @micros_per_second 1_000_000
 
+  @spec load_cursor() :: Cursor.t() | nil
   def load_cursor do
     Repo.get(Cursor, 1)
   end
 
+  @spec save_cursor(integer()) :: {:ok, Cursor.t()} | {:error, Ecto.Changeset.t()}
   def save_cursor(time_us) do
     now = DateTime.utc_now()
 

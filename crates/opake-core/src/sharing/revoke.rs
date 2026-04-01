@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -19,7 +19,7 @@ pub async fn revoke_grant(client: &mut XrpcClient<impl Transport>, uri: &str) ->
         )));
     }
 
-    debug!("deleting grant record {}", uri);
+    trace!("deleting grant record {}", uri);
     client
         .delete_record(&at_uri.collection, &at_uri.rkey)
         .await?;

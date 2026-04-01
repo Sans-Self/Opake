@@ -48,8 +48,8 @@ defmodule OpakeAppviewWeb.InboxControllerTest do
     assert length(response["grants"]) == 1
 
     grant = hd(response["grants"])
-    assert grant["ownerDid"] == "did:plc:owner"
-    assert grant["documentUri"] == "at://did:plc:owner/app.opake.document/3xyz"
+    assert grant["owner_did"] == "did:plc:owner"
+    assert grant["document_uri"] == "at://did:plc:owner/app.opake.document/3xyz"
   end
 
   test "pagination", %{conn: conn} do

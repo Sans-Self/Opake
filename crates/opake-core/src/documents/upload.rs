@@ -1,5 +1,4 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use log::debug;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, RngCore, X25519PublicKey};
@@ -8,8 +7,6 @@ use crate::records::{
     AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope, KeyringEncryption,
     KeyringRef,
 };
-
-use super::DOCUMENT_COLLECTION;
 
 /// Maximum blob size accepted by a standard PDS (50 MB).
 pub(super) const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
@@ -45,18 +42,17 @@ pub struct UploadParams<'a> {
     pub created_at: &'a str,
 }
 
-/// Encrypt plaintext, upload the ciphertext blob, wrap the content key to the
-/// owner's public key, and create the document record. Returns the AT-URI of
-/// the created record.
+/// Encrypt and upload the blob, returning the document record as serialized
+/// JSON (without creating it on the PDS). The caller uses the record value
+/// in an `applyWrites` batch for atomic document + directory operations.
 ///
-/// Metadata (name, mimeType, size, tags, description) is always encrypted
-/// alongside the blob using the same content key. The plaintext record fields
-/// are set to dummy values.
-pub async fn encrypt_and_upload(
+/// Returns `(record_json, tid)` — the TID is the rkey to use when creating.
+pub async fn prepare_upload(
     client: &mut XrpcClient<impl Transport>,
     params: &UploadParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
-) -> Result<String, Error> {
+    tid: &str,
+) -> Result<(serde_json::Value, String), Error> {
     if params.plaintext.len() > MAX_BLOB_SIZE {
         return Err(Error::InvalidRecord(format!(
             "file is {} bytes — PDS blob limit is {} bytes (50 MB)",
@@ -65,27 +61,14 @@ pub async fn encrypt_and_upload(
         )));
     }
 
-    debug!(
-        "encrypting {} ({} bytes, {})",
-        params.filename,
-        params.plaintext.len(),
-        params.mime_type
-    );
-
     let content_key = crypto::generate_content_key(rng);
     let payload = crypto::encrypt_blob(&content_key, params.plaintext, rng)?;
-
-    debug!(
-        "uploading encrypted blob ({} bytes)",
-        payload.ciphertext.len()
-    );
 
     let blob_ref = client
         .upload_blob(payload.ciphertext, "application/octet-stream")
         .await?;
 
     let wrapped_key = crypto::wrap_key(&content_key, params.owner_pubkey, params.owner_did, rng)?;
-
     let encrypted_metadata = build_encrypted_metadata(
         &content_key,
         params.filename,
@@ -113,67 +96,17 @@ pub async fn encrypt_and_upload(
         )
     };
 
-    let record_ref = client.create_record(DOCUMENT_COLLECTION, &document).await?;
-
-    Ok(record_ref.uri)
+    Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
 
-/// Encrypt, upload, ensure the root directory exists, and add the document
-/// to the specified directory (or root if none). Returns the document AT-URI.
-///
-/// This is the high-level entry point that both CLI and WASM should use.
-pub async fn upload_to_directory(
-    client: &mut XrpcClient<impl Transport>,
-    params: &UploadParams<'_>,
-    directory_uri: Option<&str>,
-    rng: &mut (impl CryptoRng + RngCore),
-) -> Result<String, Error> {
-    use crate::directories;
-
-    // Ensure root directory exists (idempotent — no-op after first call)
-    let (root_enc, root_meta) = directories::encrypt_directory_envelope(
-        directories::ROOT_DIRECTORY_NAME,
-        params.owner_did,
-        params.owner_pubkey,
-        rng,
-    )?;
-    directories::get_or_create_root(
-        client,
-        params.owner_did,
-        root_enc,
-        root_meta,
-        params.created_at,
-    )
-    .await?;
-
-    let uri = encrypt_and_upload(client, params, rng).await?;
-
-    let root_uri = directories::root_directory_uri(params.owner_did);
-    let parent = directory_uri.unwrap_or(&root_uri);
-    directories::add_entry(client, parent, &uri, params.created_at).await?;
-
-    Ok(uri)
-}
-
-/// Parameters for keyring-based upload.
-pub struct KeyringUploadParams<'a> {
-    pub plaintext: &'a [u8],
-    pub filename: &'a str,
-    pub mime_type: &'a str,
-    pub keyring_uri: &'a str,
-    pub group_key: &'a ContentKey,
-    pub rotation: u64,
-    pub description: Option<&'a str>,
-    pub created_at: &'a str,
-}
-
-/// Encrypt plaintext, upload the blob, wrap the content key under the keyring's
-/// group key, and create the document record. Returns the AT-URI.
-pub async fn encrypt_and_upload_keyring(
+/// Same as [`prepare_upload`] but wraps the content key under a keyring
+/// group key (symmetric) instead of a public key (asymmetric).
+pub async fn prepare_upload_keyring(
     client: &mut XrpcClient<impl Transport>,
     params: &KeyringUploadParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
-) -> Result<String, Error> {
+    tid: &str,
+) -> Result<(serde_json::Value, String), Error> {
     if params.plaintext.len() > MAX_BLOB_SIZE {
         return Err(Error::InvalidRecord(format!(
             "file is {} bytes — PDS blob limit is {} bytes (50 MB)",
@@ -182,27 +115,14 @@ pub async fn encrypt_and_upload_keyring(
         )));
     }
 
-    debug!(
-        "encrypting {} ({} bytes, {}) under keyring",
-        params.filename,
-        params.plaintext.len(),
-        params.mime_type
-    );
-
     let content_key = crypto::generate_content_key(rng);
     let payload = crypto::encrypt_blob(&content_key, params.plaintext, rng)?;
-
-    debug!(
-        "uploading encrypted blob ({} bytes)",
-        payload.ciphertext.len()
-    );
 
     let blob_ref = client
         .upload_blob(payload.ciphertext, "application/octet-stream")
         .await?;
 
     let wrapped_content_key = crypto::wrap_content_key_for_keyring(&content_key, params.group_key)?;
-
     let encrypted_metadata = build_encrypted_metadata(
         &content_key,
         params.filename,
@@ -234,8 +154,33 @@ pub async fn encrypt_and_upload_keyring(
         )
     };
 
-    let record_ref = client.create_record(DOCUMENT_COLLECTION, &document).await?;
+    Ok((serde_json::to_value(&document)?, tid.to_string()))
+}
 
+/// Parameters for keyring-based upload.
+pub struct KeyringUploadParams<'a> {
+    pub plaintext: &'a [u8],
+    pub filename: &'a str,
+    pub mime_type: &'a str,
+    pub keyring_uri: &'a str,
+    pub group_key: &'a ContentKey,
+    pub rotation: u64,
+    pub description: Option<&'a str>,
+    pub created_at: &'a str,
+}
+
+/// Non-atomic upload for tests — creates the record directly via createRecord.
+/// Production code uses `prepare_upload` + `apply_writes` for atomicity.
+#[cfg(test)]
+async fn encrypt_and_upload(
+    client: &mut XrpcClient<impl Transport>,
+    params: &UploadParams<'_>,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<String, Error> {
+    let (record, _tid) = prepare_upload(client, params, rng, "test-tid").await?;
+    let record_ref = client
+        .create_record(super::DOCUMENT_COLLECTION, &record)
+        .await?;
     Ok(record_ref.uri)
 }
 

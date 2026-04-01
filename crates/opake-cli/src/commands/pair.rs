@@ -6,9 +6,7 @@ use opake_core::atproto;
 use opake_core::client::Session;
 use opake_core::crypto::OsRng;
 use opake_core::pairing;
-use opake_core::records::{
-    PairRequest, PairResponse, PAIR_REQUEST_COLLECTION, PAIR_RESPONSE_COLLECTION,
-};
+use opake_core::records::{PairRequest, PairResponse, PAIR_RESPONSE_COLLECTION};
 
 use crate::commands::Execute;
 use crate::identity;
@@ -64,10 +62,13 @@ fn fingerprint(key: &[u8; 32]) -> String {
         .join(":")
 }
 
+// request runs on the NEW device — no identity exists yet, so ctx.opake()
+// can't be used (it requires identity). Keep session::load_client for the
+// authenticated PDS client and use raw pairing functions.
 async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Session>> {
     let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
-    // Bail if this device already has an identity — use `opake login` instead.
+    // Bail if this device already has an identity — use `opake account login` instead.
     if identity::load_identity(&ctx.storage, &ctx.did).is_ok() {
         anyhow::bail!(
             "this device already has an encryption identity for {}. \
@@ -112,7 +113,7 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
         }
     };
 
-    let identity = pairing::receive_pair_response(
+    let received_identity = pairing::receive_pair_response(
         &mut client,
         &ctx.did,
         &response,
@@ -120,7 +121,7 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
     )
     .await?;
 
-    identity::save_identity(&ctx.storage, &ctx.did, &identity)?;
+    identity::save_identity(&ctx.storage, &ctx.did, &received_identity)?;
     println!("Identity received and saved.");
 
     // Clean up both records.
@@ -145,27 +146,23 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
     }
 
     println!("Pairing complete.");
-    Ok(session::refreshed_session(&client))
+    Ok(None)
 }
 
 async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {
-    let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-    let id = identity::load_identity(&ctx.storage, &ctx.did)
-        .context("no local identity — run `opake pair approve` on the device that has one")?;
+    let mut opake = ctx.opake().await?;
 
-    let page = client
-        .list_records(PAIR_REQUEST_COLLECTION, Some(100), None)
-        .await?;
+    let entries = opake.list_pair_requests().await?;
 
-    if page.records.is_empty() {
+    if entries.is_empty() {
         println!("No pending pairing requests.");
-        return Ok(session::refreshed_session(&client));
+        return Ok(None);
     }
 
     println!("Pending pairing requests:\n");
 
     let mut requests: Vec<(String, PairRequest)> = Vec::new();
-    for (i, entry) in page.records.iter().enumerate() {
+    for (i, entry) in entries.iter().enumerate() {
         let request: PairRequest = serde_json::from_value(entry.value.clone())
             .context("failed to parse pair request record")?;
 
@@ -202,18 +199,12 @@ async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("ephemeral key must be 32 bytes"))?;
 
-    pairing::respond_to_pair_request(
-        &mut client,
-        &id,
-        request_uri,
-        &ephemeral_pubkey,
-        &Utc::now().to_rfc3339(),
-        &mut OsRng,
-    )
-    .await?;
+    opake
+        .approve_pair_request(request_uri, &ephemeral_pubkey)
+        .await?;
 
     println!("Identity sent. The other device should receive it shortly.");
-    Ok(session::refreshed_session(&client))
+    Ok(None)
 }
 
 use base64::Engine;

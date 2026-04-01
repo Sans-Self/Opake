@@ -108,7 +108,7 @@ impl FileStorage {
     ) -> anyhow::Result<T> {
         let path = self.account_dir(did).join(filename);
         let content = fs::read_to_string(&path)
-            .with_context(|| format!("no {filename} for {did}: run `opake login` first"))?;
+            .with_context(|| format!("no {filename} for {did}: log in first"))?;
         serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {filename} for {did}"))
     }
@@ -132,13 +132,87 @@ impl FileStorage {
         self.save_config_anyhow(&config)
     }
 
+    // -- Task helpers (standalone, not on the Storage trait) --------------------
+
+    #[allow(dead_code)] // wired in daemon migration (Phase 1)
+    pub fn save_task(&self, task: &opake_core::daemon::DaemonTask) -> anyhow::Result<()> {
+        let tasks_path = self.base_dir.join("tasks.json");
+        let mut tasks = self.load_tasks_inner();
+        tasks.retain(|t| t.id != task.id);
+        tasks.push(task.clone());
+        let json = serde_json::to_string_pretty(&tasks)?;
+        fs::write(&tasks_path, json)?;
+        Ok(())
+    }
+
+    pub fn load_tasks(&self) -> Vec<opake_core::daemon::DaemonTask> {
+        self.load_tasks_inner()
+    }
+
+    #[allow(dead_code)] // wired in daemon migration (Phase 1)
+    pub fn delete_task(&self, id: &str) -> anyhow::Result<()> {
+        let tasks_path = self.base_dir.join("tasks.json");
+        let mut tasks = self.load_tasks_inner();
+        tasks.retain(|t| t.id != id);
+        let json = serde_json::to_string_pretty(&tasks)?;
+        fs::write(&tasks_path, json)?;
+        Ok(())
+    }
+
+    fn load_tasks_inner(&self) -> Vec<opake_core::daemon::DaemonTask> {
+        let tasks_path = self.base_dir.join("tasks.json");
+        match fs::read_to_string(&tasks_path) {
+            Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    // -- Cache helpers ----------------------------------------------------------
+
+    fn cache_dir(&self, did: &str) -> PathBuf {
+        self.account_dir(did).join("cache")
+    }
+
+    fn cache_file_path(&self, did: &str, collection: &str) -> PathBuf {
+        let safe_name = collection.replace([':', '/'], "_");
+        self.cache_dir(did).join(format!("{safe_name}.json"))
+    }
+
+    fn load_cache_collection(
+        &self,
+        did: &str,
+        collection: &str,
+    ) -> Option<opake_core::storage::CachedCollection> {
+        let path = self.cache_file_path(did, collection);
+        let content = fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    fn save_cache_collection(
+        &self,
+        did: &str,
+        collection: &str,
+        data: &opake_core::storage::CachedCollection,
+    ) -> Result<(), Error> {
+        let cache_dir = self.cache_dir(did);
+        if !cache_dir.exists() {
+            Self::ensure_sensitive_dir(&cache_dir).map_err(|e| Error::Storage(e.to_string()))?;
+        }
+        let path = self.cache_file_path(did, collection);
+        let json = serde_json::to_string(data)
+            .map_err(|e| Error::Storage(format!("failed to serialize cache: {e}")))?;
+        fs::write(&path, json)
+            .map_err(|e| Error::Storage(format!("failed to write cache: {e}")))?;
+        Ok(())
+    }
+
     // -- Anyhow wrappers (the trait uses opake_core::Error, CLI wants anyhow) -
 
     /// Load config using anyhow errors (for CLI callers that don't go through the trait).
     pub fn load_config_anyhow(&self) -> anyhow::Result<Config> {
         let path = self.base_dir.join("config.toml");
         let content = fs::read_to_string(&path)
-            .with_context(|| format!("no config at {}: run `opake login` first", path.display()))?;
+            .with_context(|| format!("no config at {}: log in first", path.display()))?;
         toml::from_str(&content).context("failed to parse config.toml")
     }
 
@@ -203,57 +277,83 @@ impl Storage for FileStorage {
 
     async fn cache_get_record(
         &self,
-        _did: &str,
-        _collection: &str,
-        _uri: &str,
+        did: &str,
+        collection: &str,
+        uri: &str,
     ) -> Result<Option<opake_core::storage::CachedRecord>, Error> {
-        Ok(None)
+        let cached = self.load_cache_collection(did, collection);
+        match cached {
+            Some(c) => Ok(c.records.into_iter().find(|r| r.uri == uri)),
+            None => Ok(None),
+        }
     }
 
     async fn cache_put_records(
         &self,
-        _did: &str,
-        _collection: &str,
-        _records: &[opake_core::storage::CachedRecord],
+        did: &str,
+        collection: &str,
+        records: &[opake_core::storage::CachedRecord],
     ) -> Result<(), Error> {
-        Ok(())
+        let mut cached = self
+            .load_cache_collection(did, collection)
+            .unwrap_or_else(|| opake_core::storage::CachedCollection {
+                records: Vec::new(),
+                fetched_at: 0,
+            });
+        for record in records {
+            if let Some(existing) = cached.records.iter_mut().find(|r| r.uri == record.uri) {
+                *existing = record.clone();
+            } else {
+                cached.records.push(record.clone());
+            }
+        }
+        self.save_cache_collection(did, collection, &cached)
     }
 
     async fn cache_remove_record(
         &self,
-        _did: &str,
-        _collection: &str,
-        _uri: &str,
+        did: &str,
+        collection: &str,
+        uri: &str,
     ) -> Result<(), Error> {
+        if let Some(mut cached) = self.load_cache_collection(did, collection) {
+            cached.records.retain(|r| r.uri != uri);
+            self.save_cache_collection(did, collection, &cached)?;
+        }
         Ok(())
     }
 
     async fn cache_get_collection(
         &self,
-        _did: &str,
-        _collection: &str,
+        did: &str,
+        collection: &str,
     ) -> Result<Option<opake_core::storage::CachedCollection>, Error> {
-        Ok(None)
+        Ok(self.load_cache_collection(did, collection))
     }
 
     async fn cache_put_collection(
         &self,
-        _did: &str,
-        _collection: &str,
-        _data: &opake_core::storage::CachedCollection,
+        did: &str,
+        collection: &str,
+        data: &opake_core::storage::CachedCollection,
     ) -> Result<(), Error> {
+        self.save_cache_collection(did, collection, data)
+    }
+
+    async fn cache_invalidate_collection(&self, did: &str, collection: &str) -> Result<(), Error> {
+        if let Some(mut cached) = self.load_cache_collection(did, collection) {
+            cached.fetched_at = 0;
+            self.save_cache_collection(did, collection, &cached)?;
+        }
         Ok(())
     }
 
-    async fn cache_invalidate_collection(
-        &self,
-        _did: &str,
-        _collection: &str,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
-    async fn cache_clear(&self, _did: &str) -> Result<(), Error> {
+    async fn cache_clear(&self, did: &str) -> Result<(), Error> {
+        let cache_dir = self.cache_dir(did);
+        if cache_dir.exists() {
+            fs::remove_dir_all(&cache_dir)
+                .map_err(|e| Error::Storage(format!("failed to clear cache: {e}")))?;
+        }
         Ok(())
     }
 }
@@ -262,44 +362,6 @@ impl Storage for FileStorage {
 pub use opake_core::storage::{
     resolve_handle_or_did, sanitize_did, AccountEntry, Config, Identity,
 };
-
-/// Compile-time default appview URL, baked in via `OPAKE_DEFAULT_APPVIEW_URL` env var at build.
-const DEFAULT_APPVIEW_URL: Option<&str> = option_env!("OPAKE_DEFAULT_APPVIEW_URL");
-
-/// Resolve the appview URL from (in priority order):
-/// 1. Explicit flag value (`--appview`)
-/// 2. `OPAKE_APPVIEW_URL` environment variable
-/// 3. PDS account config record
-/// 4. Compile-time default (`OPAKE_DEFAULT_APPVIEW_URL`)
-///
-/// Returns a clear error if none are set.
-pub fn resolve_appview_url(
-    explicit: Option<&str>,
-    account_config: Option<&opake_core::records::AccountConfigRecord>,
-) -> anyhow::Result<String> {
-    if let Some(url) = explicit {
-        return Ok(url.to_string());
-    }
-
-    if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
-        if !url.is_empty() {
-            return Ok(url);
-        }
-    }
-
-    if let Some(url) = account_config.and_then(|c| c.appview_url.as_deref()) {
-        return Ok(url.to_string());
-    }
-
-    if let Some(url) = DEFAULT_APPVIEW_URL {
-        return Ok(url.to_string());
-    }
-
-    anyhow::bail!(
-        "no appview URL configured — pass --appview <url>, \
-         set OPAKE_APPVIEW_URL, or run `opake config set appview-url <url>`"
-    )
-}
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

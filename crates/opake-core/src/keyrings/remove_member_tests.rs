@@ -1,7 +1,9 @@
 use super::*;
 use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-use crate::crypto::{self, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-use crate::records::{AtBytes, Keyring, WrappedKey};
+use crate::crypto::{
+    self, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey, X25519PublicKey,
+};
+use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey};
 use crate::test_utils::MockTransport;
 
 const TEST_DID: &str = "did:plc:owner";
@@ -17,7 +19,7 @@ fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
     XrpcClient::with_session(mock, "https://pds.test".into(), session)
 }
 
-fn test_keypair() -> (X25519PublicKey, [u8; 32]) {
+fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
     let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
     let public = X25519DalekPublicKey::from(&secret);
     (public.to_bytes(), secret.to_bytes())
@@ -33,27 +35,40 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
     let metadata = crypto::KeyringMetadata {
         name: "test-keyring".into(),
         description: None,
+        icon: None,
+        enforce_revocation: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, &mut OsRng).unwrap();
 
     let members = vec![
-        WrappedKey {
-            did: TEST_DID.into(),
-            ciphertext: AtBytes {
-                encoded: "AAAA".into(),
+        KeyringMember {
+            wrapped_key: WrappedKey {
+                did: TEST_DID.into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                algo: "x25519-hkdf-a256kw".into(),
             },
-            algo: "x25519-hkdf-a256kw".into(),
+            role: Role::Manager,
         },
-        WrappedKey {
-            did: "did:plc:bob".into(),
-            ciphertext: AtBytes {
-                encoded: "BBBB".into(),
+        KeyringMember {
+            wrapped_key: WrappedKey {
+                did: "did:plc:bob".into(),
+                ciphertext: AtBytes {
+                    encoded: "BBBB".into(),
+                },
+                algo: "x25519-hkdf-a256kw".into(),
             },
-            algo: "x25519-hkdf-a256kw".into(),
+            role: Role::Manager,
         },
     ];
 
-    let keyring = Keyring::new(members, encrypted_metadata, "2026-03-01T00:00:00Z".into());
+    let keyring = Keyring::new(
+        TEST_DID.into(),
+        members,
+        encrypted_metadata,
+        "2026-03-01T00:00:00Z".into(),
+    );
     (keyring, group_key)
 }
 
@@ -91,7 +106,7 @@ async fn happy_path_removes_and_rotates() {
     mock.enqueue(get_record_response(&keyring));
     mock.enqueue(put_record_response());
 
-    let remaining = [MemberKey {
+    let remaining = [crypto::DidMember {
         did: TEST_DID,
         public_key: &owner_pubkey,
     }];
@@ -118,7 +133,7 @@ async fn happy_path_removes_and_rotates() {
         Some(RequestBody::Json(v)) => {
             let updated: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
             assert_eq!(updated.members.len(), 1);
-            assert_eq!(updated.members[0].did, TEST_DID);
+            assert_eq!(updated.members[0].wrapped_key.did, TEST_DID);
             assert_eq!(updated.rotation, 1);
             assert!(updated.modified_at.is_some());
 
@@ -128,10 +143,11 @@ async fn happy_path_removes_and_rotates() {
             // The removed member (bob) should NOT be in history —
             // only the remaining owner's wrapped key is preserved
             assert_eq!(updated.key_history[0].members.len(), 1);
-            assert_eq!(updated.key_history[0].members[0].did, TEST_DID);
+            assert_eq!(updated.key_history[0].members[0].wrapped_key.did, TEST_DID);
 
             // Owner can unwrap the new group key
-            let unwrapped = crypto::unwrap_key(&updated.members[0], &owner_privkey).unwrap();
+            let unwrapped =
+                crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_privkey).unwrap();
             assert_eq!(unwrapped.0, new_group_key.0);
         }
         _ => panic!("expected JSON body"),
@@ -144,7 +160,7 @@ async fn rejects_non_owner() {
     let group_key = crypto::generate_content_key(&mut OsRng);
 
     let mock = MockTransport::new();
-    let remaining = [MemberKey {
+    let remaining = [crypto::DidMember {
         did: TEST_DID,
         public_key: &owner_pubkey,
     }];
@@ -176,7 +192,7 @@ async fn rejects_nonexistent_member() {
     let mock = MockTransport::new();
     mock.enqueue(get_record_response(&keyring));
 
-    let remaining = [MemberKey {
+    let remaining = [crypto::DidMember {
         did: TEST_DID,
         public_key: &owner_pubkey,
     }];

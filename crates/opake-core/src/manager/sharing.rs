@@ -1,0 +1,70 @@
+use crate::client::Transport;
+use crate::crypto::{CryptoRng, RngCore, X25519PublicKey};
+use crate::documents;
+use crate::error::Error;
+use crate::sharing::{self, GrantEntry, GrantParams};
+use crate::storage::Storage;
+
+use super::types::FileContext;
+use super::FileManager;
+
+impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
+    /// Share a document with another user by creating a grant.
+    ///
+    /// Cabinet only. Fetches the document's content key, wraps it to the
+    /// recipient's public key, and creates a grant record.
+    ///
+    /// Returns the grant AT-URI.
+    #[::opake_derive::signoff]
+    pub async fn share(
+        &mut self,
+        document_uri: &str,
+        recipient_did: &str,
+        recipient_public_key: &X25519PublicKey,
+        permissions: &str,
+        note: Option<&str>,
+    ) -> Result<String, Error> {
+        let FileContext::Cabinet(ref cabinet) = self.context else {
+            return Err(Error::InvalidRecord(
+                "sharing is only supported from the cabinet".into(),
+            ));
+        };
+
+        let now = self.opake.now();
+
+        let content_key = documents::fetch_content_key(
+            &mut self.opake.client,
+            &cabinet.did,
+            &cabinet.private_key,
+            document_uri,
+        )
+        .await?;
+
+        sharing::create_grant(
+            &mut self.opake.client,
+            &GrantParams {
+                document_uri,
+                recipient_did,
+                content_key: &content_key,
+                recipient_public_key,
+                permissions,
+                note,
+                created_at: &now,
+            },
+            &mut self.opake.rng,
+        )
+        .await
+    }
+
+    /// Revoke a grant (delete the grant record). Cabinet only.
+    #[::opake_derive::signoff]
+    pub async fn revoke_share(&mut self, grant_uri: &str) -> Result<(), Error> {
+        sharing::revoke_grant(&mut self.opake.client, grant_uri).await
+    }
+
+    /// List all grants on the caller's PDS.
+    #[::opake_derive::signoff]
+    pub async fn list_shares(&mut self) -> Result<Vec<GrantEntry>, Error> {
+        sharing::list_grants(&mut self.opake.client).await
+    }
+}

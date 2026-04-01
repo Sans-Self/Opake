@@ -1,18 +1,12 @@
-use anyhow::{Context, Result};
-use chrono::Utc;
+use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
 use opake_core::crypto::{self, GrantMetadata, OsRng};
-use opake_core::directories::DirectoryTree;
-use opake_core::documents;
 use opake_core::error::Error;
 use opake_core::records::{PendingShare, PENDING_SHARE_COLLECTION};
 use opake_core::resolve;
-use opake_core::sharing::{self, GrantParams};
 
 use crate::commands::Execute;
-use crate::document_resolve;
-use crate::identity;
 use crate::session::{self, CommandContext};
 use opake_core::client::ReqwestTransport;
 
@@ -32,47 +26,41 @@ pub struct NewShareCommand {
 
 impl Execute for NewShareCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let id =
-            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
-        let private_key = id.private_key_bytes()?;
+        // Resolve document name via FileManager
+        let mut opake = ctx.opake().await?;
+        let context = opake.cabinet_context()?;
+        let mut mgr = opake.file_manager(&context);
 
-        let mut tree = DirectoryTree::load(&mut client).await?;
-        tree.decrypt_names(&ctx.did, &private_key);
-        let mut resolver = document_resolve::CliDocumentNameResolver::new(
-            &mut client,
-            &ctx.did,
-            &private_key,
-            &ctx.storage,
-        );
-        let resolved = tree.resolve(&mut resolver, &self.document).await?;
+        let tree = mgr.load_tree().await?;
+        let resolved = mgr.resolve_entry(&tree, &self.document).await?;
         let uri = resolved.uri;
 
-        let content_key =
-            documents::fetch_content_key(&mut client, &id.did, &private_key, &uri).await?;
-
+        // Resolve recipient identity (separate transport, cross-PDS)
         let transport = ReqwestTransport::new();
-        let now = Utc::now().to_rfc3339();
+        let recipient_result =
+            resolve::resolve_identity(&transport, &ctx.pds_url, &self.recipient).await;
 
-        match resolve::resolve_identity(&transport, &ctx.pds_url, &self.recipient).await {
+        match recipient_result {
             Ok(recipient) => {
-                let params = GrantParams {
-                    document_uri: &uri,
-                    recipient_did: &recipient.did,
-                    content_key: &content_key,
-                    recipient_public_key: &recipient.public_key,
-                    permissions: "read",
-                    note: self.note.as_deref(),
-                    created_at: &now,
-                };
+                let grant_uri = mgr
+                    .share(
+                        &uri,
+                        &recipient.did,
+                        &recipient.public_key,
+                        "read",
+                        self.note.as_deref(),
+                    )
+                    .await?;
 
-                let grant_uri = sharing::create_grant(&mut client, &params, &mut OsRng).await?;
-
-                let display_recipient = recipient.handle.as_deref().unwrap_or(&recipient.did);
-                println!("shared with {} → {}", display_recipient, grant_uri);
+                let display = recipient.handle.as_deref().unwrap_or(&recipient.did);
+                println!("shared with {} → {}", display, grant_uri);
             }
             Err(Error::NotFound(_)) => {
-                // Recipient hasn't set up Opake yet — queue for retry
+                // Recipient hasn't set up Opake — queue pending share.
+                // This path uses fetch_content_key from FileManager, then
+                // falls back to raw client for the pending share record.
+                let content_key = mgr.fetch_content_key(&uri).await?;
+
                 let metadata = GrantMetadata {
                     permissions: Some("read".to_string()),
                     note: self.note.clone(),
@@ -80,23 +68,23 @@ impl Execute for NewShareCommand {
                 let encrypted_metadata =
                     crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng)?;
 
+                let now = session::chrono_now();
                 let pending =
                     PendingShare::new(uri, self.recipient.clone(), encrypted_metadata, now);
 
-                client
-                    .create_record(PENDING_SHARE_COLLECTION, &pending)
+                mgr.create_record(PENDING_SHARE_COLLECTION, &pending)
                     .await?;
 
                 println!(
                     "{} hasn't set up Opake yet. Share queued — it will complete \
-                     automatically once they log in on any device (expires in 7 days).",
+                     automatically once they log in (expires in 7 days).",
                     self.recipient
                 );
             }
             Err(e) => return Err(e.into()),
         }
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 
@@ -106,9 +94,8 @@ pub struct PendingSharesCommand;
 
 impl Execute for PendingSharesCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-
-        let entries = sharing::list_pending_shares(&mut client).await?;
+        let mut opake = ctx.opake().await?;
+        let entries = opake.list_pending_shares().await?;
 
         if entries.is_empty() {
             println!("no pending shares");
@@ -123,7 +110,7 @@ impl Execute for PendingSharesCommand {
             println!("\n{} pending share(s)", entries.len());
         }
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 
@@ -133,24 +120,9 @@ pub struct RetrySharesCommand;
 
 impl Execute for RetrySharesCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let id =
-            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
-        let private_key = id.private_key_bytes()?;
-
+        let mut opake = ctx.opake().await?;
         let transport = ReqwestTransport::new();
-        let now = opake_core::client::time::unix_now();
-
-        let params = sharing::RetryParams {
-            caller_pds_url: &ctx.pds_url,
-            owner_did: &ctx.did,
-            owner_private_key: &private_key,
-            now,
-            ttl_seconds: sharing::DEFAULT_PENDING_SHARE_TTL_SECONDS,
-        };
-
-        let result =
-            sharing::retry_pending_shares(&mut client, &transport, &params, &mut OsRng).await?;
+        let result = opake.retry_pending_shares(&transport).await?;
 
         if result.checked == 0 {
             println!("no pending shares to retry");
@@ -165,7 +137,7 @@ impl Execute for RetrySharesCommand {
             );
         }
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 
@@ -178,10 +150,10 @@ pub struct CancelShareCommand {
 
 impl Execute for CancelShareCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        sharing::cancel_pending_share(&mut client, &self.uri).await?;
+        let mut opake = ctx.opake().await?;
+        opake.cancel_pending_share(&self.uri).await?;
         println!("cancelled pending share {}", self.uri);
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 

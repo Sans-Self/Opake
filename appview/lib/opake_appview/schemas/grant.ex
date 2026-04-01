@@ -21,6 +21,13 @@ defmodule OpakeAppview.Schemas.Grant do
   def changeset(grant, attrs) do
     grant
     |> cast(attrs, [:uri, :owner_did, :recipient_did, :document_uri, :created_at, :indexed_at])
-    |> validate_required([:uri, :owner_did, :recipient_did, :document_uri, :created_at, :indexed_at])
+    |> validate_required([
+      :uri,
+      :owner_did,
+      :recipient_did,
+      :document_uri,
+      :created_at,
+      :indexed_at
+    ])
   end
 end

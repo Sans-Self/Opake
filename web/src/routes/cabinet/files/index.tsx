@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { PanelContent } from "@/components/cabinet/PanelContent";
+import { TreeSnapshotProvider } from "@/components/cabinet/TreeSnapshotContext";
 import { evictReadmeCache } from "@/components/cabinet/DirectoryReadme";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { rkeyFromUri } from "@/lib/atUri";
@@ -16,7 +17,14 @@ function RootDirectoryContent() {
   const updateMetadata = useDocumentsStore((s) => s.updateMetadata);
   const moveEntry = useDocumentsStore((s) => s.moveEntry);
   const renameDirectory = useDocumentsStore((s) => s.renameDirectory);
+  const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
+  const ensureDirectoryReady = useDocumentsStore((s) => s.ensureDirectoryReady);
   const items = useDocumentsStore(useShallow((s) => s.itemsForDirectory(null)));
+
+  // Decrypt root directory metadata when the tree becomes available
+  useEffect(() => {
+    if (treeSnapshot) void ensureDirectoryReady(null);
+  }, [treeSnapshot, ensureDirectoryReady]);
 
   const readmeUriRef = useRef<string | null>(null);
   const readmeItem = items.find(
@@ -24,8 +32,6 @@ function RootDirectoryContent() {
   );
   const readmeUri = readmeItem?.uri ?? null;
 
-  // Evict README cache only when the readme URI changes (not on unmount,
-  // since opening a preview unmounts this component but keeps the same directory)
   useEffect(() => {
     if (readmeUriRef.current && readmeUriRef.current !== readmeUri) {
       evictReadmeCache(readmeUriRef.current);
@@ -41,44 +47,30 @@ function RootDirectoryContent() {
   };
 
   return (
-    <PanelContent
-      items={items}
-      viewMode={viewMode}
-      onOpen={navigateToChild}
-      onPreview={navigateToChild}
-      onEdit={(item) =>
-        void navigate({
-          to: "/cabinet/editor/$rkey",
-          params: { rkey: rkeyFromUri(item.uri) },
-        })
-      }
-      onDownload={(uri) => void downloadFile(uri)}
-      onDelete={(uri) => void deleteFile(uri)}
-      onDeleteFolder={(uri) => void deleteFolder(uri)}
-      onUpdateMetadata={(uri, changes) => void updateMetadata(uri, changes)}
-      onMoveEntry={(uri, target) => void moveEntry(uri, target)}
-      onRenameDirectory={(uri, name) => void renameDirectory(uri, name)}
-    />
+    <TreeSnapshotProvider value={treeSnapshot}>
+      <PanelContent
+        items={items}
+        viewMode={viewMode}
+        rootLabel="Your Cabinet"
+        onOpen={navigateToChild}
+        onPreview={navigateToChild}
+        onEdit={(item) =>
+          void navigate({
+            to: "/cabinet/editor/$rkey",
+            params: { rkey: rkeyFromUri(item.uri) },
+          })
+        }
+        onDownload={(uri) => void downloadFile(uri)}
+        onDelete={(uri) => void deleteFile(uri)}
+        onDeleteFolder={(uri) => void deleteFolder(uri)}
+        onUpdateMetadata={(uri, changes) => void updateMetadata(uri, changes)}
+        onMoveEntry={(uri, target) => void moveEntry(uri, target)}
+        onRenameDirectory={(uri, name) => void renameDirectory(uri, name)}
+      />
+    </TreeSnapshotProvider>
   );
 }
 
-/** Wait for the tree to be available (loadCabinet runs as a useEffect in the parent). */
-async function waitForTree(): Promise<void> {
-  if (useDocumentsStore.getState().treeSnapshot) return;
-  return new Promise((resolve) => {
-    const unsub = useDocumentsStore.subscribe((state) => {
-      if (state.treeSnapshot) {
-        unsub();
-        resolve();
-      }
-    });
-  });
-}
-
 export const Route = createFileRoute("/cabinet/files/")({
-  loader: async () => {
-    await waitForTree();
-    await useDocumentsStore.getState().ensureDirectoryReady(null);
-  },
   component: RootDirectoryContent,
 });

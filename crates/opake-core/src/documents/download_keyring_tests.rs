@@ -1,7 +1,9 @@
 use super::*;
 use crate::client::HttpResponse;
 use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-use crate::records::{AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringRef, WrappedKey};
+use crate::records::{
+    AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringMember, KeyringRef, Role, WrappedKey,
+};
 use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
@@ -135,9 +137,16 @@ fn keyring_document(fixture: &KeyringFixture) -> Document {
 
 fn keyring_record(fixture: &KeyringFixture) -> Keyring {
     Keyring::new(
+        OWNER_DID.into(),
         vec![
-            fixture.owner_wrapped_gk.clone(),
-            fixture.member_wrapped_gk.clone(),
+            KeyringMember {
+                wrapped_key: fixture.owner_wrapped_gk.clone(),
+                role: Role::Manager,
+            },
+            KeyringMember {
+                wrapped_key: fixture.member_wrapped_gk.clone(),
+                role: Role::Manager,
+            },
         ],
         dummy_encrypted_metadata(),
         "2026-03-01T00:00:00Z".into(),
@@ -343,12 +352,21 @@ async fn download_from_previous_rotation_via_history() {
     // Keyring has since rotated to 1 — rotation 0 members are in key_history
     let mut keyring = Keyring {
         rotation: 1,
-        members: vec![fixture.owner_wrapped_gk.clone()],
+        members: vec![KeyringMember {
+            wrapped_key: fixture.owner_wrapped_gk.clone(),
+            role: Role::Manager,
+        }],
         key_history: vec![records::KeyHistoryEntry {
             rotation: 0,
             members: vec![
-                fixture.owner_wrapped_gk.clone(),
-                fixture.member_wrapped_gk.clone(),
+                KeyringMember {
+                    wrapped_key: fixture.owner_wrapped_gk.clone(),
+                    role: Role::Manager,
+                },
+                KeyringMember {
+                    wrapped_key: fixture.member_wrapped_gk.clone(),
+                    role: Role::Manager,
+                },
             ],
         }],
         ..keyring_record(&fixture)
@@ -384,10 +402,16 @@ async fn rejects_member_not_present_at_historical_rotation() {
     // Keyring is at rotation 1, history has rotation 0 with only owner
     let keyring = Keyring {
         rotation: 1,
-        members: vec![fixture.owner_wrapped_gk.clone()],
+        members: vec![KeyringMember {
+            wrapped_key: fixture.owner_wrapped_gk.clone(),
+            role: Role::Manager,
+        }],
         key_history: vec![records::KeyHistoryEntry {
             rotation: 0,
-            members: vec![fixture.owner_wrapped_gk.clone()],
+            members: vec![KeyringMember {
+                wrapped_key: fixture.owner_wrapped_gk.clone(),
+                role: Role::Manager,
+            }],
         }],
         ..keyring_record(&fixture)
     };

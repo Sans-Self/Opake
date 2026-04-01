@@ -145,8 +145,8 @@ fn refresh_session_response() -> HttpResponse {
     let body = serde_json::json!({
         "did": "did:plc:test",
         "handle": "test.handle",
-        "accessJwt": "fresh-access-jwt",
-        "refreshJwt": "fresh-refresh-jwt",
+        "access_jwt": "fresh-access-jwt",
+        "refresh_jwt": "fresh-refresh-jwt",
     });
     HttpResponse {
         status: 200,
@@ -235,7 +235,6 @@ async fn refresh_failure_propagates_error() {
         .unwrap_err();
 
     assert!(err.to_string().contains("session refresh failed"));
-    assert!(err.to_string().contains("opake login"));
     assert!(!client.session_refreshed());
 }
 

@@ -30,6 +30,10 @@ defmodule OpakeAppviewWeb.ConnCase do
     signature = :crypto.sign(:eddsa, :none, message, [privkey, :ed25519])
     sig_b64 = Base.encode64(signature)
 
-    Plug.Conn.put_req_header(conn, "authorization", "Opake-Ed25519 #{did}:#{timestamp}:#{sig_b64}")
+    Plug.Conn.put_req_header(
+      conn,
+      "authorization",
+      "Opake-Ed25519 #{did}:#{timestamp}:#{sig_b64}"
+    )
   end
 end

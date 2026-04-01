@@ -111,6 +111,7 @@ pub fn save_group_key(
     save_stored(storage, did, rkey, &stored)
 }
 
+#[cfg(test)]
 pub fn load_group_key(
     storage: &FileStorage,
     did: &str,

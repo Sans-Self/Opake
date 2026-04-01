@@ -6,9 +6,6 @@ defmodule OpakeAppviewWeb.PaginationHelpers do
   @default_limit 50
   @max_limit 100
 
-  def require_did(%{"did" => did}) when is_binary(did) and byte_size(did) > 0, do: {:ok, did}
-  def require_did(_), do: {:error, "did parameter is required"}
-
   def parse_limit(%{"limit" => limit_str}) when is_binary(limit_str) do
     case Integer.parse(limit_str) do
       {n, ""} when n >= 1 and n <= @max_limit -> {:ok, n}

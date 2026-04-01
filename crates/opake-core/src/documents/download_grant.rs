@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{
@@ -33,12 +33,12 @@ pub async fn download_from_grant(
 
     // Resolve the owner's PDS from their DID
     let owner_did = &grant_at.authority;
-    debug!("resolving PDS for owner {}", owner_did);
+    trace!("resolving PDS for owner {}", owner_did);
     let did_doc = resolve_did_document(transport, owner_did).await?;
     let owner_pds = pds_from_did_document(&did_doc)?;
 
     // Fetch the grant record
-    debug!("fetching grant from {}", owner_pds);
+    trace!("fetching grant from {}", owner_pds);
     let grant_entry = get_record_public(
         transport,
         &owner_pds,
@@ -52,12 +52,12 @@ pub async fn download_from_grant(
     records::check_version(grant.opake_version)?;
 
     // Unwrap the content key from the grant
-    debug!("unwrapping content key from grant");
+    trace!("unwrapping content key from grant");
     let content_key = crypto::unwrap_key(&grant.wrapped_key, private_key)?;
 
     // Fetch the document record
     let doc_at = atproto::parse_at_uri(&grant.document)?;
-    debug!("fetching document from {}", owner_pds);
+    trace!("fetching document from {}", owner_pds);
     let doc_entry = get_record_public(
         transport,
         &owner_pds,
@@ -84,9 +84,10 @@ pub async fn download_from_grant(
     };
 
     // Fetch the blob
-    debug!(
+    trace!(
         "fetching blob did={} cid={}",
-        doc_at.authority, doc.blob.reference.cid
+        doc_at.authority,
+        doc.blob.reference.cid
     );
     let ciphertext = get_blob_public(
         transport,
@@ -99,6 +100,57 @@ pub async fn download_from_grant(
     let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext)?;
     let name = resolve_document_name(&doc, &content_key)?;
     Ok((name, plaintext))
+}
+
+/// Resolve grant metadata without downloading the blob.
+///
+/// Same cross-PDS flow as `download_from_grant` but stops after metadata
+/// decryption — no blob fetch. Used for listing incoming grants.
+pub(crate) async fn resolve_grant_metadata(
+    transport: &impl Transport,
+    private_key: &X25519PrivateKey,
+    grant_uri: &str,
+) -> Result<(String, crypto::DocumentMetadata), Error> {
+    let grant_at = atproto::parse_at_uri(grant_uri)?;
+    if grant_at.collection != GRANT_COLLECTION {
+        return Err(Error::InvalidRecord(format!(
+            "expected a grant URI ({}), got collection {}",
+            GRANT_COLLECTION, grant_at.collection,
+        )));
+    }
+
+    let owner_did = &grant_at.authority;
+    let did_doc = resolve_did_document(transport, owner_did).await?;
+    let owner_pds = pds_from_did_document(&did_doc)?;
+
+    let grant_entry = get_record_public(
+        transport,
+        &owner_pds,
+        owner_did,
+        GRANT_COLLECTION,
+        &grant_at.rkey,
+    )
+    .await?;
+    let grant: Grant = serde_json::from_value(grant_entry.value)?;
+    records::check_version(grant.opake_version)?;
+
+    let content_key = crypto::unwrap_key(&grant.wrapped_key, private_key)?;
+
+    let doc_at = atproto::parse_at_uri(&grant.document)?;
+    let doc_entry = get_record_public(
+        transport,
+        &owner_pds,
+        &doc_at.authority,
+        &doc_at.collection,
+        &doc_at.rkey,
+    )
+    .await?;
+    let doc: Document = serde_json::from_value(doc_entry.value)?;
+    records::check_version(doc.opake_version)?;
+
+    let name = resolve_document_name(&doc, &content_key)?;
+    let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
+    Ok((name, metadata))
 }
 
 #[cfg(test)]

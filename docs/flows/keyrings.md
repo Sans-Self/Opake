@@ -31,7 +31,7 @@ flowchart TB
 
 ## Create Keyring
 
-Generates a group key, wraps it to the owner, creates the keyring record, and stores the group key locally.
+Generates a group key, wraps it to the owner (with `role: manager`), creates the keyring record with the `owner` field set to the creator's DID, and stores the group key locally.
 
 ```mermaid
 sequenceDiagram
@@ -41,12 +41,12 @@ sequenceDiagram
     participant PDS
     participant Disk as Local Storage
 
-    User->>CLI: opake keyring create family-photos
+    User->>CLI: opake workspace create family-photos
 
     CLI->>Crypto: create_group_key()
-    Crypto-->>CLI: group key GK + wrappedKey (GK → owner pubkey)
+    Crypto-->>CLI: group key GK + wrappedKey (GK → owner pubkey, role=manager)
 
-    CLI->>PDS: com.atproto.repo.createRecord (keyring)
+    CLI->>PDS: com.atproto.repo.createRecord (keyring, owner=self DID)
     PDS-->>CLI: { uri, cid }
 
     CLI->>Disk: Save GK to ~/.config/opake/accounts/<did>/keyrings/<rkey>.json
@@ -54,7 +54,7 @@ sequenceDiagram
     CLI->>User: family-photos → at://did/.../keyring-tid
 ```
 
-The group key is never stored in plaintext on the PDS — only the wrapped copies live in the keyring record.
+The group key is never stored in plaintext on the PDS — only the wrapped copies live in the keyring record. The `owner` field identifies the canonical keyring owner for AppView authorization.
 
 ## List Keyrings
 
@@ -64,7 +64,7 @@ sequenceDiagram
     participant CLI
     participant PDS
 
-    User->>CLI: opake keyring ls --long
+    User->>CLI: opake workspace ls --long
 
     loop Paginate until no cursor
         CLI->>PDS: com.atproto.repo.listRecords (keyring collection, cursor)
@@ -76,7 +76,7 @@ sequenceDiagram
 
 ## Add Member
 
-Resolves the new member's identity, wraps the group key to their public key, and appends them to the keyring record.
+Resolves the new member's identity, wraps the group key to their public key with the specified role, and appends them to the keyring record.
 
 ```mermaid
 sequenceDiagram
@@ -88,7 +88,7 @@ sequenceDiagram
     participant Crypto
     participant Disk as Local Storage
 
-    User->>CLI: opake keyring add-member family-photos alice.example.com
+    User->>CLI: opake workspace add-member family-photos alice.example.com --role editor
 
     CLI->>PDS: listRecords → resolve "family-photos" to keyring URI
     PDS-->>CLI: keyring URI + rkey
@@ -103,12 +103,12 @@ sequenceDiagram
     MemberPDS-->>CLI: Alice's X25519 public key
 
     CLI->>Crypto: wrap_key(GK, alice_pubkey, alice_did)
-    Crypto-->>CLI: wrappedKey for Alice
+    Crypto-->>CLI: wrappedKey for Alice (role=editor)
 
-    CLI->>PDS: getRecord (keyring) → append Alice → putRecord
+    CLI->>PDS: getRecord (keyring) → append Alice with role → putRecord
     PDS-->>CLI: 200 OK
 
-    CLI->>User: added alice.example.com to family-photos
+    CLI->>User: added alice.example.com to family-photos (editor)
 ```
 
 ## Remove Member
@@ -124,7 +124,7 @@ sequenceDiagram
     participant Crypto
     participant Disk as Local Storage
 
-    User->>CLI: opake keyring remove-member family-photos bob.example.com
+    User->>CLI: opake workspace remove-member family-photos bob.example.com
 
     CLI->>PDS: Resolve keyring URI + fetch keyring record
     PDS-->>CLI: Keyring with members [Alice, Bob, Carol]
@@ -153,77 +153,78 @@ Before replacing the group key, the old rotation's remaining member entries are 
 
 Existing documents encrypted under the old group key stay as-is. New uploads use the new group key. Removed members' wrapped keys are excluded from history, so they cannot recover old group keys from the record.
 
-## Upload with Keyring
+## Upload with Workspace
 
-Encrypts a file and wraps the content key under the keyring's group key instead of individual public keys.
+Encrypts a file and wraps the content key under the workspace's group key instead of individual public keys.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant Crypto
     participant PDS
-    participant Disk as Local Storage
 
-    User->>CLI: opake upload photo.jpg --keyring family-photos
+    User->>CLI: opake upload photo.jpg --workspace family-photos
 
-    CLI->>PDS: listRecords → resolve "family-photos" to keyring URI
-    PDS-->>CLI: keyring URI + rkey + rotation
+    CLI->>Opake: ctx.opake() + file_context(Some("family-photos"))
+    Note over Opake: resolve_workspace: keyring lookup + group key unwrap from PDS
+    Opake->>Opake: file_manager(&ctx)
 
-    CLI->>Disk: Load group key GK
-    Disk-->>CLI: GK
+    Opake->>Opake: mgr.upload_at(plaintext, "photo.jpg", "image/jpeg", None, None)
 
-    CLI->>CLI: Read file from disk, detect MIME type
-    CLI->>Crypto: generate_content_key() → K
-    CLI->>Crypto: encrypt_blob(K, plaintext)
-    Crypto-->>CLI: { ciphertext, nonce }
+    Opake->>Crypto: generate_content_key() → K
+    Opake->>Crypto: encrypt_blob(K, plaintext)
+    Crypto-->>Opake: { ciphertext, nonce }
 
-    CLI->>PDS: com.atproto.repo.uploadBlob (ciphertext)
-    PDS-->>CLI: blob ref
+    Opake->>PDS: com.atproto.repo.uploadBlob (ciphertext)
+    PDS-->>Opake: blob ref
 
-    CLI->>Crypto: wrap_content_key_for_keyring(K, GK)
-    Crypto-->>CLI: AES-KW wrapped content key
+    Opake->>Crypto: wrap_content_key_for_keyring(K, GK)
+    Crypto-->>Opake: AES-KW wrapped content key
 
-    CLI->>PDS: createRecord (document with keyringEncryption)
-    PDS-->>CLI: { uri, cid }
+    Opake->>PDS: createRecord (document with keyringEncryption)
+    PDS-->>Opake: { uri, cid }
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: Uploaded: at://did/.../document-tid
 ```
 
 The document record references the keyring URI and stores `wrappedContentKey` (content key wrapped under GK) instead of per-DID wrapped keys.
 
-## Download Keyring-Encrypted Document
+## Download Workspace Document
 
-Automatically detected — the CLI peeks at the document's encryption type and loads the group key if needed.
+Automatically detected -- the FileManager peeks at the document's encryption type and uses the workspace's group key.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
     participant Crypto
-    participant Disk as Local Storage
 
-    User->>CLI: opake download photo.jpg
+    User->>CLI: opake download photo.jpg --workspace family-photos
 
-    CLI->>CLI: Resolve filename → AT-URI
+    CLI->>Opake: ctx.opake() + file_context(Some("family-photos")) + file_manager(&ctx)
+    Opake->>Opake: mgr.download_at("photo.jpg")
 
-    CLI->>PDS: com.atproto.repo.getRecord (document)
-    PDS-->>CLI: Document record (keyringEncryption variant)
+    Opake->>PDS: com.atproto.repo.getRecord (document)
+    PDS-->>Opake: Document record (keyringEncryption variant)
 
-    CLI->>CLI: Detect keyring encryption, extract keyring rkey + rotation
+    Opake->>Opake: Detect keyring encryption, use workspace group key GK
 
-    CLI->>Disk: Load group key GK for this keyring at document's rotation
-    Disk-->>CLI: GK
+    Opake->>Crypto: unwrap_content_key_from_keyring(wrappedContentKey, GK)
+    Crypto-->>Opake: content key K
 
-    CLI->>Crypto: unwrap_content_key_from_keyring(wrappedContentKey, GK)
-    Crypto-->>CLI: content key K
+    Opake->>PDS: com.atproto.sync.getBlob (did, cid)
+    PDS-->>Opake: ciphertext bytes
 
-    CLI->>PDS: com.atproto.sync.getBlob (did, cid)
-    PDS-->>CLI: ciphertext bytes
+    Opake->>Crypto: decrypt_blob(K, nonce, ciphertext)
+    Crypto-->>Opake: plaintext
 
-    CLI->>Crypto: decrypt_blob(K, nonce, ciphertext)
-    Crypto-->>CLI: plaintext
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>CLI: Write plaintext to disk
     CLI->>User: Saved to ./photo.jpg

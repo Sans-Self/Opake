@@ -1,18 +1,14 @@
-use log::debug;
+use log::trace;
+
+use std::collections::HashMap;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore};
 use crate::error::Error;
-use crate::records::{self, KeyHistoryEntry, Keyring};
+use crate::records::{self, KeyHistoryEntry, Keyring, KeyringMember, Role};
 
 use super::KEYRING_COLLECTION;
-
-/// A remaining member's DID and public key, needed for re-wrapping.
-pub struct MemberKey<'a> {
-    pub did: &'a str,
-    pub public_key: &'a X25519PublicKey,
-}
 
 /// Remove a member from a keyring, rotate the group key, and re-wrap to
 /// remaining members.
@@ -35,7 +31,7 @@ pub async fn remove_member(
     client: &mut XrpcClient<impl Transport>,
     keyring_uri: &str,
     remove_did: &str,
-    remaining_keys: &[MemberKey<'_>],
+    remaining_keys: &[crypto::DidMember<'_>],
     old_group_key: &ContentKey,
     modified_at: &str,
     rng: &mut (impl CryptoRng + RngCore),
@@ -50,7 +46,7 @@ pub async fn remove_member(
         )));
     }
 
-    debug!("fetching keyring record {}", keyring_uri);
+    trace!("fetching keyring record {}", keyring_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -58,8 +54,15 @@ pub async fn remove_member(
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
     records::check_version(keyring.opake_version)?;
 
+    // Build a role map from existing members before mutation.
+    let role_map: HashMap<String, Role> = keyring
+        .members
+        .iter()
+        .map(|m| (m.did().to_owned(), m.role))
+        .collect();
+
     let original_count = keyring.members.len();
-    keyring.members.retain(|m| m.did != remove_did);
+    keyring.members.retain(|m| m.did() != remove_did);
 
     if keyring.members.len() == original_count {
         return Err(Error::InvalidRecord(format!(
@@ -75,28 +78,42 @@ pub async fn remove_member(
         members: keyring.members.clone(),
     });
 
-    debug!(
+    trace!(
         "rotating group key, re-wrapping to {} remaining members",
         remaining_keys.len()
     );
-    let did_keys: Vec<(&str, &X25519PublicKey)> = remaining_keys
-        .iter()
-        .map(|mk| (mk.did, mk.public_key))
+    let (new_group_key, new_wrapped) = crypto::create_group_key(remaining_keys, rng)?;
+
+    // Pair new wrapped keys with roles from the original keyring.
+    let new_members: Result<Vec<KeyringMember>, Error> = new_wrapped
+        .into_iter()
+        .map(|wk| {
+            let role = role_map.get(&wk.did).copied().ok_or_else(|| {
+                Error::InvalidRecord(format!(
+                    "{} is not a member of this keyring (cannot re-wrap)",
+                    wk.did
+                ))
+            })?;
+            Ok(KeyringMember {
+                wrapped_key: wk,
+                role,
+            })
+        })
         .collect();
-    let (new_group_key, new_wrapped) = crypto::create_group_key(&did_keys, rng)?;
+    let new_members = new_members?;
 
     // Re-encrypt metadata: decrypt with old group key, encrypt with new one
     let metadata: KeyringMetadata =
         crypto::decrypt_metadata(old_group_key, &keyring.encrypted_metadata)?;
     keyring.encrypted_metadata = crypto::encrypt_metadata(&new_group_key, &metadata, rng)?;
 
-    keyring.members = new_wrapped;
+    keyring.members = new_members;
     keyring.rotation += 1;
     keyring.modified_at = Some(modified_at.to_string());
 
     let new_rotation = keyring.rotation;
 
-    debug!("updating keyring record (rotation {})", new_rotation);
+    trace!("updating keyring record (rotation {})", new_rotation);
     client
         .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
         .await?;

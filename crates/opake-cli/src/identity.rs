@@ -143,8 +143,8 @@ mod tests {
         // Write an old-format identity (no signing keys) with correct permissions.
         let old_identity = serde_json::json!({
             "did": did,
-            "public_key": BASE64.encode([1u8; 32]),
-            "private_key": BASE64.encode([2u8; 32]),
+            "publicKey": BASE64.encode([1u8; 32]),
+            "privateKey": BASE64.encode([2u8; 32]),
         });
         storage.ensure_account_dir(did).unwrap();
         FileStorage::write_sensitive_file(

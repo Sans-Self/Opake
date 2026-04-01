@@ -9,9 +9,14 @@
 mod account_config;
 mod defs;
 mod directory;
+pub mod directory_update;
 mod document;
+mod document_update;
 mod grant;
+mod invitation;
+mod invitation_acceptance;
 mod keyring;
+pub mod keyring_update;
 mod pair_request;
 mod pair_response;
 mod pending_share;
@@ -25,11 +30,19 @@ pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 // Re-export all record types at the `records::` level.
 pub use account_config::{AccountConfigRecord, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY};
-pub use defs::{EncryptedMetadata, EncryptionEnvelope, KeyringRef, WrappedKey};
+pub use defs::{
+    DirectKeyWrapping, EncryptedMetadata, EncryptionEnvelope, KeyWrapping, KeyringKeyWrapping,
+    KeyringMember, KeyringRef, Role, WrappedKey,
+};
 pub use directory::Directory;
+pub use directory_update::{DirectoryUpdate, DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION};
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
+pub use document_update::{DocumentUpdate, DocumentUpdateRecord, DOCUMENT_UPDATE_COLLECTION};
 pub use grant::Grant;
+pub use invitation::{Invitation, INVITATION_COLLECTION};
+pub use invitation_acceptance::{InvitationAcceptance, INVITATION_ACCEPTANCE_COLLECTION};
 pub use keyring::{KeyHistoryEntry, Keyring};
+pub use keyring_update::{KeyringUpdate, KeyringUpdateRecord, KEYRING_UPDATE_COLLECTION};
 pub use pair_request::{PairRequest, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
@@ -55,13 +68,16 @@ macro_rules! impl_versioned {
 impl_versioned!(
     AccountConfigRecord,
     Directory,
+    DirectoryUpdateRecord,
     Document,
+    DocumentUpdateRecord,
     PublicKeyRecord,
     Grant,
     Keyring,
+    KeyringUpdateRecord,
     PairRequest,
     PairResponse,
-    PendingShare
+    PendingShare,
 );
 
 fn default_version() -> u32 {
@@ -132,18 +148,14 @@ mod tests {
     }
 
     fn dummy_encrypted_directory(created_at: &str) -> Directory {
-        let encryption = Encryption::Direct(DirectEncryption {
-            envelope: EncryptionEnvelope {
-                algo: "aes-256-gcm".into(),
-                nonce: AtBytes::from_raw(&[0u8; 12]),
-                keys: vec![WrappedKey {
-                    did: "did:plc:test".into(),
-                    ciphertext: AtBytes {
-                        encoded: "AAAA".into(),
-                    },
-                    algo: "x25519-hkdf-a256kw".into(),
-                }],
-            },
+        let key_wrapping = KeyWrapping::Direct(DirectKeyWrapping {
+            keys: vec![WrappedKey {
+                did: "did:plc:test".into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                algo: "x25519-hkdf-a256kw".into(),
+            }],
         });
         let encrypted_metadata = EncryptedMetadata {
             ciphertext: AtBytes {
@@ -153,7 +165,7 @@ mod tests {
                 encoded: "CCCC".into(),
             },
         };
-        Directory::new(encryption, encrypted_metadata, created_at.into())
+        Directory::new(key_wrapping, encrypted_metadata, created_at.into())
     }
 
     #[test]
@@ -167,7 +179,7 @@ mod tests {
         assert_eq!(parsed.created_at, "2026-03-01T00:00:00Z");
         assert!(parsed.modified_at.is_none());
         // Encryption envelope is present
-        assert!(matches!(parsed.encryption, Encryption::Direct(_)));
+        assert!(matches!(parsed.key_wrapping, KeyWrapping::Direct(_)));
     }
 
     #[test]
@@ -205,10 +217,14 @@ mod tests {
         let json = serde_json::json!({
             "opakeVersion": 1,
             "algo": "aes-256-gcm",
+            "owner": "did:plc:test",
             "members": [{
-                "did": "did:plc:test",
-                "ciphertext": { "$bytes": "AAAA" },
-                "algo": "x25519-hkdf-a256kw",
+                "wrappedKey": {
+                    "did": "did:plc:test",
+                    "ciphertext": { "$bytes": "AAAA" },
+                    "algo": "x25519-hkdf-a256kw",
+                },
+                "role": "manager",
             }],
             "rotation": 0,
             "encryptedMetadata": {
@@ -225,12 +241,16 @@ mod tests {
     #[test]
     fn keyring_key_history_omitted_when_empty() {
         let keyring = Keyring::new(
-            vec![WrappedKey {
-                did: "did:plc:test".into(),
-                ciphertext: AtBytes {
-                    encoded: "AAAA".into(),
+            "did:plc:test".into(),
+            vec![KeyringMember {
+                wrapped_key: WrappedKey {
+                    did: "did:plc:test".into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-hkdf-a256kw".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                role: Role::Manager,
             }],
             EncryptedMetadata {
                 ciphertext: AtBytes {
@@ -248,5 +268,206 @@ mod tests {
             json.get("keyHistory").is_none(),
             "empty key_history should be omitted from serialization"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // DocumentUpdate serde
+    // -----------------------------------------------------------------------
+
+    fn dummy_blob_ref() -> BlobRef {
+        BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink {
+                cid: "bafytest".into(),
+            },
+            mime_type: "application/octet-stream".into(),
+            size: 1024,
+        }
+    }
+
+    fn dummy_encrypted_metadata() -> EncryptedMetadata {
+        EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
+            },
+            nonce: AtBytes {
+                encoded: "BBBB".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn document_update_content_roundtrips() {
+        let record = DocumentUpdateRecord::update_content(
+            "at://did:plc:test/app.opake.document/abc".into(),
+            dummy_blob_ref(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DocumentUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed.update,
+            DocumentUpdate::UpdateContent { .. }
+        ));
+    }
+
+    #[test]
+    fn document_update_metadata_roundtrips() {
+        let record = DocumentUpdateRecord::update_metadata(
+            "at://did:plc:test/app.opake.document/abc".into(),
+            dummy_encrypted_metadata(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DocumentUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed.update,
+            DocumentUpdate::UpdateMetadata { .. }
+        ));
+    }
+
+    #[test]
+    fn document_update_supersede_roundtrips() {
+        let record = DocumentUpdateRecord::supersede(
+            "at://did:plc:test/app.opake.document/abc".into(),
+            dummy_blob_ref(),
+            dummy_encrypted_metadata(),
+            "at://did:plc:test/app.opake.document/old".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DocumentUpdateRecord = serde_json::from_str(&json).unwrap();
+        match &parsed.update {
+            DocumentUpdate::Supersede { supersedes, .. } => {
+                assert_eq!(supersedes, "at://did:plc:test/app.opake.document/old");
+            }
+            _ => panic!("expected Supersede variant"),
+        }
+    }
+
+    #[test]
+    fn document_update_optional_fields_omitted() {
+        let record = DocumentUpdateRecord::update_content(
+            "at://did:plc:test/app.opake.document/abc".into(),
+            dummy_blob_ref(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_value(&record).unwrap();
+        assert!(json.get("encryptedMetadata").is_none());
+        assert!(json.get("supersedes").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // DirectoryUpdate serde
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn directory_update_add_entry_roundtrips() {
+        let record = DirectoryUpdateRecord::add_entry(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/dir1".into(),
+            "at://did:plc:test/app.opake.document/doc1".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        match &parsed.update {
+            DirectoryUpdate::AddEntry {
+                directory, entry, ..
+            } => {
+                assert_eq!(directory, "at://did:plc:test/app.opake.directory/dir1");
+                assert_eq!(entry, "at://did:plc:test/app.opake.document/doc1");
+            }
+            _ => panic!("expected AddEntry variant"),
+        }
+    }
+
+    #[test]
+    fn directory_update_move_entry_roundtrips() {
+        let record = DirectoryUpdateRecord::move_entry(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/src".into(),
+            "at://did:plc:test/app.opake.directory/dst".into(),
+            "at://did:plc:test/app.opake.document/doc1".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed.update, DirectoryUpdate::MoveEntry { .. }));
+    }
+
+    #[test]
+    fn directory_update_create_directory_roundtrips() {
+        let record = DirectoryUpdateRecord::create_directory(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/parent".into(),
+            dummy_encrypted_metadata(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed.update,
+            DirectoryUpdate::CreateDirectory { .. }
+        ));
+    }
+
+    #[test]
+    fn directory_update_delete_directory_roundtrips() {
+        let record = DirectoryUpdateRecord::delete_directory(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/dir1".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed.update,
+            DirectoryUpdate::DeleteDirectory { .. }
+        ));
+    }
+
+    #[test]
+    fn directory_update_rename_directory_roundtrips() {
+        let record = DirectoryUpdateRecord::rename_directory(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/dir1".into(),
+            dummy_encrypted_metadata(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            parsed.update,
+            DirectoryUpdate::RenameDirectory { .. }
+        ));
+    }
+
+    #[test]
+    fn directory_update_remove_entry_roundtrips() {
+        let record = DirectoryUpdateRecord::remove_entry(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/dir1".into(),
+            "at://did:plc:test/app.opake.document/doc1".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: DirectoryUpdateRecord = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed.update, DirectoryUpdate::RemoveEntry { .. }));
+    }
+
+    #[test]
+    fn directory_update_optional_fields_omitted() {
+        let record = DirectoryUpdateRecord::add_entry(
+            "at://did:plc:test/app.opake.keyring/kr1".into(),
+            "at://did:plc:test/app.opake.directory/dir1".into(),
+            "at://did:plc:test/app.opake.document/doc1".into(),
+            "2026-03-21T00:00:00Z".into(),
+        );
+        let json = serde_json::to_value(&record).unwrap();
+        assert!(json.get("sourceDirectory").is_none());
+        assert!(json.get("targetDirectory").is_none());
+        assert!(json.get("parentDirectory").is_none());
+        assert!(json.get("encryptedMetadata").is_none());
     }
 }

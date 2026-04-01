@@ -30,6 +30,9 @@ pub enum Error {
         uris: Vec<String>,
     },
 
+    #[error("already exists: {0}")]
+    AlreadyExists(String),
+
     #[error("invalid record: {0}")]
     InvalidRecord(String),
 

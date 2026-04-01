@@ -3,8 +3,6 @@
 
 import { create } from "zustand";
 import { useAuthStore } from "@/stores/auth";
-import { storage } from "@/lib/indexeddbStorage";
-import { base64ToUint8Array } from "@/lib/encoding";
 import { truncateDid } from "@/lib/format";
 import { handleFromDid, pdsUrlFromDid } from "@/lib/did";
 import {
@@ -13,7 +11,7 @@ import {
   incomingGrantToFileItem,
   type InboxGrantItem,
 } from "@/lib/sharing";
-import type { OAuthSession } from "@/lib/storageTypes";
+
 import type { FileItem } from "@/components/cabinet/types";
 
 // ---------------------------------------------------------------------------
@@ -62,28 +60,11 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
       return;
     }
 
-    const { did, pdsUrl } = authState.session;
-
     try {
-      const [oauthSession, identity] = await Promise.all([
-        storage.loadSession(did) as Promise<OAuthSession>,
-        storage.loadIdentity(did),
-      ]);
-
-      const privateKey = base64ToUint8Array(identity.private_key);
-      const signingKey = identity.signing_key ? base64ToUint8Array(identity.signing_key) : null;
-
-      if (!signingKey) {
-        set({ inboxLoading: false, inboxLoaded: true });
-        return;
-      }
-
-      const grants = await listIncomingGrants(pdsUrl, did, oauthSession, signingKey).catch(
-        (err: unknown) => {
-          console.warn("[search] inbox fetch failed:", err);
-          return [] as InboxGrantItem[];
-        },
-      );
+      const grants = await listIncomingGrants().catch((err: unknown) => {
+        console.warn("[search] inbox fetch failed:", err);
+        return [] as InboxGrantItem[];
+      });
 
       if (grants.length === 0) {
         set({ inboxLoading: false, inboxLoaded: true });
@@ -116,7 +97,7 @@ export const useSearchStore = create<SearchState>()((set, get) => ({
         grants.map(async (grant) => {
           const ownerPds = pdsUrlCache.get(grant.ownerDid);
           if (!ownerPds) return null;
-          const resolved = await resolveIncomingGrant(grant, privateKey, ownerPds);
+          const resolved = await resolveIncomingGrant(grant);
           const ownerDisplay = handleCache.get(grant.ownerDid) ?? truncateDid(grant.ownerDid);
           return incomingGrantToFileItem(grant, ownerDisplay, resolved);
         }),

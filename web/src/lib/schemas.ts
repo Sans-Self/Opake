@@ -159,7 +159,7 @@ export const DirectorySnapshotEntrySchema = z.object({
 });
 
 export const DirectoryTreeSnapshotSchema = z.object({
-  rootUri: z.string().nullable(),
+  root_uri: z.string().optional(),
   directories: z.record(z.string(), DirectorySnapshotEntrySchema),
 });
 
@@ -168,22 +168,22 @@ export const DirectoryTreeSnapshotSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const AccountEntrySchema = z.object({
-  pdsUrl: z.string(),
+  pds_url: z.string(),
   handle: z.string(),
 });
 
 export const ConfigSchema = z.object({
-  defaultDid: z.string().nullable(),
+  default_did: z.string().optional(),
   accounts: z.record(z.string(), AccountEntrySchema),
-  cacheEnabled: z.boolean().optional(),
+  cache_enabled: z.boolean().optional(),
 });
 
 export const IdentitySchema = z.object({
   did: z.string(),
   public_key: z.string(),
   private_key: z.string(),
-  signing_key: z.string().nullable(),
-  verify_key: z.string().nullable(),
+  signing_key: z.string().optional(),
+  verify_key: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -198,31 +198,29 @@ export const DpopPublicJwkSchema = z.object({
 });
 
 export const DpopKeyPairSchema = z.object({
-  privateKey: z.string(),
-  publicJwk: DpopPublicJwkSchema,
+  private_key_b64: z.string(),
+  public_jwk: DpopPublicJwkSchema,
 });
 
 export const LegacySessionSchema = z.object({
   type: z.literal("legacy"),
   did: z.string(),
   handle: z.string(),
-  accessJwt: z.string(),
-  refreshJwt: z.string(),
+  access_jwt: z.string(),
+  refresh_jwt: z.string(),
 });
 
-// Rust serializes as "oAuth" (camelCase rename_all), TS uses "oauth".
-// Accept both and normalize to "oauth" to match the TS Session union.
 export const OAuthSessionSchema = z.object({
-  type: z.union([z.literal("oauth"), z.literal("oAuth")]).transform((): "oauth" => "oauth"),
+  type: z.literal("oauth"),
   did: z.string(),
   handle: z.string(),
-  accessToken: z.string(),
-  refreshToken: z.string(),
-  dpopKey: DpopKeyPairSchema,
-  tokenEndpoint: z.string(),
-  dpopNonce: z.string().nullable(),
-  expiresAt: z.number().nullable(),
-  clientId: z.string(),
+  access_token: z.string(),
+  refresh_token: z.string(),
+  dpop_key: DpopKeyPairSchema,
+  token_endpoint: z.string(),
+  dpop_nonce: z.string().optional(),
+  expires_at: z.number().optional(),
+  client_id: z.string(),
 });
 
 export const SessionSchema = z.union([LegacySessionSchema, OAuthSessionSchema]);
@@ -237,7 +235,7 @@ export const CachedRecordSchema = PdsRecordSchema;
 export const CachedCollectionSchema = <T extends z.ZodType>(valueSchema: T) =>
   z.object({
     records: z.array(CachedRecordSchema(valueSchema)),
-    fetchedAt: z.number(),
+    fetched_at: z.number(),
   });
 
 // ---------------------------------------------------------------------------
@@ -250,12 +248,110 @@ export const PkceChallengeSchema = z.object({
 });
 
 export const EphemeralKeypairSchema = z.object({
-  publicKey: Uint8ArraySchema,
-  privateKey: Uint8ArraySchema,
+  public_key: Uint8ArraySchema,
+  private_key: Uint8ArraySchema,
 });
 
 // ---------------------------------------------------------------------------
-// WASM PDS operation results (through flatten())
+// Tree proposals (from AppView sync, member-verified)
+// ---------------------------------------------------------------------------
+
+export const TreeProposalSchema = z.object({
+  uri: z.string(),
+  author_did: z.string(),
+  action_type: z.string(),
+  directory_uri: z.string().optional(),
+  entry_uri: z.string().optional(),
+  encrypted_metadata: z.unknown().optional(),
+  source_directory_uri: z.string().optional(),
+  target_directory_uri: z.string().optional(),
+  parent_directory_uri: z.string().optional(),
+  indexed_at: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// FileManager results (no session — signoff persists to IndexedDB)
+// ---------------------------------------------------------------------------
+
+/** Upload, delete, move, createDirectory → mutation outcome. */
+export const MutationResultSchema = z.object({
+  uri: z.string().optional(),
+  proposed: z.boolean(),
+});
+
+/** Download → filename + decrypted plaintext. */
+export const DownloadResultSchema2 = z.object({
+  filename: z.string(),
+  plaintext: z.custom<Uint8Array>(
+    (val) => ArrayBuffer.isView(val) && val.constructor.name === "Uint8Array",
+    "Expected Uint8Array",
+  ),
+});
+
+/** Recursive delete → counts of deleted items. */
+export const DeleteRecursiveResultSchema = z.object({
+  documents_deleted: z.number(),
+  directories_deleted: z.number(),
+});
+
+/** Grant metadata resolution (no blob download). */
+export const GrantMetadataResultSchema = z.object({
+  name: z.string(),
+  metadata: DocumentMetadataSchema,
+});
+
+/** Pair request creation result. */
+export const PairRequestResultSchema = z.object({
+  uri: z.string(),
+  rkey: z.string(),
+  ephemeral_public_key: z.custom<Uint8Array>(
+    (val) => ArrayBuffer.isView(val) && val.constructor.name === "Uint8Array",
+    "Expected Uint8Array",
+  ),
+  ephemeral_private_key: z.custom<Uint8Array>(
+    (val) => ArrayBuffer.isView(val) && val.constructor.name === "Uint8Array",
+    "Expected Uint8Array",
+  ),
+});
+
+/** Workspace create → keyring URI + group key. */
+export const WorkspaceCreateResultSchema = z.object({
+  keyring_uri: z.string(),
+  key: z.custom<Uint8Array>(
+    (val) => ArrayBuffer.isView(val) && val.constructor.name === "Uint8Array",
+    "Expected Uint8Array",
+  ),
+});
+
+/** Workspace list → keyrings array with decrypted metadata from WASM. */
+export const WorkspaceListResultSchema = z.object({
+  keyrings: z.array(
+    z.object({
+      uri: z.string(),
+      ownerDid: z.string(),
+      rotation: z.number(),
+      memberCount: z.number(),
+      createdAt: z.string().optional().nullable(),
+      name: z.string().optional().nullable(),
+      description: z.string().optional().nullable(),
+      icon: z.string().optional().nullable(),
+      members: z.array(z.unknown()),
+    }),
+  ),
+});
+
+/** Grant entry from listShares. */
+export const GrantEntrySchema = z.object({
+  uri: z.string(),
+  document: z.string(),
+  recipient: z.string(),
+  encrypted_metadata: EncryptedMetadataEnvelopeSchema,
+  expires_at: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// Legacy WASM results (old flatten() pattern — pending store migration cleanup)
 // ---------------------------------------------------------------------------
 
 /** Base result shape: most WASM PDS operations return at least a session. */
@@ -280,9 +376,9 @@ export const UpdateContentResultSchema = withSession({
 
 export const IncomingGrantSchema = z.object({
   uri: z.string(),
-  ownerDid: z.string(),
-  documentUri: z.string(),
-  createdAt: z.string(),
+  owner_did: z.string(),
+  document_uri: z.string(),
+  created_at: z.string(),
 });
 
 export const IncomingGrantsResultSchema = withSession({

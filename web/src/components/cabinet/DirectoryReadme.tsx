@@ -4,12 +4,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretUpIcon, FileTextIcon } from "@phosphor-icons/react";
 import { MarkdownPreview } from "./MarkdownPreview";
-import { decryptDocumentBlob } from "@/lib/preview";
-import { useDocumentsStore } from "@/stores/documents/store";
-import { useAuthStore } from "@/stores/auth";
-import { base64ToUint8Array } from "@/lib/encoding";
-import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
-import { storage } from "@/lib/indexeddbStorage";
+import { getOpakeWorker } from "@/lib/worker";
 
 const COLLAPSED_MAX_HEIGHT = 300;
 
@@ -37,35 +32,9 @@ export function evictReadmeCache(documentUri: string): void {
 
 async function fetchAndDecryptReadme(documentUri: string): Promise<ReadmeResult> {
   try {
-    const state = useDocumentsStore.getState();
-    const record = state.documentRecords[documentUri] as PdsRecord<DocumentRecord> | undefined;
-    if (!record) {
-      return { status: "error", message: "Document record not found" };
-    }
-
-    const authState = useAuthStore.getState();
-    if (authState.session.status !== "active") {
-      return { status: "error", message: "Not authenticated" };
-    }
-
-    const { did, pdsUrl } = authState.session;
-    const session = await storage.loadSession(did);
-    const identity = await storage.loadIdentity(did);
-    const privateKey = base64ToUint8Array(identity.private_key);
-
-    const storeItem = state.items[documentUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-    const knownMetadata: DocumentMetadata | undefined = storeItem?.decrypted
-      ? {
-          name: storeItem.name,
-          mimeType: storeItem.mimeType,
-          tags: storeItem.tags,
-          description: storeItem.description,
-        }
-      : undefined;
-
-    const blob = await decryptDocumentBlob(record, pdsUrl, did, privateKey, session, knownMetadata);
-    return { status: "ready", data: blob.plaintext };
+    const worker = getOpakeWorker();
+    const result = await worker.cabinetDownload(documentUri);
+    return { status: "ready", data: result.plaintext };
   } catch (error) {
     return {
       status: "error",

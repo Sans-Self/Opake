@@ -26,8 +26,11 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
 | `app.opake.document` | record | An encrypted file/document with metadata |
 | `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
-| `app.opake.keyring` | record | A named group with a shared symmetric key, wrapped to each member |
+| `app.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
+| `app.opake.keyringLeave` | record | Opt-out record — member signals they're leaving a workspace |
 | `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
+| `app.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
+| `app.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
 | `app.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
 | `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
 | `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
@@ -95,6 +98,53 @@ sequenceDiagram
 ```
 
 Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Removing a member archives the old rotation's member entries into `keyHistory`, then rotates GK and re-wraps to the remaining members — per-document content keys and blobs stay untouched. The history lets remaining members decrypt pre-rotation documents even on new devices.
+
+## Flow: Collaborative editing via documentUpdate
+
+```mermaid
+sequenceDiagram
+    participant Editor
+    participant EditorPDS as Editor's PDS
+    participant AppView
+    participant Owner
+    participant OwnerPDS as Owner's PDS
+
+    Note over Editor,EditorPDS: 1. Editor proposes an update
+    Editor->>OwnerPDS: getRecord(document) + getBlob(cid)
+    Editor->>Editor: Decrypt, edit, re-encrypt
+    Editor->>EditorPDS: uploadBlob(new ciphertext)
+    Editor->>EditorPDS: createRecord(documentUpdate)
+
+    EditorPDS->>AppView: firehose event
+    AppView->>AppView: validate editor role, index update
+
+    Note over Owner,OwnerPDS: 2. Owner applies the update
+    Owner->>AppView: GET /api/workspace/updates
+    AppView-->>Owner: pending documentUpdate records
+    Owner->>EditorPDS: getBlob(update cid)
+    Owner->>OwnerPDS: uploadBlob + putRecord(document)
+
+    Note over Editor,EditorPDS: 3. Cleanup
+    Editor->>EditorPDS: deleteRecord(documentUpdate)
+```
+
+The owner's client is the only one that writes to the canonical document record. Editors propose changes; owners apply them. Last-write-wins by `createdAt` for conflict resolution.
+
+## Flow: Leaving a workspace
+
+```mermaid
+sequenceDiagram
+    participant Member
+    participant MemberPDS as Member's PDS
+    participant AppView
+
+    Member->>MemberPDS: createRecord(keyringLeave, { keyring })
+    MemberPDS->>AppView: firehose event
+    AppView->>AppView: remove member from workspace index
+    Note right of AppView: Workspace disappears from<br/>member's sidebar
+```
+
+The member's wrapped key still exists on the keyring record — they *could* still decrypt. This is a visibility opt-out, not a key revocation. The owner can follow up with a proper removal (key rotation) if needed.
 
 ## Flow: Device-to-device identity pairing
 

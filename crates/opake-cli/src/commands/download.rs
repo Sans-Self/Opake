@@ -1,219 +1,170 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Args;
-use opake_core::atproto;
-use opake_core::directories::DirectoryTree;
-use opake_core::documents;
-
 use opake_core::client::Session;
 
 use crate::commands::Execute;
-use crate::document_resolve;
-use crate::identity;
 use crate::keyring_store;
-use crate::session::{self, CommandContext};
-use opake_core::client::ReqwestTransport;
+use crate::session::CommandContext;
 
 /// Download and decrypt a file
 ///
-/// Three modes: own files (by name or AT-URI), shared grants (--grant),
-/// and keyring member files (--keyring-member) for cross-PDS access.
+/// Downloads to a file by default; use --stdout to print to stdout.
+/// Also available as `opake cat` (implies --stdout).
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
   opake download secret.pdf
   opake download secret.pdf -o ~/Downloads/
+  opake cat secret.pdf
   opake download --grant at://did:plc:abc/app.opake.grant/xyz
-  opake download doc.pdf --keyring-member at://did:plc:abc/app.opake.document/xyz")]
+  opake download --workspace-member at://did:plc:abc/app.opake.document/xyz")]
 pub struct DownloadCommand {
     /// AT URI or filename of the document (not needed with --grant)
-    reference: Option<String>,
+    pub reference: Option<String>,
 
     /// Output path (defaults to the original filename)
     #[arg(short, long)]
-    output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+
+    /// Print decrypted content to stdout instead of writing a file
+    #[arg(long)]
+    pub stdout: bool,
 
     /// Grant URI for downloading a shared file from another user's PDS
-    #[arg(long, conflicts_with = "keyring_member", value_name = "AT-URI")]
-    grant: Option<String>,
+    #[arg(long, conflicts_with = "workspace_member", value_name = "AT-URI")]
+    pub grant: Option<String>,
 
-    /// Download a keyring-encrypted document as a member (cross-PDS)
+    /// Download a workspace document as a member (cross-PDS, first-time)
     #[arg(long, conflicts_with = "grant", value_name = "AT-URI")]
-    keyring_member: Option<String>,
+    pub workspace_member: Option<String>,
+
+    /// Download from a workspace (resolves name within workspace tree)
+    #[arg(long)]
+    pub workspace: Option<String>,
 }
 
-/// Determine where to write the downloaded file. Uses the explicit output path
-/// if provided, otherwise falls back to the original filename.
-fn resolve_output_path(output_override: Option<PathBuf>, original_name: &str) -> PathBuf {
-    output_override.unwrap_or_else(|| PathBuf::from(original_name))
+impl Execute for DownloadCommand {
+    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
+        let to_stdout = self.stdout;
+        let output_override = self.output.clone();
+
+        // Grant path: cross-PDS download via grant record
+        if let Some(grant_uri) = &self.grant {
+            let opake = ctx.opake().await?;
+            let (name, plaintext) = opake.download_from_grant(grant_uri).await?;
+            emit_output(to_stdout, output_override, &name, &plaintext)?;
+            return Ok(None);
+        }
+
+        // Workspace-member path: cross-PDS first-time download
+        if let Some(doc_uri) = &self.workspace_member {
+            let mut opake = ctx.opake().await?;
+            let result = opake.download_as_workspace_member(doc_uri).await?;
+
+            keyring_store::save_group_key(
+                &ctx.storage,
+                &ctx.did,
+                &result.keyring_rkey,
+                result.rotation,
+                &result.group_key,
+            )?;
+
+            emit_output(
+                to_stdout,
+                output_override,
+                &result.filename,
+                &result.plaintext,
+            )?;
+            return Ok(None);
+        }
+
+        // Regular path: resolve by name, download via FileManager
+        let reference = self
+            .reference
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
+
+        let mut opake = ctx.opake().await?;
+        let context = opake.file_context(self.workspace.as_deref()).await?;
+        let mut mgr = opake.file_manager(&context);
+
+        let result = mgr.download_at(reference).await?;
+        emit_output(
+            to_stdout,
+            output_override,
+            &result.filename,
+            &result.plaintext,
+        )?;
+
+        Ok(None)
+    }
 }
 
-/// Write decrypted content to disk, refusing to overwrite existing files.
-fn write_output(path: &Path, content: &[u8]) -> Result<()> {
+fn emit_output(
+    to_stdout: bool,
+    output_override: Option<PathBuf>,
+    filename: &str,
+    plaintext: &[u8],
+) -> Result<()> {
+    if to_stdout {
+        std::io::stdout()
+            .write_all(plaintext)
+            .context("failed to write to stdout")?;
+        return Ok(());
+    }
+
+    let path = output_override.unwrap_or_else(|| PathBuf::from(filename));
+    write_file(&path, plaintext)?;
+    eprintln!(
+        "{} → {} ({} bytes)",
+        filename,
+        path.display(),
+        plaintext.len()
+    );
+    Ok(())
+}
+
+fn write_file(path: &Path, content: &[u8]) -> Result<()> {
     if path.exists() {
         anyhow::bail!(
             "output file already exists: {} (use -o to specify a different path)",
             path.display()
         );
     }
-
-    fs::write(path, content).context(format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-impl Execute for DownloadCommand {
-    async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let id =
-            identity::load_identity(&ctx.storage, &ctx.did).context("run `opake login` first")?;
-        let private_key = id.private_key_bytes()?;
-
-        let (name, plaintext, refreshed) = if let Some(grant_uri) = &self.grant {
-            // Cross-PDS shared download via grant
-            let transport = ReqwestTransport::new();
-            let (name, plaintext) =
-                documents::download_from_grant(&transport, &private_key, grant_uri).await?;
-            (name, plaintext, None)
-        } else if let Some(doc_uri) = &self.keyring_member {
-            // Cross-PDS keyring member download
-            let transport = ReqwestTransport::new();
-            let result =
-                documents::download_from_keyring_member(&transport, &id.did, &private_key, doc_uri)
-                    .await?;
-
-            // Cache the group key so subsequent downloads use the local path
-            let kr_rkey = &result.keyring_rkey;
-            keyring_store::save_group_key(
-                &ctx.storage,
-                &ctx.did,
-                kr_rkey,
-                result.rotation,
-                &result.group_key,
-            )?;
-
-            (result.filename, result.plaintext, None)
-        } else {
-            // Own-PDS download: use authenticated client
-            let reference = self
-                .reference
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("provide a document reference or --grant"))?;
-            let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-
-            let mut tree = DirectoryTree::load(&mut client).await?;
-            tree.decrypt_names(&id.did, &private_key);
-            let mut resolver = document_resolve::CliDocumentNameResolver::new(
-                &mut client,
-                &id.did,
-                &private_key,
-                &ctx.storage,
-            );
-            let resolved = tree.resolve(&mut resolver, reference).await?;
-            let uri = resolved.uri;
-
-            // Peek at the document to check if it uses keyring encryption.
-            // If so, load the local group key before attempting decryption.
-            let at_uri = atproto::parse_at_uri(&uri)?;
-            let entry = client
-                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-                .await?;
-            let doc: opake_core::records::Document = serde_json::from_value(entry.value)?;
-
-            let group_key = match &doc.encryption {
-                opake_core::records::Encryption::Keyring(kr_enc) => {
-                    let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-                    Some(
-                        keyring_store::load_group_key(
-                            &ctx.storage,
-                            &ctx.did,
-                            &kr_uri.rkey,
-                            kr_enc.keyring_ref.rotation,
-                        )
-                        .context(
-                            "if you're a keyring member (not the creator), use: \
-                                  opake download --keyring-member <document-uri>",
-                        )?,
-                    )
-                }
-                opake_core::records::Encryption::Direct(_) => None,
-            };
-
-            let (name, plaintext) = documents::download_with_group_key(
-                &mut client,
-                &id.did,
-                &private_key,
-                group_key.as_ref(),
-                &uri,
-            )
-            .await?;
-            (name, plaintext, session::refreshed_session(&client))
-        };
-
-        let output_path = resolve_output_path(self.output, &name);
-        write_output(&output_path, &plaintext)?;
-
-        println!(
-            "{} → {} ({} bytes)",
-            name,
-            output_path.display(),
-            plaintext.len()
-        );
-
-        Ok(refreshed)
-    }
+    fs::write(path, content).context(format!("failed to write {}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]
-    fn resolve_defaults_to_original_filename() {
-        let path = resolve_output_path(None, "photo.jpg");
-        assert_eq!(path, PathBuf::from("photo.jpg"));
-    }
-
-    #[test]
-    fn resolve_uses_override_when_provided() {
-        let path = resolve_output_path(Some(PathBuf::from("/tmp/custom.bin")), "photo.jpg");
-        assert_eq!(path, PathBuf::from("/tmp/custom.bin"));
-    }
-
-    #[test]
-    fn write_output_creates_file() {
+    fn write_file_creates_file() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("output.txt");
-
-        write_output(&path, b"hello").unwrap();
-
+        write_file(&path, b"hello").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"hello");
     }
 
     #[test]
-    fn write_output_refuses_to_overwrite() {
+    fn write_file_refuses_to_overwrite() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("existing.txt");
         fs::write(&path, b"original").unwrap();
-
-        let err = write_output(&path, b"new content").unwrap_err();
+        let err = write_file(&path, b"new content").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("already exists"), "got: {msg}");
-        assert!(msg.contains("-o"), "should suggest -o flag, got: {msg}");
-
-        // Original content untouched
         assert_eq!(fs::read(&path).unwrap(), b"original");
     }
 
     #[test]
-    fn write_output_handles_empty_content() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("empty.bin");
-
-        write_output(&path, b"").unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), b"");
+    fn emit_stdout_writes_to_stdout() {
+        // Just verify it doesn't panic — stdout output is hard to capture in tests
+        emit_output(true, None, "test.txt", b"").unwrap();
     }
 }

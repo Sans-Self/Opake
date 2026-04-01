@@ -48,7 +48,7 @@ pub use mnemonic::{
 
 const WRAP_ALGO: &str = "x25519-hkdf-a256kw";
 const CONTENT_KEY_LEN: usize = 32;
-const AES_GCM_NONCE_LEN: usize = 12;
+pub const AES_GCM_NONCE_LEN: usize = 12;
 const X25519_KEY_LEN: usize = 32;
 const AES_KW_OVERHEAD: usize = 8;
 const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
@@ -86,6 +86,9 @@ impl<const N: usize> std::fmt::Debug for Redacted<'_, [u8; N]> {
 }
 
 /// A 256-bit AES content encryption key.
+///
+/// Zeroized on drop — RedactedDebug auto-generates Zeroize + Drop for
+/// `#[redact]` fields.
 #[derive(Clone, crate::RedactedDebug)]
 pub struct ContentKey(#[redact] pub [u8; CONTENT_KEY_LEN]);
 
@@ -96,7 +99,10 @@ pub type X25519PublicKey = [u8; X25519_KEY_LEN];
 pub type X25519PrivateKey = [u8; X25519_KEY_LEN];
 
 /// A DID string paired with its X25519 public key.
-pub type DidPublicKey<'a> = (&'a str, &'a X25519PublicKey);
+pub struct DidMember<'a> {
+    pub did: &'a str,
+    pub public_key: &'a X25519PublicKey,
+}
 
 /// An ephemeral X25519 keypair for one-time key exchanges (e.g. device pairing).
 /// The private key is held in memory only — never persisted.
@@ -116,11 +122,11 @@ pub fn generate_ephemeral_keypair(rng: &mut (impl CryptoRng + RngCore)) -> Ephem
 }
 
 /// The result of encrypting plaintext content.
-#[derive(crate::RedactedDebug)]
+///
+/// Not redacted — ciphertext and nonces are not secret (sent to PDS).
+#[derive(Debug)]
 pub struct EncryptedPayload {
-    #[redact]
     pub ciphertext: Vec<u8>,
-    #[redact]
     pub nonce: [u8; AES_GCM_NONCE_LEN],
 }
 

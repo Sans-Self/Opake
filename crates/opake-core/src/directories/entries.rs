@@ -1,24 +1,26 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
+use crate::client::ApplyWriteOp;
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
 use crate::records::{self, Directory};
 
 use super::DIRECTORY_COLLECTION;
 
-/// Add a child entry to a directory (fetch-modify-put).
+/// Fetch a directory and prepare an add-entry mutation.
 ///
-/// Rejects duplicates. Appends to the end of the entries list.
-pub async fn add_entry(
+/// Returns an `ApplyWriteOp::Update` that can be batched with other writes
+/// via `apply_writes` for atomicity. Does NOT write to the PDS.
+pub async fn prepare_add_entry(
     client: &mut XrpcClient<impl Transport>,
     directory_uri: &str,
     entry_uri: &str,
     modified_at: &str,
-) -> Result<(), Error> {
+) -> Result<ApplyWriteOp, Error> {
     let at_uri = atproto::parse_at_uri(directory_uri)?;
 
-    debug!("fetching directory {}", directory_uri);
+    trace!("fetching directory {} for add_entry", directory_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -32,29 +34,29 @@ pub async fn add_entry(
         )));
     }
 
-    debug!("adding entry {}", entry_uri);
     directory.entries.push(entry_uri.to_string());
     directory.modified_at = Some(modified_at.to_string());
 
-    client
-        .put_record(DIRECTORY_COLLECTION, &at_uri.rkey, &directory)
-        .await?;
-
-    Ok(())
+    Ok(ApplyWriteOp::Update {
+        collection: DIRECTORY_COLLECTION.into(),
+        rkey: at_uri.rkey.clone(),
+        record: serde_json::to_value(&directory)?,
+    })
 }
 
-/// Remove a child entry from a directory (fetch-modify-put).
+/// Fetch a directory and prepare a remove-entry mutation.
 ///
-/// Errors if the entry is not present.
-pub async fn remove_entry(
+/// Returns an `ApplyWriteOp::Update` that can be batched with other writes
+/// via `apply_writes` for atomicity. Does NOT write to the PDS.
+pub async fn prepare_remove_entry(
     client: &mut XrpcClient<impl Transport>,
     directory_uri: &str,
     entry_uri: &str,
     modified_at: &str,
-) -> Result<(), Error> {
+) -> Result<ApplyWriteOp, Error> {
     let at_uri = atproto::parse_at_uri(directory_uri)?;
 
-    debug!("fetching directory {}", directory_uri);
+    trace!("fetching directory {} for remove_entry", directory_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -71,14 +73,41 @@ pub async fn remove_entry(
         )));
     }
 
-    debug!("removed entry {}", entry_uri);
     directory.modified_at = Some(modified_at.to_string());
 
-    client
-        .put_record(DIRECTORY_COLLECTION, &at_uri.rkey, &directory)
-        .await?;
+    Ok(ApplyWriteOp::Update {
+        collection: DIRECTORY_COLLECTION.into(),
+        rkey: at_uri.rkey.clone(),
+        record: serde_json::to_value(&directory)?,
+    })
+}
 
-    Ok(())
+/// Add a child entry to a directory (fetch-modify-put).
+///
+/// Convenience wrapper around `prepare_add_entry` + `apply_writes`.
+/// For atomic multi-record operations, use `prepare_add_entry` directly.
+pub async fn add_entry(
+    client: &mut XrpcClient<impl Transport>,
+    directory_uri: &str,
+    entry_uri: &str,
+    modified_at: &str,
+) -> Result<(), Error> {
+    let op = prepare_add_entry(client, directory_uri, entry_uri, modified_at).await?;
+    client.apply_writes(&[op]).await
+}
+
+/// Remove a child entry from a directory (fetch-modify-put).
+///
+/// Convenience wrapper around `prepare_remove_entry` + `apply_writes`.
+/// For atomic multi-record operations, use `prepare_remove_entry` directly.
+pub async fn remove_entry(
+    client: &mut XrpcClient<impl Transport>,
+    directory_uri: &str,
+    entry_uri: &str,
+    modified_at: &str,
+) -> Result<(), Error> {
+    let op = prepare_remove_entry(client, directory_uri, entry_uri, modified_at).await?;
+    client.apply_writes(&[op]).await
 }
 
 #[cfg(test)]
@@ -101,7 +130,7 @@ mod tests {
         let directory = dummy_directory_with_entries("/", vec![]);
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(DIR_URI, &directory));
-        mock.enqueue(put_record_response(DIR_URI));
+        mock.enqueue(put_record_response(DIR_URI)); // applyWrites just needs 200
 
         let mut client = mock_client(mock.clone());
         add_entry(&mut client, DIR_URI, DOC_URI, "2026-03-01T12:00:00Z")
@@ -111,11 +140,15 @@ mod tests {
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 2);
         assert!(reqs[0].url.contains("getRecord"));
-        assert!(reqs[1].url.contains("putRecord"));
+        assert!(reqs[1].url.contains("applyWrites"));
 
         match &reqs[1].body {
             Some(RequestBody::Json(v)) => {
-                let updated: Directory = serde_json::from_value(v["record"].clone()).unwrap();
+                let writes = v["writes"].as_array().unwrap();
+                assert_eq!(writes.len(), 1);
+                let op = &writes[0];
+                assert_eq!(op["collection"], "app.opake.directory");
+                let updated: Directory = serde_json::from_value(op["value"].clone()).unwrap();
                 assert_eq!(updated.entries, vec![DOC_URI]);
                 assert_eq!(updated.modified_at.unwrap(), "2026-03-01T12:00:00Z");
             }
@@ -158,7 +191,7 @@ mod tests {
         let directory = dummy_directory_with_entries("/", vec![DOC_URI.into(), DOC_URI_2.into()]);
         let mock = MockTransport::new();
         mock.enqueue(get_record_response(DIR_URI, &directory));
-        mock.enqueue(put_record_response(DIR_URI));
+        mock.enqueue(put_record_response(DIR_URI)); // applyWrites just needs 200
 
         let mut client = mock_client(mock.clone());
         remove_entry(&mut client, DIR_URI, DOC_URI, "2026-03-01T12:00:00Z")
@@ -166,9 +199,12 @@ mod tests {
             .unwrap();
 
         let reqs = mock.requests();
+        assert!(reqs[1].url.contains("applyWrites"));
         match &reqs[1].body {
             Some(RequestBody::Json(v)) => {
-                let updated: Directory = serde_json::from_value(v["record"].clone()).unwrap();
+                let writes = v["writes"].as_array().unwrap();
+                let updated: Directory =
+                    serde_json::from_value(writes[0]["value"].clone()).unwrap();
                 assert_eq!(updated.entries, vec![DOC_URI_2]);
                 assert!(updated.modified_at.is_some());
             }

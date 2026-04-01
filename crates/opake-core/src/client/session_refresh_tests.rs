@@ -44,8 +44,8 @@ fn legacy_refresh_response_body(did: &str, handle: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "did": did,
         "handle": handle,
-        "accessJwt": "new-access-jwt",
-        "refreshJwt": "new-refresh-jwt",
+        "access_jwt": "new-access-jwt",
+        "refresh_jwt": "new-refresh-jwt",
     }))
     .unwrap()
 }

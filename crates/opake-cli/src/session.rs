@@ -1,8 +1,13 @@
+use chrono::Utc;
 use log::info;
-use opake_core::client::{Session, XrpcClient};
+use opake_core::client::{ReqwestTransport, Session, XrpcClient};
+use opake_core::crypto::OsRng;
+use opake_core::opake::Opake;
 
 use crate::config::{resolve_handle_or_did, FileStorage};
-use opake_core::client::ReqwestTransport;
+
+/// CLI's concrete Opake type — reqwest transport, OS randomness, filesystem storage.
+pub type CliOpake = Opake<ReqwestTransport, OsRng, FileStorage>;
 
 /// Resolved account context passed to every command.
 #[derive(Debug)]
@@ -10,6 +15,40 @@ pub struct CommandContext {
     pub did: String,
     pub pds_url: String,
     pub storage: FileStorage,
+}
+
+pub fn chrono_now() -> String {
+    Utc::now().to_rfc3339()
+}
+
+pub fn chrono_now_micros() -> u64 {
+    Utc::now().timestamp_micros() as u64
+}
+
+impl CommandContext {
+    /// Build an Opake context for this account.
+    ///
+    /// Reads identity and session from Storage, constructs an authenticated
+    /// XRPC client, and bundles everything into an Opake with Storage for
+    /// automatic session persistence.
+    pub async fn opake(&self) -> anyhow::Result<CliOpake> {
+        let mut opake = Opake::for_account(
+            self.storage.clone(),
+            Some(&self.did),
+            ReqwestTransport::new(),
+            OsRng,
+            chrono_now,
+            chrono_now_micros,
+        )
+        .await?;
+
+        // Runtime env override (dev/CI convenience — skip recompile).
+        if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
+            opake.set_appview_url(url);
+        }
+
+        Ok(opake)
+    }
 }
 
 /// Resolve `--as` flag (or default account) to a CommandContext.
@@ -23,7 +62,7 @@ pub fn resolve_context(
         Some(input) => resolve_handle_or_did(&config, input)?,
         None => config
             .default_did
-            .ok_or_else(|| anyhow::anyhow!("no default account: run `opake login` first"))?,
+            .ok_or_else(|| anyhow::anyhow!("no default account: log in first"))?,
     };
 
     let account = config
@@ -47,7 +86,7 @@ pub fn load_client(
     let account = config
         .accounts
         .get(did)
-        .ok_or_else(|| anyhow::anyhow!("no account for {did}: run `opake login` first"))?;
+        .ok_or_else(|| anyhow::anyhow!("no account for {did}: log in first"))?;
     let session: Session = storage.load_account_json(did, "session.json")?;
     let transport = ReqwestTransport::new();
     Ok(XrpcClient::with_session(
@@ -55,16 +94,6 @@ pub fn load_client(
         account.pds_url.clone(),
         session,
     ))
-}
-
-/// Extract the session if it was refreshed during this client's lifetime.
-/// Commands return this to the dispatch layer for persistence.
-pub fn refreshed_session(client: &XrpcClient<ReqwestTransport>) -> Option<Session> {
-    if client.session_refreshed() {
-        client.session().cloned()
-    } else {
-        None
-    }
 }
 
 /// Persist a refreshed session to disk for a specific account.
@@ -218,7 +247,7 @@ mod tests {
             })
             .unwrap();
         let err = resolve_context(&storage, None).unwrap_err();
-        assert!(err.to_string().contains("opake login"));
+        assert!(err.to_string().contains("log in first"));
     }
 
     #[test]

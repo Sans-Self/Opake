@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -28,7 +28,7 @@ pub async fn fetch_document_metadata(
 ) -> Result<DocumentMetadataResult, Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
 
-    debug!("fetching document record {}", uri);
+    trace!("fetching document record {}", uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;

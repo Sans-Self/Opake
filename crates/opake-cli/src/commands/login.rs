@@ -166,7 +166,9 @@ pub async fn ensure_identity_and_publish(
         println!("This account has an existing encryption identity.");
         println!("Run `opake pair request` to transfer it from another device,");
         println!("`opake recover` to restore from a seed phrase,");
-        println!("or `opake login --force` to generate a new identity (invalidates old one).");
+        println!(
+            "or `opake account login --force` to generate a new identity (invalidates old one)."
+        );
         return Ok(());
     }
 
@@ -227,7 +229,7 @@ fn generate_identity_from_seed_phrase(did: &str) -> Result<opake_core::storage::
         if entered != expected.as_str() {
             anyhow::bail!(
                 "word #{} incorrect (expected {expected:?}, got {entered:?}). \
-                 Please try again with `opake login`.",
+                 Please try again with `opake account login`.",
                 idx + 1,
             );
         }

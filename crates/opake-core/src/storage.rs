@@ -116,7 +116,20 @@ pub struct AccountEntry {
     pub handle: String,
 }
 
+/// Account summary returned by `Opake::list_accounts`.
+#[derive(Debug)]
+pub struct AccountInfo {
+    pub did: String,
+    pub pds_url: String,
+    pub handle: String,
+    pub is_default: bool,
+}
+
 /// Encryption + signing keypairs, stored as base64.
+///
+/// Encryption + signing keypairs, stored as base64.
+///
+/// `#[redact]` fields are zeroized on drop automatically (via RedactedDebug).
 /// The signing fields are optional for backward compat with old identity files.
 #[derive(crate::RedactedDebug, Serialize, Deserialize)]
 pub struct Identity {
@@ -153,6 +166,20 @@ impl Identity {
     /// Whether this identity has Ed25519 signing keys.
     pub fn has_signing_keys(&self) -> bool {
         self.signing_key.is_some() && self.verify_key.is_some()
+    }
+
+    /// Construct from raw key bytes (e.g. from WASM where keys arrive as Uint8Array).
+    ///
+    /// Creates an identity without signing keys — those are only needed for
+    /// AppView auth, not file operations.
+    pub fn from_raw_keys(did: &str, public_key: &[u8; 32], private_key: &[u8; 32]) -> Self {
+        Self {
+            did: did.to_string(),
+            public_key: BASE64.encode(public_key),
+            private_key: BASE64.encode(private_key),
+            signing_key: None,
+            verify_key: None,
+        }
     }
 
     /// Generate a new identity with random X25519 + Ed25519 keypairs.
@@ -323,6 +350,89 @@ pub trait Storage {
 
     /// Remove all cached data for an account.
     fn cache_clear(&self, did: &str) -> impl std::future::Future<Output = Result<(), Error>>;
+}
+
+// ---------------------------------------------------------------------------
+// NoopStorage — used by WASM (until IndexedDb lands) and tests.
+// ---------------------------------------------------------------------------
+
+/// No-op Storage implementation. All reads fail, all writes succeed silently.
+///
+/// WASM uses this because JS handles session persistence externally.
+/// Tests that need real storage should use the test harness in opake-cli.
+pub struct NoopStorage;
+
+impl Storage for NoopStorage {
+    async fn load_config(&self) -> Result<Config, Error> {
+        Err(Error::NotFound("NoopStorage".into()))
+    }
+    async fn save_config(&self, _config: &Config) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn load_identity(&self, _did: &str) -> Result<Identity, Error> {
+        Err(Error::NotFound("NoopStorage".into()))
+    }
+    async fn save_identity(&self, _did: &str, _identity: &Identity) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn load_session(&self, _did: &str) -> Result<Session, Error> {
+        Err(Error::NotFound("NoopStorage".into()))
+    }
+    async fn save_session(&self, _did: &str, _session: &Session) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn remove_account(&self, _did: &str) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn cache_get_record(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _uri: &str,
+    ) -> Result<Option<CachedRecord>, Error> {
+        Ok(None)
+    }
+    async fn cache_put_records(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _records: &[CachedRecord],
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn cache_remove_record(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _uri: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn cache_get_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+    ) -> Result<Option<CachedCollection>, Error> {
+        Ok(None)
+    }
+    async fn cache_put_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+        _data: &CachedCollection,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn cache_invalidate_collection(
+        &self,
+        _did: &str,
+        _collection: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn cache_clear(&self, _did: &str) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

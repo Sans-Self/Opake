@@ -2,15 +2,37 @@ defmodule OpakeAppview.Jetstream.Event do
   @moduledoc """
   Parses raw Jetstream JSON messages into tagged tuples for the indexer.
 
-  Only `app.opake.grant` and `app.opake.keyring` commit events are recognized.
-  Everything else (identity events, unknown collections, malformed JSON) returns
-  `:ignore`. No full record validation — the appview indexes metadata fields,
-  not crypto payloads.
+  Recognized collections: `app.opake.grant`, `app.opake.keyring`,
+  `app.opake.directory`, and `app.opake.document`. Everything else
+  (identity events, unknown collections, malformed JSON) returns `:ignore`.
   """
 
   @grant_collection "app.opake.grant"
   @keyring_collection "app.opake.keyring"
+  @directory_collection "app.opake.directory"
+  @document_collection "app.opake.document"
+  @document_update_collection "app.opake.documentUpdate"
+  @directory_update_collection "app.opake.directoryUpdate"
+  @keyring_update_collection "app.opake.keyringUpdate"
 
+  @type event ::
+          {:upsert_grant, map()}
+          | {:delete_grant, map()}
+          | {:upsert_keyring, map()}
+          | {:delete_keyring, map()}
+          | {:upsert_directory, map()}
+          | {:delete_directory, map()}
+          | {:upsert_document, map()}
+          | {:delete_document, map()}
+          | {:upsert_document_update, map()}
+          | {:delete_document_update, map()}
+          | {:upsert_directory_update, map()}
+          | {:delete_directory_update, map()}
+          | {:upsert_keyring_update, map()}
+          | {:delete_keyring_update, map()}
+          | :ignore
+
+  @spec parse(binary()) :: event()
   def parse(json) when is_binary(json) do
     case Jason.decode(json) do
       {:ok, payload} -> parse_payload(payload)
@@ -18,17 +40,26 @@ defmodule OpakeAppview.Jetstream.Event do
     end
   end
 
-  defp parse_payload(%{"kind" => "commit", "did" => did, "time_us" => time_us, "commit" => commit}) do
+  defp parse_payload(%{
+         "kind" => "commit",
+         "did" => did,
+         "time_us" => time_us,
+         "commit" => commit
+       }) do
     parse_commit(did, time_us, commit)
   end
 
   defp parse_payload(_), do: :ignore
 
-  defp parse_commit(did, time_us, %{
-         "operation" => operation,
-         "collection" => collection,
-         "rkey" => rkey
-       } = commit) do
+  defp parse_commit(
+         did,
+         time_us,
+         %{
+           "operation" => operation,
+           "collection" => collection,
+           "rkey" => rkey
+         } = commit
+       ) do
     uri = "at://#{did}/#{collection}/#{rkey}"
 
     case {collection, operation} do
@@ -43,6 +74,36 @@ defmodule OpakeAppview.Jetstream.Event do
 
       {@keyring_collection, "delete"} ->
         {:delete_keyring, %{uri: uri, time_us: time_us}}
+
+      {@directory_collection, op} when op in ["create", "update"] ->
+        parse_directory_upsert(uri, did, time_us, commit)
+
+      {@directory_collection, "delete"} ->
+        {:delete_directory, %{directory_uri: uri, time_us: time_us}}
+
+      {@document_collection, op} when op in ["create", "update"] ->
+        parse_document_upsert(uri, did, time_us, commit)
+
+      {@document_collection, "delete"} ->
+        {:delete_document, %{document_uri: uri, time_us: time_us}}
+
+      {@document_update_collection, op} when op in ["create", "update"] ->
+        parse_document_update_upsert(uri, did, time_us, commit)
+
+      {@document_update_collection, "delete"} ->
+        {:delete_document_update, %{uri: uri, time_us: time_us}}
+
+      {@directory_update_collection, op} when op in ["create", "update"] ->
+        parse_directory_update_upsert(uri, did, time_us, commit)
+
+      {@directory_update_collection, "delete"} ->
+        {:delete_directory_update, %{uri: uri, time_us: time_us}}
+
+      {@keyring_update_collection, op} when op in ["create", "update"] ->
+        parse_keyring_update_upsert(uri, did, time_us, commit)
+
+      {@keyring_update_collection, "delete"} ->
+        {:delete_keyring_update, %{uri: uri, time_us: time_us}}
 
       _ ->
         :ignore
@@ -76,20 +137,195 @@ defmodule OpakeAppview.Jetstream.Event do
   defp parse_keyring_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
     members = record["members"] || []
 
-    member_dids =
+    member_entries =
       members
       |> Enum.filter(&is_map/1)
-      |> Enum.map(& &1["did"])
-      |> Enum.filter(&is_binary/1)
+      |> Enum.map(fn m ->
+        wrapped = m["wrappedKey"] || %{}
+        %{did: wrapped["did"], role: m["role"], wrapped_key: wrapped}
+      end)
+      |> Enum.filter(fn entry -> is_binary(entry.did) end)
 
     {:upsert_keyring,
      %{
        uri: uri,
        owner_did: did,
-       member_dids: member_dids,
+       member_entries: member_entries,
+       rotation: record["rotation"],
+       encrypted_metadata: record["encryptedMetadata"],
+       created_at: record["createdAt"],
        time_us: time_us
      }}
   end
 
   defp parse_keyring_upsert(_, _, _, _), do: :ignore
+
+  defp parse_directory_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+    key_wrapping = record["keyWrapping"]
+    encrypted_metadata = record["encryptedMetadata"]
+
+    entries =
+      case record["entries"] do
+        list when is_list(list) -> Enum.filter(list, &is_binary/1)
+        _ -> []
+      end
+
+    keyring_uri =
+      case key_wrapping do
+        %{"keyringRef" => %{"keyring" => kr_uri}} when is_binary(kr_uri) -> kr_uri
+        _ -> nil
+      end
+
+    {:upsert_directory,
+     %{
+       directory_uri: uri,
+       keyring_uri: keyring_uri,
+       owner_did: did,
+       entries: entries,
+       encrypted_metadata: encrypted_metadata,
+       key_wrapping: key_wrapping,
+       time_us: time_us
+     }}
+  end
+
+  defp parse_directory_upsert(_, _, _, _), do: :ignore
+
+  defp parse_document_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+    encryption = record["encryption"]
+    encrypted_metadata = record["encryptedMetadata"]
+    blob = record["blob"]
+
+    {keyring_uri, rotation} =
+      case encryption do
+        %{"keyringRef" => %{"keyring" => kr_uri, "rotation" => rot}}
+        when is_binary(kr_uri) and is_integer(rot) ->
+          {kr_uri, rot}
+
+        _ ->
+          {nil, nil}
+      end
+
+    {:upsert_document,
+     %{
+       document_uri: uri,
+       keyring_uri: keyring_uri,
+       owner_did: did,
+       rotation: rotation,
+       encrypted_metadata: encrypted_metadata,
+       encryption: encryption,
+       blob_ref: blob,
+       time_us: time_us
+     }}
+  end
+
+  defp parse_document_upsert(_, _, _, _), do: :ignore
+
+  defp parse_document_update_upsert(uri, did, time_us, %{"record" => record})
+       when is_map(record) do
+    document = record["document"]
+    supersedes = record["supersedes"]
+
+    if is_binary(document) do
+      {:upsert_document_update,
+       %{
+         uri: uri,
+         author_did: did,
+         document_uri: document,
+         supersedes_uri: supersedes,
+         time_us: time_us
+       }}
+    else
+      :ignore
+    end
+  end
+
+  defp parse_document_update_upsert(_, _, _, _), do: :ignore
+
+  defp parse_directory_update_upsert(uri, did, time_us, %{"record" => record})
+       when is_map(record) do
+    keyring = record["keyring"]
+    action_type = record["actionType"]
+
+    valid_fields = is_binary(keyring) and is_binary(action_type) and
+      valid_directory_update_fields?(action_type, record)
+
+    if not valid_fields and is_binary(action_type) do
+      require Logger
+      Logger.error("Rejected directoryUpdate #{uri}: #{action_type} missing required camelCase fields")
+    end
+
+    if valid_fields do
+      {:upsert_directory_update,
+       %{
+         uri: uri,
+         keyring_uri: keyring,
+         author_did: did,
+         action_type: action_type,
+         directory_uri: record["directory"],
+         entry_uri: record["entry"],
+         encrypted_metadata: record["encryptedMetadata"],
+         source_directory_uri: record["sourceDirectory"],
+         target_directory_uri: record["targetDirectory"],
+         parent_directory_uri: record["parentDirectory"],
+         time_us: time_us
+       }}
+    else
+      :ignore
+    end
+  end
+
+  defp parse_directory_update_upsert(_, _, _, _), do: :ignore
+
+  # Validate that action-specific required fields are present (camelCase wire format).
+  # Rejects records with snake_case fields from old WASM builds.
+  defp valid_directory_update_fields?("addEntry", r),
+    do: is_binary(r["directory"]) and is_binary(r["entry"])
+
+  defp valid_directory_update_fields?("removeEntry", r),
+    do: is_binary(r["directory"]) and is_binary(r["entry"])
+
+  defp valid_directory_update_fields?("moveEntry", r),
+    do: is_binary(r["sourceDirectory"]) and is_binary(r["targetDirectory"]) and is_binary(r["entry"])
+
+  defp valid_directory_update_fields?("createDirectory", r),
+    do: is_binary(r["parentDirectory"]) and is_map(r["encryptedMetadata"])
+
+  defp valid_directory_update_fields?("deleteDirectory", r),
+    do: is_binary(r["directory"])
+
+  defp valid_directory_update_fields?("renameDirectory", r),
+    do: is_binary(r["directory"]) and is_map(r["encryptedMetadata"])
+
+  defp valid_directory_update_fields?(_, _), do: true
+
+  defp parse_keyring_update_upsert(uri, did, time_us, %{"record" => record})
+       when is_map(record) do
+    keyring = record["keyring"]
+    action_type = record["actionType"]
+
+    if is_binary(keyring) and is_binary(action_type) do
+      member_public_key =
+        case record["memberPublicKey"] do
+          %{"$bytes" => b64} when is_binary(b64) -> Base.decode64!(b64)
+          _ -> nil
+        end
+
+      {:upsert_keyring_update,
+       %{
+         uri: uri,
+         keyring_uri: keyring,
+         author_did: did,
+         action_type: action_type,
+         member_did: record["memberDid"],
+         member_public_key: member_public_key,
+         role: record["role"],
+         encrypted_metadata: record["encryptedMetadata"],
+         time_us: time_us
+       }}
+    else
+      :ignore
+    end
+  end
+
+  defp parse_keyring_update_upsert(_, _, _, _), do: :ignore
 end

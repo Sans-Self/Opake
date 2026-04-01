@@ -86,10 +86,10 @@ defmodule OpakeAppview.Auth.PlugTest do
     conn = get(conn, "/api/health")
 
     response = json_response(conn, 200)
-    assert is_boolean(response["indexerConnected"])
-    assert Map.has_key?(response, "cursorTime")
-    assert Map.has_key?(response, "cursorAgeSecs")
-    refute Map.has_key?(response, "grantCount")
-    refute Map.has_key?(response, "keyringCount")
+    assert is_boolean(response["indexer_connected"])
+    assert Map.has_key?(response, "cursor_time")
+    assert Map.has_key?(response, "cursor_age_secs")
+    refute Map.has_key?(response, "grant_count")
+    refute Map.has_key?(response, "keyring_count")
   end
 end

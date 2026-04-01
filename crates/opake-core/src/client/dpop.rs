@@ -23,11 +23,9 @@ use super::transport::HttpResponse;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DpopKeyPair {
     /// SEC1-encoded private key bytes (32 bytes), base64url-encoded for storage.
-    #[serde(rename = "privateKey")]
     private_key_b64: String,
     /// JWK public key (the `x` and `y` coordinates). Embedded directly in
     /// every DPoP proof header.
-    #[serde(rename = "publicJwk")]
     public_jwk: DpopPublicJwk,
 }
 

@@ -85,6 +85,8 @@ fn keyring_metadata_roundtrip() {
     let metadata = KeyringMetadata {
         name: "family-photos".into(),
         description: Some("Photos from the holidays".into()),
+        icon: None,
+        enforce_revocation: None,
     };
 
     let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();
@@ -103,6 +105,8 @@ fn keyring_metadata_minimal() {
     let metadata = KeyringMetadata {
         name: "bare".into(),
         description: None,
+        icon: None,
+        enforce_revocation: None,
     };
 
     let encrypted = encrypt_metadata(&key, &metadata, &mut OsRng).unwrap();

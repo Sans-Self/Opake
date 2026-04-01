@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, RngCore, X25519PrivateKey};
@@ -28,7 +28,7 @@ pub async fn update_document_metadata(
 
     mutator(&mut metadata);
 
-    debug!("re-encrypting metadata for {}", uri);
+    trace!("re-encrypting metadata for {}", uri);
     let encrypted = crypto::encrypt_metadata(&result.content_key, &metadata, rng)?;
     doc.encrypted_metadata = encrypted;
 

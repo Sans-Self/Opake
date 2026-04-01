@@ -6,7 +6,6 @@ pub mod config;
 pub mod daemon;
 pub mod download;
 pub mod inbox;
-pub mod keyring;
 pub mod login;
 pub mod logout;
 pub mod ls;
@@ -26,6 +25,7 @@ pub mod share_group;
 pub mod shared;
 pub mod tree;
 pub mod upload;
+pub mod workspace;
 
 use anyhow::Result;
 use opake_core::client::Session;
@@ -38,6 +38,3 @@ pub trait Execute {
         ctx: &CommandContext,
     ) -> impl std::future::Future<Output = Result<Option<Session>>>;
 }
-
-/// Re-export for CLI commands that need to build directory encryption envelopes.
-pub use opake_core::directories::encrypt_directory_envelope as encrypt_directory;

@@ -22,15 +22,15 @@ defmodule OpakeAppview.Application do
         OpakeAppview.Auth.KeyCache,
         OpakeAppviewWeb.Endpoint
       ] ++
-        maybe_consumer()
+        maybe_indexer_children()
 
     opts = [strategy: :one_for_one, name: OpakeAppview.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
-  defp maybe_consumer do
+  defp maybe_indexer_children do
     if Application.get_env(:opake_appview, :indexer_enabled, true) do
-      [OpakeAppview.Jetstream.Consumer]
+      [OpakeAppview.TombstoneCleanup, OpakeAppview.Jetstream.Consumer]
     else
       []
     end

@@ -12,7 +12,7 @@ impl AccountsCommand {
         let config = storage.load_config_anyhow()?;
 
         if config.accounts.is_empty() {
-            println!("no accounts — run `opake login` to add one");
+            println!("no accounts — log in to add one");
             return Ok(());
         }
 

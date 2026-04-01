@@ -36,6 +36,14 @@ pub struct KeyringMetadata {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Base64-encoded workspace icon (128x128).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// When true, the daemon auto-enqueues bulk re-encryption after any member
+    /// removal. Without this, old content keys remain wrapped under the previous
+    /// group key — safe but not forward-secret.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforce_revocation: Option<bool>,
 }
 
 /// Plaintext grant metadata. Encrypted with the document's content key so both

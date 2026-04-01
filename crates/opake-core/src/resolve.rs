@@ -4,7 +4,7 @@
 // call that takes a handle or DID string and returns everything needed to
 // encrypt data for that user.
 
-use log::debug;
+use log::trace;
 
 use crate::client::{
     get_record_public, pds_from_did_document, resolve_did_document, resolve_handle,
@@ -44,25 +44,25 @@ pub async fn resolve_pds_for_login(
     handle_or_did: &str,
 ) -> Result<(String, String, Option<String>), Error> {
     let did = if handle_or_did.starts_with("did:") {
-        debug!("input is already a DID: {}", handle_or_did);
+        trace!("input is already a DID: {}", handle_or_did);
         handle_or_did.to_string()
     } else {
         match resolve_handle_wellknown(transport, handle_or_did).await {
             Ok(did) => {
-                debug!("resolved via .well-known: {}", did);
+                trace!("resolved via .well-known: {}", did);
                 did
             }
             Err(_) => {
-                debug!(".well-known failed, falling back to public API");
+                trace!(".well-known failed, falling back to public API");
                 resolve_handle(transport, BSKY_PUBLIC_API, handle_or_did).await?
             }
         }
     };
 
-    debug!("fetching DID document for {}", did);
+    trace!("fetching DID document for {}", did);
     let doc = resolve_did_document(transport, &did).await?;
     let pds_url = pds_from_did_document(&doc)?;
-    debug!("resolved PDS: {}", pds_url);
+    trace!("resolved PDS: {}", pds_url);
 
     let handle = doc
         .also_known_as
@@ -104,28 +104,28 @@ pub async fn resolve_identity(
 ) -> Result<ResolvedIdentity, Error> {
     // Step 1: Resolve to DID
     let did = if input.starts_with("did:") {
-        debug!("input is already a DID: {}", input);
+        trace!("input is already a DID: {}", input);
         input.to_string()
     } else {
         match resolve_handle_wellknown(transport, input).await {
             Ok(did) => {
-                debug!("resolved via .well-known: {}", did);
+                trace!("resolved via .well-known: {}", did);
                 did
             }
             Err(_) => {
-                debug!(".well-known failed, falling back to caller PDS");
+                trace!(".well-known failed, falling back to caller PDS");
                 resolve_handle(transport, caller_pds_url, input).await?
             }
         }
     };
 
     // Step 2: Fetch DID document
-    debug!("fetching DID document for {}", did);
+    trace!("fetching DID document for {}", did);
     let doc = resolve_did_document(transport, &did).await?;
 
     // Step 3: Extract PDS URL
     let pds_url = pds_from_did_document(&doc)?;
-    debug!("PDS for {}: {}", did, pds_url);
+    trace!("PDS for {}: {}", did, pds_url);
 
     // Step 4: Extract handle from alsoKnownAs
     let handle = doc
@@ -135,7 +135,7 @@ pub async fn resolve_identity(
         .map(|h| h.to_string());
 
     // Step 5: Fetch public key record
-    debug!("fetching public key from {}", pds_url);
+    trace!("fetching public key from {}", pds_url);
     let entry = get_record_public(
         transport,
         &pds_url,

@@ -43,10 +43,13 @@ export function FileGridCard({
   const isFolder = item.kind === "folder";
   const isClickable = isFolder || item.decrypted;
 
+  const isProposal = item.proposal != null;
+
   const cardClassName = [
     "card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all",
     isClickable ? "cursor-pointer" : "",
     isActive ? "border-primary/30 shadow-panel-md" : "",
+    isProposal ? "opacity-65 border-dashed" : "",
   ].join(" ");
 
   return (

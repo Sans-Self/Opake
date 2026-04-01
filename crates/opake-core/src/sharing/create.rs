@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, RngCore, X25519PublicKey};
@@ -24,7 +24,7 @@ pub async fn create_grant(
     params: &GrantParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<String, Error> {
-    debug!("wrapping content key for {}", params.recipient_did);
+    trace!("wrapping content key for {}", params.recipient_did);
     let wrapped_key = crypto::wrap_key(
         params.content_key,
         params.recipient_public_key,
@@ -46,7 +46,7 @@ pub async fn create_grant(
         params.created_at.to_string(),
     );
 
-    debug!("creating grant record");
+    trace!("creating grant record");
     let record_ref = client.create_record(GRANT_COLLECTION, &grant).await?;
     Ok(record_ref.uri)
 }

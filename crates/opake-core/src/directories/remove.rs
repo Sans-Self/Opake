@@ -4,7 +4,7 @@
 // post-order (children before parents) so the PDS never sees dangling
 // references mid-operation.
 
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -46,7 +46,7 @@ async fn remove_document(
 ) -> Result<RemoveResult, Error> {
     let at_uri = atproto::parse_at_uri(&target.uri)?;
 
-    debug!("deleting document {}", target.uri);
+    trace!("deleting document {}", target.uri);
     client
         .delete_record(&at_uri.collection, &at_uri.rkey)
         .await?;
@@ -96,7 +96,7 @@ async fn remove_directory(
 
         for (uri, kind) in &descendants {
             let descendant_uri = atproto::parse_at_uri(uri)?;
-            debug!("deleting descendant {}", uri);
+            trace!("deleting descendant {}", uri);
             client
                 .delete_record(&descendant_uri.collection, &descendant_uri.rkey)
                 .await?;
@@ -108,7 +108,7 @@ async fn remove_directory(
         }
     }
 
-    debug!("deleting directory {}", target.uri);
+    trace!("deleting directory {}", target.uri);
     client
         .delete_record(DIRECTORY_COLLECTION, &at_uri.rkey)
         .await?;

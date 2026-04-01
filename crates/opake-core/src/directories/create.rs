@@ -1,8 +1,8 @@
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{Directory, EncryptedMetadata, Encryption};
+use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 
 use super::DIRECTORY_COLLECTION;
 
@@ -12,13 +12,13 @@ use super::DIRECTORY_COLLECTION;
 /// the content key before calling this function.
 pub async fn create_directory(
     client: &mut XrpcClient<impl Transport>,
-    encryption: Encryption,
+    key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     created_at: &str,
 ) -> Result<String, Error> {
-    let directory = Directory::new(encryption, encrypted_metadata, created_at.to_string());
+    let directory = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
 
-    debug!("creating directory");
+    trace!("creating directory");
     let record_ref = client
         .create_record(DIRECTORY_COLLECTION, &directory)
         .await?;
@@ -45,7 +45,7 @@ mod tests {
         let mut client = mock_client(mock.clone());
         let result = create_directory(
             &mut client,
-            dir.encryption,
+            dir.key_wrapping,
             dir.encrypted_metadata,
             "2026-03-01T00:00:00Z",
         )
@@ -62,7 +62,7 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["collection"], "app.opake.directory");
                 let record: Directory = serde_json::from_value(v["record"].clone()).unwrap();
-                assert!(matches!(record.encryption, Encryption::Direct(_)));
+                assert!(matches!(record.key_wrapping, KeyWrapping::Direct(_)));
                 assert!(record.entries.is_empty());
             }
             _ => panic!("expected JSON body"),
@@ -82,7 +82,7 @@ mod tests {
         let mut client = mock_client(mock);
         let err = create_directory(
             &mut client,
-            dir.encryption,
+            dir.key_wrapping,
             dir.encrypted_metadata,
             "2026-03-01T00:00:00Z",
         )

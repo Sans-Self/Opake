@@ -293,7 +293,7 @@ async fn refresh_token_error_suggests_login() {
     .await
     .unwrap_err();
 
-    assert!(err.to_string().contains("opake login"));
+    assert!(err.to_string().contains("token refresh failed"));
 }
 
 // -- validation --

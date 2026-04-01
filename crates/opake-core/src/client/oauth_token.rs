@@ -191,10 +191,7 @@ pub async fn refresh_token(
     .await?;
 
     if response.status != 200 {
-        return Err(token_error(
-            &response,
-            "token refresh failed — run `opake login` again",
-        ));
+        return Err(token_error(&response, "token refresh failed"));
     }
 
     let token_response: TokenResponse = serde_json::from_slice(&response.body)

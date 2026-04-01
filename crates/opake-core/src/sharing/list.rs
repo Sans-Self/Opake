@@ -6,7 +6,6 @@ use super::GRANT_COLLECTION;
 
 /// A grant listing entry with its AT-URI and parsed metadata.
 #[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GrantEntry {
     pub uri: String,
     pub document: String,

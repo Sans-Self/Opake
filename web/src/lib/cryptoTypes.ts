@@ -22,10 +22,9 @@ export interface DpopPublicJwk {
 }
 
 // Mirrors: opake-core DpopKeyPair (client/dpop.rs)
-// Serialized via serde — field names match Rust's #[serde(rename)]
 export interface DpopKeyPair {
-  privateKey: string; // base64url P-256 secret
-  publicJwk: DpopPublicJwk;
+  private_key_b64: string; // base64url P-256 secret
+  public_jwk: DpopPublicJwk;
 }
 
 // Mirrors: opake-core PkceChallenge (client/oauth_discovery.rs)
@@ -36,6 +35,6 @@ export interface PkceChallenge {
 
 // Mirrors: opake-core EphemeralKeypair (crypto/mod.rs)
 export interface EphemeralKeypair {
-  publicKey: Uint8Array;
-  privateKey: Uint8Array;
+  public_key: Uint8Array;
+  private_key: Uint8Array;
 }

@@ -1,14 +1,13 @@
-// Shared decrypt-without-download logic for file previews and downloads.
+// Decrypt functions for file previews — thin wrappers around the worker API.
+//
+// Each returns a thunk `() => Promise<DecryptedBlob>` suitable for passing
+// to `<FilePreview decrypt={...} />`.
 
-import { authenticatedBlobFetch } from "@/lib/api";
-import { base64ToUint8Array } from "@/lib/encoding";
 import { getOpakeWorker } from "@/lib/worker";
-import { unwrapDirectContentKey, decryptEnvelope } from "@/stores/documents/decrypt";
 import { useDocumentsStore } from "@/stores/documents/store";
-import { useAuthStore } from "@/stores/auth";
-import { storage } from "@/lib/indexeddbStorage";
-import type { PdsRecord, DocumentRecord, DocumentMetadata } from "@/lib/pdsTypes";
-import type { Session } from "@/lib/storageTypes";
+import { useKeyringStore } from "@/stores/keyring";
+import { didFromUri } from "@/lib/atUri";
+import type { DocumentMetadata } from "@/lib/pdsTypes";
 
 export interface DecryptedBlob {
   readonly plaintext: Uint8Array;
@@ -16,81 +15,60 @@ export interface DecryptedBlob {
 }
 
 /**
- * Decrypt a document's blob content. If `knownMetadata` is provided (e.g. from
- * the store), the expensive metadata decryption step is skipped.
- */
-export async function decryptDocumentBlob(
-  record: PdsRecord<DocumentRecord>,
-  pdsUrl: string,
-  did: string,
-  privateKey: Uint8Array,
-  session: Session,
-  knownMetadata?: DocumentMetadata,
-): Promise<DecryptedBlob> {
-  const { encryption } = record.value;
-  if (encryption.$type !== "app.opake.document#directEncryption") {
-    throw new Error("Keyring-encrypted documents are not yet supported");
-  }
-
-  const cid = record.value.blob.ref.$link;
-
-  // Key unwrap and blob fetch are independent — run in parallel
-  const [contentKey, encryptedBlob] = await Promise.all([
-    unwrapDirectContentKey(encryption, did, privateKey),
-    authenticatedBlobFetch({ pdsUrl, did, cid }, session),
-  ]);
-
-  const worker = getOpakeWorker();
-  const blobNonce = base64ToUint8Array(encryption.envelope.nonce.$bytes);
-  const plaintext = await worker.decryptBlob(contentKey, new Uint8Array(encryptedBlob), blobNonce);
-
-  // Skip metadata decryption if caller already has it from the store
-  if (knownMetadata) {
-    return { plaintext, metadata: knownMetadata };
-  }
-
-  const { ciphertext: metaCiphertext, nonce: metaNonce } = decryptEnvelope(
-    record.value.encryptedMetadata,
-  );
-  const metadata: DocumentMetadata = await worker.decryptMetadata(
-    contentKey,
-    metaCiphertext,
-    metaNonce,
-  );
-
-  return { plaintext, metadata };
-}
-
-/**
- * Create a decrypt function for a document owned by the current user.
- * Pulls the record from the documents store, session + identity from IndexedDB.
- * Suitable for passing directly to `<FilePreview decrypt={...} />`.
+ * Decrypt a cabinet document (owned by the current user).
+ * Uses cabinetDownload — core handles key unwrap + blob decrypt.
  */
 export function decryptOwnDocument(documentUri: string): () => Promise<DecryptedBlob> {
   return async () => {
-    const state = useDocumentsStore.getState();
-    const record = state.documentRecords[documentUri] as PdsRecord<DocumentRecord> | undefined;
-    if (!record) throw new Error("Document record not found");
+    const worker = getOpakeWorker();
+    const result = await worker.cabinetDownload(documentUri);
 
-    const authState = useAuthStore.getState();
-    if (authState.session.status !== "active") throw new Error("Not authenticated");
-
-    const { did, pdsUrl } = authState.session;
-    const session = await storage.loadSession(did);
-    const identity = await storage.loadIdentity(did);
-    const privateKey = base64ToUint8Array(identity.private_key);
-
-    const storeItem = state.items[documentUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-    const knownMetadata: DocumentMetadata | undefined = storeItem?.decrypted
+    // Use store metadata if already decrypted, otherwise build from download
+    const storeItem = useDocumentsStore.getState().items[documentUri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+    const metadata: DocumentMetadata = storeItem?.decrypted
       ? {
           name: storeItem.name,
           mimeType: storeItem.mimeType,
           tags: storeItem.tags,
           description: storeItem.description,
         }
-      : undefined;
+      : { name: result.filename };
 
-    return decryptDocumentBlob(record, pdsUrl, did, privateKey, session, knownMetadata);
+    return { plaintext: result.plaintext, metadata };
+  };
+}
+
+/**
+ * Decrypt a workspace document using the workspace FileManager.
+ * Handles both same-PDS and cross-PDS transparently.
+ */
+export function decryptWorkspaceDocument(
+  documentUri: string,
+  keyringUri: string,
+  knownMetadata?: DocumentMetadata,
+): () => Promise<DecryptedBlob> {
+  return async () => {
+    const keyringState = useKeyringStore.getState();
+    const keyring = keyringState.keyrings[keyringUri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+    if (!keyring) throw new Error("Keyring not loaded");
+
+    const groupKey = await keyringState.ensureGroupKey(keyringUri);
+    const ownerDid = didFromUri(keyringUri);
+
+    const worker = getOpakeWorker();
+    const result = await worker.workspaceDownload(
+      keyringUri,
+      ownerDid,
+      groupKey,
+      BigInt(keyring.rotation),
+      documentUri,
+    );
+
+    return {
+      plaintext: result.plaintext,
+      metadata: knownMetadata ?? { name: result.filename },
+    };
   };
 }

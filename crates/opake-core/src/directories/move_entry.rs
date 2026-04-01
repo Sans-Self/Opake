@@ -3,7 +3,7 @@
 // Move = re-parent (remove from old directory, add to new directory).
 // Rename is handled by the metadata command (#190).
 
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
@@ -31,11 +31,11 @@ pub async fn move_entry(
                 source.name,
             )));
         }
-        debug!("removing {} from old parent {}", source.uri, parent_uri);
+        trace!("removing {} from old parent {}", source.uri, parent_uri);
         remove_entry(client, parent_uri, &source.uri, modified_at).await?;
     }
 
-    debug!("adding {} to new parent {}", source.uri, target_dir_uri);
+    trace!("adding {} to new parent {}", source.uri, target_dir_uri);
     add_entry(client, target_dir_uri, &source.uri, modified_at).await?;
 
     Ok(MoveResult {

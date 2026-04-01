@@ -13,7 +13,7 @@
         },
         "members": {
           "type": "array",
-          "items": { "type": "ref", "ref": "app.opake.defs#wrappedKey" },
+          "items": { "type": "ref", "ref": "app.opake.defs#keyringMember" },
           "minLength": 1,
           "maxLength": 256
         }
@@ -25,7 +25,7 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "algo", "members", "encryptedMetadata", "createdAt"],
+        "required": ["opakeVersion", "algo", "owner", "members", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
@@ -37,10 +37,15 @@
             "description": "The symmetric algorithm the group key is intended for.",
             "knownValues": ["aes-256-gcm"]
           },
+          "owner": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the canonical keyring owner. The owner's copy is authoritative for membership, rotation, and keyHistory."
+          },
           "members": {
             "type": "array",
-            "description": "The group key wrapped to each member's DID public key. Each entry allows that DID to recover the group key.",
-            "items": { "type": "ref", "ref": "app.opake.defs#wrappedKey" },
+            "description": "Each member's wrapped group key and workspace role.",
+            "items": { "type": "ref", "ref": "app.opake.defs#keyringMember" },
             "minLength": 1,
             "maxLength": 256
           },

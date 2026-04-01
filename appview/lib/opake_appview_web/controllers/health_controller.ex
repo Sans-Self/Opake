@@ -16,9 +16,9 @@ defmodule OpakeAppviewWeb.HealthController do
     cursor = CursorQueries.load_cursor()
 
     response = %{
-      indexerConnected: Indexer.connected?(),
-      cursorTime: format_cursor_time(cursor),
-      cursorAgeSecs: cursor_age_secs(cursor)
+      indexer_connected: Indexer.connected?(),
+      cursor_time: format_cursor_time(cursor),
+      cursor_age_secs: cursor_age_secs(cursor)
     }
 
     json(conn, response)

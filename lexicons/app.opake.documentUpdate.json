@@ -1,0 +1,52 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.documentUpdate",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A proposed update to a document owned by another workspace member. Written by an editor to their own PDS. The document owner's client picks up pending updates via the AppView, applies them, and the editor deletes the update record after confirmation.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["opakeVersion", "document", "actionType", "createdAt"],
+        "properties": {
+          "opakeVersion": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.* namespace.",
+            "minimum": 1
+          },
+          "document": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT URI of the document being updated."
+          },
+          "actionType": {
+            "type": "string",
+            "description": "What this update proposes. updateContent: new blob only. updateMetadata: new encrypted metadata only. supersede: full replacement (adoption).",
+            "knownValues": ["updateContent", "updateMetadata", "supersede"]
+          },
+          "blob": {
+            "type": "blob",
+            "description": "The updated encrypted content. Required for updateContent and supersede actions.",
+            "accept": ["*/*"],
+            "maxSize": 52428800
+          },
+          "encryptedMetadata": {
+            "type": "ref",
+            "ref": "app.opake.defs#encryptedMetadata",
+            "description": "Updated metadata, encrypted with the document's content key. Required for updateMetadata and supersede actions."
+          },
+          "supersedes": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "For adoption: the original document URI this replaces. Used with supersede action."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

@@ -21,7 +21,6 @@ use super::revoke::revoke_grant;
 
 /// Summary of what the healing pass did.
 #[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct HealResult {
     pub grants_checked: usize,
     pub grants_deleted: usize,

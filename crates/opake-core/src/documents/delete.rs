@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -23,7 +23,7 @@ pub async fn delete_document(
         )));
     }
 
-    debug!("deleting record {}", uri);
+    trace!("deleting record {}", uri);
     client
         .delete_record(&at_uri.collection, &at_uri.rkey)
         .await?;

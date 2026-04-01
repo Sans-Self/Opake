@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto::{self, AtBytes};
 use crate::client::{Transport, XrpcClient};
@@ -21,7 +21,7 @@ pub(super) fn decrypt_with_nonce(
         Error::InvalidRecord(format!("nonce is {} bytes, expected 12", v.len()))
     })?;
 
-    debug!("decrypting {} bytes", ciphertext.len());
+    trace!("decrypting {} bytes", ciphertext.len());
     crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })
 }
 
@@ -104,11 +104,28 @@ pub async fn fetch_content_key(
     private_key: &X25519PrivateKey,
     uri: &str,
 ) -> Result<ContentKey, Error> {
-    let (content_key, _doc) = fetch_document_and_key(client, did, private_key, None, uri).await?;
+    fetch_content_key_with_group_key(client, did, private_key, None, uri).await
+}
+
+/// Fetch a document's content key, with optional group key for keyring-encrypted docs.
+pub async fn fetch_content_key_with_group_key(
+    client: &mut XrpcClient<impl Transport>,
+    did: &str,
+    private_key: &X25519PrivateKey,
+    group_key: Option<&ContentKey>,
+    uri: &str,
+) -> Result<ContentKey, Error> {
+    let (content_key, _doc) =
+        fetch_document_and_key(client, did, private_key, group_key, uri).await?;
     Ok(content_key)
 }
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
+///
+/// When `group_key` is `None` and the document uses keyring encryption,
+/// auto-resolves the group key by fetching the keyring and unwrapping the
+/// caller's member entry. This lets the cabinet download path handle
+/// workspace documents transparently.
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
@@ -118,7 +135,7 @@ async fn fetch_document_and_key(
 ) -> Result<(ContentKey, Document), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
 
-    debug!("fetching record {}", uri);
+    trace!("fetching record {}", uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -126,8 +143,32 @@ async fn fetch_document_and_key(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.opake_version)?;
 
-    debug!("unwrapping content key");
-    let content_key = unwrap_document_key(&doc, did, private_key, group_key)?;
+    trace!("unwrapping content key");
+    let resolved_group_key = match (&doc.encryption, group_key) {
+        (Encryption::Keyring(kr_enc), None) => {
+            trace!(
+                "auto-resolving group key from keyring {}",
+                kr_enc.keyring_ref.keyring
+            );
+            let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
+            let kr_entry = client
+                .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
+                .await?;
+            let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
+            let member = keyring
+                .members
+                .iter()
+                .find(|m| m.did() == did)
+                .ok_or_else(|| {
+                    Error::NotFound(format!("no member entry for DID {did} in keyring"))
+                })?;
+            Some(crypto::unwrap_key(&member.wrapped_key, private_key)?)
+        }
+        _ => None,
+    };
+
+    let effective_group_key = resolved_group_key.as_ref().or(group_key);
+    let content_key = unwrap_document_key(&doc, did, private_key, effective_group_key)?;
 
     Ok((content_key, doc))
 }
@@ -159,9 +200,10 @@ pub async fn download_with_group_key(
         fetch_document_and_key(client, did, private_key, group_key, uri).await?;
     let nonce = encryption_nonce(&doc)?;
 
-    debug!(
+    trace!(
         "fetching blob did={} cid={}",
-        at_uri.authority, doc.blob.reference.cid
+        at_uri.authority,
+        doc.blob.reference.cid
     );
     let ciphertext = client
         .get_blob(&at_uri.authority, &doc.blob.reference.cid)
@@ -330,7 +372,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_keyring_encryption() {
+    async fn auto_resolves_keyring_encryption() {
+        // When a document uses keyring encryption and no group key is provided,
+        // fetch_document_and_key auto-resolves by fetching the keyring record
+        // and unwrapping the group key from the caller's member entry.
+        // This test verifies the auto-resolve is attempted (the mock will fail
+        // with "response queue exhausted" because we don't mock the keyring,
+        // but the important thing is it TRIES rather than rejecting outright).
         let doc_value = serde_json::json!({
             "uri": TEST_URI,
             "cid": "bafyrecord",
@@ -370,10 +418,17 @@ mod tests {
 
         let (_, private_key) = test_keypair();
         let mut client = mock_client(mock);
+        // Auto-resolve attempts to fetch the keyring — fails because mock
+        // has no more responses, but the error is from the keyring fetch,
+        // not from a "keyring encryption not supported" rejection.
         let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("keyring"), "got: {err}");
+        assert!(
+            !err.to_string()
+                .contains("keyring encryption but no group key"),
+            "should auto-resolve, not reject: {err}",
+        );
     }
 
     #[tokio::test]

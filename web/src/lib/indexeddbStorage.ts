@@ -52,6 +52,11 @@ interface CacheMetaRow {
   fetchedAt: number;
 }
 
+interface TaskRow {
+  id: string;
+  value: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
@@ -63,6 +68,7 @@ class OpakeDatabase extends Dexie {
   readonly profiles!: Readonly<EntityTable<ProfileRow, "did">>;
   readonly cacheRecords!: Readonly<Table<CacheRecordRow>>;
   readonly cacheMeta!: Readonly<Table<CacheMetaRow>>;
+  readonly tasks!: Readonly<EntityTable<TaskRow, "id">>;
 
   constructor(name = "opake") {
     super(name);
@@ -84,6 +90,15 @@ class OpakeDatabase extends Dexie {
       profiles: "did",
       cacheRecords: "[did+collection+uri], [did+collection], did",
       cacheMeta: "[did+collection], did",
+    });
+    this.version(4).stores({
+      configs: "key",
+      identities: "did",
+      sessions: "did",
+      profiles: "did",
+      cacheRecords: "[did+collection+uri], [did+collection], did",
+      cacheMeta: "[did+collection], did",
+      tasks: "id",
     });
   }
 }
@@ -131,7 +146,7 @@ export class IndexedDbStorage implements Storage {
     const key = sanitizeDid(did);
     const row = await this.db.sessions.get(key);
     if (!row) {
-      throw new StorageError(`no session for ${did} — log in first`);
+      throw new StorageError(`no session for ${did}`);
     }
     return SessionSchema.parse(row.value);
   }
@@ -139,6 +154,11 @@ export class IndexedDbStorage implements Storage {
   async saveSession(did: string, session: Session): Promise<void> {
     const key = sanitizeDid(did);
     await this.db.sessions.put({ did: key, value: session });
+  }
+
+  async deleteSession(did: string): Promise<void> {
+    const key = sanitizeDid(did);
+    await this.db.sessions.delete(key);
   }
 
   // -- Profiles (not on trait — web-only) -----------------------------------
@@ -204,7 +224,7 @@ export class IndexedDbStorage implements Storage {
       value: r.value as T,
     }));
 
-    return { records, fetchedAt: meta.fetchedAt };
+    return { records, fetched_at: meta.fetchedAt };
   }
 
   async cachePutCollection<T>(
@@ -227,7 +247,7 @@ export class IndexedDbStorage implements Storage {
       await this.db.cacheRecords.bulkPut(rows as CacheRecordRow[]);
 
       // Set collection metadata
-      await this.db.cacheMeta.put({ did, collection, fetchedAt: data.fetchedAt });
+      await this.db.cacheMeta.put({ did, collection, fetchedAt: data.fetched_at });
     });
   }
 
@@ -255,12 +275,12 @@ export class IndexedDbStorage implements Storage {
     const updatedConfig: Config = {
       ...config,
       accounts: remainingAccounts,
-      defaultDid:
-        config.defaultDid === did
+      default_did:
+        config.default_did === did
           ? remaining.length > 0
             ? remaining[0]
-            : null
-          : config.defaultDid,
+            : undefined
+          : config.default_did,
     };
     const key = sanitizeDid(did);
     await this.db.transaction(
@@ -283,6 +303,22 @@ export class IndexedDbStorage implements Storage {
         await this.db.cacheMeta.where("did").equals(did).delete();
       },
     );
+  }
+
+  // -- Tasks: daemon background task persistence -----------------------------
+
+  async saveTask(task: unknown): Promise<void> {
+    const t = task as { id: string };
+    await this.db.tasks.put({ id: t.id, value: task });
+  }
+
+  async loadTasks(): Promise<unknown[]> {
+    const rows = await this.db.tasks.reverse().toArray();
+    return rows.map((r) => r.value);
+  }
+
+  async deleteTask(id: string): Promise<void> {
+    await this.db.tasks.delete(id);
   }
 
   /** Close the database connection. Useful for test cleanup. */

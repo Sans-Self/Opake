@@ -10,15 +10,10 @@ import { z } from "zod";
 
 interface ApiConfig {
   pdsUrl: string;
-  appviewUrl: string;
 }
-
-export const DEFAULT_APPVIEW_URL =
-  (import.meta.env.VITE_APPVIEW_URL as string | undefined) ?? "https://appview.opake.app";
 
 const defaultConfig: Readonly<ApiConfig> = {
   pdsUrl: (import.meta.env.VITE_PDS_URL as string | undefined) ?? "https://pds.sans-self.org",
-  appviewUrl: DEFAULT_APPVIEW_URL,
 };
 
 // ---------------------------------------------------------------------------
@@ -79,7 +74,7 @@ async function authenticatedRequest(
   if (session.type === "oauth") {
     await attachDpopAuth(headers, session, method, url);
   } else {
-    headers.Authorization = `Bearer ${session.accessJwt}`;
+    headers.Authorization = `Bearer ${session.access_jwt}`;
   }
 
   let response = await fetch(url, { method, headers, body });
@@ -87,7 +82,7 @@ async function authenticatedRequest(
   // Always capture the latest PDS nonce — it may differ from the AS nonce.
   if (session.type === "oauth") {
     const nonce = response.headers.get("dpop-nonce");
-    if (nonce) session.dpopNonce = nonce;
+    if (nonce) session.dpop_nonce = nonce;
   }
 
   // DPoP nonce retry — the PDS explicitly challenged us for a nonce.
@@ -96,11 +91,11 @@ async function authenticatedRequest(
     response = await fetch(url, { method, headers, body });
 
     const nonce = response.headers.get("dpop-nonce");
-    if (nonce) session.dpopNonce = nonce;
+    if (nonce) session.dpop_nonce = nonce;
   }
 
   // Token expired — refresh and retry once.
-  if (response.status === 401 && session.type === "oauth" && session.refreshToken) {
+  if (response.status === 401 && session.type === "oauth" && session.refresh_token) {
     console.debug("[api] 401 — attempting token refresh");
     const refreshed = await refreshAccessToken(session);
     if (refreshed) {
@@ -108,7 +103,7 @@ async function authenticatedRequest(
       response = await fetch(url, { method, headers, body });
 
       const nonce = response.headers.get("dpop-nonce");
-      if (nonce) session.dpopNonce = nonce;
+      if (nonce) session.dpop_nonce = nonce;
 
       // The refreshed token might also need a nonce retry on the PDS
       if (requiresNonceRetry(response)) {
@@ -267,26 +262,66 @@ export async function authenticatedDeleteRecord(
 }
 
 // ---------------------------------------------------------------------------
-// Token refresh
+// Session persistence
 // ---------------------------------------------------------------------------
+
+/** Persist the session returned by a WASM PDS operation (captures DPoP nonce updates + token refreshes). */
+export async function persistSession(did: string, session: unknown): Promise<void> {
+  await storage.saveSession(did, session as Session);
+}
+
+// ---------------------------------------------------------------------------
+// Token refresh (with lock to prevent concurrent refresh attempts)
+// ---------------------------------------------------------------------------
+
+let refreshLock: Promise<boolean> | null = null;
 
 /** Refresh an expired OAuth access token. Mutates the session in place and persists to IndexedDB.
  *
+ * Uses a lock to prevent concurrent refresh attempts — OAuth refresh tokens
+ * are single-use in atproto. If a refresh is already in progress, subsequent
+ * callers wait for it and adopt the result.
+ *
  * Before attempting a refresh, re-reads the session from IndexedDB. If the
- * tokens differ (i.e. the Service Worker already refreshed), adopts the fresh
- * tokens and returns true without calling the token endpoint. This prevents
- * consuming a single-use refresh token that the SW already rotated.
+ * daemon already refreshed, adopts the stored tokens without calling the
+ * token endpoint.
  */
 async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
-  // Check if the SW already refreshed for us
+  if (refreshLock) {
+    const result = await refreshLock;
+    // Adopt whatever the winning refresh saved
+    try {
+      const stored = await storage.loadSession(session.did);
+      if (stored.type === "oauth") {
+        session.access_token = stored.access_token;
+        session.refresh_token = stored.refresh_token;
+        session.dpop_nonce = stored.dpop_nonce;
+        session.expires_at = stored.expires_at;
+      }
+    } catch {
+      /* best effort */
+    }
+    return result;
+  }
+
+  refreshLock = refreshAccessTokenInner(session);
+  try {
+    return await refreshLock;
+  } finally {
+    refreshLock = null;
+  }
+}
+
+async function refreshAccessTokenInner(session: OAuthSession): Promise<boolean> {
+  // Check if the daemon already refreshed for us
   try {
     const stored = await storage.loadSession(session.did);
-    if (stored.type === "oauth" && stored.accessToken !== session.accessToken) {
+    if (stored.type === "oauth" && stored.access_token !== session.access_token) {
       console.debug("[api] SW already refreshed — adopting stored tokens");
-      session.accessToken = stored.accessToken;
-      session.refreshToken = stored.refreshToken;
-      session.dpopNonce = stored.dpopNonce;
-      session.expiresAt = stored.expiresAt;
+      session.access_token = stored.access_token;
+      session.refresh_token = stored.refresh_token;
+      session.dpop_nonce = stored.dpop_nonce;
+      session.expires_at = stored.expires_at;
       return true;
     }
   } catch (err) {
@@ -294,21 +329,21 @@ async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
   }
 
   const worker = getOpakeWorker();
-  const url = session.tokenEndpoint;
+  const url = session.token_endpoint;
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    refresh_token: session.refreshToken,
-    client_id: session.clientId,
+    refresh_token: session.refresh_token,
+    client_id: session.client_id,
   });
 
   const timestamp = Math.floor(Date.now() / 1000);
   const proof = await worker.createDpopProof(
-    session.dpopKey,
+    session.dpop_key,
     "POST",
     url,
     timestamp,
-    session.dpopNonce,
+    session.dpop_nonce,
     null,
   );
 
@@ -318,7 +353,7 @@ async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
   };
 
   let response = await fetch(url, { method: "POST", headers, body: body.toString() });
-  let nonce = response.headers.get("dpop-nonce") ?? session.dpopNonce;
+  let nonce = response.headers.get("dpop-nonce") ?? session.dpop_nonce;
 
   // Nonce retry for the AS
   if (response.status === 400) {
@@ -330,7 +365,7 @@ async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
     } | null;
     if (errorBody?.error === "use_dpop_nonce" && nonce) {
       const retryProof = await worker.createDpopProof(
-        session.dpopKey,
+        session.dpop_key,
         "POST",
         url,
         timestamp,
@@ -352,10 +387,10 @@ async function refreshAccessToken(session: OAuthSession): Promise<boolean> {
   console.debug("[api] token refreshed, new expiry:", tokenResponse.expires_in);
 
   const now = Math.floor(Date.now() / 1000);
-  session.accessToken = tokenResponse.access_token;
-  session.refreshToken = tokenResponse.refresh_token ?? session.refreshToken;
-  session.dpopNonce = nonce;
-  session.expiresAt = tokenResponse.expires_in ? now + tokenResponse.expires_in : null;
+  session.access_token = tokenResponse.access_token;
+  session.refresh_token = tokenResponse.refresh_token ?? session.refresh_token;
+  session.dpop_nonce = nonce;
+  session.expires_at = tokenResponse.expires_in ? now + tokenResponse.expires_in : undefined;
 
   // Persist updated session
   await storage.saveSession(session.did, session).catch((err: unknown) => {
@@ -383,13 +418,13 @@ async function attachDpopAuth(
   const worker = getOpakeWorker();
   const timestamp = Math.floor(Date.now() / 1000);
   const proof = await worker.createDpopProof(
-    session.dpopKey,
+    session.dpop_key,
     method,
     url,
     timestamp,
-    session.dpopNonce,
-    session.accessToken,
+    session.dpop_nonce,
+    session.access_token,
   );
-  headers.Authorization = `DPoP ${session.accessToken}`;
+  headers.Authorization = `DPoP ${session.access_token}`;
   headers.DPoP = proof;
 }

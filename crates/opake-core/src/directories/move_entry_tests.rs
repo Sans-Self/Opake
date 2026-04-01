@@ -65,19 +65,23 @@ async fn move_doc_into_directory() {
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 4);
 
-    // Old parent should have doc removed
+    // Old parent should have doc removed (via applyWrites)
+    assert!(reqs[1].url.contains("applyWrites"));
     match &reqs[1].body {
         Some(RequestBody::Json(v)) => {
-            let dir: Directory = serde_json::from_value(v["record"].clone()).unwrap();
+            let writes = v["writes"].as_array().unwrap();
+            let dir: Directory = serde_json::from_value(writes[0]["value"].clone()).unwrap();
             assert!(dir.entries.is_empty());
         }
         _ => panic!("expected JSON body"),
     }
 
-    // New parent should have doc added
+    // New parent should have doc added (via applyWrites)
+    assert!(reqs[3].url.contains("applyWrites"));
     match &reqs[3].body {
         Some(RequestBody::Json(v)) => {
-            let dir: Directory = serde_json::from_value(v["record"].clone()).unwrap();
+            let writes = v["writes"].as_array().unwrap();
+            let dir: Directory = serde_json::from_value(writes[0]["value"].clone()).unwrap();
             assert_eq!(dir.entries, vec![DOC_URI]);
         }
         _ => panic!("expected JSON body"),

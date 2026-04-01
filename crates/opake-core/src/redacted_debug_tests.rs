@@ -105,7 +105,9 @@ fn content_key_shows_length_not_bytes() {
 }
 
 #[test]
-fn encrypted_payload_shows_lengths() {
+fn encrypted_payload_uses_standard_debug() {
+    // EncryptedPayload uses normal Debug (not RedactedDebug) because
+    // ciphertext and nonces are not secret — they're sent to the PDS.
     let key = generate_content_key(&mut OsRng);
     let payload = encrypt_blob(&key, b"test", &mut OsRng).unwrap();
     let out = format!("{payload:?}");
@@ -113,7 +115,9 @@ fn encrypted_payload_shows_lengths() {
         out.contains("EncryptedPayload"),
         "expected type name: {out}"
     );
-    assert!(out.contains("[12 bytes]"), "expected nonce length: {out}");
-    // ciphertext is longer than plaintext due to GCM tag
-    assert!(out.contains("bytes]"), "expected ciphertext length: {out}");
+    assert!(out.contains("nonce"), "expected nonce field: {out}");
+    assert!(
+        out.contains("ciphertext"),
+        "expected ciphertext field: {out}"
+    );
 }

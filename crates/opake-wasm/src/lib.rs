@@ -13,15 +13,11 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
-mod directories;
+mod daemon;
 #[cfg(target_arch = "wasm32")]
-mod documents;
+pub(crate) mod js_storage;
 #[cfg(target_arch = "wasm32")]
-mod list;
-#[cfg(target_arch = "wasm32")]
-mod session;
-#[cfg(target_arch = "wasm32")]
-mod sharing;
+mod opake_wasm;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_util;
 
@@ -35,6 +31,12 @@ pub fn init() {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn now_iso() -> String {
     js_sys::Date::new_0().to_iso_string().into()
+}
+
+/// Microseconds since Unix epoch via JS Date.now() (milliseconds → micros).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn now_micros() -> u64 {
+    (js_sys::Date::now() * 1000.0) as u64
 }
 
 #[wasm_bindgen(js_name = bindingCheck)]
@@ -122,23 +124,17 @@ pub fn unwrap_key(wrapped_key_js: JsValue, private_key: &[u8]) -> Result<Vec<u8>
 }
 
 #[wasm_bindgen(js_name = wrapContentKeyForKeyring)]
-pub fn wrap_content_key_for_keyring(
-    content_key: &[u8],
-    group_key: &[u8],
-) -> Result<Vec<u8>, JsError> {
+pub fn wrap_content_key_for_keyring(content_key: &[u8], key: &[u8]) -> Result<Vec<u8>, JsError> {
     let content_key = content_key_from_slice(content_key)?;
-    let group_key = content_key_from_slice(group_key)?;
-    opake_core::crypto::wrap_content_key_for_keyring(&content_key, &group_key)
+    let key = content_key_from_slice(key)?;
+    opake_core::crypto::wrap_content_key_for_keyring(&content_key, &key)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
 #[wasm_bindgen(js_name = unwrapContentKeyFromKeyring)]
-pub fn unwrap_content_key_from_keyring(
-    wrapped: &[u8],
-    group_key: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    let group_key = content_key_from_slice(group_key)?;
-    let content_key = opake_core::crypto::unwrap_content_key_from_keyring(wrapped, &group_key)
+pub fn unwrap_content_key_from_keyring(wrapped: &[u8], key: &[u8]) -> Result<Vec<u8>, JsError> {
+    let key = content_key_from_slice(key)?;
+    let content_key = opake_core::crypto::unwrap_content_key_from_keyring(wrapped, &key)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(content_key.0.to_vec())
 }
@@ -293,10 +289,10 @@ pub fn decrypt_metadata_js(
 /// Returns `{ ciphertext: Uint8Array, nonce: Uint8Array }`.
 #[wasm_bindgen(js_name = encryptKeyringMetadata)]
 pub fn encrypt_keyring_metadata_js(key: &[u8], metadata: JsValue) -> Result<JsValue, JsError> {
-    let group_key = content_key_from_slice(key)?;
+    let key = content_key_from_slice(key)?;
     let metadata: KeyringMetadata =
         serde_wasm_bindgen::from_value(metadata).map_err(|e| JsError::new(&e.to_string()))?;
-    let encrypted = opake_core::crypto::encrypt_metadata(&group_key, &metadata, &mut OsRng)
+    let encrypted = opake_core::crypto::encrypt_metadata(&key, &metadata, &mut OsRng)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     let ciphertext = encrypted
@@ -321,12 +317,12 @@ pub fn decrypt_keyring_metadata_js(
     ciphertext: &[u8],
     nonce: &[u8],
 ) -> Result<JsValue, JsError> {
-    let group_key = content_key_from_slice(key)?;
+    let key = content_key_from_slice(key)?;
     let encrypted = opake_core::records::EncryptedMetadata {
         ciphertext: opake_core::records::AtBytes::from_raw(ciphertext),
         nonce: opake_core::records::AtBytes::from_raw(nonce),
     };
-    let metadata: KeyringMetadata = opake_core::crypto::decrypt_metadata(&group_key, &encrypted)
+    let metadata: KeyringMetadata = opake_core::crypto::decrypt_metadata(&key, &encrypted)
         .map_err(|e| JsError::new(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&metadata).map_err(|e| JsError::new(&e.to_string()))
 }
@@ -492,16 +488,15 @@ struct DirectoryRecordInput {
 }
 
 #[derive(Serialize)]
-struct DirectorySnapshotEntry {
-    name: String,
-    entries: Vec<String>,
+pub(crate) struct DirectorySnapshotEntry {
+    pub(crate) name: String,
+    pub(crate) entries: Vec<String>,
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectoryTreeSnapshot {
-    root_uri: Option<String>,
-    directories: HashMap<String, DirectorySnapshotEntry>,
+pub(crate) struct DirectoryTreeSnapshot {
+    pub(crate) root_uri: Option<String>,
+    pub(crate) directories: HashMap<String, DirectorySnapshotEntry>,
 }
 
 #[derive(Serialize)]
@@ -623,6 +618,86 @@ impl DirectoryTreeHandle {
             .collect();
         serde_wasm_bindgen::to_value(&descendants).unwrap_or(JsValue::NULL)
     }
+}
+
+/// Build a workspace directory tree with group key decryption.
+///
+/// Like `DirectoryTreeHandle::new` but decrypts names using both the user's
+/// private key (for direct-encrypted dirs) and a map of group keys (for
+/// keyring-encrypted workspace dirs). Also sets the workspace root based
+/// on the keyring URI.
+///
+/// `keys_js` is `Record<string, Uint8Array>` (keyring URI → group key).
+///
+/// Returns a `DirectoryTreeSnapshot` (plain object, not a handle).
+#[wasm_bindgen(js_name = buildWorkspaceDirectoryTree)]
+pub fn build_workspace_directory_tree(
+    records_js: JsValue,
+    did: &str,
+    private_key: &[u8],
+    keys_js: JsValue,
+    keyring_uri: &str,
+) -> Result<JsValue, JsError> {
+    let inputs: Vec<DirectoryRecordInput> =
+        serde_wasm_bindgen::from_value(records_js).map_err(|e| JsError::new(&e.to_string()))?;
+
+    let priv_key: &X25519PrivateKey = private_key
+        .try_into()
+        .map_err(|_| JsError::new("private key must be exactly 32 bytes"))?;
+
+    let raw_map: HashMap<String, Vec<u8>> =
+        serde_wasm_bindgen::from_value(keys_js).map_err(|e| JsError::new(&e.to_string()))?;
+    let keys: HashMap<String, ContentKey> = raw_map
+        .into_iter()
+        .map(|(uri, bytes)| {
+            let arr: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| JsError::new("group key must be exactly 32 bytes"))?;
+            Ok((uri, ContentKey(arr)))
+        })
+        .collect::<Result<_, JsError>>()?;
+
+    let records = inputs.into_iter().map(|r| (r.uri, r.value));
+    let mut tree = DirectoryTree::from_records(records);
+
+    // Set workspace root
+    let ws_root_uri = opake_core::directories::workspace_root_directory_uri(did, keyring_uri);
+    tree.set_root(&ws_root_uri);
+
+    tree.decrypt_names_with_group_keys(did, priv_key, &keys);
+
+    // Build snapshot
+    let mut directories = HashMap::new();
+    for uri in tree.all_directory_uris() {
+        let name = tree.directory_name(uri).unwrap_or("?").to_owned();
+        let entries = tree
+            .entries_for(uri)
+            .map(|e| e.to_vec())
+            .unwrap_or_default();
+        directories.insert(uri.to_owned(), DirectorySnapshotEntry { name, entries });
+    }
+
+    let snap = DirectoryTreeSnapshot {
+        root_uri: tree.root_uri().map(str::to_owned),
+        directories,
+    };
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    snap.serialize(&serializer)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Return the workspace root directory URI for a keyring.
+///
+/// Deterministic: `at://{did}/app.opake.directory/ws-{keyring_rkey}`.
+#[wasm_bindgen(js_name = workspaceRootDirectoryUri)]
+pub fn workspace_root_directory_uri(did: &str, keyring_uri: &str) -> String {
+    opake_core::directories::workspace_root_directory_uri(did, keyring_uri)
+}
+
+/// Return the collection string for directoryUpdate records.
+#[wasm_bindgen(js_name = directoryUpdateCollection)]
+pub fn directory_update_collection_export() -> String {
+    opake_core::records::DIRECTORY_UPDATE_COLLECTION.to_owned()
 }
 
 // ---------------------------------------------------------------------------

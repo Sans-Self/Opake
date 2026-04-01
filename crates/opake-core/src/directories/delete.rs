@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -30,7 +30,7 @@ pub async fn delete_directory(
         ));
     }
 
-    debug!("fetching directory to check emptiness: {}", uri);
+    trace!("fetching directory to check emptiness: {}", uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -45,7 +45,7 @@ pub async fn delete_directory(
         )));
     }
 
-    debug!("deleting directory {}", uri);
+    trace!("deleting directory {}", uri);
     client
         .delete_record(&at_uri.collection, &at_uri.rkey)
         .await?;

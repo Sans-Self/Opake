@@ -17,9 +17,8 @@ import {
 import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
 import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
-import { useDocumentsStore } from "@/stores/documents/store";
-import { getOpakeWorker } from "@/lib/worker";
 import { isPreviewable, isEditable, type FileItem } from "./types";
+import { useTreeSnapshot } from "./TreeSnapshotContext";
 
 interface PanelContentProps {
   readonly items: readonly FileItem[];
@@ -30,10 +29,11 @@ interface PanelContentProps {
   readonly onEdit?: (item: FileItem) => void;
   readonly onDownload: (uri: string) => void;
   readonly onDelete: (uri: string) => void;
-  readonly onDeleteFolder: (uri: string) => void;
-  readonly onUpdateMetadata: (uri: string, changes: MetadataChanges) => void;
-  readonly onMoveEntry: (entryUri: string, targetDirectoryUri: string | null) => void;
-  readonly onRenameDirectory: (directoryUri: string, newName: string) => void;
+  readonly onDeleteFolder?: (uri: string) => void;
+  readonly onUpdateMetadata?: (uri: string, changes: MetadataChanges) => void;
+  readonly onMoveEntry?: (entryUri: string, targetDirectoryUri: string | null) => void;
+  readonly onRenameDirectory?: (directoryUri: string, newName: string) => void;
+  readonly rootLabel: string;
 }
 
 export function PanelContent({
@@ -49,6 +49,7 @@ export function PanelContent({
   onUpdateMetadata,
   onMoveEntry,
   onRenameDirectory,
+  rootLabel,
 }: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
@@ -56,28 +57,51 @@ export function PanelContent({
   const moveDialogRef = useRef<MoveDialogHandle>(null);
   const renameDialogRef = useRef<RenameDialogHandle>(null);
   const shareDialogRef = useRef<ShareDialogHandle>(null);
+  const treeSnapshot = useTreeSnapshot();
 
-  const handleDeleteFolderClick = async (item: FileItem) => {
-    const worker = getOpakeWorker();
-    const counts = await worker.treeCountDescendants(item.uri);
+  const handleDeleteFolderClick = (item: FileItem) => {
+    const snapshot = treeSnapshot;
+    if (!snapshot) return;
+    // Count descendants from the snapshot
+    const countDescendants = (uri: string): { documents: number; directories: number } => {
+      const dir = snapshot.directories[uri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+      if (!dir) return { documents: 0, directories: 0 };
+      return dir.entries.reduce(
+        (acc, entryUri) => {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+          if (snapshot.directories[entryUri]) {
+            const sub = countDescendants(entryUri);
+            return {
+              documents: acc.documents + sub.documents,
+              directories: acc.directories + 1 + sub.directories,
+            };
+          }
+          return { documents: acc.documents + 1, directories: acc.directories };
+        },
+        { documents: 0, directories: 0 },
+      );
+    };
+    const counts = countDescendants(item.uri);
     deleteFolderDialogRef.current?.show(item.uri, item.name, counts.documents, counts.directories);
   };
 
-  const handleMoveClick = async (item: FileItem) => {
-    const snapshot = useDocumentsStore.getState().treeSnapshot;
+  const handleMoveClick = (item: FileItem) => {
+    const snapshot = treeSnapshot;
     const currentParent = snapshot
       ? (Object.entries(snapshot.directories).find(([, entry]) =>
           entry.entries.includes(item.uri),
         )?.[0] ?? null)
       : null;
 
+    const collectDescendantUris = (uri: string): string[] => {
+      const dir = snapshot?.directories[uri];
+      if (!dir) return [];
+      return dir.entries.flatMap((entryUri) => [entryUri, ...collectDescendantUris(entryUri)]);
+    };
+
     const disabled: ReadonlySet<string> =
-      item.kind === "folder"
-        ? new Set([
-            item.uri,
-            ...(await getOpakeWorker().treeCollectDescendants(item.uri)).map((d) => d.uri),
-          ])
-        : new Set();
+      item.kind === "folder" ? new Set([item.uri, ...collectDescendantUris(item.uri)]) : new Set();
 
     moveDialogRef.current?.show(item.uri, item.name, item.kind, currentParent, disabled);
   };
@@ -120,13 +144,15 @@ export function PanelContent({
       onClick={() => handleItemClick(item)}
       onDoubleClick={editHandler(item)}
       onPreview={previewHandler(item)}
-      onEditMetadata={() => metadataDialogRef.current?.show(item)}
-      onRename={() => renameDialogRef.current?.show(item.uri, item.name)}
-      onMove={() => void handleMoveClick(item)}
+      onEditMetadata={onUpdateMetadata ? () => metadataDialogRef.current?.show(item) : undefined}
+      onRename={
+        onRenameDirectory ? () => renameDialogRef.current?.show(item.uri, item.name) : undefined
+      }
+      onMove={onMoveEntry ? () => handleMoveClick(item) : undefined}
       onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
       onDownload={() => onDownload(item.uri)}
       onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
-      onDeleteFolder={() => void handleDeleteFolderClick(item)}
+      onDeleteFolder={onDeleteFolder ? () => handleDeleteFolderClick(item) : undefined}
     />
   ));
 
@@ -147,10 +173,12 @@ export function PanelContent({
       )}
 
       <DeleteConfirmDialog ref={deleteDialogRef} onConfirm={onDelete} />
-      <DeleteFolderConfirmDialog ref={deleteFolderDialogRef} onConfirm={onDeleteFolder} />
-      <MetadataEditDialog ref={metadataDialogRef} onSave={onUpdateMetadata} />
-      <MoveDialog ref={moveDialogRef} onMove={onMoveEntry} />
-      <RenameDialog ref={renameDialogRef} onSave={onRenameDirectory} />
+      {onDeleteFolder && (
+        <DeleteFolderConfirmDialog ref={deleteFolderDialogRef} onConfirm={onDeleteFolder} />
+      )}
+      {onUpdateMetadata && <MetadataEditDialog ref={metadataDialogRef} onSave={onUpdateMetadata} />}
+      {onMoveEntry && <MoveDialog ref={moveDialogRef} onMove={onMoveEntry} rootLabel={rootLabel} />}
+      {onRenameDirectory && <RenameDialog ref={renameDialogRef} onSave={onRenameDirectory} />}
       <ShareDialog ref={shareDialogRef} />
     </div>
   );

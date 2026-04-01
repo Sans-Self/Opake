@@ -9,6 +9,7 @@ defmodule OpakeAppview.Queries.Pagination do
   @doc """
   Parses a cursor string into `{:ok, datetime, uri}` or `:none`.
   """
+  @spec parse_cursor(String.t() | nil) :: {:ok, DateTime.t(), String.t()} | :none
   def parse_cursor(nil), do: :none
   def parse_cursor(""), do: :none
 
@@ -29,6 +30,7 @@ defmodule OpakeAppview.Queries.Pagination do
   Builds the next cursor from a list of results. Returns `nil` for empty lists.
   Items must have `:indexed_at` (DateTime) and `:uri` (string) fields.
   """
+  @spec build_next_cursor([map()]) :: String.t() | nil
   def build_next_cursor([]), do: nil
 
   def build_next_cursor(items) do

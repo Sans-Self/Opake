@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::sharing::{self, GrantEntry};
+use opake_core::sharing::GrantEntry;
 
 use crate::commands::Execute;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 
 #[derive(Args)]
 /// List grants you've shared with others
@@ -37,12 +37,15 @@ fn format_long(entries: &[GrantEntry]) -> String {
 
 impl Execute for SharedCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-        let entries = sharing::list_grants(&mut client).await?;
+        let mut opake = ctx.opake().await?;
+        let context = opake.cabinet_context()?;
+        let mut mgr = opake.file_manager(&context);
+
+        let entries = mgr.list_shares().await?;
 
         if entries.is_empty() {
             println!("no outgoing grants");
-            return Ok(session::refreshed_session(&client));
+            return Ok(None);
         }
 
         if self.long {
@@ -53,7 +56,7 @@ impl Execute for SharedCommand {
 
         println!("\n{} grant(s)", entries.len());
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }
 

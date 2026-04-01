@@ -22,27 +22,21 @@ import { RevokeShareDialog } from "@/components/cabinet/RevokeShareDialog";
 import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
 import { isPreviewable } from "@/components/cabinet/types";
 import { useAuthStore } from "@/stores/auth";
+import { getOpakeWorker } from "@/lib/worker";
 import { useDocumentsStore } from "@/stores/documents/store";
-import { decryptDocumentRecord } from "@/stores/documents/decrypt";
-import { storage } from "@/lib/indexeddbStorage";
 import { truncateDid, formatRelativeDate } from "@/lib/format";
-import { handleFromDid, pdsUrlFromDid } from "@/lib/did";
+import { handleFromDid } from "@/lib/did";
 import { loading as trackLoading } from "@/stores/app";
 import {
-  listOutgoingGrants,
   listIncomingGrants,
-  revokeGrant,
   resolveIncomingGrant,
   downloadIncomingGrant,
   decryptIncomingDocument,
   incomingGrantToFileItem,
-  type GrantEntry,
   type InboxGrantItem,
   type ResolvedIncomingGrant,
 } from "@/lib/sharing";
 import { decryptOwnDocument } from "@/lib/preview";
-import { base64ToUint8Array } from "@/lib/encoding";
-import type { OAuthSession } from "@/lib/storageTypes";
 import type { FileItem } from "@/components/cabinet/types";
 import { toastSuccess, toastError } from "@/stores/toast";
 
@@ -77,8 +71,16 @@ function useHandleResolver(dids: readonly string[]): HandleCache {
 // Grant → FileItem conversion
 // ---------------------------------------------------------------------------
 
+/** Grant entry shape from cabinetListShares (Zod-validated GrantEntrySchema). */
+interface OutgoingGrant {
+  readonly uri: string;
+  readonly document: string;
+  readonly recipient: string;
+  readonly created_at: string;
+}
+
 function outgoingGrantToFileItem(
-  grant: GrantEntry,
+  grant: OutgoingGrant,
   storeItem: FileItem | undefined,
   recipientDisplay: string,
 ): FileItem {
@@ -93,7 +95,7 @@ function outgoingGrantToFileItem(
     encrypted: true,
     status: "shared",
     size: resolved?.size,
-    modified: formatRelativeDate(grant.record.createdAt),
+    modified: formatRelativeDate(grant.created_at),
     decrypted: true,
     tags: [],
     subtitle: `shared with ${recipientDisplay}`,
@@ -120,7 +122,6 @@ type PreviewTarget =
 function SharedPage() {
   const session = useAuthStore((s) => s.session);
   const storeItems = useDocumentsStore((s) => s.items);
-  const documentRecords = useDocumentsStore((s) => s.documentRecords);
   const loadCabinet = useDocumentsStore((s) => s.loadCabinet);
   const cabinetPathFor = useDocumentsStore((s) => s.cabinetPathFor);
   const viewMode = useDocumentsStore((s) => s.viewMode);
@@ -130,7 +131,7 @@ function SharedPage() {
 
   const revokeDialogRef = useRef<ConfirmDialogHandle>(null);
 
-  const [outgoing, setOutgoing] = useState<GrantEntry[]>([]);
+  const [outgoing, setOutgoing] = useState<OutgoingGrant[]>([]);
   const [incoming, setIncoming] = useState<InboxGrantItem[]>([]);
   const [resolvedIncoming, setResolvedIncoming] = useState<Record<string, ResolvedIncomingGrant>>(
     {},
@@ -139,7 +140,7 @@ function SharedPage() {
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
 
   // Handle resolution
-  const recipientDids = useMemo(() => outgoing.map((g) => g.record.recipient), [outgoing]);
+  const recipientDids = useMemo(() => outgoing.map((g) => g.recipient), [outgoing]);
   const ownerDids = useMemo(() => incoming.map((g) => g.ownerDid), [incoming]);
   const allDids = useMemo(() => [...recipientDids, ...ownerDids], [recipientDids, ownerDids]);
   const handleCache = useHandleResolver(allDids);
@@ -151,9 +152,8 @@ function SharedPage() {
   const outgoingItems: readonly FileItem[] = useMemo(
     () =>
       outgoing.map((grant) => {
-        const recipientDisplay =
-          handleCache[grant.record.recipient] ?? truncateDid(grant.record.recipient);
-        return outgoingGrantToFileItem(grant, storeItems[grant.record.document], recipientDisplay);
+        const recipientDisplay = handleCache[grant.recipient] ?? truncateDid(grant.recipient);
+        return outgoingGrantToFileItem(grant, storeItems[grant.document], recipientDisplay);
       }),
     [outgoing, handleCache, storeItems],
   );
@@ -176,42 +176,21 @@ function SharedPage() {
     const done = trackLoading("sharing-fetch");
     setLoading(true);
     try {
-      const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
-
-      const identity = await storage.loadIdentity(session.did);
-      const privateKey = base64ToUint8Array(identity.private_key);
-      const signingKey = identity.signing_key ? base64ToUint8Array(identity.signing_key) : null;
-
+      const worker = getOpakeWorker();
       const [out, inc] = await Promise.all([
-        listOutgoingGrants(session.pdsUrl, session.did, oauthSession),
-        signingKey
-          ? listIncomingGrants(session.pdsUrl, session.did, oauthSession, signingKey).catch(
-              (err: unknown) => {
-                console.warn("[shared] inbox fetch failed, showing outgoing only:", err);
-                return [] as InboxGrantItem[];
-              },
-            )
-          : Promise.resolve([]),
+        worker.cabinetListShares() as Promise<OutgoingGrant[]>,
+        listIncomingGrants().catch((err: unknown) => {
+          console.warn("[shared] inbox fetch failed, showing outgoing only:", err);
+          return [] as InboxGrantItem[];
+        }),
       ]);
 
       setOutgoing(out);
       setIncoming(inc);
 
-      // Pre-resolve unique owner PDS URLs, then resolve each grant
-      const uniqueOwnerDids = [...new Set(inc.map((g) => g.ownerDid))];
-      const pdsResults = await Promise.all(
-        uniqueOwnerDids.map((did) =>
-          pdsUrlFromDid(did)
-            .then((url) => [did, url] as const)
-            .catch(() => null),
-        ),
-      );
-      const pdsUrlCache = new Map(pdsResults.filter((r): r is NonNullable<typeof r> => r !== null));
-
+      // Resolve each incoming grant (core handles PDS resolution internally)
       inc.forEach((grant) => {
-        const ownerPds = pdsUrlCache.get(grant.ownerDid);
-        if (!ownerPds) return;
-        void resolveIncomingGrant(grant, privateKey, ownerPds)
+        void resolveIncomingGrant(grant)
           .then((resolved) => {
             setResolvedIncoming((prev) => ({ ...prev, [grant.uri]: resolved }));
           })
@@ -233,46 +212,22 @@ function SharedPage() {
 
   // Ensure documents store is loaded so outgoing grant names resolve
   useEffect(() => {
-    void loadCabinet();
+    if (!useDocumentsStore.getState().treeSnapshot) {
+      void loadCabinet();
+    }
   }, [loadCabinet]);
 
   // Decrypt metadata for outgoing grant documents that the store hasn't decrypted yet
+  // Document metadata is decrypted by ensureDirectoryReady in the documents store.
+  // Trigger ensureAllDirectoriesReady to decrypt shared document names.
   useEffect(() => {
     if (outgoing.length === 0 || session.status !== "active") return;
-
-    const undecrypted = outgoing.filter((g) => {
-      const item = storeItems[g.record.document];
-      const record = documentRecords[g.record.document];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard on dynamic key
-      return record && !item?.decrypted;
-    });
-    if (undecrypted.length === 0) return;
-
-    const setItems: (fn: (draft: { items: Record<string, FileItem> }) => void) => void = (fn) => {
-      useDocumentsStore.setState((state) => {
-        const draft = { items: { ...state.items } };
-        fn(draft);
-        return { items: draft.items };
-      });
-    };
-
-    void (async () => {
-      const identity = await storage.loadIdentity(session.did);
-      const privateKey = base64ToUint8Array(identity.private_key);
-      await Promise.all(
-        undecrypted.map((g) =>
-          decryptDocumentRecord(
-            documentRecords[g.record.document],
-            session.did,
-            privateKey,
-            setItems,
-          ).catch((err: unknown) =>
-            console.warn("[shared] failed to decrypt grant document:", g.uri, err),
-          ),
-        ),
-      );
-    })();
-  }, [outgoing, storeItems, documentRecords, session]);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+    const hasUndecrypted = outgoing.some((g) => !storeItems[g.document]?.decrypted);
+    if (hasUndecrypted) {
+      void useDocumentsStore.getState().ensureAllDirectoriesReady();
+    }
+  }, [outgoing, storeItems, session]);
 
   // Evict preview cache on close
   const previewCacheKey = preview?.source === "outgoing" ? preview.documentUri : preview?.grant.uri;
@@ -288,8 +243,8 @@ function SharedPage() {
 
       const done = trackLoading(`revoke:${grantUri}`);
       try {
-        const oauthSession = (await storage.loadSession(session.did)) as OAuthSession;
-        await revokeGrant(session.pdsUrl, session.did, grantUri, oauthSession);
+        const worker = getOpakeWorker();
+        await worker.cabinetRevokeShare(grantUri);
         setOutgoing((prev) => prev.filter((g) => g.uri !== grantUri));
         if (preview?.item.uri === grantUri) setPreview(null);
         toastSuccess("Sharing stopped");
@@ -329,7 +284,7 @@ function SharedPage() {
       const grant = grantMap.get(item.uri);
       if (!grant) return;
       if (isPreviewable(item)) {
-        setPreview({ source: "outgoing", documentUri: grant.record.document, item });
+        setPreview({ source: "outgoing", documentUri: grant.document, item });
       }
     },
     [grantMap],
@@ -379,7 +334,7 @@ function SharedPage() {
   const renderOutgoingActions = useCallback(
     (item: FileItem) => () => {
       const grant = grantMap.get(item.uri);
-      const cabinetPath = grant ? cabinetPathFor(grant.record.document) : null;
+      const cabinetPath = grant ? cabinetPathFor(grant.document) : null;
       return (
         // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- stopPropagation wrapper
         <div onClick={(e) => e.stopPropagation()}>
@@ -407,7 +362,7 @@ function SharedPage() {
                 icon: DownloadSimpleIcon,
                 label: "Download",
                 onClick: () => {
-                  if (grant) void downloadFile(grant.record.document);
+                  if (grant) void downloadFile(grant.document);
                 },
               },
               {

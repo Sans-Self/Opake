@@ -1,12 +1,22 @@
-use log::debug;
+use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
 use crate::error::Error;
-use crate::records::{self, Keyring};
+use crate::records::{self, Keyring, KeyringMember, Role};
 
 use super::KEYRING_COLLECTION;
+
+/// Everything needed to add a member to a keyring.
+pub struct AddMemberParams<'a> {
+    pub keyring_uri: &'a str,
+    pub group_key: &'a ContentKey,
+    pub new_member_did: &'a str,
+    pub new_member_public_key: &'a X25519PublicKey,
+    pub role: Role,
+    pub modified_at: &'a str,
+}
 
 /// Fetch a keyring record, add a new member's wrapped group key, and update.
 ///
@@ -14,14 +24,10 @@ use super::KEYRING_COLLECTION;
 /// it's needed to wrap a copy for the new member.
 pub async fn add_member(
     client: &mut XrpcClient<impl Transport>,
-    keyring_uri: &str,
-    group_key: &ContentKey,
-    new_member_did: &str,
-    new_member_public_key: &X25519PublicKey,
-    modified_at: &str,
+    params: &AddMemberParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(), Error> {
-    let at_uri = atproto::parse_at_uri(keyring_uri)?;
+    let at_uri = atproto::parse_at_uri(params.keyring_uri)?;
 
     let caller_did = client.did()?;
     if at_uri.authority != caller_did {
@@ -31,7 +37,7 @@ pub async fn add_member(
         )));
     }
 
-    debug!("fetching keyring record {}", keyring_uri);
+    trace!("fetching keyring record {}", params.keyring_uri);
     let entry = client
         .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
         .await?;
@@ -39,18 +45,35 @@ pub async fn add_member(
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
     records::check_version(keyring.opake_version)?;
 
-    if keyring.members.iter().any(|m| m.did == new_member_did) {
+    if keyring
+        .members
+        .iter()
+        .any(|m| m.did() == params.new_member_did)
+    {
         return Err(Error::InvalidRecord(format!(
-            "{new_member_did} is already a member of this keyring"
+            "{} is already a member of this keyring",
+            params.new_member_did
         )));
     }
 
-    debug!("wrapping group key for {}", new_member_did);
-    let wrapped = crypto::wrap_key(group_key, new_member_public_key, new_member_did, rng)?;
-    keyring.members.push(wrapped);
-    keyring.modified_at = Some(modified_at.to_string());
+    trace!(
+        "wrapping group key for {} (role={})",
+        params.new_member_did,
+        params.role
+    );
+    let wrapped = crypto::wrap_key(
+        params.group_key,
+        params.new_member_public_key,
+        params.new_member_did,
+        rng,
+    )?;
+    keyring.members.push(KeyringMember {
+        wrapped_key: wrapped,
+        role: params.role,
+    });
+    keyring.modified_at = Some(params.modified_at.to_string());
 
-    debug!("updating keyring record");
+    trace!("updating keyring record");
     client
         .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
         .await?;
@@ -62,8 +85,8 @@ pub async fn add_member(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
-    use crate::records::{AtBytes, Keyring, WrappedKey, SCHEMA_VERSION};
+    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey};
+    use crate::records::{AtBytes, Keyring, KeyringMember, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
     const TEST_DID: &str = "did:plc:owner";
@@ -79,7 +102,7 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn test_keypair() -> (X25519PublicKey, [u8; 32]) {
+    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
         let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
         let public = X25519DalekPublicKey::from(&secret);
         (public.to_bytes(), secret.to_bytes())
@@ -89,12 +112,16 @@ mod tests {
         Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![WrappedKey {
-                did: owner_did.into(),
-                ciphertext: AtBytes {
-                    encoded: "AAAA".into(),
+            owner: owner_did.into(),
+            members: vec![KeyringMember {
+                wrapped_key: WrappedKey {
+                    did: owner_did.into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-hkdf-a256kw".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                role: Role::Manager,
             }],
             rotation: 0,
             key_history: Vec::new(),
@@ -140,17 +167,15 @@ mod tests {
         mock.enqueue(put_record_response());
 
         let mut client = mock_client(mock.clone());
-        add_member(
-            &mut client,
-            KEYRING_URI,
-            &group_key,
-            "did:plc:newmember",
-            &new_pubkey,
-            "2026-03-01T12:00:00Z",
-            &mut OsRng,
-        )
-        .await
-        .unwrap();
+        let params = AddMemberParams {
+            keyring_uri: KEYRING_URI,
+            group_key: &group_key,
+            new_member_did: "did:plc:newmember",
+            new_member_public_key: &new_pubkey,
+            role: Role::Editor,
+            modified_at: "2026-03-01T12:00:00Z",
+        };
+        add_member(&mut client, &params, &mut OsRng).await.unwrap();
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 2);
@@ -162,12 +187,13 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 let updated: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
                 assert_eq!(updated.members.len(), 2);
-                assert_eq!(updated.members[0].did, TEST_DID);
-                assert_eq!(updated.members[1].did, "did:plc:newmember");
+                assert_eq!(updated.members[0].wrapped_key.did, TEST_DID);
+                assert_eq!(updated.members[1].wrapped_key.did, "did:plc:newmember");
                 assert!(updated.modified_at.is_some());
 
                 // Verify new member can unwrap the group key
-                let unwrapped = crypto::unwrap_key(&updated.members[1], &new_privkey).unwrap();
+                let unwrapped =
+                    crypto::unwrap_key(&updated.members[1].wrapped_key, &new_privkey).unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
             }
             _ => panic!("expected JSON body"),
@@ -184,17 +210,17 @@ mod tests {
         mock.enqueue(get_record_response(&keyring));
 
         let mut client = mock_client(mock);
-        let err = add_member(
-            &mut client,
-            KEYRING_URI,
-            &group_key,
-            TEST_DID,
-            &owner_pubkey,
-            "2026-03-01T12:00:00Z",
-            &mut OsRng,
-        )
-        .await
-        .unwrap_err();
+        let params = AddMemberParams {
+            keyring_uri: KEYRING_URI,
+            group_key: &group_key,
+            new_member_did: TEST_DID,
+            new_member_public_key: &owner_pubkey,
+            role: Role::Editor,
+            modified_at: "2026-03-01T12:00:00Z",
+        };
+        let err = add_member(&mut client, &params, &mut OsRng)
+            .await
+            .unwrap_err();
 
         assert!(err.to_string().contains("already a member"), "got: {err}");
     }
@@ -207,17 +233,17 @@ mod tests {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
 
-        let err = add_member(
-            &mut client,
-            "at://did:plc:someone-else/app.opake.keyring/kr1",
-            &group_key,
-            "did:plc:newmember",
-            &pubkey,
-            "2026-03-01T12:00:00Z",
-            &mut OsRng,
-        )
-        .await
-        .unwrap_err();
+        let params = AddMemberParams {
+            keyring_uri: "at://did:plc:someone-else/app.opake.keyring/kr1",
+            group_key: &group_key,
+            new_member_did: "did:plc:newmember",
+            new_member_public_key: &pubkey,
+            role: Role::Editor,
+            modified_at: "2026-03-01T12:00:00Z",
+        };
+        let err = add_member(&mut client, &params, &mut OsRng)
+            .await
+            .unwrap_err();
 
         assert!(
             err.to_string().contains("cannot modify keyring"),
@@ -236,17 +262,17 @@ mod tests {
         mock.enqueue(get_record_response(&keyring));
 
         let mut client = mock_client(mock);
-        let err = add_member(
-            &mut client,
-            KEYRING_URI,
-            &group_key,
-            "did:plc:new",
-            &pubkey,
-            "2026-03-01T12:00:00Z",
-            &mut OsRng,
-        )
-        .await
-        .unwrap_err();
+        let params = AddMemberParams {
+            keyring_uri: KEYRING_URI,
+            group_key: &group_key,
+            new_member_did: "did:plc:new",
+            new_member_public_key: &pubkey,
+            role: Role::Editor,
+            modified_at: "2026-03-01T12:00:00Z",
+        };
+        let err = add_member(&mut client, &params, &mut OsRng)
+            .await
+            .unwrap_err();
 
         assert!(err.to_string().contains("schema version"), "got: {err}");
     }

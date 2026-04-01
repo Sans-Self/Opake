@@ -1,23 +1,44 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, Outlet, Link } from "@tanstack/react-router";
 import { Sidebar } from "@/components/cabinet/Sidebar";
 import { TopBar } from "@/components/cabinet/TopBar";
 import { OpakeLogo } from "@/components/OpakeLogo";
+import {
+  CreateWorkspaceDialog,
+  type CreateWorkspaceDialogHandle,
+} from "@/components/cabinet/CreateWorkspaceDialog";
 import { useDocumentsStore } from "@/stores/documents/store";
+import { useKeyringStore } from "@/stores/keyring";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
 
 function CabinetLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const loadCabinet = useDocumentsStore((s) => s.loadCabinet);
+  const createWorkspace = useKeyringStore((s) => s.createWorkspace);
   const anyLoading = useAppStore((s) => s.anythingLoading());
+  const createDialogRef = useRef<CreateWorkspaceDialogHandle>(null);
 
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
+  // Load cabinet + keyrings on mount. Sequenced to avoid DPoP nonce
+  // race — both hit the same PDS session. See #380.
+  const loaded = useRef(false);
   useEffect(() => {
-    void loadCabinet();
-  }, [loadCabinet]);
+    if (loaded.current) return;
+    loaded.current = true;
+    void useDocumentsStore
+      .getState()
+      .loadCabinet()
+      .then(() => void useKeyringStore.getState().loadKeyrings());
+  }, []);
+
+  const handleCreateWorkspace = useCallback(
+    (name: string, description: string | undefined) => {
+      void createWorkspace(name, description);
+    },
+    [createWorkspace],
+  );
 
   return (
     <div className="bg-base-300 flex h-screen overflow-hidden font-sans">
@@ -51,13 +72,18 @@ function CabinetLayout() {
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
-        <Sidebar onNavigate={closeSidebar} />
+        <Sidebar
+          onNavigate={closeSidebar}
+          onCreateWorkspace={() => createDialogRef.current?.show()}
+        />
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden pt-14 md:pt-0">
         <TopBar />
         <Outlet />
       </main>
+
+      <CreateWorkspaceDialog ref={createDialogRef} onConfirm={handleCreateWorkspace} />
     </div>
   );
 }
@@ -74,9 +100,9 @@ export const Route = createFileRoute("/cabinet")({
       throw redirect({ to: "/devices/login" });
     }
 
-    // Kick off loadCabinet so child loaders (waitForTree) can resolve.
-    // Fire-and-forget — the child loaders subscribe to the store.
-    void useDocumentsStore.getState().loadCabinet();
+    // Data loading lives in the useEffect on CabinetLayout — not here.
+    // beforeLoad fires on EVERY child navigation, and loadCabinet is
+    // destructive (resets items to directory-only before re-populating).
   },
   component: CabinetLayout,
 });

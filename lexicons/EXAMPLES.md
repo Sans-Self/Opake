@@ -18,13 +18,24 @@ This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only on
 
 ## 1. Root directory (created on first `opake mkdir`)
 
-The root directory is a singleton at rkey `self`. It's lazy-created the first time a user creates a directory.
+The root directory is a singleton at rkey `self`. Directory names are always encrypted in `encryptedMetadata` — the PDS never sees real folder names. `keyWrapping` tells clients how to unwrap the content key.
 
 ```json
 {
   "$type": "app.opake.directory",
   "opakeVersion": 1,
-  "name": "/",
+  "keyWrapping": {
+    "$type": "app.opake.defs#directKeyWrapping",
+    "keys": [{
+      "did": "did:plc:alice123",
+      "ciphertext": { "$bytes": "kv7N...72 bytes...Q==" },
+      "algo": "x25519-hkdf-a256kw"
+    }]
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "Ghb8...encrypted JSON..." },
+    "nonce": { "$bytes": "rNpK...12 bytes..." }
+  },
   "entries": [
     "at://did:plc:alice123/app.opake.directory/3k..."
   ],
@@ -33,7 +44,7 @@ The root directory is a singleton at rkey `self`. It's lazy-created the first ti
 }
 ```
 
-Directories are purely organizational — no encryption, no crypto. The `entries` array is an ordered list of AT-URIs pointing to documents or other directories (children-on-parent model). You can derive the child type from the collection segment of the URI.
+The `entries` array is an ordered list of AT-URIs pointing to documents or other directories (children-on-parent model). Directories use `KeyWrapping` (not `Encryption`) because they have no blob — only `encryptedMetadata`.
 
 ## 2. A named directory
 
@@ -41,7 +52,18 @@ Directories are purely organizational — no encryption, no crypto. The `entries
 {
   "$type": "app.opake.directory",
   "opakeVersion": 1,
-  "name": "Photos",
+  "keyWrapping": {
+    "$type": "app.opake.defs#directKeyWrapping",
+    "keys": [{
+      "did": "did:plc:alice123",
+      "ciphertext": { "$bytes": "Xm4p...72 bytes...==" },
+      "algo": "x25519-hkdf-a256kw"
+    }]
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "9fHa...encrypted {name:'Photos'}..." },
+    "nonce": { "$bytes": "T7kR...12 bytes..." }
+  },
   "entries": [
     "at://did:plc:alice123/app.opake.document/3kabcd",
     "at://did:plc:alice123/app.opake.document/3kefgh",
@@ -52,7 +74,55 @@ Directories are purely organizational — no encryption, no crypto. The `entries
 }
 ```
 
-This directory contains two documents and a subdirectory. Non-root directories use TID rkeys (created via `createRecord`).
+This directory contains two documents and a subdirectory. Non-root directories use TID rkeys (created via `createRecord`). The decrypted `encryptedMetadata` contains `{ "name": "Photos" }`.
+
+## 2a. Workspace directory (encrypted under keyring)
+
+A workspace directory uses `keyringKeyWrapping` — the content key is wrapped under the workspace's group key instead of an individual DID's public key. All workspace members who can unwrap the group key can read the directory name.
+
+```json
+{
+  "$type": "app.opake.directory",
+  "opakeVersion": 1,
+  "keyWrapping": {
+    "$type": "app.opake.defs#keyringKeyWrapping",
+    "keyringRef": {
+      "keyring": "at://did:plc:alice123/app.opake.keyring/3kabc",
+      "wrappedContentKey": { "$bytes": "Qw9f...40 bytes (AES-KW)..." },
+      "rotation": 0
+    }
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "mNp3...encrypted {name:'Projects'}..." },
+    "nonce": { "$bytes": "Hk7a...12 bytes..." }
+  },
+  "entries": [
+    "at://did:plc:alice123/app.opake.document/3kdoc1",
+    "at://did:plc:bob456/app.opake.document/3kdoc2"
+  ],
+  "createdAt": "2026-03-21T10:00:00.000Z"
+}
+```
+
+Note: `entries` can contain cross-PDS AT-URIs — workspace documents live on each member's PDS. The workspace root directory uses a deterministic rkey `ws-{keyring_rkey}`.
+
+## 2b. Directory update (member proposing structural change)
+
+Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the AppView and applies them.
+
+```json
+{
+  "$type": "app.opake.directoryUpdate",
+  "opakeVersion": 1,
+  "keyring": "at://did:plc:alice123/app.opake.keyring/3kabc",
+  "actionType": "addEntry",
+  "directory": "at://did:plc:alice123/app.opake.directory/ws-3kabc",
+  "entry": "at://did:plc:bob456/app.opake.document/3knewdoc",
+  "createdAt": "2026-03-21T12:00:00.000Z"
+}
+```
+
+Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `targetDirectory`), `createDirectory` (with `parentDirectory` + `encryptedMetadata`), `deleteDirectory`, `renameDirectory` (with `encryptedMetadata`).
 
 ## 3. Alice creates a private encrypted document
 
@@ -126,34 +196,48 @@ from the network (eventually). For true forward secrecy, Alice would also re-enc
 the document with a fresh content key.
 
 
-## 5. Keyring-based group sharing (family photos)
+## 5. Workspace (keyring-based group sharing)
 
-### First, the keyring:
+### The keyring record:
+
+The `owner` field identifies the canonical owner (Alice). Each member has a `role`: manager (full control), editor (upload/edit), or viewer (read-only). The keyring name and description are inside `encryptedMetadata`, encrypted with the group key.
 
 ```json
 {
   "$type": "app.opake.keyring",
   "opakeVersion": 1,
-  "name": "family-photos",
-  "description": "Shared photo collection for the family",
   "algo": "aes-256-gcm",
+  "owner": "did:plc:alice123",
   "members": [
     {
-      "did": "did:plc:alice123",
-      "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
-      "algo": "x25519-hkdf-a256kw"
+      "wrappedKey": {
+        "did": "did:plc:alice123",
+        "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
+        "algo": "x25519-hkdf-a256kw"
+      },
+      "role": "manager"
     },
     {
-      "did": "did:plc:bob456",
-      "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
-      "algo": "x25519-hkdf-a256kw"
+      "wrappedKey": {
+        "did": "did:plc:bob456",
+        "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
+        "algo": "x25519-hkdf-a256kw"
+      },
+      "role": "editor"
     },
     {
-      "did": "did:plc:carol789",
-      "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
-      "algo": "x25519-hkdf-a256kw"
+      "wrappedKey": {
+        "did": "did:plc:carol789",
+        "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
+        "algo": "x25519-hkdf-a256kw"
+      },
+      "role": "viewer"
     }
   ],
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "rotation": 0,
   "createdAt": "2026-01-15T09:00:00.000Z"
 }
@@ -196,10 +280,11 @@ the document with a fresh content key.
 3. Decrypt `wrappedContentKey` with GK → get the per-document content key
 4. Fetch + decrypt the blob with content key + nonce
 
-**Adding a new family member (did:plc:dave):**
-- Wrap GK to Dave's pubkey
+**Adding a new member (did:plc:dave as editor):**
+- Wrap GK to Dave's pubkey with `"role": "editor"`
 - Update the keyring record to add Dave to `members`
 - Dave can now decrypt *all* documents under this keyring. No per-document changes needed.
+- The AppView enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
 
 **Removing a member:**
 - Archive the current rotation's remaining member entries into `keyHistory`
@@ -207,7 +292,7 @@ the document with a fresh content key.
 - New documents use the new GK
 - Old documents remain readable: the client looks up the document's rotation in `keyHistory` to find the old wrapped group key
 - Removed members' wrapped keys are excluded from history, so they can't recover old GK from the record
-- For true revocation of old content: re-encrypt affected documents with new content keys (see #88)
+- Forward secrecy is automatic (removed member can't decrypt new content). For historical access revocation, see background re-encryption.
 
 
 ## 6. Pair request (new device requesting identity)
@@ -281,6 +366,76 @@ When sharing with someone who hasn't logged into Opake, a `pendingShare` record 
 - The daemon re-derives the content key from the document at retry time using the owner's identity
 - Records expire after 7 days and are automatically deleted by the daemon
 - Cross-device: created from any device, retried by any device with the daemon running
+
+## 9. Document update (collaborative editing)
+
+An editor proposes an update to a document owned by another workspace member. The update lives on the editor's PDS until the owner applies it.
+
+```json
+{
+  "$type": "app.opake.documentUpdate",
+  "opakeVersion": 1,
+  "document": "at://did:plc:alice123/app.opake.document/3kabcd",
+  "blob": {
+    "$type": "blob",
+    "ref": { "$link": "bafkrei..." },
+    "mimeType": "application/octet-stream",
+    "size": 294912
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
+  "createdAt": "2026-03-21T10:00:00.000Z"
+}
+```
+
+**How the owner applies it:**
+1. AppView surfaces pending updates via `GET /api/workspace/updates`
+2. Owner's client fetches the update blob from the editor's PDS
+3. Owner re-uploads the blob to their own PDS and updates their document record
+4. Editor's client deletes the `documentUpdate` record after confirmation
+
+For document adoption (when a member is removed), the `supersedes` field points to the original document URI being replaced:
+
+```json
+{
+  "$type": "app.opake.documentUpdate",
+  "opakeVersion": 1,
+  "document": "at://did:plc:alice123/app.opake.document/3kabcd",
+  "blob": {
+    "$type": "blob",
+    "ref": { "$link": "bafkrei..." },
+    "mimeType": "application/octet-stream",
+    "size": 294912
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
+  "supersedes": "at://did:plc:removed-member/app.opake.document/3koriginal",
+  "createdAt": "2026-03-21T10:30:00.000Z"
+}
+```
+
+## 10. Leaving a workspace
+
+A member opts out of a workspace by writing a `keyringLeave` record to their own PDS. The AppView stops listing them as a member.
+
+```json
+{
+  "$type": "app.opake.keyringLeave",
+  "opakeVersion": 1,
+  "keyring": "at://did:plc:alice123/app.opake.keyring/3k...",
+  "createdAt": "2026-03-21T11:00:00.000Z"
+}
+```
+
+**Key points:**
+- This is a visibility opt-out, not a key revocation — the member's wrapped key still exists on the keyring record
+- The workspace disappears from the member's sidebar
+- The owner can follow up with a proper removal (key rotation) to revoke future access
+- Used for both voluntary leave and cleaning up stale/forked workspace membership
 
 ## Design Decisions & Notes
 

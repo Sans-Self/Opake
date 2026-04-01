@@ -17,6 +17,7 @@ import {
   accountConfigCollection as wasmAccountConfigCollection,
   accountConfigRkey as wasmAccountConfigRkey,
   newAccountConfig as wasmNewAccountConfig,
+  decryptKeyringMetadata as wasmDecryptKeyringMetadata,
 } from "@/wasm/opake-wasm/opake";
 import type { DpopKeyPair, PkceChallenge, EphemeralKeypair } from "@/lib/cryptoTypes";
 import type { AccountConfigRecord } from "@/lib/pdsTypes";
@@ -39,8 +40,8 @@ export const identityApi = {
     method: string,
     url: string,
     timestamp: number,
-    nonce: string | null,
-    accessToken: string | null,
+    nonce: string | null | undefined,
+    accessToken: string | null | undefined,
   ): string {
     return wasmCreateDpopProof(
       keypair,
@@ -108,5 +109,10 @@ export const identityApi = {
 
   newAccountConfig(modifiedAt: string): AccountConfigRecord {
     return AccountConfigRecordSchema.parse(wasmNewAccountConfig(modifiedAt));
+  },
+
+  // REMOVE: temporary bridge until listWorkspacesDecrypted lands in core.
+  decryptKeyringMetadata(key: Uint8Array, ciphertext: Uint8Array, nonce: Uint8Array): unknown {
+    return wasmDecryptKeyringMetadata(key, ciphertext, nonce);
   },
 };

@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
 use super::{
-    hkdf_info, ContentKey, CryptoRng, DidPublicKey, RngCore, X25519PrivateKey, X25519PublicKey,
+    hkdf_info, ContentKey, CryptoRng, DidMember, RngCore, X25519PrivateKey, X25519PublicKey,
     CIPHERTEXT_LEN, CONTENT_KEY_LEN, WRAP_ALGO, X25519_KEY_LEN,
 };
 use crate::atproto::AtBytes;
@@ -103,13 +103,13 @@ pub fn unwrap_key(
 
 /// Generate a random group key for a keyring, then wrap it to each member's public key.
 pub fn create_group_key(
-    member_public_keys: &[DidPublicKey],
+    members: &[DidMember],
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(ContentKey, Vec<WrappedKey>), Error> {
     let group_key = super::generate_content_key(rng);
-    let wrapped_keys: Result<Vec<_>, _> = member_public_keys
+    let wrapped_keys: Result<Vec<_>, _> = members
         .iter()
-        .map(|(did, pubkey)| wrap_key(&group_key, pubkey, did, rng))
+        .map(|m| wrap_key(&group_key, m.public_key, m.did, rng))
         .collect();
     Ok((group_key, wrapped_keys?))
 }

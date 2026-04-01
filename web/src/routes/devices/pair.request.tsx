@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
-import { getOpakeWorker } from "@/lib/worker";
 import { storage } from "@/lib/indexeddbStorage";
-import { formatFingerprint, rkeyFromUri } from "@/lib/encoding";
+import { formatFingerprint } from "@/lib/encoding";
 import {
   createPairRequest,
   pollForPairResponse,
@@ -64,26 +63,21 @@ function PairRequestPage() {
       const authState = useAuthStore.getState();
       if (authState.session.status !== "active") return;
 
-      const { did, pdsUrl } = authState.session;
-      const worker = getOpakeWorker();
-      const session = await storage.loadSession(did);
+      const { did } = authState.session;
 
       addLoading("pair-request-init");
       try {
-        const ephemeral = await worker.generateEphemeralKeypair();
-        ephemeralPrivKeyRef.current = ephemeral.privateKey;
-
-        const requestUri = await createPairRequest(pdsUrl, did, ephemeral.publicKey, session);
+        const pairResult = await createPairRequest();
+        ephemeralPrivKeyRef.current = pairResult.ephemeral_private_key;
 
         if (cancelledRef.current) return;
 
-        const fingerprint = formatFingerprint(ephemeral.publicKey);
-        const requestRkey = rkeyFromUri(requestUri);
-        setState({ step: "waiting", fingerprint, requestUri });
+        const fingerprint = formatFingerprint(pairResult.ephemeral_public_key);
+        setState({ step: "waiting", fingerprint, requestUri: pairResult.uri });
 
         pollRef.current = setInterval(async () => {
           try {
-            const response = await pollForPairResponse(pdsUrl, did, requestRkey, session);
+            const response = await pollForPairResponse(pairResult.rkey, did);
             if (!response || cancelledRef.current) return;
 
             cleanup();
@@ -97,13 +91,11 @@ function PairRequestPage() {
               return;
             }
 
-            const identity = await receivePairResponse(response, privKey, worker);
+            const identity = await receivePairResponse(response, privKey);
             await storage.saveIdentity(did, identity);
 
             // Clean up PDS records (best-effort)
-            await cleanupPairRecords(pdsUrl, did, requestUri, null, session).catch(
-              Function.prototype as () => void,
-            );
+            await cleanupPairRecords(pairResult.uri, null).catch(Function.prototype as () => void);
 
             // Transition identity to ready
             useAuthStore.setState((draft) => {
@@ -114,6 +106,7 @@ function PairRequestPage() {
             removeLoading("pair-request-receive");
             setTimeout(() => navigate({ to: "/cabinet" }), 1500);
           } catch (err) {
+            console.error("[pairing] receive failed:", err);
             cleanup();
             removeLoading("pair-request-receive");
             setState({
@@ -123,6 +116,7 @@ function PairRequestPage() {
           }
         }, POLL_INTERVAL_MS);
       } catch (err) {
+        console.error("[pairing] init failed:", err);
         if (cancelledRef.current) return;
         setState({
           step: "error",

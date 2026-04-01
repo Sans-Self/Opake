@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
-import { getOpakeWorker } from "@/lib/worker";
-import { storage } from "@/lib/indexeddbStorage";
 import { listPairRequests, approvePairRequest, type PendingPairRequest } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
@@ -44,11 +42,8 @@ async function fetchPairRequests(): Promise<AcceptState> {
   const authState = useAuthStore.getState();
   if (authState.session.status !== "active") return { step: "loading" };
 
-  const { did, pdsUrl } = authState.session;
-  const session = await storage.loadSession(did);
-
   try {
-    const requests = await listPairRequests(pdsUrl, did, session, MAX_KEY_AGE);
+    const requests = await listPairRequests(MAX_KEY_AGE);
     return requests.length === 0 ? { step: "empty" } : { step: "selecting", requests };
   } catch (err) {
     return {
@@ -101,26 +96,13 @@ function PairAcceptPage() {
         return;
       }
 
-      const { did, pdsUrl } = authState.session;
-      const worker = getOpakeWorker();
-
       try {
-        const session = await storage.loadSession(did);
-        const identity = await storage.loadIdentity(did);
-
-        await approvePairRequest(
-          pdsUrl,
-          did,
-          request.uri,
-          request.ephemeralKey,
-          identity,
-          session,
-          worker,
-        );
+        await approvePairRequest(request.uri, request.ephemeralKey);
 
         setState({ step: "success" });
         setTimeout(() => navigate({ to: "/cabinet" }), 1500);
       } catch (err) {
+        console.error("[pairing] approve failed:", err);
         setState({
           step: "error",
           message: err instanceof Error ? err.message : String(err),

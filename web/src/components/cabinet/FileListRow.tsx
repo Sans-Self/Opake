@@ -43,10 +43,13 @@ export function FileListRow({
   const isFolder = item.kind === "folder";
   const isClickable = isFolder || item.decrypted;
 
+  const isProposal = item.proposal != null;
+
   const rowClassName = [
     "hover:bg-bg-hover flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors",
     isClickable ? "cursor-pointer" : "",
     isActive ? "bg-bg-hover ring-1 ring-primary/20" : "",
+    isProposal ? "opacity-65" : "",
   ].join(" ");
 
   return (
@@ -106,11 +109,8 @@ export function FileListRow({
         ) : (
           <div className="skeleton h-4 w-36 rounded" />
         )}
-        {item.subtitle && (
-          <div className="text-caption text-text-faint truncate">{item.subtitle}</div>
-        )}
         <div className="text-caption text-text-faint mt-0.5 flex items-center gap-1.5">
-          <span>{item.modified}</span>
+          {item.subtitle ? <span>{item.subtitle}</span> : <span>{item.modified}</span>}
           {item.decrypted && item.size && (
             <>
               <span>·</span>

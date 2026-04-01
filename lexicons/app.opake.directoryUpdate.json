@@ -1,0 +1,73 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.directoryUpdate",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A proposed structural change to a workspace directory. Written by a member to their own PDS when they can't directly modify the owner's directory records. The owner's daemon picks up pending updates via the AppView and applies them.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["opakeVersion", "keyring", "actionType", "createdAt"],
+        "properties": {
+          "opakeVersion": {
+            "type": "integer",
+            "description": "Schema version for the app.opake.* namespace.",
+            "minimum": 1
+          },
+          "keyring": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT URI of the workspace keyring this operation belongs to."
+          },
+          "actionType": {
+            "type": "string",
+            "description": "The structural operation being proposed.",
+            "knownValues": [
+              "addEntry",
+              "removeEntry",
+              "moveEntry",
+              "createDirectory",
+              "deleteDirectory",
+              "renameDirectory"
+            ]
+          },
+          "directory": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Target directory for addEntry, removeEntry, deleteDirectory, renameDirectory actions."
+          },
+          "entry": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The document or directory being placed, removed, or moved."
+          },
+          "sourceDirectory": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Source directory for moveEntry action."
+          },
+          "targetDirectory": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Destination directory for moveEntry action."
+          },
+          "parentDirectory": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Parent directory for createDirectory action."
+          },
+          "encryptedMetadata": {
+            "type": "ref",
+            "ref": "app.opake.defs#encryptedMetadata",
+            "description": "Encrypted directory name and description for createDirectory and renameDirectory actions."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

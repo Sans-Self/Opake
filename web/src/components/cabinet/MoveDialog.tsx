@@ -3,8 +3,8 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ArrowBendUpRightIcon, FolderIcon, HouseIcon } from "@phosphor-icons/react";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
-import { useDocumentsStore } from "@/stores/documents/store";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
+import { useTreeSnapshot } from "./TreeSnapshotContext";
 
 // ---------------------------------------------------------------------------
 // Handle
@@ -22,6 +22,7 @@ export interface MoveDialogHandle {
 
 interface MoveDialogProps {
   readonly onMove: (entryUri: string, targetDirectoryUri: string | null) => void;
+  readonly rootLabel: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ function TreeNode({
 // ---------------------------------------------------------------------------
 
 export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function MoveDialog(
-  { onMove },
+  { onMove, rootLabel },
   ref,
 ) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -117,7 +118,7 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
   const [disabledUris, setDisabledUris] = useState<ReadonlySet<string>>(new Set());
   const [currentParentUri, setCurrentParentUri] = useState<string | null>(null);
 
-  const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
+  const treeSnapshot = useTreeSnapshot();
 
   const dismiss = useCallback(() => {
     dialogRef.current?.close();
@@ -148,8 +149,9 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
   const handleMove = useCallback(() => {
     if (!entryUri) return;
     // selectedTarget is null for root, or a directory URI
-    // Resolve null if root is selected (rootUri maps to null in the store)
-    const targetUri = selectedTarget === treeSnapshot?.rootUri ? null : selectedTarget;
+    // Resolve null if root is selected (root_uri maps to null in the store)
+    const isRoot = selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri;
+    const targetUri = isRoot ? null : selectedTarget;
     onMove(entryUri, targetUri);
     dismiss();
   }, [entryUri, selectedTarget, treeSnapshot, onMove, dismiss]);
@@ -158,10 +160,10 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
   const canMove =
     selectedTarget !== null &&
     selectedTarget !== currentParentUri &&
-    !(currentParentUri === null && selectedTarget === treeSnapshot?.rootUri);
+    !(currentParentUri === null && selectedTarget === treeSnapshot?.root_uri);
 
   // Root directory children for the tree
-  const rootDir = treeSnapshot?.rootUri ? treeSnapshot.directories[treeSnapshot.rootUri] : null;
+  const rootDir = treeSnapshot?.root_uri ? treeSnapshot.directories[treeSnapshot.root_uri] : null;
   const rootChildren = rootDir
     ? rootDir.entries.filter((e) => treeSnapshot && e in treeSnapshot.directories)
     : [];
@@ -184,18 +186,18 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
             {/* Root */}
             <li
               role="treeitem"
-              aria-selected={treeSnapshot ? selectedTarget === treeSnapshot.rootUri : false}
+              aria-selected={selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri}
             >
               <button
-                onClick={() => treeSnapshot?.rootUri && setSelectedTarget(treeSnapshot.rootUri)}
+                onClick={() => treeSnapshot?.root_uri && setSelectedTarget(treeSnapshot.root_uri)}
                 className={`text-ui flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-                  selectedTarget === treeSnapshot?.rootUri
+                  selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri
                     ? "bg-accent text-accent-content"
                     : "hover:bg-bg-hover"
                 } cursor-pointer`}
               >
                 <HouseIcon size={15} className="shrink-0" />
-                <span>Your Cabinet</span>
+                <span>{rootLabel}</span>
                 {currentParentUri === null && (
                   <span className="text-caption text-text-faint ml-auto shrink-0">(current)</span>
                 )}

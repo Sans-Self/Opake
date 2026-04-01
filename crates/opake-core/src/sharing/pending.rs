@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::{list_collection, time, Transport, XrpcClient};
@@ -24,7 +24,6 @@ pub const DEFAULT_PENDING_SHARE_TTL_SECONDS: i64 = 7 * 24 * 3600;
 
 /// Summary of a retry pass.
 #[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RetryResult {
     pub checked: usize,
     pub completed: usize,
@@ -73,7 +72,7 @@ pub async fn cancel_pending_share(
             PENDING_SHARE_COLLECTION, at_uri.collection,
         )));
     }
-    debug!("cancelling pending share {uri}");
+    trace!("cancelling pending share {uri}");
     client
         .delete_record(PENDING_SHARE_COLLECTION, &at_uri.rkey)
         .await
@@ -130,7 +129,7 @@ pub async fn retry_pending_shares(
         // Check expiry
         if let Some(created_ts) = time::parse_rfc3339(&entry.created_at) {
             if params.now - created_ts > params.ttl_seconds {
-                debug!("pending share {} expired, deleting", entry.uri);
+                trace!("pending share {} expired, deleting", entry.uri);
                 match client
                     .delete_record(PENDING_SHARE_COLLECTION, &at_uri.rkey)
                     .await

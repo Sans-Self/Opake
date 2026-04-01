@@ -1,3 +1,8 @@
+/** Extract the authority DID from an AT Protocol URI (`at://did:plc:xxx/...`). */
+export function didFromUri(uri: string): string {
+  return uri.split("/")[2];
+}
+
 /** Extract the rkey (last path segment) from an AT Protocol URI. */
 export function rkeyFromUri(uri: string): string {
   const segments = uri.split("/");

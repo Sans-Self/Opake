@@ -1,10 +1,10 @@
-use log::debug;
+use log::trace;
 
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{Directory, EncryptedMetadata, Encryption};
+use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 
-use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
+use super::{workspace_root_rkey, DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
 
 /// Get the root directory's AT-URI, creating it if it doesn't exist.
 ///
@@ -16,24 +16,55 @@ use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
 pub async fn get_or_create_root(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    encryption: Encryption,
+    key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     created_at: &str,
 ) -> Result<String, Error> {
-    debug!("checking for root directory");
+    trace!("checking for root directory");
     match client
         .get_record(did, DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY)
         .await
     {
         Ok(entry) => {
-            debug!("root directory exists: {}", entry.uri);
+            trace!("root directory exists: {}", entry.uri);
             Ok(entry.uri)
         }
         Err(Error::NotFound(_)) => {
-            debug!("root directory not found, creating");
-            let root = Directory::new(encryption, encrypted_metadata, created_at.to_string());
+            trace!("root directory not found, creating");
+            let root = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
             let record_ref = client
                 .put_record(DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY, &root)
+                .await?;
+            Ok(record_ref.uri)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Get or create a workspace's root directory.
+///
+/// Same pattern as [`get_or_create_root`] but uses a deterministic rkey
+/// derived from the keyring URI (`ws-{keyring_rkey}`).
+pub async fn get_or_create_workspace_root(
+    client: &mut XrpcClient<impl Transport>,
+    did: &str,
+    keyring_uri: &str,
+    key_wrapping: KeyWrapping,
+    encrypted_metadata: EncryptedMetadata,
+    created_at: &str,
+) -> Result<String, Error> {
+    let rkey = workspace_root_rkey(keyring_uri);
+    trace!("checking for workspace root directory (rkey: {})", rkey);
+    match client.get_record(did, DIRECTORY_COLLECTION, &rkey).await {
+        Ok(entry) => {
+            trace!("workspace root exists: {}", entry.uri);
+            Ok(entry.uri)
+        }
+        Err(Error::NotFound(_)) => {
+            trace!("workspace root not found, creating");
+            let root = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
+            let record_ref = client
+                .put_record(DIRECTORY_COLLECTION, &rkey, &root)
                 .await?;
             Ok(record_ref.uri)
         }
@@ -66,7 +97,7 @@ mod tests {
         let uri = get_or_create_root(
             &mut client,
             TEST_DID,
-            dir.encryption,
+            dir.key_wrapping,
             dir.encrypted_metadata,
             "2026-03-01T00:00:00Z",
         )
@@ -91,7 +122,7 @@ mod tests {
         let uri = get_or_create_root(
             &mut client,
             TEST_DID,
-            dir.encryption,
+            dir.key_wrapping,
             dir.encrypted_metadata,
             "2026-03-01T00:00:00Z",
         )
@@ -109,7 +140,7 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["rkey"], "self");
                 let record: Directory = serde_json::from_value(v["record"].clone()).unwrap();
-                assert!(matches!(record.encryption, Encryption::Direct(_)));
+                assert!(matches!(record.key_wrapping, KeyWrapping::Direct(_)));
                 assert!(record.entries.is_empty());
             }
             _ => panic!("expected JSON body"),
@@ -130,7 +161,7 @@ mod tests {
         let err = get_or_create_root(
             &mut client,
             TEST_DID,
-            dir.encryption,
+            dir.key_wrapping,
             dir.encrypted_metadata,
             "2026-03-01T00:00:00Z",
         )

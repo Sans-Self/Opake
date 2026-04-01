@@ -11,6 +11,7 @@ defmodule OpakeAppview.Queries.GrantQueries do
   alias OpakeAppview.Schemas.Grant
   alias OpakeAppview.Queries.Pagination
 
+  @spec upsert_grant(map()) :: {:ok, Grant.t()} | {:error, Ecto.Changeset.t()}
   def upsert_grant(attrs) do
     %Grant{}
     |> Grant.changeset(attrs)
@@ -20,11 +21,13 @@ defmodule OpakeAppview.Queries.GrantQueries do
     )
   end
 
+  @spec delete_grant(String.t()) :: {non_neg_integer(), nil}
   def delete_grant(uri) do
     from(g in Grant, where: g.uri == ^uri)
     |> Repo.delete_all()
   end
 
+  @spec list_inbox(String.t(), keyword()) :: {[Grant.t()], String.t() | nil}
   def list_inbox(recipient_did, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
     cursor = Keyword.get(opts, :cursor)
@@ -55,6 +58,7 @@ defmodule OpakeAppview.Queries.GrantQueries do
     {grants, next_cursor}
   end
 
+  @spec grant_count() :: non_neg_integer()
   def grant_count do
     Repo.aggregate(Grant, :count)
   end

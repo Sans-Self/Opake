@@ -7,7 +7,7 @@
 
 # AppView: API & Deployment
 
-The AppView indexes `app.opake.grant` and `app.opake.keyring` records from the AT Protocol firehose and serves them via a REST API. It enables the `inbox` command — "what's been shared with me?" — without scanning every PDS in the network.
+The AppView indexes five `app.opake.*` collections from the AT Protocol firehose — `grant`, `keyring`, `document` (keyring-encrypted only), `documentUpdate`, and `keyringLeave` — and serves them via a REST API. It enables the `inbox` command ("what's been shared with me?") and workspace queries without scanning every PDS in the network.
 
 Built with Elixir/Phoenix. Source lives in `appview/`.
 
@@ -45,6 +45,16 @@ docker compose --profile full up --build
 ```
 
 This starts postgres and the appview container. The entrypoint auto-creates the database and runs migrations.
+
+## Database Schema
+
+| Table | PK | Purpose |
+|-------|-----|---------|
+| `cursor` | `id` (singleton) | Jetstream cursor position |
+| `grants` | `uri` | Indexed sharing grants |
+| `keyring_members` | `(keyring_uri, member_did)` | Denormalized keyring membership with role |
+| `workspace_documents` | `document_uri` | Documents encrypted under a keyring |
+| `document_updates` | `uri` | Pending collaborative edit proposals |
 
 ## Configuration
 
@@ -148,6 +158,65 @@ Returns keyrings where `did` is a member.
   "cursor": "..."
 }
 ```
+
+### `GET /api/workspace?keyring=<uri>&limit=<n>&cursor=<cursor>`
+
+Returns documents encrypted under a keyring. **Requires the authenticated DID to be a member of the keyring** (returns 403 otherwise).
+
+| Param | Required | Default | Max |
+|-------|----------|---------|-----|
+| `keyring` | yes | — | — |
+| `limit` | no | 50 | 100 |
+| `cursor` | no | — | — |
+
+```json
+{
+  "documents": [
+    {
+      "documentUri": "at://did:plc:alice/app.opake.document/3abc",
+      "keyringUri": "at://did:plc:owner/app.opake.keyring/3def",
+      "ownerDid": "did:plc:alice",
+      "rotation": 0,
+      "indexedAt": "2026-03-21T10:00:00.000000Z"
+    }
+  ],
+  "cursor": "..."
+}
+```
+
+### `GET /api/workspace/updates?document=<uri>&limit=<n>&cursor=<cursor>`
+
+Returns pending document updates. If `document` is provided, returns updates for that specific document. If omitted, returns all pending updates targeting documents owned by the authenticated DID (joined on workspace_documents ownership).
+
+| Param | Required | Default | Max |
+|-------|----------|---------|-----|
+| `document` | no | — | — |
+| `limit` | no | 50 | 100 |
+| `cursor` | no | — | — |
+
+```json
+{
+  "updates": [
+    {
+      "uri": "at://did:plc:editor/app.opake.documentUpdate/3abc",
+      "documentUri": "at://did:plc:owner/app.opake.document/3xyz",
+      "authorDid": "did:plc:editor",
+      "supersedesUri": null,
+      "indexedAt": "2026-03-21T10:00:00.000000Z"
+    }
+  ]
+}
+```
+
+## Firehose Collections
+
+| Collection | Events | Effect |
+|------------|--------|--------|
+| `app.opake.grant` | create/update/delete | Index/remove grants in `grants` table |
+| `app.opake.keyring` | create/update/delete | Upsert/delete keyring members (with roles) in `keyring_members` |
+| `app.opake.document` | create/update/delete | If `keyringEncryption`, index in `workspace_documents`. Direct-encrypted documents are ignored. |
+| `app.opake.documentUpdate` | create/update/delete | Index/remove in `document_updates` |
+| `app.opake.keyringLeave` | create | Remove the authoring member from `keyring_members` for the referenced keyring |
 
 ## Rate Limiting
 

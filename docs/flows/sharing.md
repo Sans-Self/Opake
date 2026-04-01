@@ -38,6 +38,7 @@ Grants another user access to a document by wrapping the content key to their pu
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS as Own PDS
     participant PLC as PLC Directory
     participant RecipientPDS as Recipient's PDS
@@ -45,26 +46,29 @@ sequenceDiagram
 
     User->>CLI: opake share photo.jpg alice.example.com
 
-    CLI->>CLI: Resolve filename → AT-URI
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.resolve_entry(&tree, "photo.jpg")
 
-    Note over CLI,RecipientPDS: Resolve recipient identity
-    CLI->>PLC: DID document for recipient
-    PLC-->>CLI: { pds_url }
-    CLI->>RecipientPDS: getRecord (publicKey/self)
-    RecipientPDS-->>CLI: recipient's X25519 public key
+    Note over Opake,RecipientPDS: Resolve recipient identity
+    Opake->>PLC: DID document for recipient
+    PLC-->>Opake: { pds_url }
+    Opake->>RecipientPDS: getRecord (publicKey/self)
+    RecipientPDS-->>Opake: recipient's X25519 public key
 
-    Note over CLI,PDS: Fetch content key from own document
-    CLI->>PDS: getRecord (document)
-    PDS-->>CLI: Document record with owner's wrappedKey
-    CLI->>Crypto: unwrap_key(owner_wrappedKey, private_key)
-    Crypto-->>CLI: content key K
+    Note over Opake,PDS: Fetch content key from own document
+    Opake->>PDS: getRecord (document)
+    PDS-->>Opake: Document record with owner's wrappedKey
+    Opake->>Crypto: unwrap_key(owner_wrappedKey, private_key)
+    Crypto-->>Opake: content key K
 
-    Note over CLI,PDS: Create grant
-    CLI->>Crypto: wrap_key(K, recipient_pubkey, recipient_did)
-    Crypto-->>CLI: wrappedKey for recipient
+    Note over Opake,PDS: Create grant
+    Opake->>Crypto: wrap_key(K, recipient_pubkey, recipient_did)
+    Crypto-->>Opake: wrappedKey for recipient
 
-    CLI->>PDS: createRecord (grant)
-    PDS-->>CLI: { uri, cid }
+    Opake->>PDS: createRecord (grant)
+    PDS-->>Opake: { uri, cid }
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: Shared: at://did/.../grant-tid
 ```

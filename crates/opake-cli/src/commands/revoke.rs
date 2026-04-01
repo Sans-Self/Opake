@@ -1,10 +1,9 @@
 use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::sharing;
 
 use crate::commands::Execute;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 
 #[derive(Args)]
 /// Revoke a share grant
@@ -19,16 +18,18 @@ pub struct RevokeCommand {
 
 impl Execute for RevokeCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
-        let mut client = session::load_client(&ctx.storage, &ctx.did)?;
-
         if !self.yes && !crate::prompt::confirm(&format!("revoke {}?", self.grant))? {
             println!("aborted");
-            return Ok(session::refreshed_session(&client));
+            return Ok(None);
         }
 
-        sharing::revoke_grant(&mut client, &self.grant).await?;
+        let mut opake = ctx.opake().await?;
+        let context = opake.cabinet_context()?;
+        let mut mgr = opake.file_manager(&context);
+
+        mgr.revoke_share(&self.grant).await?;
         println!("revoked {}", self.grant);
 
-        Ok(session::refreshed_session(&client))
+        Ok(None)
     }
 }

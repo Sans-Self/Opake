@@ -1,4 +1,4 @@
-use log::debug;
+use log::trace;
 use serde::Deserialize;
 
 use super::Transport;
@@ -9,7 +9,7 @@ use crate::error::Error;
 impl<T: Transport> super::XrpcClient<T> {
     /// Upload raw bytes as a blob via `com.atproto.repo.uploadBlob`.
     pub async fn upload_blob(&mut self, data: Vec<u8>, mime_type: &str) -> Result<BlobRef, Error> {
-        debug!("uploading blob ({} bytes, {})", data.len(), mime_type);
+        trace!("uploading blob ({} bytes, {})", data.len(), mime_type);
 
         let mut request = HttpRequest {
             method: HttpMethod::Post,
@@ -35,7 +35,7 @@ impl<T: Transport> super::XrpcClient<T> {
 
     /// Fetch a blob by DID + CID via `com.atproto.sync.getBlob`.
     pub async fn get_blob(&mut self, did: &str, cid: &str) -> Result<Vec<u8>, Error> {
-        debug!("fetching blob did={} cid={}", did, cid);
+        trace!("fetching blob did={} cid={}", did, cid);
         let url = format!(
             "{}/xrpc/com.atproto.sync.getBlob?did={}&cid={}",
             self.base_url, did, cid,

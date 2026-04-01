@@ -24,11 +24,18 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 6. **Public keys as PDS records.** atproto DID docs only have signing keys. Opake publishes X25519 encryption public keys as `app.opake.publicKey/self` singleton records.
 7. **Multi-device: seed phrase.** Identity keypairs are derived from a BIP-39 24-word mnemonic via PBKDF2 + HKDF. The seed phrase is the default identity creation path — no random keypair fallback. Recovery via `opake recover` (CLI) or the web UI.
 8. **Storage trait in opake-core.** Config, Identity, Session types and the `Storage` trait live in core so both CLI (`FileStorage`, filesystem) and web (`IndexedDbStorage`, IndexedDB) share the same contract. Platform-specific I/O is injected, never imported.
+9. **Domain API: `Opake` → `FileManager` / `WorkspaceAdmin`.** The `Opake<T, R, S>` struct bundles client + identity + RNG + time + storage. All CLI commands route through Opake (sole holdout: `pair request` on a new device with no identity). Call `.file_context(workspace_name?)` + `.file_manager(&context)` for file ops, `.workspace_admin()` for membership ops (add/remove member, leave). Opake itself handles workspace CRUD, sharing, identity, pairing, config, maintenance. All mutations auto-persist sessions via `#[signoff]` (FileManager) or `#[signoff(self)]` (Opake). Raw functions are `pub(crate)`; the domain types ARE the public API.
+10. **Workspace is the domain concept.** Keyrings are crypto plumbing. The `Workspace` type wraps keyring data with domain semantics. CLI uses `opake workspace`, not `opake keyring`. Lexicon stays `app.opake.keyring` (wire format).
+11. **Sensitive types auto-zeroize.** `RedactedDebug` derive macro generates `Zeroize + Drop` for `#[redact]` fields. ContentKey, Identity, Session types are all zeroized on drop.
 
 ## Documentation
 
 - **[README.md](README.md)** — Usage, roadmap, build instructions
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Crate structure, encryption model, data model, storage layout, file permissions
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System overview, encryption model, data model, identity derivation
+- **[docs/CRATE_STRUCTURE.md](docs/CRATE_STRUCTURE.md)** — Detailed file tree for all crates and web frontend
+- **[docs/STORAGE.md](docs/STORAGE.md)** — Storage abstraction, local record cache, file permissions
+- **[docs/AUTH.md](docs/AUTH.md)** — OAuth/DPoP authentication, multi-account, device pairing
+- **[docs/CRYPTO.md](docs/CRYPTO.md)** — Algorithms, constants, key hierarchy, operation reference
 - **[docs/FLOWS.md](docs/FLOWS.md)** — Sequence diagrams for every operation
 - **[docs/appview.md](docs/appview.md)** — AppView config, auth, API endpoints
 - **[lexicons/README.md](lexicons/README.md)** — Full lexicon schema reference
@@ -36,6 +43,36 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 - **[docs/LICENSING.md](docs/LICENSING.md)** — AGPL-3.0 implications for self-hosters, plugin devs, contributors
 - **[SECURITY.md](SECURITY.md)** — Vulnerability reporting, scope, response timeline
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Code style, testing, architecture overview
+
+## AppView (Elixir)
+
+See **[docs/appview.md](docs/appview.md)** for tables, endpoints, deployment, and firehose details.
+
+### Conventions for agents
+
+- Event parser returns tagged tuples or `:ignore`. Indexer dispatches via `dispatch/3` function clauses grouped by domain.
+- All public functions have `@spec`. Schemas use `.t()` types.
+- Query list functions return `{[results], cursor | nil}`. Cursor format: `"{iso8601}::{uri}"`.
+- Workspace-scoped endpoints must check `KeyringQueries.is_member?/2` — returns 403 for non-members.
+- `Pagination.build_next_cursor/1` expects items with `:uri` and `:indexed_at` fields. If your schema uses a different PK name, map it.
+
+### Adding a new collection
+
+1. `@collection` constant + parser in `event.ex`, `dispatch/3` clause in `indexer.ex`
+2. Migration, schema, query module (follow existing patterns)
+3. Collection string in `@wanted_collections` in `consumer.ex`
+4. Controller + route if API endpoint needed
+5. Tests: event parser, query, pipeline e2e, controller
+
+### Test setup
+
+- DataCase for queries (`async: true`), ConnCase for controllers (`async: false`)
+- Controller tests need `set_mox_global`, `verify_on_exit!`, `:ets.delete_all_objects(:key_cache)` in setup
+- Pipeline e2e tests feed JSON through `Indexer.process_message/2`
+
+## Communication Style
+
+Conversational peer dynamic. Crosslink's "don't narrate" rule applies to code output only — status updates, design discussion, and back-and-forth should feel like talking to a colleague, not reading CI logs.
 
 ## References
 

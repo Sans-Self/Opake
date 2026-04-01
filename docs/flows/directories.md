@@ -2,36 +2,38 @@
 
 ## Create Directory
 
-Creates a directory record and registers it as a child of the root.
+Creates a directory record and registers it as a child of the specified parent (or root). Checks for duplicate names via `tree.has_child_directory`.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
 
     User->>CLI: opake mkdir Photos
 
-    CLI->>PDS: com.atproto.repo.getRecord (directory/self)
-    alt Root exists
-        PDS-->>CLI: root directory record
-    else Root not found (404)
-        CLI->>PDS: com.atproto.repo.putRecord (directory/self, name="/")
-        PDS-->>CLI: { uri, cid }
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.create_directory_at("Photos", None)
+
+    Opake->>PDS: ensure_root (getRecord directory/self, putRecord if 404)
+    Opake->>Opake: tree.has_child_directory(root_uri, "Photos")
+    alt Already exists
+        Opake-->>CLI: Error::AlreadyExists
     end
 
-    CLI->>PDS: com.atproto.repo.createRecord (directory, name="Photos")
-    PDS-->>CLI: { uri, cid }
+    Opake->>PDS: createRecord (directory, name="Photos")
+    PDS-->>Opake: { uri, cid }
 
-    CLI->>PDS: com.atproto.repo.getRecord (root)
-    CLI->>CLI: Append new directory URI to entries
-    CLI->>PDS: com.atproto.repo.putRecord (root with updated entries)
-    PDS-->>CLI: { uri, cid }
+    Opake->>PDS: putRecord (root with updated entries)
+    PDS-->>Opake: { uri, cid }
+
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: Photos → at://did/.../directory/<tid>
 ```
 
-Directories are children-on-parent: the parent's `entries` array holds the AT-URIs of its children. The root directory is a singleton at rkey "self".
+Directories are children-on-parent: the parent's `entries` array holds the AT-URIs of its children. The root directory is a singleton at rkey "self". `tree.resolve_directory(path)` resolves directory-only paths without needing a document resolver.
 
 ## Delete (Non-Recursive)
 
@@ -41,93 +43,129 @@ Deletes an empty directory. Refuses if the directory has entries.
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
 
     User->>CLI: opake rm Photos
 
-    Note over CLI: Fast path: try document resolution first
-    CLI->>PDS: listRecords (document collection)
-    PDS-->>CLI: no match → NotFound
-
-    Note over CLI: Fall back to tree load (directories only)
-    CLI->>PDS: listRecords (directory collection, paginated)
-    PDS-->>CLI: all directories (includes root)
-
-    CLI->>CLI: tree.resolve("Photos") → directory in memory
-    CLI->>CLI: count_descendants → 0 docs, 0 dirs
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.load_tree() + mgr.resolve_entry(&tree, "Photos")
+    Opake->>Opake: Resolved as directory, count_descendants = 0
 
     CLI->>User: delete Photos/? [y/N]
     User-->>CLI: y
 
-    CLI->>PDS: com.atproto.repo.deleteRecord (directory)
-    PDS-->>CLI: 200 OK
+    Opake->>PDS: applyWrites (deleteRecord directory + update parent entries)
+    PDS-->>Opake: 200 OK
 
-    CLI->>PDS: getRecord (root) → remove_entry → putRecord (root)
-    PDS-->>CLI: 200 OK
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: deleted at://did/.../directory/<rkey>
 ```
 
 ## Delete (Recursive)
 
-Deletes a directory and all its contents in post-order (children before parents).
+Deletes a directory and all its contents via `mgr.delete_recursive`. Tree-walking delete in post-order (children before parents).
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
+    participant Opake as Opake + FileManager
     participant PDS
 
     User->>CLI: opake rm -r Photos
 
-    Note over CLI: Path contains no / → try document resolution
-    CLI->>PDS: listRecords (document collection)
-    PDS-->>CLI: no match → NotFound
+    CLI->>Opake: ctx.opake() + file_context(None) + file_manager(&ctx)
+    Opake->>Opake: mgr.load_tree() + mgr.resolve_entry(&tree, "Photos")
+    Opake->>Opake: Resolved as directory, count_descendants = 2 docs + 1 subdir
 
-    Note over CLI: Fall back to tree load (directories only)
-    CLI->>PDS: listRecords (directory collection, paginated)
-    PDS-->>CLI: all directories (includes root)
-
-    CLI->>CLI: tree.resolve("Photos") → directory in memory
-    CLI->>CLI: count_descendants → 2 docs, 1 subdir (from entry URIs)
     CLI->>User: delete Photos/? (2 documents, 1 subdirectories) [y/N]
     User-->>CLI: y
 
-    CLI->>CLI: collect_descendants (post-order, from entry URIs)
-    Note over CLI: Children deleted before parents<br/>No getRecord needed — URIs known from directory entries
+    Opake->>Opake: mgr.delete_recursive(&tree, &resolved, recursive=true)
+    Note over Opake: Post-order walk: children before parents<br/>URIs known from directory entries — no getRecord needed
 
     loop Each descendant (post-order)
-        CLI->>PDS: com.atproto.repo.deleteRecord
-        PDS-->>CLI: 200 OK
+        Opake->>PDS: deleteRecord
+        PDS-->>Opake: 200 OK
     end
 
-    CLI->>PDS: com.atproto.repo.deleteRecord (Photos)
-    PDS-->>CLI: 200 OK
+    Opake->>PDS: deleteRecord (Photos) + update parent entries
+    PDS-->>Opake: 200 OK
 
-    CLI->>PDS: getRecord (root) → remove_entry → putRecord (root)
-    PDS-->>CLI: 200 OK
+    Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: deleted at://...  (2 documents, 2 directories)
 ```
 
-Post-order deletion means leaf documents are removed first, then empty subdirectories, then the target directory itself. The parent's entry list is only updated once (for the target directory — descendant directories are deleted wholesale without updating their parents' entries, since the parents are also being deleted).
+Post-order deletion means leaf documents are removed first, then empty subdirectories, then the target directory itself. The parent's entry list is only updated once (for the target directory -- descendant directories are deleted wholesale without updating their parents' entries, since the parents are also being deleted).
 
 ## Path Resolution
 
-The `DirectoryTree` resolves user-provided references to AT-URIs. Three input forms are supported:
+`FileManager::resolve_entry(&tree, reference)` resolves user-provided references to AT-URIs. Three input forms are supported:
 
 | Input | Strategy | API cost |
 |-------|----------|----------|
 | `at://did/.../document/rkey` | Passthrough | 0 calls |
-| `beach.jpg` (bare name) | `documents::resolve_uri` (fast path) | 1 paginated call |
-| `Photos` (bare name, no document match) | Tree load + in-memory search | 1 paginated + 0 calls |
-| `Photos/beach.jpg` | Tree load + walk + getRecord per doc child | 1 paginated + N getRecord |
-| `Photos/Vacation/sunset.jpg` | Tree load + walk + getRecord per doc child | 1 paginated + N getRecord |
+| `beach.jpg` (bare name) | Lazy document resolution in root children | 1 getRecord per child (early exit on match) |
+| `Photos` (bare name, directory match) | `tree.resolve_directory` (in-memory) | 0 calls |
+| `Photos/beach.jpg` | `tree.resolve_directory("Photos")` + lazy doc search in directory | 0 + N getRecord (early exit) |
+| `Photos/Vacation/sunset.jpg` | Directory walk + lazy doc search | 0 + N getRecord (early exit) |
 
 Bare names search only root's direct children (matching filesystem semantics). Use paths for nested items.
 
-The tree is built from a single paginated `listRecords` call (directories only). Directory segments are walked in memory. When the final segment targets a document, each document child URI in the parent directory is fetched individually via `getRecord` to match by name. This avoids loading the entire document collection — only the children of the relevant directory are fetched.
+The tree is built from a single paginated `listRecords` call (directories only). `tree.resolve_directory(path)` resolves directory-only paths in memory without needing a document resolver. `tree.has_child_directory(parent_uri, name)` checks for duplicate directory names. `tree.is_document_uri(uri)` distinguishes document entries from directory entries.
 
-For recursive deletion (`rm -r`), descendant counts and URIs are determined entirely from directory entry arrays — document names aren't needed, so no `getRecord` calls are made for counting or collecting.
+Document resolution is lazy: `find_entry_in_directory` resolves documents one at a time via `getRecord`, with early exit on match. This avoids loading the entire document collection -- only the children of the relevant directory are fetched, and only until a match is found.
 
-Future optimization: a local URI → name cache (#155) would eliminate repeated `getRecord` calls for the same directory's children.
+For recursive deletion (`rm -r`), `delete_recursive` determines descendant counts and URIs entirely from directory entry arrays -- document names aren't needed, so no `getRecord` calls are made for counting or collecting.
+
+Future optimization: a local URI to name cache (#155) would eliminate repeated `getRecord` calls for the same directory's children.
+
+---
+
+## Workspace Directories
+
+Workspace directories use `keyringKeyWrapping` instead of `directKeyWrapping`. They live on the workspace owner's PDS. All members can read them via unauthenticated public fetches.
+
+### Create Workspace Directory (Owner)
+
+```mermaid
+sequenceDiagram
+    participant Owner
+    participant PDS as Owner's PDS
+
+    Owner->>Owner: encrypt_keyring_directory_envelope(name, keyring_uri, group_key)
+    Owner->>PDS: getRecord(directory/ws-{keyring_rkey})
+    alt root exists
+        PDS-->>Owner: existing root URI
+    else 404
+        Owner->>PDS: putRecord(directory/ws-{keyring_rkey}, root)
+    end
+    Owner->>PDS: createRecord(directory, keyringKeyWrapping)
+    Owner->>PDS: putRecord(parent, entries += new_dir_uri)
+```
+
+### Propose Directory Change (Non-Owner Member)
+
+```mermaid
+sequenceDiagram
+    participant Member
+    participant MemberPDS as Member's PDS
+    participant AppView
+    participant OwnerDaemon as Owner's Daemon
+    participant OwnerPDS as Owner's PDS
+
+    Member->>MemberPDS: createRecord(directoryUpdate, { actionType, keyring, ... })
+    MemberPDS->>AppView: firehose event
+    AppView->>AppView: index in directory_updates
+
+    OwnerDaemon->>AppView: GET /api/workspace/directory-updates
+    AppView-->>OwnerDaemon: pending directoryUpdate records
+    OwnerDaemon->>OwnerPDS: apply changes (applyWrites for moves)
+```
+
+### Workspace Root Convention
+
+Each workspace has its own root directory at a deterministic rkey: `ws-{keyring_rkey}`. This allows idempotent `putRecord` creation without discovery. The workspace root is separate from the owner's personal root (`directory/self`).
