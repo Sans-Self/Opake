@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::crypto::DocumentMetadata;
+use opake_core::manager::ResolvedDocumentMetadata;
 
 use crate::commands::Execute;
 use crate::session::CommandContext;
@@ -68,7 +68,7 @@ impl Execute for LsCommand {
         if self.long {
             let doc_meta = mgr.resolve_document_metadata_in(&tree, &dir.uri).await?;
 
-            let mut docs: Vec<(&str, &str, &DocumentMetadata)> = doc_meta
+            let mut docs: Vec<(&str, &str, &ResolvedDocumentMetadata)> = doc_meta
                 .iter()
                 .map(|(uri, meta)| (meta.name.as_str(), uri.as_str(), meta))
                 .collect();

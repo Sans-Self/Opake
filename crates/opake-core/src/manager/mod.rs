@@ -20,7 +20,10 @@ mod types;
 mod upload;
 
 pub use admin::WorkspaceAdmin;
-pub use types::{DownloadResult, FileContext, MutationOutcome, UploadRequest, UploadResult};
+pub use types::{
+    DownloadResult, FileContext, MutationOutcome, ResolvedDocumentMetadata, UploadRequest,
+    UploadResult,
+};
 
 use crate::client::Transport;
 use crate::client::{DocumentProposal, KeyringProposal, TreeProposal};

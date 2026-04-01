@@ -173,3 +173,42 @@ Revoking deletes the grant record. The recipient can no longer decrypt
 new copies, but if they downloaded the file before revocation, they still
 have the plaintext. This is the same model as git-crypt — true revocation
 requires re-encrypting the blob with a new content key.
+
+## Limits and Behavior
+
+### File Size
+
+The PDS enforces a **50MB blob limit**. Files are encrypted before upload
+(AES-256-GCM adds ~28 bytes of overhead), so the effective plaintext limit
+is just under 50MB. The SDK does not currently pre-validate file size —
+oversized uploads will fail with an `Xrpc` error from the PDS.
+
+### Multi-Tab
+
+If multiple browser tabs are open, each has its own `Opake` instance with
+independent DPoP nonce state. Concurrent requests from different tabs may
+cause nonce mismatches (cheap 401 → retry), and concurrent token refreshes
+can race on the single-use refresh token.
+
+For multi-tab apps, coordinate PDS access using `navigator.locks`:
+
+```typescript
+await navigator.locks.request("opake-pds", async () => {
+  await cabinet.upload(data, filename, mimeType);
+});
+```
+
+### Token Refresh
+
+The SDK proactively refreshes OAuth tokens 30 seconds before expiry (via
+the `@withTokenGuard` decorator on `Opake` methods). If a token expires
+during a long operation (e.g., uploading a large file), the WASM XRPC
+client handles it reactively by catching the 401 and retrying with a
+fresh token. This is transparent — no action needed from the consumer.
+
+### `WorkspaceEntry.icon`
+
+The `icon` field on `WorkspaceEntry` is an AT-URI pointing to a blob
+on the workspace owner's PDS. To display it, fetch the blob via the
+PDS's public `com.atproto.sync.getBlob` endpoint. The blob is NOT
+encrypted — it's a public workspace icon.

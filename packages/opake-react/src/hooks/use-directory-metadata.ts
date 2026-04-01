@@ -31,13 +31,8 @@ export function useDirectoryMetadata(
     queryKey: opakeKeys.metadata(directoryUri ?? ""),
     queryFn: async () => {
       if (!directoryUri) throw new Error("no directory");
-      // loadTreeWithMetadata is the read-only variant that resolves
-      // metadata without applying proposals. Once the WASM export
-      // exists, switch to it. For now, use syncAndLoadTree as the
-      // only metadata-resolving path available.
-      // TODO: Replace with read-only loadTreeWithMetadata when available
       return withFileManager(opake, keyringUri, async (fm) => {
-        const result = await fm.syncAndLoadTree(directoryUri);
+        const result = await fm.loadTreeWithMetadata(directoryUri);
         return result.metadata;
       });
     },

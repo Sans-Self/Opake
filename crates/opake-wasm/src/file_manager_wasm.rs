@@ -143,6 +143,49 @@ impl WasmFileManagerHandle {
         to_js(&serde_json::json!({ "snapshot": snapshot }))
     }
 
+    /// Load tree + metadata (read-only, no proposal application).
+    #[wasm_bindgen(js_name = loadTreeWithMetadata)]
+    pub async fn load_tree_with_metadata(
+        &mut self,
+        metadata_for_dir: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        let snapshot = build_snapshot(&tree);
+
+        let metadata = if let Some(ref dir_uri) = metadata_for_dir {
+            if dir_uri == "*" {
+                let mut all = std::collections::HashMap::new();
+                for uri in tree.all_directory_uris() {
+                    match mgr.resolve_document_metadata_in(&tree, uri).await {
+                        Ok(m) => all.extend(m),
+                        Err(e) => log::warn!("metadata resolution failed for {uri}: {e}"),
+                    }
+                }
+                Some(all)
+            } else {
+                let target = if dir_uri.is_empty() {
+                    tree.root_uri().unwrap_or(dir_uri)
+                } else {
+                    dir_uri.as_str()
+                };
+                Some(
+                    mgr.resolve_document_metadata_in(&tree, target)
+                        .await
+                        .map_err(wasm_err)?,
+                )
+            }
+        } else {
+            None
+        };
+
+        to_js(&serde_json::json!({
+            "snapshot": snapshot,
+            "metadata": metadata,
+        }))
+    }
+
     /// Load tree, apply proposals, resolve metadata — the full sync cycle.
     #[wasm_bindgen(js_name = syncAndLoadTree)]
     pub async fn sync_and_load_tree(
@@ -367,6 +410,34 @@ impl WasmFileManagerHandle {
             .await
             .map_err(wasm_err)?;
         to_js(&metadata)
+    }
+
+    /// Fetch and decrypt metadata for a single document by URI.
+    #[wasm_bindgen(js_name = getDocumentMetadata)]
+    pub async fn get_document_metadata(&mut self, document_uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let did = opake.did().to_owned();
+        let identity = opake.require_identity().map_err(wasm_err)?;
+        let private_key = identity.private_key_bytes().map_err(wasm_err)?;
+        let group_key = match ctx {
+            FileContext::Workspace(ref ws) => Some(ws.key.clone()),
+            FileContext::Cabinet(_) => None,
+        };
+        let result = opake_core::metadata::fetch_document_metadata(
+            opake.client_mut(),
+            document_uri,
+            &did,
+            &private_key,
+            group_key.as_ref(),
+        )
+        .await
+        .map_err(wasm_err)?;
+        let resolved = opake_core::manager::ResolvedDocumentMetadata::from_parts(
+            result.metadata,
+            result.document.created_at,
+            result.document.modified_at,
+        );
+        to_js(&resolved)
     }
 
     #[wasm_bindgen(js_name = isOwner)]

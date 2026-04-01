@@ -312,6 +312,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &self.did
     }
 
+    /// Mutable access to the XRPC client for external callers.
+    pub fn client_mut(&mut self) -> &mut XrpcClient<T> {
+        &mut self.client
+    }
+
     /// The caller's identity, if one exists (may be absent pre-pairing).
     pub fn identity(&self) -> Option<&Identity> {
         self.identity.as_ref()

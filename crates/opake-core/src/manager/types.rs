@@ -72,6 +72,41 @@ pub enum MutationOutcome {
     Proposed { update_uri: String },
 }
 
+/// Document metadata including record timestamps.
+///
+/// Combines the decrypted metadata (from the encrypted envelope) with
+/// the unencrypted timestamps from the PDS record.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedDocumentMetadata {
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub size: Option<u64>,
+    pub tags: Vec<String>,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub modified_at: Option<String>,
+}
+
+impl ResolvedDocumentMetadata {
+    /// Build from decrypted metadata + record timestamps.
+    pub fn from_parts(
+        meta: crate::crypto::DocumentMetadata,
+        created_at: String,
+        modified_at: Option<String>,
+    ) -> Self {
+        Self {
+            name: meta.name,
+            mime_type: meta.mime_type,
+            size: meta.size,
+            tags: meta.tags,
+            description: meta.description,
+            created_at,
+            modified_at,
+        }
+    }
+}
+
 impl MutationOutcome {
     pub fn is_applied(&self) -> bool {
         matches!(self, MutationOutcome::Applied)

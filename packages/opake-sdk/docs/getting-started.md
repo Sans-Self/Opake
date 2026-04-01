@@ -14,6 +14,52 @@ For browser environments using IndexedDB storage:
 npm install @opake/sdk dexie
 ```
 
+## First-Time Setup
+
+Before `Opake.init()` can work, the user needs an authenticated session
+and an encryption identity in storage. Here's the setup flow:
+
+```typescript
+import { Opake, type Storage } from "@opake/sdk";
+import { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
+
+const storage: Storage = new IndexedDbStorage();
+
+// 1. Check if any account exists
+if (!(await Opake.isConfigured(storage))) {
+  // 2. Authenticate via OAuth (you implement the OAuth flow)
+  //    The SDK provides the crypto primitives:
+  const dpopKey = await Opake.generateDpopKeyPair();
+  const pkce = await Opake.generatePkce();
+  // ... run OAuth flow, get tokens ...
+
+  // 3. Save the session to storage
+  await storage.saveSession(did, oauthSession);
+  await storage.saveConfig({
+    default_did: did,
+    accounts: { [did]: { pds_url: pdsUrl, handle } },
+  });
+
+  // 4. Create an encryption identity (from seed phrase or random)
+  const seedPhrase = await Opake.generateSeedPhrase();
+  const identity = await Opake.createIdentity(seedPhrase, did);
+  await storage.saveIdentity(did, identity);
+
+  // IMPORTANT: save the seed phrase somewhere safe — it's the
+  // only way to recover the encryption keys on a new device.
+}
+
+// 5. Now init works
+const opake = await Opake.init({ storage });
+
+// 6. Publish the public key so others can encrypt for you
+await opake.publishPublicKey();
+```
+
+## Quick Start
+
+For an already-configured app (session + identity in storage):
+
 ## Quick Start
 
 ```typescript

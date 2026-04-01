@@ -30,7 +30,9 @@ type WasmFileManager = {
   createDirectory(name: string, parentUri: string | null): Promise<unknown>;
   ensureRoot(): Promise<string>;
   loadTree(): Promise<unknown>;
+  loadTreeWithMetadata(metadataForDir: string | null): Promise<unknown>;
   syncAndLoadTree(metadataForDir: string | null): Promise<unknown>;
+  getDocumentMetadata(documentUri: string): Promise<unknown>;
   renameDirectory(directoryUri: string, newName: string): Promise<unknown>;
   updateMetadata(
     documentUri: string,
@@ -51,8 +53,13 @@ type WasmFileManager = {
 /**
  * File operations within a cabinet or workspace.
  *
- * Created via `opake.cabinet()` or `opake.workspaceFromKey()`. Operates
+ * Created via `opake.cabinet()` or `opake.workspace()`. Operates
  * on directories and documents within the bound context.
+ *
+ * Token management: the `Opake` class proactively refreshes tokens
+ * before expiry via `@withTokenGuard`. If a token expires mid-operation
+ * (e.g., during a slow upload), the WASM XRPC client handles it
+ * reactively by retrying with a fresh token.
  *
  * Call `.dispose()` when done to release the context. Supports the
  * TC39 Explicit Resource Management proposal (`using`).
@@ -237,6 +244,58 @@ export class FileManager {
   }
 
   /**
+   * Create a directory if it doesn't already exist.
+   *
+   * Loads the tree, checks if a directory with the given name exists in
+   * the parent, and returns it if so. Otherwise creates a new one.
+   *
+   * @param name - Directory name.
+   * @param parentUri - Parent directory URI.
+   * @returns The existing or newly created directory URI + whether it was created.
+   */
+  async createDirectoryIfNotExists(
+    name: string,
+    parentUri?: string,
+  ): Promise<{ uri: string; created: boolean }> {
+    const tree = await this.loadTree();
+    const parent = parentUri ? tree.directories[parentUri] : null;
+    if (parent) {
+      for (const entry of parent.entries) {
+        if (entry.type === "directory") {
+          const dir = tree.directories[entry.uri];
+          if (dir && dir.name === name) {
+            return { uri: entry.uri, created: false };
+          }
+        }
+      }
+    }
+    const result = await this.createDirectory(name, parentUri);
+    return { uri: result.uri, created: true };
+  }
+
+  /**
+   * Find a document by filename within a directory.
+   *
+   * Loads the tree and metadata, searches for a document with the given
+   * name. Returns the URI and metadata, or null if not found.
+   *
+   * @param directoryUri - Directory to search in.
+   * @param filename - Document name to match.
+   */
+  async findDocument(
+    directoryUri: string,
+    filename: string,
+  ): Promise<{ uri: string; metadata: DocumentMetadata } | null> {
+    const { metadata } = await this.loadTreeWithMetadata(directoryUri);
+    for (const [uri, meta] of Object.entries(metadata)) {
+      if (meta.name === filename) {
+        return { uri, metadata: meta };
+      }
+    }
+    return null;
+  }
+
+  /**
    * Ensure the root directory exists, creating it if needed.
    *
    * @returns The URI of the root directory.
@@ -293,6 +352,49 @@ export class FileManager {
     try {
       const result = await h.syncAndLoadTree(directoryUri ?? null);
       return result as { snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> };
+    } catch (e) {
+      throw parseWasmError(e);
+    }
+  }
+
+  /**
+   * Load tree + metadata (read-only, no proposal application).
+   *
+   * Like `loadTree()` but also decrypts document metadata for the specified
+   * directory. Does NOT apply proposals or write to the PDS.
+   *
+   * @param directoryUri - Directory to resolve metadata for. `"*"` for all, omit for root.
+   */
+  async loadTreeWithMetadata(
+    directoryUri?: string,
+  ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
+    const h = this.requireHandle();
+    try {
+      const result = await h.loadTreeWithMetadata(directoryUri ?? null);
+      return result as { snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> };
+    } catch (e) {
+      throw parseWasmError(e);
+    }
+  }
+
+  /**
+   * Fetch and decrypt metadata for a single document.
+   *
+   * Includes timestamps from the PDS record (`createdAt`, `modifiedAt`).
+   *
+   * @param documentUri - AT URI of the document.
+   *
+   * @example
+   * ```typescript
+   * const meta = await cabinet.getDocumentMetadata(docUri);
+   * console.log(meta.name, meta.size, meta.createdAt);
+   * ```
+   */
+  async getDocumentMetadata(documentUri: string): Promise<DocumentMetadata> {
+    const h = this.requireHandle();
+    try {
+      const result = await h.getDocumentMetadata(documentUri);
+      return result as DocumentMetadata;
     } catch (e) {
       throw parseWasmError(e);
     }

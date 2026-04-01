@@ -437,7 +437,25 @@ export class Opake {
     }
   }
 
-  /** @see {@link addWorkspaceMember} */
+  /**
+   * List members of a workspace.
+   *
+   * @param keyringUri - Workspace keyring URI.
+   * @returns Array of keyring member records with DIDs and roles.
+   */
+  @withTokenGuard
+  async listWorkspaceMembers(keyringUri: string): Promise<unknown> {
+    const ctx = this.requireContext();
+    try {
+      return await ctx.listWorkspaceMembers(keyringUri);
+    } catch (e) {
+      throw parseWasmError(e);
+    }
+  }
+
+  /**
+   * Add a member to a workspace.
+   */
   @withTokenGuard
   async addWorkspaceMember(
     keyringUri: string,

@@ -112,6 +112,22 @@ impl WasmOpakeHandle {
 
     // -- Workspace management (does NOT consume the context) --
 
+    /// List members of a workspace. Fetches the keyring record and returns
+    /// the member list with DIDs and roles.
+    #[wasm_bindgen(js_name = listWorkspaceMembers)]
+    pub async fn list_workspace_members(&mut self, keyring_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake()?;
+        let at_uri = opake_core::atproto::parse_at_uri(keyring_uri).map_err(wasm_err)?;
+        let entry = opake
+            .client_mut()
+            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+            .await
+            .map_err(wasm_err)?;
+        let keyring: opake_core::records::Keyring =
+            serde_json::from_value(entry.value).map_err(|e| JsError::new(&e.to_string()))?;
+        to_js(&keyring.members)
+    }
+
     #[wasm_bindgen(js_name = createWorkspace)]
     pub async fn create_workspace(
         &mut self,
@@ -733,23 +749,6 @@ impl WasmOpakeHandle {
             serde_wasm_bindgen::from_value(members_js).map_err(|e| JsError::new(&e.to_string()))?;
         let key = WasmOpake::unwrap_workspace_key(&members, opake.did(), &private_key)
             .map_err(wasm_err)?;
-        Ok(key.0.to_vec())
-    }
-
-    /// Unwrap a workspace key from keyring members (synchronous, no network).
-    /// REMOVE: prefer unwrapGroupKey which reads identity internally.
-    #[wasm_bindgen(js_name = unwrapWorkspaceKey)]
-    pub fn unwrap_workspace_key(
-        members_js: JsValue,
-        did: &str,
-        private_key: &[u8],
-    ) -> Result<Vec<u8>, JsError> {
-        let members: Vec<opake_core::records::KeyringMember> =
-            serde_wasm_bindgen::from_value(members_js).map_err(|e| JsError::new(&e.to_string()))?;
-        let privkey: opake_core::crypto::X25519PrivateKey = private_key
-            .try_into()
-            .map_err(|_| JsError::new("private key must be 32 bytes"))?;
-        let key = WasmOpake::unwrap_workspace_key(&members, did, &privkey).map_err(wasm_err)?;
         Ok(key.0.to_vec())
     }
 

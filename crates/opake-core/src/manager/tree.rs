@@ -891,7 +891,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         tree: &DirectoryTree,
         directory_uri: &str,
-    ) -> Result<HashMap<String, crypto::DocumentMetadata>, Error> {
+    ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
         let (did, private_key, group_key) = self.decryption_params()?;
         let mut result = HashMap::new();
 
@@ -929,7 +929,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     pub async fn resolve_document_metadata_for(
         &mut self,
         uris: &[&str],
-    ) -> Result<HashMap<String, crypto::DocumentMetadata>, Error> {
+    ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
         let (did, private_key, group_key) = self.decryption_params()?;
         let mut result = HashMap::new();
         for uri in uris {
@@ -960,7 +960,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         did: &str,
         private_key: &crypto::X25519PrivateKey,
         group_key: Option<&crypto::ContentKey>,
-    ) -> Result<Option<crypto::DocumentMetadata>, Error> {
+    ) -> Result<Option<super::types::ResolvedDocumentMetadata>, Error> {
         // Cache-first: check local document cache before hitting PDS
         let doc_scope = doc_scope_key(self.context);
         let cached = self
@@ -1031,6 +1031,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             &content_key,
             &doc.encrypted_metadata,
         )?;
-        Ok(Some(metadata))
+        Ok(Some(super::types::ResolvedDocumentMetadata::from_parts(
+            metadata,
+            doc.created_at,
+            doc.modified_at,
+        )))
     }
 }
