@@ -58,6 +58,30 @@ pub fn result_with_session<T: Serialize>(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Convert an opake-core Error into a structured JsError.
+///
+/// Format: `"Kind: message"` — the TS SDK parses this prefix to produce
+/// typed `OpakeError { kind, message }` instances.
+pub fn wasm_err(e: opake_core::error::Error) -> JsError {
+    use opake_core::error::Error;
+    let kind = match &e {
+        Error::Encryption(_) => "Encryption",
+        Error::Decryption(_) => "Decryption",
+        Error::KeyWrap(_) => "KeyWrap",
+        Error::Auth(_) => "Auth",
+        Error::Xrpc { .. } => "Xrpc",
+        Error::Appview { .. } => "Appview",
+        Error::NotFound(_) => "NotFound",
+        Error::AmbiguousName { .. } => "AmbiguousName",
+        Error::AlreadyExists(_) => "AlreadyExists",
+        Error::InvalidRecord(_) => "InvalidRecord",
+        Error::Serialization(_) => "Serialization",
+        Error::Mnemonic(_) => "Mnemonic",
+        Error::Storage(_) => "Storage",
+    };
+    JsError::new(&format!("{kind}: {e}"))
+}
+
 /// Parse a 32-byte public key from a JS Uint8Array slice.
 pub fn pub_key_from_slice(bytes: &[u8]) -> Result<X25519PublicKey, JsError> {
     bytes
@@ -98,14 +122,12 @@ pub async fn make_opake_from_storage(
         crate::now_micros,
     )
     .await
-    .map_err(|e| JsError::new(&e.to_string()))
+    .map_err(wasm_err)
 }
 
 /// Build a cabinet FileContext from an Opake.
 pub fn cabinet_context(opake: &WasmOpake) -> Result<FileContext, JsError> {
-    opake
-        .cabinet_context()
-        .map_err(|e| JsError::new(&e.to_string()))
+    opake.cabinet_context().map_err(wasm_err)
 }
 
 /// Build a workspace FileContext.
@@ -155,5 +177,85 @@ pub mod serde_bytes {
 
     pub fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(bytes)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared serialization helpers (used by opake_context + file_manager)
+// ---------------------------------------------------------------------------
+
+/// Serialize a Rust value to a JS object via serde_wasm_bindgen.
+/// Maps are serialized as plain objects, not JS Maps.
+pub fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsError> {
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    value
+        .serialize(&serializer)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Parse a role string from JS into the core Role enum.
+pub fn parse_role(s: &str) -> Result<opake_core::records::Role, JsError> {
+    use opake_core::records::Role;
+    match s {
+        "manager" => Ok(Role::Manager),
+        "editor" => Ok(Role::Editor),
+        "viewer" => Ok(Role::Viewer),
+        _ => Err(JsError::new("role must be manager, editor, or viewer")),
+    }
+}
+
+/// Result DTO for mutations that may be applied or proposed.
+#[derive(Serialize)]
+pub struct MutationResultDto {
+    pub uri: Option<String>,
+    pub proposed: bool,
+}
+
+/// Build a DirectoryTreeSnapshot from a core DirectoryTree.
+/// Pre-computes a parent index for O(n) total instead of O(n²).
+pub fn build_snapshot(
+    tree: &opake_core::directories::DirectoryTree,
+) -> crate::DirectoryTreeSnapshot {
+    let mut parent_index: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for uri in tree.all_directory_uris() {
+        if let Some(entries) = tree.entries_for(uri) {
+            for entry_uri in entries {
+                parent_index.insert(entry_uri.clone(), uri.to_owned());
+            }
+        }
+    }
+
+    let mut directories = std::collections::HashMap::new();
+    for uri in tree.all_directory_uris() {
+        let name = tree.directory_name(uri).unwrap_or("?").to_owned();
+        let entries: Vec<crate::TypedEntry> = tree
+            .entries_for(uri)
+            .map(|e| {
+                e.iter()
+                    .map(|entry_uri| crate::TypedEntry {
+                        uri: entry_uri.clone(),
+                        kind: if tree.is_directory(entry_uri) {
+                            "directory"
+                        } else {
+                            "document"
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let parent_uri = parent_index.get(uri).cloned();
+        directories.insert(
+            uri.to_owned(),
+            crate::DirectorySnapshotEntry {
+                name,
+                entries,
+                parent_uri,
+            },
+        );
+    }
+    crate::DirectoryTreeSnapshot {
+        root_uri: tree.root_uri().map(|s| s.to_owned()),
+        directories,
     }
 }

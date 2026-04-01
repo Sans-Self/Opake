@@ -38,6 +38,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             filename,
             mime_type,
             description,
+            tags: &[],
             directory_uri: directory_uri.as_deref(),
         })
         .await
@@ -88,6 +89,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 owner_did: &cabinet.did,
                 owner_pubkey: &cabinet.public_key,
                 description: req.description,
+                tags: req.tags,
                 created_at: now,
             },
             &mut self.opake.rng,
@@ -158,6 +160,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 group_key: &ws.key,
                 rotation: ws.rotation,
                 description: req.description,
+                tags: req.tags,
                 created_at: now,
             },
             &mut self.opake.rng,

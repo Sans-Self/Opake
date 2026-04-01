@@ -226,6 +226,42 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         ))
     }
 
+    /// Resolve a workspace by keyring URI.
+    ///
+    /// Works for both own and foreign workspaces — detects ownership from
+    /// the URI's authority and routes to the appropriate resolution path.
+    /// The group key never leaves Rust; it's held in the returned Workspace.
+    pub async fn resolve_workspace_by_uri(
+        &mut self,
+        keyring_uri: &str,
+    ) -> Result<Workspace, Error> {
+        let at_uri = atproto::parse_at_uri(keyring_uri)?;
+        if at_uri.authority == self.did {
+            // Own keyring — fetch with authenticated client
+            let identity = self.require_identity()?;
+            let private_key = identity.private_key_bytes()?;
+            let entry = self
+                .client
+                .get_record(&self.did, &at_uri.collection, &at_uri.rkey)
+                .await?;
+            let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
+            let group_key = Self::unwrap_workspace_key(&keyring.members, &self.did, &private_key)?;
+            let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
+                .unwrap_or_default();
+            Ok(Workspace::from_keyring(
+                keyring_uri.to_string(),
+                name,
+                None,
+                self.did.clone(),
+                group_key,
+                keyring.rotation,
+            ))
+        } else {
+            // Foreign keyring — resolve via public PDS endpoint
+            self.resolve_foreign_workspace(keyring_uri).await
+        }
+    }
+
     /// Resolve a workspace from a foreign PDS by keyring URI.
     ///
     /// Cross-PDS — fetches the keyring record from the owner's PDS (public

@@ -1,0 +1,405 @@
+// WasmFileManagerHandle — file operations within a cabinet or workspace.
+//
+// Shares ownership of the Opake via Rc<RefCell<>> with the parent
+// OpakeContext. Creates temporary core FileManager borrows per method
+// call. Non-consuming — the OpakeContext remains usable after this
+// handle is freed.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use opake_core::manager::{FileContext, UploadRequest};
+use serde::Serialize;
+use wasm_bindgen::prelude::*;
+
+use crate::wasm_util::{
+    build_snapshot, pub_key_from_slice, to_js, wasm_err, DownloadResult, MutationResultDto,
+    WasmOpake,
+};
+
+/// WASM FileManager handle.
+#[wasm_bindgen(js_name = FileManager)]
+pub struct WasmFileManagerHandle {
+    pub(crate) opake: Rc<RefCell<Option<WasmOpake>>>,
+    pub(crate) context: Option<FileContext>,
+}
+
+#[wasm_bindgen(js_class = FileManager)]
+impl WasmFileManagerHandle {
+    pub async fn upload(
+        &mut self,
+        plaintext: &[u8],
+        filename: &str,
+        mime_type: &str,
+        description: Option<String>,
+        tags: JsValue,
+        directory_uri: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let tags_vec: Vec<String> = if tags.is_null() || tags.is_undefined() {
+            vec![]
+        } else {
+            serde_wasm_bindgen::from_value(tags).map_err(|e| JsError::new(&e.to_string()))?
+        };
+
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr
+            .upload(&UploadRequest {
+                plaintext,
+                filename,
+                mime_type,
+                description: description.as_deref(),
+                tags: &tags_vec,
+                directory_uri: directory_uri.as_deref(),
+            })
+            .await
+            .map_err(wasm_err)?;
+
+        to_js(&MutationResultDto {
+            uri: Some(result.uri),
+            proposed: result.outcome.is_proposed(),
+        })
+    }
+
+    pub async fn download(&mut self, document_uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr.download(document_uri).await.map_err(wasm_err)?;
+
+        to_js(&DownloadResult {
+            filename: result.filename,
+            plaintext: result.plaintext,
+        })
+    }
+
+    pub async fn delete(
+        &mut self,
+        document_uri: &str,
+        parent_directory_uri: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr
+            .delete(document_uri, parent_directory_uri.as_deref())
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto {
+            uri: None,
+            proposed: result.is_proposed(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = moveEntry)]
+    pub async fn move_entry(
+        &mut self,
+        entry_uri: &str,
+        source_dir: &str,
+        target_dir: &str,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr
+            .move_entry(entry_uri, source_dir, target_dir)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto {
+            uri: None,
+            proposed: result.is_proposed(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = createDirectory)]
+    pub async fn create_directory(
+        &mut self,
+        name: &str,
+        parent_uri: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr
+            .create_directory(name, parent_uri.as_deref())
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto {
+            uri: Some(result.uri),
+            proposed: result.outcome.is_proposed(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = ensureRoot)]
+    pub async fn ensure_root(&mut self) -> Result<String, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        mgr.ensure_root().await.map_err(wasm_err)
+    }
+
+    /// Load the directory tree (read-only, no PDS writes).
+    #[wasm_bindgen(js_name = loadTree)]
+    pub async fn load_tree(&mut self) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        let snapshot = build_snapshot(&tree);
+        to_js(&serde_json::json!({ "snapshot": snapshot }))
+    }
+
+    /// Load tree, apply proposals, resolve metadata — the full sync cycle.
+    #[wasm_bindgen(js_name = syncAndLoadTree)]
+    pub async fn sync_and_load_tree(
+        &mut self,
+        metadata_for_dir: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        let snapshot = build_snapshot(&tree);
+
+        let mut metadata = if let Some(ref dir_uri) = metadata_for_dir {
+            if dir_uri == "*" {
+                let mut all = std::collections::HashMap::new();
+                for uri in tree.all_directory_uris() {
+                    match mgr.resolve_document_metadata_in(&tree, uri).await {
+                        Ok(m) => all.extend(m),
+                        Err(e) => log::warn!("metadata resolution failed for {uri}: {e}"),
+                    }
+                }
+                Some(all)
+            } else {
+                let target = if dir_uri.is_empty() {
+                    tree.root_uri().unwrap_or(dir_uri)
+                } else {
+                    dir_uri.as_str()
+                };
+                let m = mgr
+                    .resolve_document_metadata_in(&tree, target)
+                    .await
+                    .map_err(wasm_err)?;
+                Some(m)
+            }
+        } else {
+            None
+        };
+
+        mgr.cleanup_own_applied_proposals(&tree).await;
+        let applied = mgr.apply_pending_proposals(&tree).await.unwrap_or(0);
+        let proposals = mgr.proposals().to_vec();
+
+        let proposal_uris: Vec<&str> = proposals
+            .iter()
+            .filter_map(|p| p.entry_uri.as_deref())
+            .collect();
+        if !proposal_uris.is_empty() {
+            if let Ok(proposal_meta) = mgr.resolve_document_metadata_for(&proposal_uris).await {
+                metadata
+                    .get_or_insert_with(std::collections::HashMap::new)
+                    .extend(proposal_meta);
+            }
+        }
+
+        to_js(&serde_json::json!({
+            "snapshot": snapshot,
+            "metadata": metadata,
+            "proposals": proposals,
+            "proposals_applied": applied,
+        }))
+    }
+
+    /// Apply pending proposals without metadata resolution (daemon use).
+    #[wasm_bindgen(js_name = syncAndApplyProposals)]
+    pub async fn sync_and_apply_proposals(&mut self) -> Result<usize, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        mgr.apply_pending_proposals(&tree).await.map_err(wasm_err)
+    }
+
+    // -- Editor operations --
+
+    #[wasm_bindgen(js_name = renameDirectory)]
+    pub async fn rename_directory(
+        &mut self,
+        directory_uri: &str,
+        new_name: &str,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let result = mgr
+            .rename_directory(directory_uri, new_name)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto {
+            uri: None,
+            proposed: result.is_proposed(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = updateMetadata)]
+    pub async fn update_metadata(
+        &mut self,
+        document_uri: &str,
+        name: Option<String>,
+        tags: JsValue,
+        description: Option<String>,
+    ) -> Result<JsValue, JsError> {
+        let tags_vec: Option<Vec<String>> = if tags.is_null() || tags.is_undefined() {
+            None
+        } else {
+            Some(serde_wasm_bindgen::from_value(tags).map_err(|e| JsError::new(&e.to_string()))?)
+        };
+
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let metadata = mgr
+            .update_metadata(document_uri, |meta| {
+                if let Some(ref n) = name {
+                    meta.name = n.clone();
+                }
+                if let Some(ref t) = tags_vec {
+                    meta.tags = t.clone();
+                }
+                if let Some(ref d) = description {
+                    meta.description = Some(d.clone());
+                }
+            })
+            .await
+            .map_err(wasm_err)?;
+
+        to_js(&metadata)
+    }
+
+    #[wasm_bindgen(js_name = updateContent)]
+    pub async fn update_content(
+        &mut self,
+        document_uri: &str,
+        new_plaintext: &[u8],
+    ) -> Result<String, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        mgr.update_content(document_uri, new_plaintext)
+            .await
+            .map_err(wasm_err)
+    }
+
+    #[wasm_bindgen(js_name = fetchContentKey)]
+    pub async fn fetch_content_key(&mut self, document_uri: &str) -> Result<Vec<u8>, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let key = mgr
+            .fetch_content_key(document_uri)
+            .await
+            .map_err(wasm_err)?;
+        Ok(key.0.to_vec())
+    }
+
+    // -- Sharing --
+
+    pub async fn share(
+        &mut self,
+        document_uri: &str,
+        recipient_did: &str,
+        recipient_public_key: &[u8],
+        permissions: &str,
+        note: Option<String>,
+    ) -> Result<String, JsError> {
+        let pubkey = pub_key_from_slice(recipient_public_key)?;
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        mgr.share(
+            document_uri,
+            recipient_did,
+            &pubkey,
+            permissions,
+            note.as_deref(),
+        )
+        .await
+        .map_err(wasm_err)
+    }
+
+    #[wasm_bindgen(js_name = revokeShare)]
+    pub async fn revoke_share(&mut self, grant_uri: &str) -> Result<(), JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        mgr.revoke_share(grant_uri).await.map_err(wasm_err)
+    }
+
+    #[wasm_bindgen(js_name = listShares)]
+    pub async fn list_shares(&mut self) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let shares = mgr.list_shares().await.map_err(wasm_err)?;
+        to_js(&shares)
+    }
+
+    #[wasm_bindgen(js_name = deleteRecursive)]
+    pub async fn delete_recursive(&mut self, uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        let resolved = mgr.resolve_entry(&tree, uri).await.map_err(wasm_err)?;
+        let result = mgr
+            .delete_recursive(&tree, &resolved, true)
+            .await
+            .map_err(wasm_err)?;
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct R {
+            documents_deleted: usize,
+            directories_deleted: usize,
+        }
+        to_js(&R {
+            documents_deleted: result.documents_deleted,
+            directories_deleted: result.directories_deleted,
+        })
+    }
+
+    /// Resolve document metadata within a directory for a specific set of URIs.
+    #[wasm_bindgen(js_name = resolveDocumentMetadataIn)]
+    pub async fn resolve_document_metadata_in(
+        &mut self,
+        directory_uri: &str,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts()?;
+        let mut mgr = opake.file_manager(ctx);
+        let tree = mgr.load_tree().await.map_err(wasm_err)?;
+        let metadata = mgr
+            .resolve_document_metadata_in(&tree, directory_uri)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&metadata)
+    }
+
+    #[wasm_bindgen(js_name = isOwner)]
+    pub fn is_owner(&self) -> Result<bool, JsError> {
+        let borrow = self.opake.borrow();
+        let opake = borrow
+            .as_ref()
+            .ok_or_else(|| JsError::new("already finished"))?;
+        let ctx = self
+            .context
+            .as_ref()
+            .ok_or_else(|| JsError::new("already finished"))?;
+        Ok(opake.did() == ctx.owner_did())
+    }
+
+    /// Get the session for JS-side persistence.
+    pub fn session(&self) -> Result<JsValue, JsError> {
+        let borrow = self.opake.borrow();
+        let opake = borrow
+            .as_ref()
+            .ok_or_else(|| JsError::new("already finished"))?;
+        let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
+        serde_wasm_bindgen::to_value(session).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Borrow the Opake and FileContext for creating a temporary FileManager.
+    fn parts(&self) -> Result<(std::cell::RefMut<'_, WasmOpake>, &FileContext), JsError> {
+        let borrow = std::cell::RefMut::filter_map(self.opake.borrow_mut(), |opt| opt.as_mut())
+            .map_err(|_| JsError::new("Opake not available"))?;
+        let ctx = self
+            .context
+            .as_ref()
+            .ok_or_else(|| JsError::new("FileManager already finished"))?;
+        Ok((borrow, ctx))
+    }
+}

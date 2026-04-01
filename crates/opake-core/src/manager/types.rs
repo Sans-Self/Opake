@@ -38,6 +38,7 @@ pub struct UploadRequest<'a> {
     pub filename: &'a str,
     pub mime_type: &'a str,
     pub description: Option<&'a str>,
+    pub tags: &'a [String],
     /// Target directory URI. `None` means the root directory.
     pub directory_uri: Option<&'a str>,
 }

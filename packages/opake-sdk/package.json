@@ -1,0 +1,44 @@
+{
+  "name": "@opake/sdk",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./storage/indexeddb": {
+      "import": "./dist/storage/indexeddb.mjs",
+      "require": "./dist/storage/indexeddb.cjs",
+      "types": "./dist/storage/indexeddb.d.ts"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "wasm/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typedoc": "typedoc"
+  },
+  "peerDependencies": {
+    "dexie": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "dexie": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "typedoc": "^0.27.0"
+  }
+}

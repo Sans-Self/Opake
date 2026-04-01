@@ -15,6 +15,8 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 mod daemon;
 #[cfg(target_arch = "wasm32")]
+pub(crate) mod file_manager_wasm;
+#[cfg(target_arch = "wasm32")]
 pub(crate) mod js_storage;
 #[cfg(target_arch = "wasm32")]
 mod opake_wasm;
@@ -488,12 +490,22 @@ struct DirectoryRecordInput {
 }
 
 #[derive(Serialize)]
-pub(crate) struct DirectorySnapshotEntry {
-    pub(crate) name: String,
-    pub(crate) entries: Vec<String>,
+pub(crate) struct TypedEntry {
+    pub(crate) uri: String,
+    #[serde(rename = "type")]
+    pub(crate) kind: &'static str,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DirectorySnapshotEntry {
+    pub(crate) name: String,
+    pub(crate) entries: Vec<TypedEntry>,
+    pub(crate) parent_uri: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DirectoryTreeSnapshot {
     pub(crate) root_uri: Option<String>,
     pub(crate) directories: HashMap<String, DirectorySnapshotEntry>,
@@ -544,15 +556,44 @@ impl DirectoryTreeHandle {
     /// Bulk-transfer the entire tree state to JS as a single object.
     #[wasm_bindgen(js_name = snapshot)]
     pub fn snapshot(&self) -> Result<JsValue, JsError> {
+        // Pre-compute parent index (O(n) instead of O(n²) find_parent per dir)
+        let mut parent_index: HashMap<String, String> = HashMap::new();
+        for uri in self.inner.all_directory_uris() {
+            if let Some(entries) = self.inner.entries_for(uri) {
+                for entry_uri in entries {
+                    parent_index.insert(entry_uri.clone(), uri.to_owned());
+                }
+            }
+        }
+
         let mut directories = HashMap::new();
         for uri in self.inner.all_directory_uris() {
             let name = self.inner.directory_name(uri).unwrap_or("?").to_owned();
             let entries = self
                 .inner
                 .entries_for(uri)
-                .map(|e| e.to_vec())
+                .map(|e| {
+                    e.iter()
+                        .map(|entry_uri| TypedEntry {
+                            uri: entry_uri.clone(),
+                            kind: if self.inner.is_directory(entry_uri) {
+                                "directory"
+                            } else {
+                                "document"
+                            },
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
-            directories.insert(uri.to_owned(), DirectorySnapshotEntry { name, entries });
+            let parent_uri = parent_index.get(uri).cloned();
+            directories.insert(
+                uri.to_owned(),
+                DirectorySnapshotEntry {
+                    name,
+                    entries,
+                    parent_uri,
+                },
+            );
         }
 
         let snap = DirectoryTreeSnapshot {
@@ -666,15 +707,44 @@ pub fn build_workspace_directory_tree(
 
     tree.decrypt_names_with_group_keys(did, priv_key, &keys);
 
+    // Build parent index (O(n) instead of O(n²) find_parent per dir)
+    let mut parent_index: HashMap<String, String> = HashMap::new();
+    for uri in tree.all_directory_uris() {
+        if let Some(entries) = tree.entries_for(uri) {
+            for entry_uri in entries {
+                parent_index.insert(entry_uri.clone(), uri.to_owned());
+            }
+        }
+    }
+
     // Build snapshot
     let mut directories = HashMap::new();
     for uri in tree.all_directory_uris() {
         let name = tree.directory_name(uri).unwrap_or("?").to_owned();
         let entries = tree
             .entries_for(uri)
-            .map(|e| e.to_vec())
+            .map(|e| {
+                e.iter()
+                    .map(|entry_uri| TypedEntry {
+                        uri: entry_uri.clone(),
+                        kind: if tree.is_directory(entry_uri) {
+                            "directory"
+                        } else {
+                            "document"
+                        },
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        directories.insert(uri.to_owned(), DirectorySnapshotEntry { name, entries });
+        let parent_uri = parent_index.get(uri).cloned();
+        directories.insert(
+            uri.to_owned(),
+            DirectorySnapshotEntry {
+                name,
+                entries,
+                parent_uri,
+            },
+        );
     }
 
     let snap = DirectoryTreeSnapshot {

@@ -18,13 +18,14 @@ fn build_encrypted_metadata(
     mime_type: &str,
     size: u64,
     description: Option<&str>,
+    tags: &[String],
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<crate::records::EncryptedMetadata, Error> {
     let metadata = DocumentMetadata {
         name: filename.into(),
         mime_type: Some(mime_type.into()),
         size: Some(size),
-        tags: vec![],
+        tags: tags.to_vec(),
         description: description.map(Into::into),
     };
     crypto::encrypt_metadata(content_key, &metadata, rng)
@@ -39,6 +40,7 @@ pub struct UploadParams<'a> {
     pub owner_did: &'a str,
     pub owner_pubkey: &'a X25519PublicKey,
     pub description: Option<&'a str>,
+    pub tags: &'a [String],
     pub created_at: &'a str,
 }
 
@@ -75,6 +77,7 @@ pub async fn prepare_upload(
         params.mime_type,
         params.plaintext.len() as u64,
         params.description,
+        params.tags,
         rng,
     )?;
 
@@ -129,6 +132,7 @@ pub async fn prepare_upload_keyring(
         params.mime_type,
         params.plaintext.len() as u64,
         params.description,
+        params.tags,
         rng,
     )?;
 
@@ -166,6 +170,7 @@ pub struct KeyringUploadParams<'a> {
     pub group_key: &'a ContentKey,
     pub rotation: u64,
     pub description: Option<&'a str>,
+    pub tags: &'a [String],
     pub created_at: &'a str,
 }
 
@@ -242,6 +247,7 @@ mod tests {
             owner_did: TEST_DID,
             owner_pubkey: public_key,
             description: None,
+            tags: &[],
             created_at: "2026-03-01T00:00:00Z",
         }
     }
@@ -315,6 +321,7 @@ mod tests {
             owner_did: TEST_DID,
             owner_pubkey: &public_key,
             description: Some("Quarterly report"),
+            tags: &[],
             created_at: "2026-03-01T00:00:00Z",
         };
         encrypt_and_upload(&mut client, &params, &mut OsRng)
