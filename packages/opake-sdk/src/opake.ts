@@ -22,6 +22,15 @@ import type {
 import { OpakeError, parseWasmError } from "./errors";
 import { initWasm } from "./wasm";
 import { FileManager } from "./file-manager";
+import {
+  login as authLogin,
+  loginWithAppPassword as authLoginWithAppPassword,
+  startLogin as authStartLogin,
+  completeLogin as authCompleteLogin,
+  type LoginOptions,
+  type StartLoginOptions,
+  type PendingLogin,
+} from "./auth";
 
 // The WASM module types. We import dynamically after init.
 type WasmModule = typeof import("../wasm/opake.js");
@@ -222,6 +231,106 @@ export class Opake {
   static async generatePkce(): Promise<{ verifier: string; challenge: string }> {
     const wasm = await initWasm();
     return wasm.generatePkce() as { verifier: string; challenge: string };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Authentication
+  // ---------------------------------------------------------------------------
+
+  /**
+   * OAuth 2.0 + DPoP login (one-shot, callback pattern).
+   *
+   * Handles discovery, PAR, PKCE, DPoP proofs, code exchange, and session
+   * storage. The consumer provides an `authorize` callback for the
+   * platform-specific redirect step.
+   *
+   * Does NOT survive page navigations. For full-page redirect flows, use
+   * `Opake.startLogin()` / `Opake.completeLogin()`.
+   *
+   * @example
+   * ```typescript
+   * // Browser popup
+   * await Opake.login("alice.bsky.social", {
+   *   storage,
+   *   redirectUri: "https://myapp.com/callback",
+   *   authorize: async (authUrl) => {
+   *     const popup = window.open(authUrl);
+   *     return waitForCallbackMessage(popup); // { code, state }
+   *   },
+   * });
+   * const opake = await Opake.init({ storage });
+   * ```
+   */
+  static async login(handle: string, options: LoginOptions): Promise<void> {
+    return authLogin(handle, options);
+  }
+
+  /**
+   * Start an OAuth login flow (two-step, redirect-safe).
+   *
+   * Returns the auth URL and serializable pending state. The consumer
+   * saves `pending` to sessionStorage, redirects the user, then calls
+   * `Opake.completeLogin()` with the callback parameters.
+   *
+   * @example
+   * ```typescript
+   * const { authUrl, pending } = await Opake.startLogin("alice.bsky.social", {
+   *   storage,
+   *   redirectUri: "https://myapp.com/callback",
+   * });
+   * sessionStorage.setItem("opake:pending", JSON.stringify(pending));
+   * window.location.href = authUrl;
+   *
+   * // ... on callback page:
+   * const pending = JSON.parse(sessionStorage.getItem("opake:pending")!);
+   * const params = new URLSearchParams(window.location.search);
+   * await Opake.completeLogin(params.get("code")!, params.get("state")!, pending, {
+   *   storage,
+   *   redirectUri: "https://myapp.com/callback",
+   * });
+   * ```
+   */
+  static async startLogin(
+    handle: string,
+    options: StartLoginOptions,
+  ): Promise<{ authUrl: string; pending: PendingLogin }> {
+    return authStartLogin(handle, options);
+  }
+
+  /**
+   * Complete an OAuth login flow after the user returns from authorization.
+   *
+   * Validates the CSRF state, exchanges the code for tokens with DPoP,
+   * and saves the session to storage.
+   */
+  static async completeLogin(
+    code: string,
+    state: string,
+    pending: PendingLogin,
+    options: { storage: Storage; redirectUri: string },
+  ): Promise<void> {
+    return authCompleteLogin(code, state, pending, options);
+  }
+
+  /**
+   * Login with an app password (legacy createSession).
+   *
+   * For environments that can't do OAuth redirects — Obsidian plugins,
+   * simple scripts, testing. The user creates an app password in their
+   * PDS account settings.
+   *
+   * @example
+   * ```typescript
+   * await Opake.loginWithAppPassword("alice.bsky.social", "xxxx-xxxx-xxxx-xxxx", { storage });
+   * const opake = await Opake.init({ storage });
+   * ```
+   */
+  static async loginWithAppPassword(
+    handle: string,
+    appPassword: string,
+    options: { storage: Storage },
+  ): Promise<void> {
+    return authLoginWithAppPassword(handle, appPassword, options);
   }
 
   // ---------------------------------------------------------------------------

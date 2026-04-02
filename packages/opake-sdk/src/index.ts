@@ -24,6 +24,9 @@ export {
   sanitizeDid,
 } from "./storage";
 
+// Auth types (for two-step login flow)
+export { type LoginOptions, type StartLoginOptions, type PendingLogin } from "./auth";
+
 // Storage implementations
 export { MemoryStorage } from "./storage/memory";
 // IndexedDbStorage is at "@opake/sdk/storage/indexeddb" (separate entrypoint)

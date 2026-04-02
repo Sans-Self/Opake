@@ -17,7 +17,9 @@ npm install @opake/sdk dexie
 ## First-Time Setup
 
 Before `Opake.init()` can work, the user needs an authenticated session
-and an encryption identity in storage. Here's the setup flow:
+and an encryption identity in storage.
+
+### Option A: OAuth Login (browser, Electron, CLI)
 
 ```typescript
 import { Opake, type Storage } from "@opake/sdk";
@@ -25,40 +27,71 @@ import { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
 
 const storage: Storage = new IndexedDbStorage();
 
-// 1. Check if any account exists
+// 1. Check if already logged in
 if (!(await Opake.isConfigured(storage))) {
-  // 2. Authenticate via OAuth (you implement the OAuth flow)
-  //    The SDK provides the crypto primitives:
-  const dpopKey = await Opake.generateDpopKeyPair();
-  const pkce = await Opake.generatePkce();
-  // ... run OAuth flow, get tokens ...
-
-  // 3. Save the session to storage
-  await storage.saveSession(did, oauthSession);
-  await storage.saveConfig({
-    default_did: did,
-    accounts: { [did]: { pds_url: pdsUrl, handle } },
+  // 2. Login via OAuth (SDK handles DPoP, PKCE, discovery, token exchange)
+  await Opake.login("alice.bsky.social", {
+    storage,
+    redirectUri: "https://myapp.com/callback",
+    authorize: async (authUrl) => {
+      // Open a popup and wait for the callback
+      const popup = window.open(authUrl, "_blank", "width=600,height=700");
+      return new Promise((resolve, reject) => {
+        window.addEventListener("message", (e) => {
+          if (e.data?.type === "oauth-callback") {
+            resolve({ code: e.data.code, state: e.data.state });
+          }
+        });
+        const check = setInterval(() => {
+          if (popup?.closed) { clearInterval(check); reject(new Error("Login cancelled")); }
+        }, 500);
+      });
+    },
   });
 
-  // 4. Create an encryption identity (from seed phrase or random)
+  // 3. Create an encryption identity
   const seedPhrase = await Opake.generateSeedPhrase();
+  // Show seedPhrase to user — they MUST save it for recovery
+  const config = await storage.loadConfig();
+  const did = config.default_did!;
   const identity = await Opake.createIdentity(seedPhrase, did);
   await storage.saveIdentity(did, identity);
-
-  // IMPORTANT: save the seed phrase somewhere safe — it's the
-  // only way to recover the encryption keys on a new device.
 }
 
-// 5. Now init works
+// 4. Ready
 const opake = await Opake.init({ storage });
-
-// 6. Publish the public key so others can encrypt for you
 await opake.publishPublicKey();
 ```
 
-## Quick Start
+For full-page redirect flows (no popup), use the two-step API:
 
-For an already-configured app (session + identity in storage):
+```typescript
+// On the login page:
+const { authUrl, pending } = await Opake.startLogin("alice.bsky.social", {
+  storage,
+  redirectUri: "https://myapp.com/callback",
+});
+sessionStorage.setItem("opake:pending", JSON.stringify(pending));
+window.location.href = authUrl;
+
+// On the callback page:
+const pending = JSON.parse(sessionStorage.getItem("opake:pending")!);
+const params = new URLSearchParams(window.location.search);
+await Opake.completeLogin(params.get("code")!, params.get("state")!, pending, {
+  storage,
+  redirectUri: "https://myapp.com/callback",
+});
+sessionStorage.removeItem("opake:pending");
+```
+
+### Option B: App Password (Obsidian, scripts)
+
+```typescript
+await Opake.loginWithAppPassword("alice.bsky.social", "xxxx-xxxx-xxxx-xxxx", { storage });
+const opake = await Opake.init({ storage });
+```
+
+Create an app password in your PDS account settings. No DPoP, no redirect.
 
 ## Quick Start
 
