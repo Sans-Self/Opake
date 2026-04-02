@@ -77,27 +77,27 @@ sdk: sdk-build sdk-test
 
 # Install frontend dependencies
 install-web-deps:
-    cd web && bun install
+    cd apps/web && bun install
 
 # Start frontend dev server
 web-dev:
-    cd web && bun run dev
+    cd apps/web && bun run dev
 
 # Production build (SDK + Vite)
 web-build: sdk-build
-    cd web && bun run build
+    cd apps/web && bun run build
 
 # Run frontend tests
 web-test:
-    cd web && bun run test
+    cd apps/web && bun run test
 
 # Lint frontend
 web-lint:
-    cd web && bun run lint
+    cd apps/web && bun run lint
 
 # Typecheck frontend
 web-typecheck:
-    cd web && bun run tsc --noEmit
+    cd apps/web && bun run tsc --noEmit
 
 # ---------------------------------------------------------------------------
 # Elixir appview
@@ -105,15 +105,30 @@ web-typecheck:
 
 # Start appview dev server
 appview:
-    cd appview && mix phx.server
+    cd apps/appview && mix phx.server
 
 # Run appview tests
 appview-test:
-    cd appview && mix test
+    cd apps/appview && mix test
 
 # Build appview release
 appview-release:
-    cd appview && MIX_ENV=prod mix release
+    cd apps/appview && MIX_ENV=prod mix release
+
+# ---------------------------------------------------------------------------
+# E2E tests
+# ---------------------------------------------------------------------------
+
+# Run CLI e2e tests (requires a running PDS)
+e2e-cli:
+    cd tests && bun test tests/cli/
+
+# Run web e2e tests (requires running web + appview)
+e2e-web:
+    cd tests && bun test tests/web/
+
+# Run all e2e tests
+e2e: e2e-cli e2e-web
 
 # ---------------------------------------------------------------------------
 # CI / validation

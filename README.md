@@ -23,7 +23,7 @@ Your data is opaque to everyone without the key. That's the point.
 Requires Rust 1.75+.
 
 ```sh
-cargo install --path crates/opake-cli
+cargo install --path apps/cli
 ```
 
 ### 2. Login

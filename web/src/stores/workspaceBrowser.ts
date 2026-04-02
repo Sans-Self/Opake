@@ -187,6 +187,130 @@ function buildRemoteProposals(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Local tree mutations (optimistic, no AppView round-trip)
+// ---------------------------------------------------------------------------
+
+type LocalMutation =
+  | {
+      readonly type: "addEntry";
+      readonly parentUri: string;
+      readonly entryUri: string;
+      readonly item?: FileItem;
+    }
+  | { readonly type: "removeEntry"; readonly parentUri: string; readonly entryUri: string }
+  | {
+      readonly type: "moveEntry";
+      readonly sourceUri: string;
+      readonly targetUri: string;
+      readonly entryUri: string;
+    }
+  | { readonly type: "renameDirectory"; readonly directoryUri: string; readonly newName: string }
+  | { readonly type: "removeDirectory"; readonly directoryUri: string; readonly parentUri: string };
+
+/** Collect all URIs reachable from a directory (inclusive). */
+function collectSubtreeUris(
+  directories: Record<string, { name: string; entries: string[] }>,
+  rootUri: string,
+): string[] {
+  const result: string[] = [rootUri];
+  const queue = [rootUri];
+  // eslint-disable-next-line functional/no-loop-statements -- BFS traversal
+  while (queue.length > 0) {
+    const uri = queue.pop()!;
+    const dir = directories[uri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+    if (!dir) continue;
+    for (const entry of dir.entries) {
+      result.push(entry);
+      if (directories[entry]) queue.push(entry);
+    }
+  }
+  return result;
+}
+
+/** Apply a local mutation to the Immer draft's treeSnapshot and fileItems. */
+function applyLocalTreeMutation(
+  draft: {
+    treeSnapshot: DirectoryTreeSnapshot | null;
+    fileItems: Record<string, FileItem>;
+    treeVersion: number;
+  },
+  mutation: LocalMutation,
+): void {
+  if (!draft.treeSnapshot) return;
+  const dirs = draft.treeSnapshot.directories as Record<
+    string,
+    { name: string; entries: string[] }
+  >;
+
+  switch (mutation.type) {
+    case "addEntry": {
+      const parent = dirs[mutation.parentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (parent && !parent.entries.includes(mutation.entryUri)) {
+        parent.entries.push(mutation.entryUri);
+      }
+      if (mutation.item) {
+        draft.fileItems[mutation.entryUri] = mutation.item;
+      }
+      break;
+    }
+    case "removeEntry": {
+      const parent = dirs[mutation.parentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (parent) {
+        parent.entries = parent.entries.filter((e) => e !== mutation.entryUri);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft
+      delete draft.fileItems[mutation.entryUri];
+      break;
+    }
+    case "moveEntry": {
+      const source = dirs[mutation.sourceUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (source) {
+        source.entries = source.entries.filter((e) => e !== mutation.entryUri);
+      }
+      const target = dirs[mutation.targetUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (target && !target.entries.includes(mutation.entryUri)) {
+        target.entries.push(mutation.entryUri);
+      }
+      break;
+    }
+    case "renameDirectory": {
+      const dir = dirs[mutation.directoryUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (dir) {
+        dir.name = mutation.newName;
+      }
+      break;
+    }
+    case "removeDirectory": {
+      const allUris = collectSubtreeUris(dirs, mutation.directoryUri);
+      for (const uri of allUris) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft
+        delete dirs[uri];
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft
+        delete draft.fileItems[uri];
+      }
+      const parent = dirs[mutation.parentUri];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+      if (parent) {
+        parent.entries = parent.entries.filter((e) => e !== mutation.directoryUri);
+      }
+      break;
+    }
+  }
+
+  draft.treeVersion += 1;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace params
+// ---------------------------------------------------------------------------
+
 /** Get workspace context params from the keyring store. */
 function workspaceParams(keyringUri: string) {
   const keyringState = useKeyringStore.getState();
@@ -205,6 +329,8 @@ interface WorkspaceState {
   activeKeyringUri: string | null;
   fileItems: Readonly<Record<string, FileItem>>;
   treeSnapshot: DirectoryTreeSnapshot | null;
+  /** Monotonic counter — incremented on every local or remote tree change. */
+  treeVersion: number;
   /** Optimistic proposals from workspace members, keyed by entity URI. */
   pendingProposals: Readonly<Record<string, FileItem>>;
 
@@ -236,6 +362,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     activeKeyringUri: null,
     fileItems: {},
     treeSnapshot: null,
+    treeVersion: 0,
     pendingProposals: {},
 
     selectWorkspace: async (keyringUri) => {
@@ -243,6 +370,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         draft.activeKeyringUri = keyringUri;
         draft.fileItems = {};
         draft.treeSnapshot = null;
+        draft.treeVersion = 0;
         draft.pendingProposals = {};
       });
       await get().loadWorkspaceTree(keyringUri);
@@ -271,16 +399,17 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         if (get().activeKeyringUri !== keyringUri) return;
 
-        set((draft) => {
-          draft.treeSnapshot = castDraft(snapshot);
-        });
-
         // Build file items from the combined metadata result.
         const fileItems = Object.fromEntries(
           Object.entries(metadata).map(
             ([uri, meta]) => [uri, fileItemFromMetadata(uri, meta)] as const,
           ),
         );
+
+        set((draft) => {
+          draft.treeSnapshot = castDraft(snapshot);
+          draft.treeVersion += 1;
+        });
 
         if (get().activeKeyringUri === keyringUri) {
           const allTreeUris = new Set(
@@ -372,10 +501,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             toastSuccess(`Uploaded "${file.name}" — pending owner approval`);
           } else {
             set((draft) => {
-              draft.fileItems[uri] = item;
+              applyLocalTreeMutation(draft, {
+                type: "addEntry",
+                parentUri: targetDirectoryUri,
+                entryUri: uri,
+                item,
+              });
             });
             toastSuccess(`Uploaded "${file.name}" to workspace`);
-            void get().loadWorkspaceTree(keyringUri);
           }
         }
       } catch (err) {
@@ -465,12 +598,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
           toastSuccess("Deletion proposed — pending owner approval");
         } else {
-          set((draft) => {
-            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft
-            delete draft.fileItems[documentUri];
-          });
+          if (parentUri) {
+            set((draft) => {
+              applyLocalTreeMutation(draft, {
+                type: "removeEntry",
+                parentUri,
+                entryUri: documentUri,
+              });
+            });
+          } else {
+            set((draft) => {
+              // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- immer draft
+              delete draft.fileItems[documentUri];
+            });
+          }
           toastSuccess("Document deleted");
-          if (activeUri) void get().loadWorkspaceTree(activeUri);
         }
       } catch (err) {
         toastError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -497,8 +639,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           directoryUri,
         );
 
+        const { treeSnapshot } = get();
+        const parentUri = treeSnapshot ? findParentUri(treeSnapshot, directoryUri) : null;
+        if (parentUri) {
+          set((draft) => {
+            applyLocalTreeMutation(draft, {
+              type: "removeDirectory",
+              directoryUri,
+              parentUri,
+            });
+          });
+        }
         toastSuccess("Folder deleted");
-        await get().loadWorkspaceTree(activeUri);
       } catch (err) {
         toastError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
@@ -554,9 +706,27 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             };
           });
           toastSuccess(`Folder "${name}" proposed — pending owner approval`);
-        } else {
+        } else if (uri) {
+          set((draft) => {
+            // Add the new directory to the snapshot and its parent's entries.
+            if (draft.treeSnapshot) {
+              (
+                draft.treeSnapshot.directories as Record<
+                  string,
+                  { name: string; entries: string[] }
+                >
+              )[uri] = {
+                name,
+                entries: [],
+              };
+            }
+            applyLocalTreeMutation(draft, {
+              type: "addEntry",
+              parentUri,
+              entryUri: uri,
+            });
+          });
           toastSuccess(`Folder "${name}" created`);
-          await get().loadWorkspaceTree(activeUri);
         }
       } catch (err) {
         toastError(`Failed to create folder: ${err instanceof Error ? err.message : String(err)}`);
@@ -608,8 +778,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
           toastSuccess(`Rename proposed — pending owner approval`);
         } else {
+          set((draft) => {
+            applyLocalTreeMutation(draft, {
+              type: "renameDirectory",
+              directoryUri,
+              newName,
+            });
+          });
           toastSuccess(`Renamed to "${newName}"`);
-          await get().loadWorkspaceTree(activeUri);
         }
       } catch (err) {
         toastError(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -667,8 +843,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
           toastSuccess("Move proposed — pending owner approval");
         } else {
+          set((draft) => {
+            applyLocalTreeMutation(draft, {
+              type: "moveEntry",
+              sourceUri,
+              targetUri: targetDirectoryUri,
+              entryUri,
+            });
+          });
           toastSuccess("Moved");
-          await get().loadWorkspaceTree(activeUri);
         }
       } catch (err) {
         toastError(`Move failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -790,6 +973,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         draft.activeKeyringUri = null;
         draft.fileItems = {};
         draft.treeSnapshot = null;
+        draft.treeVersion = 0;
         draft.pendingProposals = {};
       });
     },

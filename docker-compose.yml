@@ -16,7 +16,7 @@ services:
 
   appview:
     build:
-      context: appview
+      context: apps/appview
       dockerfile: ../Containerfile.appview
     depends_on:
       db:

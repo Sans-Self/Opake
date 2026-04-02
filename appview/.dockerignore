@@ -1,8 +1,0 @@
-_build/
-deps/
-.elixir_ls/
-*.ez
-.git
-test/
-AGENTS.md
-README.md

@@ -1,0 +1,19 @@
+{
+  "name": "opake-e2e-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:web": "playwright test",
+    "test:web:headed": "playwright test --headed",
+    "test:web:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^22",
+    "fake-pds": "^0.7.0",
+    "typescript": "^5.7",
+    "vitest": "^3.0"
+  }
+}

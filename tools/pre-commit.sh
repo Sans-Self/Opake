@@ -20,6 +20,6 @@ if git diff --cached --name-only | grep -q '\.rs$'; then
 fi
 
 # Web frontend checks (only if web/ files are staged)
-if git diff --cached --name-only | grep -q '^web/src/'; then
-    (cd web && bun run format:check && bun run lint)
+if git diff --cached --name-only | grep -q '^apps/web/src/'; then
+    (cd apps/web && bun run format:check && bun run lint)
 fi
