@@ -1,0 +1,72 @@
+<ChapterHeader title="Encryption & Keys" />
+
+<Lead>
+  Opake employs a hybrid encryption model: symmetric content encryption for speed, and asymmetric
+  key wrapping for sharing and identity.
+</Lead>
+
+## The Cryptographic Reality
+
+We don't use "bank-level security" buzzwords. We use standard, audited cryptographic primitives. If you're a developer, here is exactly what happens when you upload a file.
+
+### 1. Content Encryption
+
+When you select a file to upload, your device generates a random 256-bit symmetric key (`Content Key`).
+
+The file is then encrypted using **AES-256-GCM**. This algorithm is fast and handles arbitrary-size data efficiently. This produces the ciphertext blob that will actually be uploaded to your PDS.
+
+<CodeBlock language="rust" title="opake-core/src/crypto/content.rs">
+  {`// The core primitive.
+pub fn encrypt_blob(
+    plaintext: &[u8],
+    key: &ContentKey
+) -> Result<Vec<u8>, CryptoError> {
+    // Generates 12-byte random nonce
+    // Applies AES-GCM
+    // Returns ciphertext with appended authentication tag
+}`}
+</CodeBlock>
+
+### 2. Key Wrapping (The Lockbox)
+
+We have the encrypted file, but how do we store the `Content Key` so that _only you_ can decrypt it later? We wrap it.
+
+Your Opake identity consists of an **X25519** keypair. We take the `Content Key` and wrap it to your X25519 public key using a scheme called `x25519-hkdf-a256kw`.
+
+1. We generate an ephemeral X25519 keypair.
+2. We perform an ECDH key agreement with your public key.
+3. We derive a wrapping key using HKDF-SHA256.
+4. We wrap the `Content Key` using AES-256-KW.
+
+The result is a `WrappedKey`. This lockbox is safe to store publicly while being streamed through the AT Protocol firehose because it can only be opened by your private X25519 key.
+
+<Callout type="info">
+  **A Note on JWE:** We intentionally avoided the JSON Web Encryption (JWE) standard. Our specific
+  HKDF info string (`opake-v1-x25519-hkdf-a256kw-{did}`) provides strict domain separation,
+  preventing replay attacks across different users or protocol versions.
+</Callout>
+
+## Cryptographic Heritage
+
+Opake doesn't reinvent the wheel. We stand on the shoulders of giants who have spent decades perfecting modern, easy-to-use, and highly secure encryption. Our design is heavily influenced by the same primitives used by the **Signal Protocol**.
+
+- **Signal's X25519 & Ed25519:** Just like Signal, we use Curve25519 (X25519) for our identity and key wrapping. It is the modern gold standard for elliptic curve cryptography—fast, secure, and designed to be resistant to many types of side-channel attacks.
+- **[Age (Actually Good Encryption)](https://github.com/FiloSottile/age):** Our file-based encryption model (encrypting for specific public key recipients) is conceptually very similar to the `age` tool. We believe in "static" encryption that is robust and doesn't rely on complex state-machine handshakes.
+- **[The Noise Protocol Framework](http://noiseprotocol.org/):** While we aren't a messaging protocol, we follow the Noise philosophy: using simple, composable primitives (Diffie-Hellman + HKDF + AEAD) to build secure systems.
+
+---
+
+## Where Do Keys Come From?
+
+Your keys are derived from a **24-word secret phrase** generated when you first set up Opake. The same phrase always produces the same keys — this is how you can recover your identity on a new device without needing your old one.
+
+For nerds: the derivation uses standard cryptographic primitives: PBKDF2 to stretch the phrase into a master seed, then HKDF to derive separate X25519 (encryption) and Ed25519 (signing) keys. For the full technical details, see [Your Seed Phrase](/docs/seed-phrase).
+
+## Where Are My Keys Stored?
+
+Your private keys never touch the network.
+
+- **On the Web:** They are stored in your browser's `IndexedDB`, accessible only to the Opake web app domain.
+- **On the CLI:** They are stored in `~/.config/opake/accounts/`, guarded by strict `0600` UNIX file permissions.
+
+Your seed phrase is shown once at setup and never stored. To learn how to back it up and recover, read [Your Seed Phrase](/docs/seed-phrase). To transfer keys between devices without re-entering the phrase, read about [Device Pairing](/docs/pairing).

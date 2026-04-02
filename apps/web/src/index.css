@@ -1,0 +1,429 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* ─── Fallback font metric overrides (eliminates layout shift on swap) ──── */
+
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 111.93%;
+  ascent-override: 86.55%;
+  descent-override: 21.55%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond Fallback";
+  src: local("Times New Roman"), local("Times");
+  size-adjust: 98.32%;
+  ascent-override: 93.98%;
+  descent-override: 29.19%;
+  line-gap-override: 0%;
+}
+
+/* ─── Self-hosted fonts ──────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-italic.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-italic.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/inter-latin-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/inter-latin-ext-normal.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 300 400;
+  font-display: swap;
+  src: url("/fonts/inter-latin-italic.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 300 400;
+  font-display: swap;
+  src: url("/fonts/inter-latin-ext-italic.woff2") format("woff2");
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+/* ─── Opake theme ─────────────────────────────────────────────────────────── */
+
+@plugin "daisyui/theme" {
+  name: "opake";
+  default: true;
+
+  /* Surfaces */
+  --color-base-100: oklch(0.985 0.005 85); /* #FDFAF5 — panel bg */
+  --color-base-200: oklch(0.957 0.012 85); /* #F5F1E8 — sidebar bg */
+  --color-base-300: oklch(0.93 0.015 85); /* #EDE8DC — page bg */
+  --color-base-content: oklch(0.155 0.035 70); /* #1C1408 — primary text */
+
+  /* Accent gold */
+  --color-primary: oklch(0.58 0.095 75); /* #9A7840 */
+  --color-primary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Muted text / secondary */
+  --color-secondary: oklch(0.39 0.055 65); /* #5C4A2E */
+  --color-secondary-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Accent light bg */
+  --color-accent: oklch(0.94 0.035 85); /* #F5E9D0 */
+  --color-accent-content: oklch(0.49 0.08 70); /* #7D6230 */
+
+  /* Dark UI */
+  --color-neutral: oklch(0.155 0.035 70); /* #1C1408 */
+  --color-neutral-content: oklch(0.976 0.008 85); /* #FAF7F1 */
+
+  /* Semantic */
+  --color-success: oklch(0.53 0.065 145); /* #5C7A54 — shared/sage */
+  --color-success-content: oklch(0.976 0.008 85);
+  --color-warning: oklch(0.68 0.135 75); /* #C4952A — gold star */
+  --color-warning-content: oklch(0.155 0.035 70);
+  --color-error: oklch(0.45 0.11 25); /* #A04840 — destructive */
+  --color-error-content: oklch(0.976 0.008 85);
+  --color-info: oklch(0.58 0.095 75);
+  --color-info-content: oklch(0.976 0.008 85);
+
+  /* Shape */
+  --radius-selector: 0.625rem;
+  --radius-field: 0.5625rem;
+  --radius-box: 1rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ─── Design tokens ───────────────────────────────────────────────────────── */
+
+@theme {
+  --font-display: "Cormorant Garamond", "Cormorant Garamond Fallback", serif;
+  --font-sans: "Inter", "Inter Fallback", sans-serif;
+
+  /* Text scale */
+  --text-ui: 0.8125rem; /* 13px — primary UI text */
+  --text-caption: 0.6875rem; /* 11px — meta/caption */
+  --text-label: 0.625rem; /* 10px — small labels */
+  --text-micro: 0.5625rem; /* 9px — tiny text */
+
+  /* Custom colours */
+  --color-border-accent: oklch(0.79 0.06 80); /* #D4BC96 */
+  --color-text-faint: oklch(0.76 0.035 75); /* #C4B09A */
+  --color-text-muted: oklch(0.62 0.04 70); /* #9A8768 */
+  --color-bg-hover: oklch(0.58 0.095 75 / 0.055); /* gold hover */
+  --color-bg-ghost-1: oklch(0.94 0.025 80); /* #F5EDDB */
+  --color-bg-ghost-2: oklch(0.965 0.015 80); /* #FAF5EC */
+  --color-bg-sage: oklch(0.94 0.02 140); /* #EEF2E8 */
+  --color-bg-stone: oklch(0.95 0.01 80); /* #F4F1EC */
+
+  /* File-type icon colours */
+  --color-file-doc: #6676a8;
+  --color-file-doc-bg: #eef0f8;
+  --color-file-sheet: #5c8a5c;
+  --color-file-sheet-bg: #eef4ee;
+  --color-file-pdf: #a05040;
+  --color-file-pdf-bg: #f5eeec;
+  --color-file-note: #8a6a30;
+  --color-file-code: #7a6a98;
+  --color-file-code-bg: #f0eef5;
+  --color-file-image: #8a5a8a;
+  --color-file-image-bg: #f2eef2;
+
+  /* Elevation */
+  --shadow-panel-sm: 0 1px 8px oklch(0.35 0.05 60 / 0.07);
+  --shadow-panel-md: 0 2px 16px oklch(0.35 0.05 60 / 0.09);
+  --shadow-panel-lg: 0 6px 32px oklch(0.35 0.05 60 / 0.12);
+
+  /* Keyframes */
+  --animate-logo-square: logo-square 2s linear infinite;
+  @keyframes logo-square {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      background: var(--sq-from);
+      border: var(--sq-border-from);
+    }
+    25% {
+      transform: translate(calc(var(--sq-dir) * var(--space)), 0);
+    }
+    50% {
+      transform: translate(calc(var(--sq-dir) * var(--space)), calc(var(--sq-dir) * var(--space)));
+      background: var(--sq-to);
+      border: var(--sq-border-to);
+    }
+    75% {
+      transform: translate(0, calc(var(--sq-dir) * var(--space)));
+    }
+  }
+
+  --animate-hover-lift: hover-lift 0.2s ease-out forwards;
+  @keyframes hover-lift {
+    to {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-panel-sm);
+    }
+  }
+
+  --animate-ghost-panel: ghost-panel 0.3s ease-out both;
+  @keyframes ghost-panel {
+    from {
+      opacity: 0;
+      translate: 0 0;
+    }
+  }
+
+  --animate-toast-enter: toast-enter 0.25s ease-out both;
+  @keyframes toast-enter {
+    from {
+      opacity: 0;
+      translate: 1rem 0;
+    }
+  }
+}
+
+/* ─── Utilities ──────────────────────────────────────────────────────────── */
+
+/* Two-click destructive action: ghost on idle, filled error on confirm. */
+@utility btn-confirm-danger {
+  @apply btn-ghost;
+
+  &[data-confirming="true"] {
+    @apply btn-error;
+  }
+}
+
+@utility bg-encrypted-pattern {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 13px,
+    oklch(0.58 0.095 75 / 0.04) 13px,
+    oklch(0.58 0.095 75 / 0.04) 14px
+  );
+}
+
+/* ─── Base styles ─────────────────────────────────────────────────────────── */
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Soften DaisyUI form element focus rings */
+  .input,
+  .textarea,
+  .select {
+    &:focus,
+    &:focus-within {
+      @apply border-primary/40! ring-primary/15 shadow-none ring-1 outline-none!;
+    }
+  }
+
+  /* Scoped prose — for MDX content blocks */
+  .prose p {
+    margin-block: 0.75em;
+  }
+  .prose a {
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose strong {
+    font-weight: 600;
+  }
+  .prose h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.3rem, 2.5vw, 1.8rem);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin-top: 2.5em;
+    margin-bottom: 0.75em;
+    color: var(--color-base-content);
+  }
+  .prose h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.8em;
+    margin-bottom: 0.5em;
+    color: var(--color-base-content);
+  }
+  .prose ul {
+    list-style-type: disc;
+    margin-block: 0.75em;
+    padding-left: 1.5em;
+  }
+  .prose ol {
+    list-style-type: decimal;
+    margin-block: 0.75em;
+    padding-left: 1.5em;
+  }
+  .prose li {
+    margin-block: 0.25em;
+  }
+  .prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-block: 1em;
+    font-size: 0.875em;
+  }
+  .prose th,
+  .prose td {
+    border: 1px solid var(--color-border-accent);
+    padding: 0.4em 0.75em;
+    text-align: left;
+  }
+  .prose th {
+    background: var(--color-base-300);
+    font-weight: 600;
+  }
+  .prose tbody tr:nth-child(even) {
+    background: var(--color-base-200);
+  }
+  .prose hr {
+    border: none;
+    border-top: 1px solid var(--color-border-accent);
+    opacity: 0.4;
+    margin-block: 2em;
+  }
+  .prose code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .prose code:not(pre code) {
+    font-size: 0.85em;
+    padding: 0.15em 0.35em;
+    border-radius: 0.25rem;
+    background: var(--color-base-300);
+  }
+  .prose blockquote {
+    border-left: 3px solid var(--color-border-accent);
+    padding-left: 1em;
+    margin-block: 1em;
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+  .prose pre {
+    margin-block: 1em;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+  }
+
+  /* Editor prose — shared by Tiptap editor and its live preview pane.
+     Uses body font for headings (not the display serif used on docs pages). */
+  .prose-editor h1,
+  .prose-editor h2,
+  .prose-editor h3 {
+    font-family: var(--font-sans);
+  }
+  .prose-editor h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+  }
+  .prose-editor h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+  }
+  .prose-editor h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.3em;
+    margin-bottom: 0.4em;
+  }
+
+  /* Editor images */
+  .prose-editor img {
+    max-width: 100%;
+    border-radius: 0.5rem;
+    margin-block: 1em;
+  }
+
+  /* Editor code blocks — match the syntax highlighter's own background */
+  .prose-editor pre {
+    background: hsl(230, 1%, 98%);
+    padding: 0.875em 1em;
+  }
+
+  /* ProseMirror placeholder */
+  .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: var(--color-text-faint);
+    pointer-events: none;
+    height: 0;
+  }
+}

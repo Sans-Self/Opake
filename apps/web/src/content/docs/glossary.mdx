@@ -1,0 +1,59 @@
+<ChapterHeader title="Glossary of Terms" />
+
+<Lead>A quick-hit reference for the terminology we use across the Opake ecosystem.</Lead>
+
+### AT Protocol (atproto)
+
+The decentralized social networking protocol that Opake is built on. It handles identity, data storage, and the communication between different servers.
+
+### AES-256-GCM
+
+The symmetric encryption algorithm we use for file contents. It's fast, secure, and industry-standard.
+
+### AppView
+
+A specialized service that indexes the [Firehose](#firehose) and provides a fast way to discover which files have been shared with you. It never sees your plaintext data.
+
+### Cabinet
+
+Our name for the Opake interface—the place where you manage your files, keys, and sharing grants.
+
+### Content Key
+
+A random 256-bit key generated for every single file. It's the key that actually "locks" the file content.
+
+### DID (Decentralized Identifier)
+
+Your permanent, cryptographic ID on the AT Protocol (e.g., `did:plc:123...`). Unlike a handle, a DID never changes.
+
+### Firehose
+
+The real-time stream of all public records being created on the AT Protocol. Our AppView "listens" to the firehose to find new Sharing Grants.
+
+### Grant
+
+A record that "grants" a specific person access to a file by wrapping the file's [Content Key](#content-key) for their [Public Key](#public-key).
+
+### Keyring
+
+A named group of users that shares a common Group Key. It makes sharing folders with teams or families effortless.
+
+### PDS (Personal Data Server)
+
+The server where your data actually lives. You can host your own, or use a provider like Bluesky.
+
+### Public Key
+
+The part of your cryptographic identity that you share with the world. Others use your public key to "wrap" files specifically for you.
+
+### Wrapped Key
+
+A [Content Key](#content-key) that has been encrypted for a specific recipient using their [Public Key](#public-key). It's like a small lockbox that only one person can open.
+
+### X25519
+
+The specific elliptic curve we use for asymmetric encryption and key wrapping. It's modern, fast, and secure.
+
+---
+
+Still curious? Head back to the [Handbook Index](/docs).

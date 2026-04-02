@@ -1,0 +1,135 @@
+<ChapterHeader title="The CLI Manual" />
+
+<Lead>
+  For the power users, the keyboard-bound, and the automation-obsessed. The Opake CLI is the
+  reference implementation of our protocol.
+</Lead>
+
+## Installation
+
+The CLI is built in Rust and requires building from source. You'll need Rust 1.75+ and Git.
+
+<CodeBlock language="sh">git clone https://tangled.org/sans-self.org/opake.app</CodeBlock>
+
+<CodeBlock language="sh">cd opake.app && cargo install --path crates/opake-cli</CodeBlock>
+
+This puts the `opake` binary in your `~/.cargo/bin/` directory. Pre-built binaries and crates.io publishing are planned.
+
+---
+
+## 1. Identity & Session Management
+
+Everything starts with a session. Opake supports multiple accounts and uses AT Protocol OAuth by default.
+
+### Login
+
+<CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
+
+Override the PDS or fall back to legacy app-password auth:
+
+<CodeBlock language="sh">opake login you.bsky.social --pds https://pds.example.com</CodeBlock>
+
+<CodeBlock language="sh">opake login you.bsky.social --legacy</CodeBlock>
+
+### Managing Accounts
+
+<CodeBlock language="sh">opake accounts</CodeBlock>
+
+<CodeBlock language="sh">opake set-default bob.other.com</CodeBlock>
+
+Use a specific account for a single command with `--as`:
+
+<CodeBlock language="sh">opake ls --as alice.example.com</CodeBlock>
+
+---
+
+## 2. The Social Filesystem
+
+Managing your encrypted vault from the terminal.
+
+### Upload & Download
+
+<CodeBlock language="sh">opake upload photo.jpg --description "Beach vacation"</CodeBlock>
+
+<CodeBlock language="sh">opake download photo.jpg -o ~/Downloads/copy.jpg</CodeBlock>
+
+Decrypt and stream to stdout without saving locally:
+
+<CodeBlock language="sh">opake cat notes.txt</CodeBlock>
+
+### Organization
+
+<CodeBlock language="sh">opake ls --long</CodeBlock>
+
+<CodeBlock language="sh">opake mkdir Photos</CodeBlock>
+
+<CodeBlock language="sh">opake tree</CodeBlock>
+
+### Metadata
+
+View or modify a document's metadata after upload:
+
+<CodeBlock language="sh">opake metadata photo.jpg</CodeBlock>
+
+<CodeBlock language="sh">opake metadata photo.jpg --rename "sunset.jpg"</CodeBlock>
+
+<CodeBlock language="sh">opake metadata photo.jpg --add-tag vacation --add-tag beach</CodeBlock>
+
+<CodeBlock language="sh">
+  opake metadata photo.jpg --description "Golden hour at Scheveningen"
+</CodeBlock>
+
+---
+
+## 3. Sharing & Collaboration
+
+Cryptographic access control at your fingertips.
+
+### Direct Sharing (Grants)
+
+<CodeBlock language="sh">opake share secret.pdf bob.bsky.social</CodeBlock>
+
+<CodeBlock language="sh">opake shared</CodeBlock>
+
+<CodeBlock language="sh">opake inbox</CodeBlock>
+
+<CodeBlock language="sh">opake revoke at://did:plc:123/app.opake.grant/tid456</CodeBlock>
+
+### Group Sharing (Keyrings)
+
+<CodeBlock language="sh">opake keyring create "The Collective"</CodeBlock>
+
+<CodeBlock language="sh">opake keyring add-member "The Collective" alice.bsky.social</CodeBlock>
+
+<CodeBlock language="sh">opake upload internal-docs.zip --keyring "The Collective"</CodeBlock>
+
+---
+
+## 4. Maintenance & Security
+
+### Device Pairing
+
+<CodeBlock language="sh">opake pair request</CodeBlock>
+
+Run the above on the **new** device, then approve on the **existing** device:
+
+<CodeBlock language="sh">opake pair approve</CodeBlock>
+
+### The Nuclear Option
+
+<CodeBlock language="sh">opake logout alice.bsky.social</CodeBlock>
+
+<CodeBlock language="sh">opake rm -r /</CodeBlock>
+
+<CodeBlock language="sh">opake purge --dry-run</CodeBlock>
+
+<CodeBlock language="sh">opake purge --force</CodeBlock>
+
+<Callout type="warning">
+  **The Mini Nuke:** Running `opake rm -r /` clears your entire vault while keeping your
+  cryptographic identity intact. Use it when you want a fresh start without re-pairing devices.
+</Callout>
+
+<Callout type="info">
+  **Pro-Tip:** Every command supports `--help` for detailed usage and sub-command options.
+</Callout>
