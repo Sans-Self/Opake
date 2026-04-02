@@ -5,14 +5,14 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.cjs"
     },
     "./storage/indexeddb": {
+      "types": "./dist/storage/indexeddb.d.ts",
       "import": "./dist/storage/indexeddb.mjs",
-      "require": "./dist/storage/indexeddb.cjs",
-      "types": "./dist/storage/indexeddb.d.ts"
+      "require": "./dist/storage/indexeddb.cjs"
     }
   },
   "main": "./dist/index.cjs",

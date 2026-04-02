@@ -34,7 +34,8 @@ import {
 
 // The WASM module types. We import dynamically after init.
 type WasmModule = typeof import("../wasm/opake.js");
-type WasmOpakeContext = InstanceType<WasmModule["OpakeContext"]>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- WASM-generated type has private constructor
+type WasmOpakeContext = any;
 
 // ---------------------------------------------------------------------------
 // Token guard decorator
@@ -49,15 +50,12 @@ const REFRESH_THRESHOLD_MS = 30_000; // refresh 30s before expiry
  * refresh (concurrent callers share the same promise). Eliminates reactive
  * 401 retries and makes concurrent dispatch safe.
  */
-function withTokenGuard<T extends (...args: never[]) => Promise<unknown>>(
-  target: T,
-  _context: ClassMethodDecoratorContext<Opake>,
-): T {
-  async function guarded(this: Opake, ...args: unknown[]): Promise<unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- TC39 decorator type erasure
+function withTokenGuard(_target: any, _context: ClassMethodDecoratorContext) {
+  return async function (this: Opake, ...args: any[]): Promise<any> {
     await this.ensureValidToken();
-    return (target as (...a: unknown[]) => Promise<unknown>).call(this, ...args);
-  }
-  return guarded as unknown as T;
+    return _target.call(this, ...args);
+  };
 }
 
 // ---------------------------------------------------------------------------
