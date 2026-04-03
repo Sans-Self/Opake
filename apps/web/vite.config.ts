@@ -25,9 +25,13 @@ export default defineConfig({
     // atproto OAuth — RFC 8252 rejects "localhost", needs loopback IP)
     host: true,
   },
+  optimizeDeps: {
+    include: ["use-sync-external-store/shim/with-selector"],
+  },
   resolve: {
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
     },
+    dedupe: ["react", "react-dom"],
   },
 });

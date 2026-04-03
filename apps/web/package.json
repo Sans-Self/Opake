@@ -4,10 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "wasm:build": "wasm-pack build ../crates/opake-wasm --target web --out-dir ../../web/src/wasm/opake-wasm --out-name opake",
-    "wasm:build:dev": "wasm-pack build ../crates/opake-wasm --target web --dev --out-dir ../../web/src/wasm/opake-wasm --out-name opake",
     "dev": "vite",
-    "build": "bun run wasm:build && tsc && vite build",
+    "build": "tsc && vite build",
     "preview": "bun run serve.ts",
     "start": "bun run serve.ts",
     "test": "vitest run",
@@ -18,8 +16,15 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx,mdx}'"
   },
   "dependencies": {
+    "@opake/daemon": "workspace:*",
+    "@opake/react": "workspace:*",
+    "@opake/sdk": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-query": "^5.0.0",
+    "@tanstack/react-router": "^1.168.10",
     "@tanstack/react-start": "^1.166.3",
+    "@tanstack/react-store": "^0.9.3",
+    "@tiptap/extension-code-block": "^3.22.1",
     "@tiptap/extension-image": "^3.20.4",
     "@tiptap/extension-placeholder": "^3.20.4",
     "@tiptap/extension-table": "^3.20.4",

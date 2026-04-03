@@ -1,4 +1,5 @@
 import { defineConfig } from "tsup";
+import { copyFileSync } from "node:fs";
 
 export default defineConfig({
   entry: {
@@ -11,4 +12,10 @@ export default defineConfig({
   clean: true,
   outDir: "dist",
   external: ["dexie"],
+  onSuccess: async () => {
+    // The WASM glue code resolves opake_bg.wasm relative to itself via
+    // `new URL('opake_bg.wasm', import.meta.url)`. Since tsup bundles the
+    // glue into dist/, the binary needs to be there too.
+    copyFileSync("wasm/opake_bg.wasm", "dist/opake_bg.wasm");
+  },
 });

@@ -6,17 +6,17 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
     "./storage/indexeddb": {
       "types": "./dist/storage/indexeddb.d.ts",
-      "import": "./dist/storage/indexeddb.mjs",
+      "import": "./dist/storage/indexeddb.js",
       "require": "./dist/storage/indexeddb.cjs"
     }
   },
   "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist/",
