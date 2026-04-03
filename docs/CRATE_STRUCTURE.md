@@ -1,4 +1,4 @@
-# Opake — Crate & Module Structure
+# Opake — Monorepo Structure
 
 ```
 crates/
@@ -112,7 +112,13 @@ crates/
       daemon.rs        Service Worker maintenance task exports (session refresh, pair cleanup)
       wasm_util.rs     make_client, make_opake, make_cabinet, make_workspace helpers. WasmOpake = Opake<WasmTransport, OsRng, NoopStorage>
 
-  opake-cli/           CLI binary wrapping opake-core
+  opake-derive/        Proc-macro crate
+    src/
+      lib.rs           #[derive(RedactedDebug)] — generates Debug + Zeroize + Drop for structs with #[redact] fields
+                        #[signoff] — attribute macro for session persistence, auto-generates wrapper+inner split. #[signoff] for FileManager (self.opake.signoff()), #[signoff(self)] for Opake (self.signoff())
+
+apps/
+  cli/                 CLI binary wrapping opake-core (package: opake-cli)
     src/
       main.rs          Clap app, command dispatch. Workspace command (alias for hidden Keyring)
       config.rs        FileStorage (impl Storage for filesystem), anyhow wrappers
@@ -153,89 +159,130 @@ crates/
         completions.rs Shell completion script generation
         purge.rs       Delete all records from PDS (danger zone)
 
-  opake-derive/        Proc-macro crate
+  web/                 React SPA (Vite + TanStack Router + Tailwind + daisyUI)
     src/
-      lib.rs           #[derive(RedactedDebug)] — generates Debug + Zeroize + Drop for structs with #[redact] fields
-                        #[signoff] — attribute macro for session persistence, auto-generates wrapper+inner split. #[signoff] for FileManager (self.opake.signoff()), #[signoff(self)] for Opake (self.signoff())
+      lib/
+        storage.ts       Storage interface (mirrors opake-core Storage trait)
+        storageTypes.ts  Config, Identity, Session types (mirrors opake-core)
+        indexeddbStorage.ts  IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
+        api.ts           API client helpers
+        cryptoTypes.ts   Crypto type definitions
+        oauth.ts         OAuth flow helpers
+        directoryTree.ts Client-side directory tree utilities
+        sharing.ts       Share/grant helpers
+        pairing.ts       Device pairing helpers
+        did.ts           DID resolution helpers
+        worker.ts        Worker proxy (Comlink)
+      stores/
+        auth.ts          Auth state (Zustand)
+        app.ts           App-wide state
+        keyring.ts       Workspace/keyring state
+        search.ts        Search state
+        tasks.ts         Background task state
+        toast.ts         Toast notifications
+        workspaceBrowser.ts  Workspace browser state
+        documents/       Document stores (file-items, store)
+      routes/
+        __root.tsx       Root layout with auth guard
+        _public.tsx      Public layout wrapper
+        _public/         Public routes (landing, login)
+        cabinet/         Cabinet routes (file browser)
+        devices/         Device management routes
+      components/cabinet/
+        PanelContent.tsx     File grid/list view
+        PanelShell.tsx       Panel container
+        Sidebar.tsx          Navigation sidebar
+        TopBar.tsx           Header with account switcher
+        FileGridCard.tsx     Grid card with file icon + metadata
+        FileListRow.tsx      List row variant
+        FilePreview.tsx      File content preview
+        MarkdownEditor.tsx   In-browser markdown editing
+        SearchResults.tsx    Search results panel
+        types.ts             Discriminated union types for cabinet state
+        (+ dialogs: AddMember, CreateWorkspace, Delete, Move, NewFolder, Rename, Share, WorkspaceMembers, WorkspaceSettings, etc.)
+      wasm/opake-wasm/   WASM build of opake-core (via wasm-pack)
+      workers/
+        opake.worker.ts  Single worker composing all API modules (Comlink)
+        daemon.ts        Background daemon (session refresh, cleanup tasks)
+        context.ts       Worker context management
+        api/
+          cabinet.ts     Cabinet file operations
+          identity.ts    Keypairs, seed phrases, DPoP, DID resolution
+          workspace.ts   Workspace operations
 
-web/                   React SPA (Vite + TanStack Router + Tailwind + daisyUI)
-  src/
+  appview/             Elixir/Phoenix indexer + REST API (replaces Rust appview)
     lib/
-      storage.ts       Storage interface (mirrors opake-core Storage trait)
-      storage-types.ts Config, Identity, Session types (mirrors opake-core)
-      indexeddb-storage.ts  IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
-      api.ts           API client helpers
-      crypto-types.ts  Crypto type definitions
-    stores/
-      auth.ts          Auth state (Zustand)
-    routes/
-      __root.tsx       Root layout with auth guard
-      index.tsx        Landing page
-      login.tsx        Login form
-      cabinet.tsx      File cabinet (main UI)
-    components/cabinet/
-      PanelStack.tsx   Stacked panel navigation
-      PanelContent.tsx File grid/list view
-      Sidebar.tsx      Navigation sidebar
-      TopBar.tsx       Header with account switcher
-      FileGridCard.tsx Grid card with file icon + metadata
-      FileListRow.tsx  List row variant
-      types.ts         Discriminated union types for cabinet state
-    wasm/opake-wasm/   WASM build of opake-core (via wasm-pack)
-    workers/
-      opake.worker.ts  Single worker composing all API modules (Comlink)
-      api/
-        crypto.ts      Encrypt, decrypt, wrap, unwrap
-        identity.ts    Keypairs, seed phrases, DPoP, DID resolution
-        tree.ts        Stateful directory tree handle
-        pds.ts         PDS operations via WasmTransport
-        keyrings.ts    Keyring operations
-        workspaceDirectories.ts  Workspace directory operations
-        wasmResult.ts  Shared result/session unwrap helpers
+      opake_appview/
+        application.ex       OTP supervision tree (Repo, KeyCache, Endpoint, Consumer)
+        indexer.ex            Event dispatch, cursor saving, connection state (ETS)
+        release.ex            Release tasks (create_db, migrate, rollback, status)
+        repo.ex               Ecto Repo
+        auth/
+          plug.ex             Opake-Ed25519 header verification (Plug)
+          key_cache.ex        GenServer + ETS, 5-min TTL per DID
+          key_fetcher.ex      DID → PDS → publicKey → signingKey resolution
+          base64.ex           Flexible base64 decode (padded/unpadded)
+        jetstream/
+          consumer.ex         WebSockex client with exponential backoff
+          event.ex            Jetstream JSON → tagged tuples
+        queries/
+          cursor_queries.ex   Singleton cursor upsert/load
+          grant_queries.ex    Grant CRUD + inbox pagination
+          keyring_queries.ex  Keyring member CRUD + membership pagination
+          workspace_queries.ex  Workspace document membership queries
+          document_update_queries.ex  Document update index queries
+          pagination.ex       Shared cursor-based pagination helpers
+        schemas/
+          cursor.ex           Singleton cursor (id=1)
+          grant.ex            Grant (uri PK)
+          keyring_member.ex   Keyring member (composite PK)
+          workspace_document.ex  Workspace document schema
+          document_update.ex  Document update schema
+      opake_appview_web/
+        router.ex             /api/health (public), /api/inbox + /api/keyrings + /api/workspace + /api/workspace/updates (auth'd)
+        endpoint.ex           Bandit HTTP, API-only (no sessions/static)
+        plugs/rate_limit.ex   Hammer ETS rate limiting per IP
+        controllers/
+          health_controller.ex     Indexer status + cursor lag
+          inbox_controller.ex      Grants by recipient DID
+          keyrings_controller.ex   Keyrings by member DID
+          workspace_controller.ex  Workspace documents + pending updates
+          pagination_helpers.ex    Shared param parsing (did, limit, cursor)
+
+packages/
+  opake-sdk/             @opake/sdk — TypeScript SDK wrapping WASM bindings
+    src/
+      index.ts           Package entry point, re-exports
+      opake.ts           Opake client (auth, session management)
+      file-manager.ts    FileManager (upload, download, tree, metadata)
+      auth.ts            OAuth/DPoP helpers
+      storage.ts         Storage interface (mirrors opake-core trait)
+      wasm.ts            WASM initialization and bridge
+      types.ts           Shared type definitions
+      errors.ts          Typed error hierarchy
+      storage/           Storage implementations
+    wasm/                WASM build output (wasm-pack → here)
+
+  opake-daemon/          @opake/daemon — Background task scheduler
+    src/
+      index.ts           Package entry point
+      scheduler.ts       Task scheduling loop
+      tasks.ts           Task definitions (session refresh, pair cleanup, grant healing)
+      types.ts           Task type definitions
+
+  opake-react/           @opake/react — React bindings
+    src/
+      index.ts           Package entry point
+      provider.tsx       OpakeProvider context
+      keys.ts            Query key management
+      hooks/             React hooks for Opake operations
+
+tests/                   E2E and integration tests
   tests/
-    lib/
-      indexeddb-storage.test.ts  Storage contract tests (fake-indexeddb)
-
-appview/               Elixir/Phoenix indexer + REST API (replaces Rust appview)
-  lib/
-    opake_appview/
-      application.ex       OTP supervision tree (Repo, KeyCache, Endpoint, Consumer)
-      indexer.ex            Event dispatch, cursor saving, connection state (ETS)
-      release.ex            Release tasks (create_db, migrate, rollback, status)
-      repo.ex               Ecto Repo
-      auth/
-        plug.ex             Opake-Ed25519 header verification (Plug)
-        key_cache.ex        GenServer + ETS, 5-min TTL per DID
-        key_fetcher.ex      DID → PDS → publicKey → signingKey resolution
-        base64.ex           Flexible base64 decode (padded/unpadded)
-      jetstream/
-        consumer.ex         WebSockex client with exponential backoff
-        event.ex            Jetstream JSON → tagged tuples
-      queries/
-        cursor_queries.ex   Singleton cursor upsert/load
-        grant_queries.ex    Grant CRUD + inbox pagination
-        keyring_queries.ex  Keyring member CRUD + membership pagination
-        workspace_queries.ex  Workspace document membership queries
-        document_update_queries.ex  Document update index queries
-        pagination.ex       Shared cursor-based pagination helpers
-      schemas/
-        cursor.ex           Singleton cursor (id=1)
-        grant.ex            Grant (uri PK)
-        keyring_member.ex   Keyring member (composite PK)
-        workspace_document.ex  Workspace document schema
-        document_update.ex  Document update schema
-    opake_appview_web/
-      router.ex             /api/health (public), /api/inbox + /api/keyrings + /api/workspace + /api/workspace/updates (auth'd)
-      endpoint.ex           Bandit HTTP, API-only (no sessions/static)
-      plugs/rate_limit.ex   Hammer ETS rate limiting per IP
-      controllers/
-        health_controller.ex     Indexer status + cursor lag
-        inbox_controller.ex      Grants by recipient DID
-        keyrings_controller.ex   Keyrings by member DID
-        workspace_controller.ex  Workspace documents + pending updates
-        pagination_helpers.ex    Shared param parsing (did, limit, cursor)
+    cli/                 CLI integration tests
+    web/                 Web E2E tests (Playwright)
 ```
 
-The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens through the `Storage` trait — `FileStorage` (CLI, filesystem) and `IndexedDbStorage` (web, IndexedDB) implement the same contract with platform-specific backends. This keeps `opake-core` compilable to WASM, which the web frontend uses via `wasm-pack`.
+The boundary is strict: `opake-core` never touches the filesystem, stdin, or any platform-specific API. All I/O happens through the `Storage` trait — `FileStorage` (CLI, filesystem) and `IndexedDbStorage` (web, IndexedDB) implement the same contract with platform-specific backends. This keeps `opake-core` compilable to WASM. The `@opake/sdk` package wraps the WASM bindings in a TypeScript API; the web frontend consumes Opake through the SDK, not raw WASM imports.
 
 The `Opake<T, R, S>` struct is the root context for all operations. All CLI commands route through Opake except `pair request` (new device has no identity yet — uses raw pairing functions). Construct one with an authenticated client + identity + storage, then call `.file_context(workspace_name?)` to resolve the target, `.file_manager(&context)` for file operations, or `.workspace_admin()` for membership management (add/remove member, leave). Opake itself provides workspace CRUD, sharing (grants, pending shares), identity/account management, pairing, and maintenance methods. Session persistence is automatic via `#[signoff]` / `#[signoff(self)]` on every public mutation. Platform differences (transport, RNG, clock, storage) are injected via type parameters and function pointers — no conditional compilation in the domain layer.

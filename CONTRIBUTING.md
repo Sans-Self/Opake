@@ -2,7 +2,7 @@
   NOTE TO EDITORS: 
   Opake uses a dual-documentation system. If you modify the technical details, 
   architecture, or code style in this file, you MUST also update the 
-  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+  corresponding MDX content in `apps/web/src/content/` to prevent documentation drift. 
 -->
 
 # Contributing to Opake
@@ -15,7 +15,7 @@ Contributions welcome — from humans and AI agents alike.
 2. Install Rust 1.75+ via [rustup](https://rustup.rs)
 3. Run the test suite: `cargo test`
 4. Run the linter: `cargo clippy -- -D warnings`
-5. For web frontend work: install [Bun](https://bun.sh), then `cd web && bun install`
+5. For web frontend work: install [Bun](https://bun.sh), then `cd apps/web && bun install`
 
 ## Code style
 
@@ -29,36 +29,52 @@ Contributions welcome — from humans and AI agents alike.
 ## Architecture
 
 ```
-opake-core      platform-agnostic library (compiles to WASM)
-                - encryption/decryption (AES-256-GCM, x25519 key wrapping)
-                - XRPC client with automatic token refresh
-                - document operations (upload, download, list, delete, resolve)
-                - device pairing (ephemeral DH key exchange, identity transfer)
-                - AT Protocol record types and lexicon constants
-                - Storage trait + config/identity/session types (storage.rs)
-                - shared config path resolution (paths.rs)
+crates/
+  opake-core      platform-agnostic library (compiles to WASM)
+                  - encryption/decryption (AES-256-GCM, x25519 key wrapping)
+                  - XRPC client with automatic token refresh
+                  - document operations (upload, download, list, delete, resolve)
+                  - device pairing (ephemeral DH key exchange, identity transfer)
+                  - AT Protocol record types and lexicon constants
+                  - Storage trait + config/identity/session types (storage.rs)
+                  - shared config path resolution (paths.rs)
 
-opake-cli       CLI binary wrapping opake-core
-                - clap command definitions
-                - FileStorage (impl Storage over filesystem, TOML + JSON)
-                - user interaction (prompts, formatting)
+  opake-derive    proc-macro crate
+                  - #[derive(RedactedDebug)] with #[redact] field attribute
+                  - generates Debug impls showing byte length instead of content
+                  - used by opake-core (ContentKey, Session) and opake-cli (Identity)
 
-opake-derive    proc-macro crate
-                - #[derive(RedactedDebug)] with #[redact] field attribute
-                - generates Debug impls showing byte length instead of content
-                - used by opake-core (ContentKey, Session) and opake-cli (Identity)
+  opake-wasm      WASM bridge (wasm-pack, wasm_bindgen)
+                  - stateless crypto + tree exports
+                  - OpakeContext + WasmFileManagerHandle for stateful JS interop
 
-appview/        Elixir/Phoenix indexer + REST API for grant/keyring discovery
-                - Jetstream firehose consumer (WebSockex)
-                - PostgreSQL storage (Ecto)
-                - Phoenix API with DID-scoped Ed25519 auth (Erlang :crypto)
-                - rate limiting via Hammer
+apps/
+  cli/            CLI binary wrapping opake-core (package: opake-cli)
+                  - clap command definitions
+                  - FileStorage (impl Storage over filesystem, TOML + JSON)
+                  - user interaction (prompts, formatting)
 
-web/            React SPA (Vite + TanStack Router + Tailwind/daisyUI)
-                - opake-core via WASM (wasm-pack build)
-                - IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
-                - Zustand stores, Web Worker for off-main-thread crypto
-                - cabinet file browser UI with panel navigation
+  appview/        Elixir/Phoenix indexer + REST API for grant/keyring discovery
+                  - Jetstream firehose consumer (WebSockex)
+                  - PostgreSQL storage (Ecto)
+                  - Phoenix API with DID-scoped Ed25519 auth (Erlang :crypto)
+                  - rate limiting via Hammer
+
+  web/            React SPA (Vite + TanStack Router + Tailwind/daisyUI)
+                  - opake-core via @opake/sdk (WASM under the hood)
+                  - IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
+                  - Zustand stores, Web Worker for off-main-thread crypto
+                  - cabinet file browser UI with panel navigation
+
+packages/
+  @opake/sdk      TypeScript SDK wrapping WASM bindings
+                  - Opake client, FileManager, auth, storage interfaces
+
+  @opake/daemon   Background task scheduler
+                  - session refresh, pair cleanup, grant healing, share retry
+
+  @opake/react    React bindings
+                  - OpakeProvider, hooks, query key management
 ```
 
 `opake-core` must never depend on filesystem, stdin, or any platform-specific API. All I/O goes through the `Storage` trait — `FileStorage` (CLI) and `IndexedDbStorage` (web) are the platform-specific implementations.
@@ -80,8 +96,8 @@ cargo test -p opake-core            # core only
 cargo test -p opake-cli             # CLI only
 cargo test -- --test-output         # show println output
 
-cd appview && mix test              # appview tests (Elixir/ExUnit)
-cd web && bun run test              # web frontend tests (Vitest + fake-indexeddb)
+cd apps/appview && mix test          # appview tests (Elixir/ExUnit)
+cd apps/web && bun run test          # web frontend tests (Vitest + fake-indexeddb)
 ```
 
 ## Commit messages
