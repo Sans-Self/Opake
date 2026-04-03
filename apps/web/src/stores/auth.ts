@@ -11,6 +11,8 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Opake, PendingLogin } from "@opake/sdk";
 import type { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
+import { base64ToUint8Array } from "@/lib/encoding";
+import { loading } from "@/stores/app";
 
 // Lazy SDK imports — static imports trigger WASM evaluation during SSR.
 const loadSdk = () => import("@opake/sdk");
@@ -86,9 +88,62 @@ interface AuthActions {
   startLogin(handle: string): Promise<void>;
   completeLogin(code: string, state: string): Promise<void>;
   logout(): Promise<void>;
+
+  // Identity lifecycle
+  generateSeedPhrase(): Promise<string>;
+  saveIdentity(seedPhrase: string): Promise<void>;
+  publishPublicKey(): Promise<void>;
 }
 
+export type AuthSnapshot = AuthState;
+
 type AuthStore = AuthState & AuthActions;
+
+// ---------------------------------------------------------------------------
+// Identity resolution
+// ---------------------------------------------------------------------------
+
+function requireActiveDid(): string {
+  const { session } = useAuthStore.getState();
+  if (session.status !== "active") {
+    throw new Error("No active session");
+  }
+  return session.did;
+}
+
+async function resolveIdentityState(
+  opake: Opake,
+  did: string,
+  storage: IndexedDbStorage,
+): Promise<IdentityState> {
+  const [localIdentity, remote] = await Promise.all([
+    storage.loadIdentity(did).catch(() => null),
+    opake.resolveIdentity(did).catch(() => null),
+  ]);
+
+  if (!localIdentity && !remote?.publicKey) return { status: "none" };
+  if (!localIdentity) return { status: "remote_only" };
+  if (!remote?.publicKey) return { status: "fresh" };
+
+  const localKeyBytes = base64ToUint8Array(localIdentity.public_key);
+  const keysMatch =
+    localKeyBytes.length === remote.publicKey.length &&
+    localKeyBytes.every((b, i) => b === remote.publicKey[i]);
+
+  return keysMatch ? { status: "ready" } : { status: "conflict" };
+}
+
+/** Derive identity from seed phrase, save, re-init Opake with the new identity. */
+async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promise<void> {
+  const { Opake } = await loadSdk();
+  const s = await getStorage();
+  const identity = await Opake.createIdentity(seedPhrase, did);
+  await s.saveIdentity(did, identity);
+
+  const opake = await Opake.init({ storage: s, did });
+  opakeInstance?.destroy();
+  opakeInstance = opake;
+}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -107,6 +162,7 @@ export const useAuthStore = create<AuthStore>()(
       }
 
       bootPromise = (async () => {
+        const done = loading("boot");
         try {
           const { Opake } = await loadSdk();
           const s = await getStorage();
@@ -152,6 +208,13 @@ export const useAuthStore = create<AuthStore>()(
               bannerUrl: null,
             };
           });
+
+          // Fire-and-forget — identity resolution shouldn't block boot
+          void resolveIdentityState(opake, did, s).then((identityState) => {
+            set((draft) => {
+              draft.identity = identityState;
+            });
+          });
         } catch (err) {
           set((draft) => {
             draft.session = {
@@ -159,6 +222,8 @@ export const useAuthStore = create<AuthStore>()(
               message: err instanceof Error ? err.message : "Failed to initialize",
             };
           });
+        } finally {
+          done();
         }
       })();
 
@@ -174,6 +239,7 @@ export const useAuthStore = create<AuthStore>()(
         draft.session = { status: "authenticating" };
       });
 
+      const done = loading("login");
       try {
         const { Opake } = await loadSdk();
         const s = await getStorage();
@@ -191,6 +257,8 @@ export const useAuthStore = create<AuthStore>()(
             message: err instanceof Error ? err.message : "Login failed",
           };
         });
+      } finally {
+        done();
       }
     },
 
@@ -208,6 +276,7 @@ export const useAuthStore = create<AuthStore>()(
         return;
       }
 
+      const done = loading("complete-login");
       try {
         const { Opake } = await loadSdk();
         const pending = JSON.parse(raw) as PendingLogin;
@@ -232,6 +301,12 @@ export const useAuthStore = create<AuthStore>()(
           };
         });
 
+        void resolveIdentityState(opake, pending.did, s).then((identityState) => {
+          set((draft) => {
+            draft.identity = identityState;
+          });
+        });
+
         // Reset boot promise so it doesn't return stale state
         bootPromise = null;
       } catch (err) {
@@ -241,6 +316,8 @@ export const useAuthStore = create<AuthStore>()(
             message: err instanceof Error ? err.message : "Login failed. Please try again.",
           };
         });
+      } finally {
+        done();
       }
     },
 
@@ -263,6 +340,44 @@ export const useAuthStore = create<AuthStore>()(
         draft.session = { status: "none" };
         draft.identity = { status: "none" };
       });
+    },
+
+    // -----------------------------------------------------------------
+    // Identity lifecycle
+    // -----------------------------------------------------------------
+
+    async generateSeedPhrase() {
+      const { Opake } = await loadSdk();
+      return Opake.generateSeedPhrase();
+    },
+
+    async saveIdentity(seedPhrase) {
+      const did = requireActiveDid();
+      const done = loading("save-identity");
+      try {
+        await deriveAndPersistIdentity(seedPhrase, did);
+
+        const s = await getStorage();
+        const identityState = await resolveIdentityState(getOpake(), did, s);
+        set((draft) => {
+          draft.identity = identityState;
+        });
+      } finally {
+        done();
+      }
+    },
+
+    async publishPublicKey() {
+      requireActiveDid();
+      const done = loading("publish-key");
+      try {
+        await getOpake().publishPublicKey();
+        set((draft) => {
+          draft.identity = { status: "ready" };
+        });
+      } finally {
+        done();
+      }
     },
   })),
 );
