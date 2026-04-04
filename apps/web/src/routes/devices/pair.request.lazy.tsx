@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
-import { storage } from "@/lib/indexeddbStorage";
 import { formatFingerprint } from "@/lib/encoding";
 import {
   createPairRequest,
@@ -11,8 +10,14 @@ import {
 } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
+import type { PairRequestResult } from "@opake/sdk";
 
 const POLL_INTERVAL_MS = 3000;
+
+// Module-level promise dedup: WASM async methods hold RefCell<&mut self>,
+// so concurrent calls on the same context panic. StrictMode double-mounts
+// would fire two createPairRequest calls — this ensures only one runs.
+let activePairInit: Promise<PairRequestResult> | null = null;
 
 // ---------------------------------------------------------------------------
 // Page — new device requesting identity from an existing device
@@ -31,6 +36,7 @@ function PairRequestPage() {
   const { addLoading, removeLoading } = useAppStore();
   const ephemeralPrivKeyRef = useRef<Uint8Array | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingRef = useRef(false);
 
   const cleanup = useCallback(() => {
     if (pollRef.current) {
@@ -50,15 +56,21 @@ function PairRequestPage() {
 
       addLoading("pair-request-init");
       try {
-        const pairResult = await createPairRequest();
-        ephemeralPrivKeyRef.current = pairResult.ephemeral_private_key;
+        // Deduplicate: StrictMode double-mount shares one WASM call.
+        activePairInit ??= createPairRequest();
+        const pairResult = await activePairInit;
+        ephemeralPrivKeyRef.current = pairResult.ephemeralPrivateKey;
 
         if (cancelledRef.current) return;
 
-        const fingerprint = formatFingerprint(pairResult.ephemeral_public_key);
+        const fingerprint = formatFingerprint(pairResult.ephemeralPublicKey);
         setState({ step: "waiting", fingerprint, requestUri: pairResult.uri });
 
         pollRef.current = setInterval(async () => {
+          // Guard: WASM holds RefCell<&mut self> for async calls. Overlapping
+          // polls would panic with "recursive use of an object detected."
+          if (pollingRef.current) return;
+          pollingRef.current = true;
           try {
             const response = await pollForPairResponse(pairResult.rkey, did);
             if (!response || cancelledRef.current) return;
@@ -75,15 +87,10 @@ function PairRequestPage() {
             }
 
             const identity = await receivePairResponse(response, privKey);
-            await storage.saveIdentity(did, identity);
+            await useAuthStore.getState().saveReceivedIdentity(identity);
 
             // Clean up PDS records (best-effort)
             await cleanupPairRecords(pairResult.uri, null).catch(Function.prototype as () => void);
-
-            // Transition identity to ready
-            useAuthStore.setState((draft) => {
-              draft.identity = { status: "ready" };
-            });
 
             setState({ step: "success" });
             removeLoading("pair-request-receive");
@@ -96,6 +103,8 @@ function PairRequestPage() {
               step: "error",
               message: err instanceof Error ? err.message : String(err),
             });
+          } finally {
+            pollingRef.current = false;
           }
         }, POLL_INTERVAL_MS);
       } catch (err) {
@@ -106,6 +115,7 @@ function PairRequestPage() {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
+        activePairInit = null;
         removeLoading("pair-request-init");
       }
     }

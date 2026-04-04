@@ -78,7 +78,7 @@ export interface WorkspaceEntry {
   readonly name: string;
   readonly description: string | null;
   readonly icon: string | null;
-  readonly role: WorkspaceRole;
+  readonly createdAt: string | null;
   readonly rotation: number;
   readonly memberCount: number;
 }
@@ -105,6 +105,32 @@ export interface WorkspaceSyncResult {
   readonly proposalsApplied: number;
   readonly error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Device pairing
+// ---------------------------------------------------------------------------
+
+/** Result of creating a pair request (new device side). */
+export interface PairRequestResult {
+  readonly uri: string;
+  readonly rkey: string;
+  readonly ephemeralPublicKey: Uint8Array;
+  readonly ephemeralPrivateKey: Uint8Array;
+}
+
+/** A pending pair request visible to the approving device. */
+export interface PendingPairRequest {
+  readonly uri: string;
+  readonly ephemeralKey: Uint8Array;
+  readonly createdAt: string;
+}
+
+/** Raw pair response record — opaque to consumers, passed to receivePairResponse. */
+export type PairResponseRecord = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Init options
+// ---------------------------------------------------------------------------
 
 /** Options for initializing an Opake instance. */
 export interface OpakeInitOptions {

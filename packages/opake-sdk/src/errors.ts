@@ -67,6 +67,20 @@ const KNOWN_KINDS = new Set<string>([
  * Expected format: `"Kind: rest of the message"`.
  * Falls back to `Unknown` if the format doesn't match.
  */
+/** Decorator: catch WASM errors and rethrow as typed OpakeError. Works on sync and async methods. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- TC39 decorator type erasure
+export function wrapWasmErrors(_target: any, _context: ClassMethodDecoratorContext) {
+  return function (this: unknown, ...args: any[]): any {
+    try {
+      const result = _target.call(this, ...args);
+      if (result instanceof Promise) return result.catch((e: unknown) => { throw parseWasmError(e); });
+      return result;
+    } catch (e) {
+      throw parseWasmError(e);
+    }
+  };
+}
+
 export function parseWasmError(error: unknown): OpakeError {
   const message = error instanceof Error ? error.message : String(error);
 

@@ -14,7 +14,7 @@ export function getRouter() {
     context: {
       auth: {
         session: { status: "initializing" },
-        identity: { status: "unchecked" },
+        identity: { status: "pending" },
       },
     } satisfies RouterContext,
     scrollRestoration: true,

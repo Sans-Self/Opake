@@ -497,7 +497,6 @@ pub(crate) struct TypedEntry {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct DirectorySnapshotEntry {
     pub(crate) name: String,
     pub(crate) entries: Vec<TypedEntry>,
@@ -505,7 +504,6 @@ pub(crate) struct DirectorySnapshotEntry {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct DirectoryTreeSnapshot {
     pub(crate) root_uri: Option<String>,
     pub(crate) directories: HashMap<String, DirectorySnapshotEntry>,

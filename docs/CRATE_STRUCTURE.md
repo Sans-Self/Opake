@@ -159,36 +159,30 @@ apps/
         completions.rs Shell completion script generation
         purge.rs       Delete all records from PDS (danger zone)
 
-  web/                 React SPA (Vite + TanStack Router + Tailwind + daisyUI)
+  web/                 React SPA (Vite + TanStack Start + Tailwind + daisyUI)
     src/
       lib/
-        storage.ts       Storage interface (mirrors opake-core Storage trait)
-        storageTypes.ts  Config, Identity, Session types (mirrors opake-core)
-        indexeddbStorage.ts  IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
-        api.ts           API client helpers
-        cryptoTypes.ts   Crypto type definitions
-        oauth.ts         OAuth flow helpers
-        directoryTree.ts Client-side directory tree utilities
-        sharing.ts       Share/grant helpers
-        pairing.ts       Device pairing helpers
-        did.ts           DID resolution helpers
-        worker.ts        Worker proxy (Comlink)
+        encoding.ts      Base64/hex/fingerprint utilities
+        atUri.ts         AT-URI parsing helpers
+        pairing.ts       Device pairing (thin wrappers over @opake/sdk)
+        seedPhraseParser.ts  Seed phrase text extraction (numbered grids, plain lists)
+        cn.ts            Tailwind class merge utility
+        docs-registry.ts Documentation section metadata
+        og-meta.ts       Open Graph meta tag helpers
       stores/
-        auth.ts          Auth state (Zustand)
-        app.ts           App-wide state
-        keyring.ts       Workspace/keyring state
-        search.ts        Search state
-        tasks.ts         Background task state
+        auth.ts          Auth + identity state machine (Zustand + @opake/sdk)
+        app.ts           App-wide loading tracker
         toast.ts         Toast notifications
-        workspaceBrowser.ts  Workspace browser state
-        documents/       Document stores (file-items, store)
-      routes/
-        __root.tsx       Root layout with auth guard
-        _public.tsx      Public layout wrapper
-        _public/         Public routes (landing, login)
-        cabinet/         Cabinet routes (file browser)
-        devices/         Device management routes
-      components/cabinet/
+      routes/            TanStack Router file-based routing
+        __root.tsx       Root layout (HTML shell, error boundary)
+        _public.tsx      Public layout (nav, footer — SSR)
+        _public/         Public routes (landing, docs, FAQ)
+        cabinet/         Cabinet routes (lazy-loaded, auth-guarded)
+        devices/         Device + identity routes (lazy-loaded)
+      components/
+        cabinet/         File browser, sidebar, editor, workspace UI
+        devices/         Identity setup, seed phrase, pairing, conflict resolution
+        content/         MDX rendering, landing page sections
         PanelContent.tsx     File grid/list view
         PanelShell.tsx       Panel container
         Sidebar.tsx          Navigation sidebar
@@ -253,12 +247,13 @@ packages/
   opake-sdk/             @opake/sdk — TypeScript SDK wrapping WASM bindings
     src/
       index.ts           Package entry point, re-exports
-      opake.ts           Opake client (auth, session management)
+      opake.ts           Opake client (auth, identity, workspaces, daemon ops)
       file-manager.ts    FileManager (upload, download, tree, metadata)
-      auth.ts            OAuth/DPoP helpers
+      auth.ts            OAuth/DPoP two-step login + app password flows
+      pairing.ts         Device pairing (create/approve/receive/cleanup)
       storage.ts         Storage interface (mirrors opake-core trait)
       wasm.ts            WASM initialization and bridge
-      types.ts           Shared type definitions
+      types.ts           Domain type definitions (results, pairing, workspaces)
       errors.ts          Typed error hierarchy
       storage/           Storage implementations
     wasm/                WASM build output (wasm-pack → here)

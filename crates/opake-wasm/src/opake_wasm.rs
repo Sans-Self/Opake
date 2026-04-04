@@ -174,7 +174,6 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct WorkspaceEntry {
             uri: String,
             owner_did: String,
@@ -377,7 +376,6 @@ impl WasmOpakeHandle {
         let invitations = opake.list_invitations().await.map_err(wasm_err)?;
 
         #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct Entry {
             uri: String,
             target: String,

@@ -5,14 +5,21 @@
 // context back to the parent Opake instance.
 
 import type {
-  DeleteRecursiveResult,
+  MutationResult,
+  UploadResult,
   DirectoryTreeSnapshot,
   DocumentMetadata,
   DownloadResult,
-  MutationResult,
-  UploadResult,
+  DeleteRecursiveResult,
 } from "./types";
-import { parseWasmError } from "./errors";
+import { parseWasmError, wrapWasmErrors } from "./errors";
+import {
+  downloadResultSchema,
+  deleteRecursiveResultSchema,
+  directoryTreeSnapshotSchema,
+  documentMetadataSchema,
+  treeWithMetadataSchema,
+} from "./schemas";
 
 // WASM handle type (the actual WasmFileManagerHandle from opake-wasm)
 type WasmFileManager = {
@@ -120,7 +127,8 @@ export class FileManager {
    * });
    * ```
    */
-  async upload(
+  @wrapWasmErrors
+  upload(
     data: Uint8Array,
     filename: string,
     mimeType: string,
@@ -130,20 +138,10 @@ export class FileManager {
       directoryUri?: string;
     },
   ): Promise<UploadResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.upload(
-        data,
-        filename,
-        mimeType,
-        options?.description ?? null,
-        options?.tags ? [...options.tags] : null,
-        options?.directoryUri ?? null,
-      );
-      return result as UploadResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().upload(
+      data, filename, mimeType,
+      options?.description ?? null, options?.tags ? [...options.tags] : null, options?.directoryUri ?? null,
+    ) as Promise<UploadResult>;
   }
 
   /**
@@ -164,15 +162,9 @@ export class FileManager {
    * const blob = new Blob([data], { type: "application/octet-stream" });
    * ```
    */
-  async download(documentUri: string): Promise<DownloadResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.download(documentUri);
-      const parsed = result as { filename: string; plaintext: Uint8Array };
-      return { filename: parsed.filename, data: parsed.plaintext };
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  download(documentUri: string): Promise<DownloadResult> {
+    return this.requireHandle().download(documentUri).then(downloadResultSchema.parse);
   }
 
   /**
@@ -186,14 +178,9 @@ export class FileManager {
    *
    * @throws {OpakeError} kind "NotFound" if the document doesn't exist.
    */
-  async delete(documentUri: string, parentDirectoryUri?: string): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.delete(documentUri, parentDirectoryUri ?? null);
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  delete(documentUri: string, parentDirectoryUri?: string): Promise<MutationResult> {
+    return this.requireHandle().delete(documentUri, parentDirectoryUri ?? null) as Promise<MutationResult>;
   }
 
   /**
@@ -206,14 +193,9 @@ export class FileManager {
    * @param sourceDirUri - Current parent directory URI.
    * @param targetDirUri - Destination directory URI.
    */
-  async move(entryUri: string, sourceDirUri: string, targetDirUri: string): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.moveEntry(entryUri, sourceDirUri, targetDirUri);
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  move(entryUri: string, sourceDirUri: string, targetDirUri: string): Promise<MutationResult> {
+    return this.requireHandle().moveEntry(entryUri, sourceDirUri, targetDirUri) as Promise<MutationResult>;
   }
 
   // ---------------------------------------------------------------------------
@@ -233,14 +215,9 @@ export class FileManager {
    * console.log("Created directory:", result.uri);
    * ```
    */
-  async createDirectory(name: string, parentUri?: string): Promise<UploadResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.createDirectory(name, parentUri ?? null);
-      return result as UploadResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  createDirectory(name: string, parentUri?: string): Promise<UploadResult> {
+    return this.requireHandle().createDirectory(name, parentUri ?? null) as Promise<UploadResult>;
   }
 
   /**
@@ -300,13 +277,9 @@ export class FileManager {
    *
    * @returns The URI of the root directory.
    */
-  async ensureRoot(): Promise<string> {
-    const h = this.requireHandle();
-    try {
-      return await h.ensureRoot();
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  ensureRoot(): Promise<string> {
+    return this.requireHandle().ensureRoot();
   }
 
   /**
@@ -326,15 +299,12 @@ export class FileManager {
    * }
    * ```
    */
-  async loadTree(): Promise<DirectoryTreeSnapshot> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.loadTree();
-      const parsed = result as { snapshot: DirectoryTreeSnapshot };
-      return parsed.snapshot;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  loadTree(): Promise<DirectoryTreeSnapshot> {
+    return (this.requireHandle().loadTree() as Promise<{ snapshot: unknown }>)
+      // Zod 4 z.record() with .transform() inner schemas loses type info.
+      // Runtime validation is correct — the cast bridges the inference gap.
+      .then((r) => directoryTreeSnapshotSchema.parse(r.snapshot) as DirectoryTreeSnapshot);
   }
 
   /**
@@ -345,16 +315,12 @@ export class FileManager {
    *
    * @param directoryUri - Directory to resolve metadata for. `"*"` for all, omit for none.
    */
-  async syncAndLoadTree(
+  @wrapWasmErrors
+  syncAndLoadTree(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.syncAndLoadTree(directoryUri ?? null);
-      return result as { snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> };
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().syncAndLoadTree(directoryUri ?? null)
+      .then(treeWithMetadataSchema.parse) as Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }>;
   }
 
   /**
@@ -365,16 +331,12 @@ export class FileManager {
    *
    * @param directoryUri - Directory to resolve metadata for. `"*"` for all, omit for root.
    */
-  async loadTreeWithMetadata(
+  @wrapWasmErrors
+  loadTreeWithMetadata(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.loadTreeWithMetadata(directoryUri ?? null);
-      return result as { snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> };
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().loadTreeWithMetadata(directoryUri ?? null)
+      .then(treeWithMetadataSchema.parse) as Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }>;
   }
 
   /**
@@ -390,14 +352,9 @@ export class FileManager {
    * console.log(meta.name, meta.size, meta.createdAt);
    * ```
    */
-  async getDocumentMetadata(documentUri: string): Promise<DocumentMetadata> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.getDocumentMetadata(documentUri);
-      return result as DocumentMetadata;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  getDocumentMetadata(documentUri: string): Promise<DocumentMetadata> {
+    return this.requireHandle().getDocumentMetadata(documentUri).then(documentMetadataSchema.parse);
   }
 
   /**
@@ -408,14 +365,9 @@ export class FileManager {
    * @param directoryUri - URI of the directory to rename.
    * @param newName - New display name.
    */
-  async renameDirectory(directoryUri: string, newName: string): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.renameDirectory(directoryUri, newName);
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  renameDirectory(directoryUri: string, newName: string): Promise<MutationResult> {
+    return this.requireHandle().renameDirectory(directoryUri, newName) as Promise<MutationResult>;
   }
 
   /**
@@ -426,14 +378,9 @@ export class FileManager {
    * @param directoryUri - URI of the directory to delete.
    * @returns Counts of deleted documents and directories.
    */
-  async deleteRecursive(directoryUri: string): Promise<DeleteRecursiveResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.deleteRecursive(directoryUri);
-      return result as DeleteRecursiveResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  deleteRecursive(directoryUri: string): Promise<DeleteRecursiveResult> {
+    return this.requireHandle().deleteRecursive(directoryUri).then(deleteRecursiveResultSchema.parse);
   }
 
   // ---------------------------------------------------------------------------
@@ -446,26 +393,14 @@ export class FileManager {
    * @param documentUri - URI of the document.
    * @param updates - Fields to update (null fields are left unchanged).
    */
-  async updateMetadata(
+  @wrapWasmErrors
+  updateMetadata(
     documentUri: string,
-    updates: {
-      filename?: string;
-      description?: string;
-      tags?: readonly string[];
-    },
+    updates: { filename?: string; description?: string; tags?: readonly string[] },
   ): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.updateMetadata(
-        documentUri,
-        updates.filename ?? null,
-        updates.tags ? [...updates.tags] : null,
-        updates.description ?? null,
-      );
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().updateMetadata(
+      documentUri, updates.filename ?? null, updates.tags ? [...updates.tags] : null, updates.description ?? null,
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -474,14 +409,9 @@ export class FileManager {
    * @param documentUri - URI of the document.
    * @param newContent - New file contents (will be encrypted).
    */
-  async updateContent(documentUri: string, newContent: Uint8Array): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.updateContent(documentUri, newContent);
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  updateContent(documentUri: string, newContent: Uint8Array): Promise<MutationResult> {
+    return this.requireHandle().updateContent(documentUri, newContent) as Promise<MutationResult>;
   }
 
   // ---------------------------------------------------------------------------
@@ -499,20 +429,11 @@ export class FileManager {
    * @param recipientPublicKey - Recipient's X25519 public key (32 bytes).
    * @param role - Access role ("read" or "write").
    */
-  async share(
-    documentUri: string,
-    recipientDid: string,
-    recipientPublicKey: Uint8Array,
-    permissions: string,
-    note?: string,
+  @wrapWasmErrors
+  share(
+    documentUri: string, recipientDid: string, recipientPublicKey: Uint8Array, permissions: string, note?: string,
   ): Promise<MutationResult> {
-    const h = this.requireHandle();
-    try {
-      const result = await h.share(documentUri, recipientDid, recipientPublicKey, permissions, note ?? null);
-      return result as MutationResult;
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().share(documentUri, recipientDid, recipientPublicKey, permissions, note ?? null) as Promise<MutationResult>;
   }
 
   /**
@@ -520,13 +441,9 @@ export class FileManager {
    *
    * @param grantUri - URI of the grant record to delete.
    */
-  async revokeShare(grantUri: string): Promise<void> {
-    const h = this.requireHandle();
-    try {
-      await h.revokeShare(grantUri);
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  revokeShare(grantUri: string): Promise<void> {
+    return this.requireHandle().revokeShare(grantUri);
   }
 
   // ---------------------------------------------------------------------------
@@ -538,13 +455,9 @@ export class FileManager {
    *
    * Owners apply mutations directly. Non-owners create proposals.
    */
+  @wrapWasmErrors
   isOwner(): boolean {
-    const h = this.requireHandle();
-    try {
-      return h.isOwner();
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+    return this.requireHandle().isOwner();
   }
 
   /**
@@ -552,13 +465,9 @@ export class FileManager {
    *
    * Only meaningful for workspace owners. Returns the number of proposals applied.
    */
-  async syncAndApplyProposals(): Promise<number> {
-    const h = this.requireHandle();
-    try {
-      return await h.syncAndApplyProposals();
-    } catch (e) {
-      throw parseWasmError(e);
-    }
+  @wrapWasmErrors
+  syncAndApplyProposals(): Promise<number> {
+    return this.requireHandle().syncAndApplyProposals();
   }
 
   // ---------------------------------------------------------------------------

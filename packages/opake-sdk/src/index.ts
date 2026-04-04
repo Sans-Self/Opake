@@ -47,4 +47,7 @@ export {
   type ResolvedWorkspace,
   type ResolvedIdentity,
   type WorkspaceSyncResult,
+  type PairRequestResult,
+  type PendingPairRequest,
+  type PairResponseRecord,
 } from "./types";

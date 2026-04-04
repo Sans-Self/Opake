@@ -77,7 +77,6 @@ pub enum MutationOutcome {
 /// Combines the decrypted metadata (from the encrypted envelope) with
 /// the unencrypted timestamps from the PDS record.
 #[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ResolvedDocumentMetadata {
     pub name: String,
     pub mime_type: Option<String>,

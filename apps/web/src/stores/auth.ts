@@ -94,6 +94,7 @@ interface AuthActions {
   generateSeedPhrase(): Promise<string>;
   validateSeedPhrase(phrase: string): Promise<boolean>;
   saveIdentity(seedPhrase: string): Promise<void>;
+  saveReceivedIdentity(identity: import("@opake/sdk").Identity): Promise<void>;
   publishPublicKey(): Promise<void>;
 }
 
@@ -363,6 +364,27 @@ export const useAuthStore = create<AuthStore>()(
 
         const s = await getStorage();
         const identityState = await resolveIdentityState(getOpake(), did, s);
+        set((draft) => {
+          draft.identity = identityState;
+        });
+      } finally {
+        done();
+      }
+    },
+
+    async saveReceivedIdentity(identity) {
+      const did = requireActiveDid();
+      const done = loading("save-identity");
+      try {
+        const { Opake } = await loadSdk();
+        const s = await getStorage();
+        await s.saveIdentity(did, identity);
+
+        const opake = await Opake.init({ storage: s, did });
+        opakeInstance?.destroy();
+        opakeInstance = opake;
+
+        const identityState = await resolveIdentityState(opake, did, s);
         set((draft) => {
           draft.identity = identityState;
         });

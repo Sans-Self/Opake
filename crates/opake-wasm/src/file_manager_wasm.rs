@@ -385,7 +385,6 @@ impl WasmFileManagerHandle {
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct R {
             documents_deleted: usize,
             directories_deleted: usize,
