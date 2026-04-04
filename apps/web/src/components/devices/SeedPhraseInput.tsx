@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { FileTextIcon, WarningIcon } from "@phosphor-icons/react";
+import { extractSeedPhraseWords } from "@/lib/seedPhraseParser";
+import { useAuthStore } from "@/stores/auth";
 
 const WORD_COUNT = 24;
 const ROWS = 6;
@@ -12,12 +14,11 @@ interface SeedPhraseInputProps {
   readonly error?: string | null;
 }
 
-import { extractSeedPhraseWords } from "@/lib/seedPhraseParser";
-
 export function SeedPhraseInput({ onSubmit, onCancel, loading, error }: SeedPhraseInputProps) {
   const [words, setWords] = useState<readonly string[]>(
     Array.from({ length: WORD_COUNT }, () => ""),
   );
+  const [validationError, setValidationError] = useState<string | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +63,17 @@ export function SeedPhraseInput({ onSubmit, onCancel, loading, error }: SeedPhra
     e.target.value = "";
   }, []);
 
+  const handleValidateAndSubmit = useCallback(async () => {
+    const phrase = words.join(" ");
+    setValidationError(null);
+    const valid = await useAuthStore.getState().validateSeedPhrase(phrase);
+    if (!valid) {
+      setValidationError("Invalid seed phrase — check your words and try again.");
+      return;
+    }
+    onSubmit(phrase);
+  }, [words, onSubmit]);
+
   const handleKeyDown = useCallback(
     (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === " ") {
@@ -74,11 +86,11 @@ export function SeedPhraseInput({ onSubmit, onCancel, loading, error }: SeedPhra
       } else if (e.key === "Enter") {
         const filled = words.filter((w) => w.length > 0).length;
         if (filled === WORD_COUNT) {
-          onSubmit(words.join(" "));
+          void handleValidateAndSubmit();
         }
       }
     },
-    [words, onSubmit],
+    [words, handleValidateAndSubmit],
   );
 
   const filledCount = words.filter((w) => w.length > 0).length;
@@ -128,10 +140,10 @@ export function SeedPhraseInput({ onSubmit, onCancel, loading, error }: SeedPhra
         ))}
       </div>
 
-      {error && (
+      {(error ?? validationError) && (
         <div className="text-error flex items-center gap-2 text-sm" role="alert">
           <WarningIcon size={16} />
-          {error}
+          {error ?? validationError}
         </div>
       )}
 
@@ -160,7 +172,7 @@ export function SeedPhraseInput({ onSubmit, onCancel, loading, error }: SeedPhra
         )}
 
         <button
-          onClick={() => onSubmit(words.join(" "))}
+          onClick={() => void handleValidateAndSubmit()}
           disabled={!canSubmit}
           className={cn("btn btn-primary btn-sm", loading && "loading")}
         >

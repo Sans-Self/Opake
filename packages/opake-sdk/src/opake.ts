@@ -655,7 +655,18 @@ export class Opake {
   async resolveIdentity(handleOrDid: string): Promise<ResolvedIdentity> {
     const ctx = this.requireContext();
     try {
-      return await ctx.resolveIdentity(handleOrDid) as ResolvedIdentity;
+      const raw = await ctx.resolveIdentity(handleOrDid) as {
+        did: string;
+        handle: string | null;
+        pds_url: string;
+        public_key: Uint8Array;
+      };
+      return {
+        did: raw.did,
+        handle: raw.handle,
+        pdsUrl: raw.pds_url,
+        publicKey: raw.public_key,
+      };
     } catch (e) {
       throw parseWasmError(e);
     }

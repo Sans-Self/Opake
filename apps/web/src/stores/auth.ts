@@ -72,6 +72,7 @@ export type SessionState =
   | { status: "error"; message: string };
 
 export type IdentityState =
+  | { status: "pending" }
   | { status: "none" }
   | { status: "fresh" }
   | { status: "remote_only" }
@@ -91,6 +92,7 @@ interface AuthActions {
 
   // Identity lifecycle
   generateSeedPhrase(): Promise<string>;
+  validateSeedPhrase(phrase: string): Promise<boolean>;
   saveIdentity(seedPhrase: string): Promise<void>;
   publishPublicKey(): Promise<void>;
 }
@@ -152,7 +154,7 @@ async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promis
 export const useAuthStore = create<AuthStore>()(
   immer((set) => ({
     session: { status: "initializing" } as SessionState,
-    identity: { status: "none" } as IdentityState,
+    identity: { status: "pending" } as IdentityState,
 
     async boot() {
       // Deduplicate concurrent calls (StrictMode, HMR, multiple route guards)
@@ -209,11 +211,9 @@ export const useAuthStore = create<AuthStore>()(
             };
           });
 
-          // Fire-and-forget — identity resolution shouldn't block boot
-          void resolveIdentityState(opake, did, s).then((identityState) => {
-            set((draft) => {
-              draft.identity = identityState;
-            });
+          const identityState = await resolveIdentityState(opake, did, s);
+          set((draft) => {
+            draft.identity = identityState;
           });
         } catch (err) {
           set((draft) => {
@@ -301,10 +301,9 @@ export const useAuthStore = create<AuthStore>()(
           };
         });
 
-        void resolveIdentityState(opake, pending.did, s).then((identityState) => {
-          set((draft) => {
-            draft.identity = identityState;
-          });
+        const identityState = await resolveIdentityState(opake, pending.did, s);
+        set((draft) => {
+          draft.identity = identityState;
         });
 
         // Reset boot promise so it doesn't return stale state
@@ -349,6 +348,11 @@ export const useAuthStore = create<AuthStore>()(
     async generateSeedPhrase() {
       const { Opake } = await loadSdk();
       return Opake.generateSeedPhrase();
+    },
+
+    async validateSeedPhrase(phrase) {
+      const { Opake } = await loadSdk();
+      return Opake.validateSeedPhrase(phrase);
     },
 
     async saveIdentity(seedPhrase) {

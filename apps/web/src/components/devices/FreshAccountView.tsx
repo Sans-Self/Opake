@@ -23,7 +23,8 @@ export function FreshAccountView() {
     if (!phrase) return;
     setPhase("saving");
     try {
-      await useAuthStore.getState().confirmSeedPhrase(phrase);
+      await useAuthStore.getState().saveIdentity(phrase);
+      await useAuthStore.getState().publishPublicKey();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to publish key");
       setPhase("error");

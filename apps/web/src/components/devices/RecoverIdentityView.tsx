@@ -6,7 +6,6 @@ import { ChoiceButton } from "./ChoiceButton";
 import { PageHeader } from "./PageHeader";
 import { SeedPhraseDisplay } from "./SeedPhraseDisplay";
 import { SeedPhraseInput } from "./SeedPhraseInput";
-import { SeedPhraseMismatchWarning } from "./SeedPhraseMismatchWarning";
 import { useSeedPhraseRecovery } from "./useSeedPhraseRecovery";
 
 type FreshPhase = "confirming" | "generating" | "showing" | "saving" | "error";
@@ -28,25 +27,13 @@ export function RecoverIdentityView() {
     if (!freshPhrase) return;
     setFreshPhase("saving");
     try {
-      await useAuthStore.getState().confirmSeedPhrase(freshPhrase);
-      // Identity → "ready", parent switches to ReadyView
+      await useAuthStore.getState().saveIdentity(freshPhrase);
+      await useAuthStore.getState().publishPublicKey();
     } catch (e) {
       setFreshError(e instanceof Error ? e.message : "Failed to publish key");
       setFreshPhase("error");
     }
   }, [freshPhrase]);
-
-  // Seed phrase recovery sub-views
-  if (recovery.phase === "mismatch") {
-    return (
-      <SeedPhraseMismatchWarning
-        onConfirm={recovery.handleForceRecover}
-        onCancel={recovery.cancelEntering}
-        loading={recovery.loading}
-        error={recovery.error}
-      />
-    );
-  }
 
   if (recovery.phase === "entering") {
     return (

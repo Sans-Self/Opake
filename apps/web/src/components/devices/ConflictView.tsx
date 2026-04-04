@@ -5,23 +5,11 @@ import { DestructiveConfirmation } from "@/components/DestructiveConfirmation";
 import { ChoiceButton } from "./ChoiceButton";
 import { PageHeader } from "./PageHeader";
 import { SeedPhraseInput } from "./SeedPhraseInput";
-import { SeedPhraseMismatchWarning } from "./SeedPhraseMismatchWarning";
 import { useSeedPhraseRecovery } from "./useSeedPhraseRecovery";
 
 export function ConflictView() {
-  const [confirmingFresh, setConfirmingFresh] = useState(false);
+  const [confirmingOverwrite, setConfirmingOverwrite] = useState(false);
   const recovery = useSeedPhraseRecovery();
-
-  if (recovery.phase === "mismatch") {
-    return (
-      <SeedPhraseMismatchWarning
-        onConfirm={recovery.handleForceRecover}
-        onCancel={recovery.cancelEntering}
-        loading={recovery.loading}
-        error={recovery.error}
-      />
-    );
-  }
 
   if (recovery.phase === "entering") {
     return (
@@ -34,21 +22,21 @@ export function ConflictView() {
     );
   }
 
-  if (confirmingFresh) {
+  if (confirmingOverwrite) {
     return (
       <div className="flex flex-col items-center gap-6 text-center">
         <PageHeader
           icon={WarningIcon}
           iconClassName="text-error"
-          title="This will destroy your current key"
-          description="Files encrypted with the old key won't be accessible."
+          title="Overwrite the published key?"
+          description="This will replace the remote key with the one on this device. Other devices using the old key will need to re-sync."
         />
         <DestructiveConfirmation
           phrase="This will make my old data unusable and I am okay with that"
-          onConfirm={() => void useAuthStore.getState().generateAndPublishIdentity()}
+          onConfirm={() => void useAuthStore.getState().publishPublicKey()}
         />
         <button
-          onClick={() => setConfirmingFresh(false)}
+          onClick={() => setConfirmingOverwrite(false)}
           className="text-base-content/50 hover:text-base-content/70 cursor-pointer text-sm"
         >
           Go back
@@ -68,10 +56,10 @@ export function ConflictView() {
       <div className="flex w-full flex-wrap justify-center-safe gap-4">
         <ChoiceButton
           as="Button"
-          onClick={() => setConfirmingFresh(true)}
+          onClick={() => setConfirmingOverwrite(true)}
           icon={KeyIcon}
-          title="Start fresh"
-          description="Create a new key. Files encrypted with the old key won't be accessible."
+          title="Use this device's key"
+          description="Overwrite the published key. Other devices will need to re-sync."
         />
 
         <ChoiceButton

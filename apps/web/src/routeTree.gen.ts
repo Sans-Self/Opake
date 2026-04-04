@@ -8,6 +8,8 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
+import { createFileRoute } from '@tanstack/react-router'
+
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PublicRouteImport } from './routes/_public'
 import { Route as DevicesRouteRouteImport } from './routes/devices/route'
@@ -17,7 +19,6 @@ import { Route as CabinetIndexRouteImport } from './routes/cabinet/index'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
 import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
-import { Route as DevicesCliCallbackRouteImport } from './routes/devices/cli-callback'
 import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
 import { Route as CabinetTasksRouteImport } from './routes/cabinet/tasks'
 import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
@@ -44,6 +45,10 @@ import { Route as CabinetWorkspaceRkeySplatRouteImport } from './routes/cabinet/
 import { Route as CabinetWorkspaceEditorRkeyNewRouteImport } from './routes/cabinet/workspace-editor/$rkey/new'
 import { Route as CabinetWorkspaceEditorRkeyDocRkeyRouteImport } from './routes/cabinet/workspace-editor/$rkey/$docRkey'
 
+const DevicesCliCallbackLazyRouteImport = createFileRoute(
+  '/devices/cli-callback',
+)()
+
 const PublicRoute = PublicRouteImport.update({
   id: '/_public',
   getParentRoute: () => rootRouteImport,
@@ -52,17 +57,17 @@ const DevicesRouteRoute = DevicesRouteRouteImport.update({
   id: '/devices',
   path: '/devices',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/devices/route.lazy').then((d) => d.Route))
 const CabinetRouteRoute = CabinetRouteRouteImport.update({
   id: '/cabinet',
   path: '/cabinet',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/cabinet/route.lazy').then((d) => d.Route))
 const DevicesIndexRoute = DevicesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => DevicesRouteRoute,
-} as any)
+} as any).lazy(() => import('./routes/devices/index.lazy').then((d) => d.Route))
 const CabinetIndexRoute = CabinetIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -73,51 +78,63 @@ const PublicIndexRoute = PublicIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PublicRoute,
 } as any)
+const DevicesCliCallbackLazyRoute = DevicesCliCallbackLazyRouteImport.update({
+  id: '/cli-callback',
+  path: '/cli-callback',
+  getParentRoute: () => DevicesRouteRoute,
+} as any).lazy(() =>
+  import('./routes/devices/cli-callback.lazy').then((d) => d.Route),
+)
 const DevicesOauthCallbackRoute = DevicesOauthCallbackRouteImport.update({
   id: '/oauth-callback',
   path: '/oauth-callback',
   getParentRoute: () => DevicesRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/devices/oauth-callback.lazy').then((d) => d.Route),
+)
 const DevicesLoginRoute = DevicesLoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => DevicesRouteRoute,
-} as any)
-const DevicesCliCallbackRoute = DevicesCliCallbackRouteImport.update({
-  id: '/cli-callback',
-  path: '/cli-callback',
-  getParentRoute: () => DevicesRouteRoute,
-} as any)
+} as any).lazy(() => import('./routes/devices/login.lazy').then((d) => d.Route))
 const CabinetTrashRoute = CabinetTrashRouteImport.update({
   id: '/trash',
   path: '/trash',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() => import('./routes/cabinet/trash.lazy').then((d) => d.Route))
 const CabinetTasksRoute = CabinetTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() => import('./routes/cabinet/tasks.lazy').then((d) => d.Route))
 const CabinetSharedRoute = CabinetSharedRouteImport.update({
   id: '/shared',
   path: '/shared',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/shared.lazy').then((d) => d.Route),
+)
 const CabinetSettingsRoute = CabinetSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/settings.lazy').then((d) => d.Route),
+)
 const CabinetSearchRoute = CabinetSearchRouteImport.update({
   id: '/search',
   path: '/search',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/search.lazy').then((d) => d.Route),
+)
 const CabinetEncryptedRoute = CabinetEncryptedRouteImport.update({
   id: '/encrypted',
   path: '/encrypted',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/encrypted.lazy').then((d) => d.Route),
+)
 const PublicTroubleshootingRoute = PublicTroubleshootingRouteImport.update({
   id: '/troubleshooting',
   path: '/troubleshooting',
@@ -132,22 +149,30 @@ const CabinetFilesRouteRoute = CabinetFilesRouteRouteImport.update({
   id: '/files',
   path: '/files',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/files/route.lazy').then((d) => d.Route),
+)
 const CabinetDocsRouteRoute = CabinetDocsRouteRouteImport.update({
   id: '/docs',
   path: '/docs',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/docs/route.lazy').then((d) => d.Route),
+)
 const CabinetFilesIndexRoute = CabinetFilesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CabinetFilesRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/files/index.lazy').then((d) => d.Route),
+)
 const CabinetDocsIndexRoute = CabinetDocsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CabinetDocsRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/docs/index.lazy').then((d) => d.Route),
+)
 const PublicDocsIndexRoute = PublicDocsIndexRouteImport.update({
   id: '/docs/',
   path: '/docs/',
@@ -157,12 +182,16 @@ const DevicesPairRequestRoute = DevicesPairRequestRouteImport.update({
   id: '/pair/request',
   path: '/pair/request',
   getParentRoute: () => DevicesRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/devices/pair.request.lazy').then((d) => d.Route),
+)
 const DevicesPairAcceptRoute = DevicesPairAcceptRouteImport.update({
   id: '/pair/accept',
   path: '/pair/accept',
   getParentRoute: () => DevicesRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/devices/pair.accept.lazy').then((d) => d.Route),
+)
 const CabinetWorkspaceSettingsRkeyRoute =
   CabinetWorkspaceSettingsRkeyRouteImport.update({
     id: '/workspace-settings/$rkey',
@@ -173,22 +202,30 @@ const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => CabinetFilesRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/files/$.lazy').then((d) => d.Route),
+)
 const CabinetEditorNewRoute = CabinetEditorNewRouteImport.update({
   id: '/editor/new',
   path: '/editor/new',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/editor/new.lazy').then((d) => d.Route),
+)
 const CabinetEditorRkeyRoute = CabinetEditorRkeyRouteImport.update({
   id: '/editor/$rkey',
   path: '/editor/$rkey',
   getParentRoute: () => CabinetRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/editor/$rkey.lazy').then((d) => d.Route),
+)
 const CabinetDocsSlugRoute = CabinetDocsSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
   getParentRoute: () => CabinetDocsRouteRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/cabinet/docs/$slug.lazy').then((d) => d.Route),
+)
 const PublicDocsSlugRoute = PublicDocsSlugRouteImport.update({
   id: '/docs/$slug',
   path: '/docs/$slug',
@@ -233,9 +270,9 @@ export interface FileRoutesByFullPath {
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
-  '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
   '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyRouteRouteWithChildren
@@ -263,9 +300,9 @@ export interface FileRoutesByTo {
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
-  '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/': typeof PublicIndexRoute
   '/cabinet': typeof CabinetIndexRoute
   '/devices': typeof DevicesIndexRoute
@@ -300,9 +337,9 @@ export interface FileRoutesById {
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/cabinet/trash': typeof CabinetTrashRoute
-  '/devices/cli-callback': typeof DevicesCliCallbackRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/_public/': typeof PublicIndexRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
@@ -338,9 +375,9 @@ export interface FileRouteTypes {
     | '/cabinet/shared'
     | '/cabinet/tasks'
     | '/cabinet/trash'
-    | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/cli-callback'
     | '/cabinet/'
     | '/devices/'
     | '/cabinet/workspace/$rkey'
@@ -368,9 +405,9 @@ export interface FileRouteTypes {
     | '/cabinet/shared'
     | '/cabinet/tasks'
     | '/cabinet/trash'
-    | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/cli-callback'
     | '/'
     | '/cabinet'
     | '/devices'
@@ -404,9 +441,9 @@ export interface FileRouteTypes {
     | '/cabinet/shared'
     | '/cabinet/tasks'
     | '/cabinet/trash'
-    | '/devices/cli-callback'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/cli-callback'
     | '/_public/'
     | '/cabinet/'
     | '/devices/'
@@ -477,6 +514,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicIndexRouteImport
       parentRoute: typeof PublicRoute
     }
+    '/devices/cli-callback': {
+      id: '/devices/cli-callback'
+      path: '/cli-callback'
+      fullPath: '/devices/cli-callback'
+      preLoaderRoute: typeof DevicesCliCallbackLazyRouteImport
+      parentRoute: typeof DevicesRouteRoute
+    }
     '/devices/oauth-callback': {
       id: '/devices/oauth-callback'
       path: '/oauth-callback'
@@ -489,13 +533,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/devices/login'
       preLoaderRoute: typeof DevicesLoginRouteImport
-      parentRoute: typeof DevicesRouteRoute
-    }
-    '/devices/cli-callback': {
-      id: '/devices/cli-callback'
-      path: '/cli-callback'
-      fullPath: '/devices/cli-callback'
-      preLoaderRoute: typeof DevicesCliCallbackRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
     '/cabinet/trash': {
@@ -758,18 +795,18 @@ const CabinetRouteRouteWithChildren = CabinetRouteRoute._addFileChildren(
 )
 
 interface DevicesRouteRouteChildren {
-  DevicesCliCallbackRoute: typeof DevicesCliCallbackRoute
   DevicesLoginRoute: typeof DevicesLoginRoute
   DevicesOauthCallbackRoute: typeof DevicesOauthCallbackRoute
+  DevicesCliCallbackLazyRoute: typeof DevicesCliCallbackLazyRoute
   DevicesIndexRoute: typeof DevicesIndexRoute
   DevicesPairAcceptRoute: typeof DevicesPairAcceptRoute
   DevicesPairRequestRoute: typeof DevicesPairRequestRoute
 }
 
 const DevicesRouteRouteChildren: DevicesRouteRouteChildren = {
-  DevicesCliCallbackRoute: DevicesCliCallbackRoute,
   DevicesLoginRoute: DevicesLoginRoute,
   DevicesOauthCallbackRoute: DevicesOauthCallbackRoute,
+  DevicesCliCallbackLazyRoute: DevicesCliCallbackLazyRoute,
   DevicesIndexRoute: DevicesIndexRoute,
   DevicesPairAcceptRoute: DevicesPairAcceptRoute,
   DevicesPairRequestRoute: DevicesPairRequestRoute,

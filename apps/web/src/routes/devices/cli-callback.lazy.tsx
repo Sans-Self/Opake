@@ -1,6 +1,6 @@
 import { CheckIcon } from "@phosphor-icons/react";
 import { useMemo, useEffect } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createLazyFileRoute } from "@tanstack/react-router";
 
 type CallbackResult =
   | { state: "success"; errorMessage: "" }
@@ -71,6 +71,6 @@ function CliCallbackPage() {
   );
 }
 
-export const Route = createFileRoute("/devices/cli-callback")({
+export const Route = createLazyFileRoute("/devices/cli-callback")({
   component: CliCallbackPage,
 });
