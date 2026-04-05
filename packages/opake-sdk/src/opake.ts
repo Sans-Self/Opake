@@ -16,6 +16,7 @@ import type {
   ResolvedIdentity,
   ResolvedWorkspace,
   WorkspaceEntry,
+  WorkspaceMember,
   WorkspaceRole,
   WorkspaceSyncResult,
 } from "./types";
@@ -181,41 +182,6 @@ export class Opake {
   ): Promise<import("./storage").Identity> {
     const wasm = await initWasm();
     return wasm.generateIdentity(did) as import("./storage").Identity;
-  }
-
-  /** Generate a DPoP keypair for OAuth token binding. */
-  static async generateDpopKeyPair(): Promise<import("./storage").DpopKeyPair> {
-    const wasm = await initWasm();
-    return wasm.generateDpopKeyPair() as import("./storage").DpopKeyPair;
-  }
-
-  /** Create a DPoP proof JWT for an OAuth request. */
-  static async createDpopProof(
-    keypair: import("./storage").DpopKeyPair,
-    method: string,
-    url: string,
-    timestamp: number,
-    nonce?: string,
-    token?: string,
-  ): Promise<string> {
-    const wasm = await initWasm();
-    return wasm.createDpopProof(
-      keypair,
-      method,
-      url,
-      timestamp,
-      nonce ?? null,
-      token ?? null,
-    );
-  }
-
-  /** Generate a PKCE challenge for OAuth authorization. */
-  static async generatePkce(): Promise<{
-    verifier: string;
-    challenge: string;
-  }> {
-    const wasm = await initWasm();
-    return wasm.generatePkce() as { verifier: string; challenge: string };
   }
 
   // ---------------------------------------------------------------------------
@@ -429,11 +395,7 @@ export class Opake {
    */
   @wrapWasmErrors
   async checkSession(): Promise<void> {
-    const ctx = this.requireContext();
-    const existing = await ctx.getAccountConfig();
-    const config = existing ?? { telemetryEnabled: false };
-    config.modifiedAt = new Date().toISOString();
-    await ctx.setAccountConfig(config);
+    await this.requireContext().checkSession();
   }
 
   // ---------------------------------------------------------------------------
@@ -469,8 +431,8 @@ export class Opake {
     const ctx = this.requireContext();
     try {
       await ctx.proactiveRefresh();
-    } catch {
-      // Best effort — reactive refresh via 401 handler covers failures
+    } catch (e) {
+      console.warn("opake: proactive token refresh failed", e);
     }
   }
 
@@ -577,8 +539,8 @@ export class Opake {
    * @returns Array of keyring member records with DIDs and roles.
    */
   @wrapWasmErrors @withTokenGuard
-  listWorkspaceMembers(keyringUri: string): Promise<unknown> {
-    return this.requireContext().listWorkspaceMembers(keyringUri);
+  listWorkspaceMembers(keyringUri: string): Promise<readonly WorkspaceMember[]> {
+    return this.requireContext().listWorkspaceMembers(keyringUri) as Promise<readonly WorkspaceMember[]>;
   }
 
   /**

@@ -20,7 +20,13 @@ export interface AccountEntry {
   readonly handle: string;
 }
 
-/** X25519 + Ed25519 keypair derived from seed phrase or generated fresh. */
+/**
+ * Encryption identity keypairs. Contains private key material.
+ *
+ * WARNING: This type transits through JS for IndexedDB persistence.
+ * Do not log, display, or transmit these values. WASM handles all
+ * crypto operations — JS only stores and loads identities.
+ */
 export interface Identity {
   readonly did: string;
   readonly public_key: string;
@@ -57,13 +63,12 @@ export interface OAuthSession {
   readonly type: "oauth";
   readonly did: string;
   readonly handle: string;
-  // Mutable — WASM writes back refreshed tokens via Storage.saveSession()
-  access_token: string;
-  refresh_token: string;
+  readonly access_token: string;
+  readonly refresh_token: string;
   readonly dpop_key: DpopKeyPair;
   readonly token_endpoint: string;
-  dpop_nonce?: string;
-  expires_at?: number;
+  readonly dpop_nonce?: string;
+  readonly expires_at?: number;
   readonly client_id: string;
 }
 
