@@ -19,7 +19,10 @@ if git diff --cached --name-only | grep -q '\.rs$'; then
     cargo check --target wasm32-unknown-unknown -p opake-core
 fi
 
-# Web frontend checks (only if web/ files are staged)
+# Web frontend checks (only staged files under apps/web/src/)
 if git diff --cached --name-only | grep -q '^apps/web/src/'; then
-    (cd apps/web && bun run format:check && bun run lint)
+    STAGED_WEB=$(git diff --cached --name-only --diff-filter=d | grep '^apps/web/src/' | sed 's|^apps/web/||')
+    if [ -n "$STAGED_WEB" ]; then
+        (cd apps/web && bun run format:check && bunx eslint $STAGED_WEB)
+    fi
 fi
