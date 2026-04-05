@@ -131,22 +131,39 @@ impl<'de> Deserialize<'de> for Session {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
+        // Use serde's built-in tagged enum support instead of routing
+        // through serde_json::Value. The old approach broke when the
+        // deserializer was serde_wasm_bindgen (JS→Rust), because
+        // serde_json::Value::deserialize from a non-JSON deserializer
+        // is a lossy conversion.
+        //
+        // Backward compat: files without a "type" field are treated as
+        // legacy sessions via the #[serde(other)] fallback below.
 
-        match value.get("type").and_then(|t| t.as_str()) {
-            Some("oauth") => {
-                let oauth: OAuthSession =
-                    serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                Ok(Session::OAuth(oauth))
+        #[derive(Deserialize)]
+        #[serde(tag = "type")]
+        enum Tagged {
+            #[serde(rename = "oauth")]
+            OAuth(OAuthSession),
+            #[serde(rename = "legacy")]
+            Legacy(LegacySession),
+        }
+
+        // Try tagged first (has "type" field)
+        // For backward compat with legacy sessions that lack "type",
+        // use an untagged fallback.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Compat {
+            Tagged(Tagged),
+            LegacyFallback(LegacySession),
+        }
+
+        match Compat::deserialize(deserializer)? {
+            Compat::Tagged(Tagged::OAuth(s)) => Ok(Session::OAuth(s)),
+            Compat::Tagged(Tagged::Legacy(s)) | Compat::LegacyFallback(s) => {
+                Ok(Session::Legacy(s))
             }
-            Some("legacy") | None => {
-                let legacy: LegacySession =
-                    serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                Ok(Session::Legacy(legacy))
-            }
-            Some(other) => Err(serde::de::Error::custom(format!(
-                "unknown session type: {other}"
-            ))),
         }
     }
 }
