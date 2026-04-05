@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Opake, PendingLogin, ResolvedIdentity } from "@opake/sdk";
+import type { Opake, ResolvedIdentity } from "@opake/sdk";
 import type { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { loading } from "@/stores/app";
@@ -56,8 +56,6 @@ export function getOpake(): Opake {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const PENDING_KEY = "opake:pendingLogin";
 
 function redirectUri(): string {
   return `${window.location.origin}/devices/oauth-callback`;
@@ -227,7 +225,9 @@ export const useAuthStore = create<AuthStore>()(
             if (isDeadSessionError(err)) {
               opakeInstance = null;
               opake.destroy();
-              await s.clearSession(did).catch(() => {});
+              await s.clearSession(did).catch(() => {
+                /* best effort */
+              });
               bootPromise = null;
               set((draft) => {
                 draft.session = { status: "none" };
@@ -285,7 +285,7 @@ export const useAuthStore = create<AuthStore>()(
           redirectUri: redirectUri(),
         });
 
-        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+        Opake.savePendingLogin(pending);
         window.location.href = authUrl;
       } catch (err) {
         set((draft) => {
@@ -300,10 +300,10 @@ export const useAuthStore = create<AuthStore>()(
     },
 
     async completeLogin(code, state) {
-      const raw = sessionStorage.getItem(PENDING_KEY);
-      sessionStorage.removeItem(PENDING_KEY);
+      const { Opake } = await loadSdk();
+      const pending = Opake.loadPendingLogin();
 
-      if (!raw) {
+      if (!pending) {
         set((draft) => {
           draft.session = {
             status: "error",
@@ -315,8 +315,6 @@ export const useAuthStore = create<AuthStore>()(
 
       const done = loading("complete-login");
       try {
-        const { Opake } = await loadSdk();
-        const pending = JSON.parse(raw) as PendingLogin;
         const s = await getStorage();
 
         await Opake.completeLogin(code, state, pending, {
