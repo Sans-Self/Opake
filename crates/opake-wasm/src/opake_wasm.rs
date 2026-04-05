@@ -539,6 +539,21 @@ impl WasmOpakeHandle {
         }))
     }
 
+    /// Verify the session is usable by touching the account config record.
+    ///
+    /// Reads the config, stamps `modifiedAt`, and writes it back. Throws on
+    /// auth failure — the SDK uses this during boot to detect dead sessions.
+    #[wasm_bindgen(js_name = checkSession)]
+    pub async fn check_session(&mut self) -> Result<(), JsError> {
+        let mut opake = self.opake()?;
+        let config = opake.get_account_config().await.map_err(wasm_err)?;
+        let mut record = config
+            .unwrap_or_else(|| opake_core::records::AccountConfigRecord::new(&crate::now_iso()));
+        record.modified_at = crate::now_iso();
+        opake.set_account_config(&record).await.map_err(wasm_err)?;
+        Ok(())
+    }
+
     /// Fetch the account config record, if it exists.
     #[wasm_bindgen(js_name = getAccountConfig)]
     pub async fn get_account_config(&mut self) -> Result<JsValue, JsError> {

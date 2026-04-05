@@ -73,6 +73,20 @@ export class MemoryStorage implements Storage {
   }
 
   async removeAccount(did: string): Promise<void> {
+    const remainingAccounts = Object.fromEntries(
+      Object.entries(this.config.accounts).filter(([key]) => key !== did),
+    );
+    const remaining = Object.keys(remainingAccounts);
+    this.config = {
+      ...this.config,
+      accounts: remainingAccounts,
+      default_did:
+        this.config.default_did === did
+          ? remaining.length > 0
+            ? remaining[0]
+            : undefined
+          : this.config.default_did,
+    };
     this.identities.delete(did);
     this.sessions.delete(did);
     await this.cacheClear(did);

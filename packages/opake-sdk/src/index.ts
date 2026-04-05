@@ -43,6 +43,7 @@ export {
   type DocumentMetadata,
   type DeleteRecursiveResult,
   type WorkspaceRole,
+  type WorkspaceMember,
   type WorkspaceEntry,
   type ResolvedWorkspace,
   type ResolvedIdentity,

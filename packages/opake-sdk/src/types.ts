@@ -71,6 +71,16 @@ export interface DeleteRecursiveResult {
 /** Workspace member role — matches the Rust `Role` enum. */
 export type WorkspaceRole = "manager" | "editor" | "viewer";
 
+/** A workspace member as stored in the keyring record. */
+export interface WorkspaceMember {
+  readonly wrappedKey: {
+    readonly did: string;
+    readonly ciphertext: { readonly $bytes: string };
+    readonly algo: string;
+  };
+  readonly role: WorkspaceRole;
+}
+
 /** Workspace (keyring) entry as returned by listWorkspaces. */
 export interface WorkspaceEntry {
   readonly uri: string;

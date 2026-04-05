@@ -99,34 +99,6 @@ export const syncDetailedResultSchema = z
   })
   .transform((r) => r.workspaces);
 
-export const retryPendingSharesResultSchema = z.object({
-  checked: z.number(),
-  completed: z.number(),
-  expired: z.number(),
-  still_pending: z.number(),
-  failed: z.number(),
-});
-
-export type RetryPendingSharesResult = z.output<typeof retryPendingSharesResultSchema>;
-
-// ---------------------------------------------------------------------------
-// Mutations
-// ---------------------------------------------------------------------------
-
-export const mutationResultSchema = z.object({
-  uri: z.string().nullable(),
-  proposed: z.boolean(),
-});
-
-export type MutationResult = z.output<typeof mutationResultSchema>;
-
-export const uploadResultSchema = z.object({
-  uri: z.string(),
-  proposed: z.boolean(),
-});
-
-export type UploadResult = z.output<typeof uploadResultSchema>;
-
 // ---------------------------------------------------------------------------
 // File operations
 // ---------------------------------------------------------------------------
