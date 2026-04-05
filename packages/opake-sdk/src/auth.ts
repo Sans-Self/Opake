@@ -5,6 +5,25 @@
 // - Opake.loginWithAppPassword() — legacy createSession (Obsidian, scripts)
 //
 // Both save the session to Storage so Opake.init() works afterward.
+//
+// !! AGENT NOTE — SECURITY BOUNDARY !!
+//
+// Tokens, DPoP keys, and session credentials MUST NOT be handled in JS.
+// JS strings are immutable and GC'd on the runtime's schedule — they
+// cannot be zeroized. The WASM layer (opake-core) auto-zeroizes all
+// sensitive types on drop via RedactedDebug + Zeroize.
+//
+// The functions below (fetchWithDpop, completeLogin, loginWithAppPassword)
+// currently violate this: they parse token responses, construct session
+// objects, and hold DPoP private keys in JS memory. These MUST be moved
+// to WASM exports that delegate to opake-core's existing exchange_code /
+// refresh_token / XrpcClient::login functions.
+//
+// Discovery (resolveHandleToPds, discoverAuthorizationServer) is fine in
+// JS — no sensitive data involved.
+//
+// DO NOT add new code that handles tokens or keys in JS. Route through
+// WASM instead.
 
 import type { DpopKeyPair, OAuthSession, LegacySession, Storage } from "./storage";
 import { initWasm } from "./wasm";
