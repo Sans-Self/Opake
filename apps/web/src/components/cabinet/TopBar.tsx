@@ -10,11 +10,19 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { DropdownMenu } from "@/components/DropdownMenu";
+import { OpakeLogo } from "@/components/OpakeLogo";
+import { MobileMenuIcon } from "./MobileMenuIcon";
 import { useAuthStore } from "@/stores/auth";
+import { useAppStore } from "@/stores/app";
 import { useSearchInput } from "@/hooks/useSearchInput";
 import { truncateDid } from "@/lib/format";
 
-export function TopBar() {
+interface TopBarProps {
+  readonly onMenuToggle?: () => void;
+  readonly menuOpen?: boolean;
+}
+
+export function TopBar({ onMenuToggle, menuOpen = false }: TopBarProps) {
   const {
     query: searchQuery,
     handleChange: handleSearchChange,
@@ -24,33 +32,46 @@ export function TopBar() {
   // eslint-disable-next-line @typescript-eslint/unbound-method -- Zustand actions don't use `this`
   const logout = useAuthStore((s) => s.logout);
 
-  const handle = session.status === "active" ? session.handle : null;
-  const did = session.status === "active" ? session.did : null;
-  const avatarUrl = session.status === "active" ? session.avatarUrl : null;
-  const bannerUrl = session.status === "active" ? session.bannerUrl : null;
+  const active = session.status === "active" ? session : null;
+  const handle = active?.handle ?? null;
+  const did = active?.did ?? null;
+  const avatarUrl = active?.avatarUrl ?? null;
+  const bannerUrl = active?.bannerUrl ?? null;
   const initial = handle?.[0]?.toUpperCase() ?? "?";
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const closeMenu = useCallback(() => setUserMenuOpen(false), []);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!userMenuOpen) return;
     function onClickOutside(e: MouseEvent) {
       const target = e.target as Node;
       if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
         return;
       }
-      setMenuOpen(false);
+      setUserMenuOpen(false);
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [menuOpen]);
+  }, [userMenuOpen]);
+
+  const anyLoading = useAppStore((s) => s.anythingLoading());
 
   return (
     <header className="border-base-300/50 bg-base-300/90 flex shrink-0 items-center gap-3 border-b px-5 py-2.5 backdrop-blur-[10px]">
+      {/* Mobile: hamburger + logo */}
+      {onMenuToggle && (
+        <div className="flex items-center gap-2 md:hidden">
+          <MobileMenuIcon open={menuOpen} onClick={onMenuToggle} />
+          <Link to="/">
+            <OpakeLogo size="sm" loading={anyLoading} />
+          </Link>
+        </div>
+      )}
+
       {/* Search — hidden on mobile (lives in sidebar instead) */}
       <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui hidden max-w-90 flex-1 items-center gap-2 rounded-lg py-1.75 md:flex">
         <MagnifyingGlassIcon size={13} className="text-text-faint" />
@@ -81,9 +102,9 @@ export function TopBar() {
       {/* User menu */}
       <button
         ref={triggerRef}
-        onClick={() => setMenuOpen((prev) => !prev)}
+        onClick={() => setUserMenuOpen((prev) => !prev)}
         className="btn btn-ghost btn-sm gap-2 rounded-lg pl-1"
-        aria-expanded={menuOpen}
+        aria-expanded={userMenuOpen}
         aria-haspopup="true"
       >
         {avatarUrl ? (
@@ -103,7 +124,7 @@ export function TopBar() {
         )}
         <span className="text-secondary text-xs font-normal">{handle ?? "Not signed in"}</span>
       </button>
-      {menuOpen &&
+      {userMenuOpen &&
         createPortal(
           <div
             ref={popoverRef}

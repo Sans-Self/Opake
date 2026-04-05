@@ -529,8 +529,8 @@ export class Opake {
    * @returns Array of workspace entries with decrypted names and roles.
    */
   @wrapWasmErrors @withTokenGuard
-  listWorkspaces(): Promise<readonly WorkspaceEntry[]> {
-    return this.requireContext().listWorkspaces(null).then(listWorkspacesResultSchema.parse);
+  listWorkspaces(appviewUrl?: string): Promise<readonly WorkspaceEntry[]> {
+    return this.requireContext().listWorkspaces(appviewUrl ?? null).then(listWorkspacesResultSchema.parse);
   }
 
   /**

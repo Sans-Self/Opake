@@ -11,7 +11,7 @@ import {
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
-import { useKeyringStore } from "@/stores/keyring";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { useSearchInput } from "@/hooks/useSearchInput";
 import { SidebarItem } from "./SidebarItem";
 import { rkeyFromUri } from "@/lib/atUri";
@@ -34,7 +34,8 @@ interface SidebarProps {
 
 export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
   const anyLoading = useAppStore((s) => s.anythingLoading());
-  const keyrings = useKeyringStore((s) => s.keyrings);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const workspaceError = useWorkspaceStore((s) => s.error);
   const matchRoute = useMatchRoute();
   const {
     query: searchQuery,
@@ -42,7 +43,7 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
     handleClear: handleSearchClear,
   } = useSearchInput();
 
-  const workspaceEntries = Object.values(keyrings);
+  const workspaceEntries = Object.values(workspaces);
 
   return (
     <aside className="border-base-300/50 bg-base-200 flex h-full w-53 shrink-0 flex-col border-r px-3 py-4">
@@ -98,7 +99,6 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
           const active = Boolean(
             matchRoute({ to: "/cabinet/workspace/$rkey", params: { rkey: wsRkey }, fuzzy: true }),
           );
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: catch empty string from PDS
           const displayName = ws.name || "Unnamed";
 
           return (
@@ -130,11 +130,12 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
               {/* [NOI FEEDBACK PLS] — design says three-dots here replacing member count.
                   All actions (members, settings, invite, leave) are in the toolbar already.
                   Keeping member count for now — three-dots in a Link is invalid HTML without restructuring. */}
-              <span className="text-label text-text-faint">{ws.member_count}</span>
+              <span className="text-label text-text-faint">{ws.memberCount}</span>
             </Link>
           );
         })}
-        {workspaceEntries.length === 0 && (
+        {workspaceError && <span className="text-caption text-error ml-1">{workspaceError}</span>}
+        {!workspaceError && workspaceEntries.length === 0 && (
           <span className="text-caption text-text-faint ml-1">No workspaces yet</span>
         )}
       </nav>
