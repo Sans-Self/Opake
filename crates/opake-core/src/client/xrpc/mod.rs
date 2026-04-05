@@ -370,7 +370,7 @@ impl<T: Transport> XrpcClient<T> {
         serde_json::from_slice::<Body>(&response.body)
             .ok()
             .and_then(|b| b.error)
-            .is_some_and(|e| e == "ExpiredToken")
+            .is_some_and(|e| e == "ExpiredToken" || e == "AuthenticationFailed")
     }
 
     /// Send a request and check the response status. Every XRPC method except
