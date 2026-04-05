@@ -136,6 +136,11 @@ export class IndexedDbStorage implements Storage {
     await this.db.sessions.put({ did: key, value: session });
   }
 
+  async clearSession(did: string): Promise<void> {
+    const key = sanitizeDid(did);
+    await this.db.sessions.delete(key);
+  }
+
   // -- Cache: record-level --------------------------------------------------
 
   async cacheGetRecord<T>(did: string, collection: string, uri: string): Promise<CachedRecord<T> | null> {

@@ -38,7 +38,7 @@ async function fetchPairRequests(): Promise<AcceptState> {
 
 function PairAcceptPage() {
   const [state, setState] = useState<AcceptState>({ step: "loading" });
-  const { addLoading, removeLoading } = useAppStore();
+  const { addLoading, removeLoading, isLoading } = useAppStore();
   const initialLoadDone = useRef(false);
   const navigate = useNavigate();
 
@@ -46,10 +46,10 @@ function PairAcceptPage() {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
 
-    addLoading("pair-accept-fetch");
+    addLoading("pair-accept");
     void fetchPairRequests()
       .then(setState)
-      .finally(() => removeLoading("pair-accept-fetch"));
+      .finally(() => removeLoading("pair-accept"));
   }, [addLoading, removeLoading]);
 
   const shouldPoll =
@@ -59,25 +59,22 @@ function PairAcceptPage() {
     if (!shouldPoll) return;
 
     const interval = setInterval(() => {
-      addLoading("pair-accept-fetch");
+      // Guard: WASM holds RefCell<&mut self> for async calls.
+      if (isLoading("pair-accept")) return;
+      addLoading("pair-accept");
       void fetchPairRequests()
         .then(setState)
-        .finally(() => removeLoading("pair-accept-fetch"));
+        .finally(() => removeLoading("pair-accept"));
     }, POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [shouldPoll, addLoading, removeLoading]);
+  }, [shouldPoll, addLoading, removeLoading, isLoading]);
 
   const handleApprove = useCallback(
     async (request: PendingPairRequest) => {
+      if (isLoading("pair-accept")) return;
       setState({ step: "approving" });
-      addLoading("pair-accept-approve");
-
-      const authState = useAuthStore.getState();
-      if (authState.session.status !== "active") {
-        removeLoading("pair-accept-approve");
-        return;
-      }
+      addLoading("pair-accept");
 
       try {
         await approvePairRequest(request.uri, request.ephemeralKey);
@@ -91,7 +88,7 @@ function PairAcceptPage() {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        removeLoading("pair-accept-approve");
+        removeLoading("pair-accept");
       }
     },
     [addLoading, navigate, removeLoading],
@@ -121,7 +118,7 @@ function PairAcceptPage() {
           <h1 className="text-base-content text-2xl font-semibold">Approve a device</h1>
           <p className="text-base-content/60 text-center text-sm">
             Verify the fingerprint matches what your new device shows. Only requests made in the
-            last {MAX_KEY_AGE_MINUTES} are shown.
+            last {MAX_KEY_AGE_MINUTES} minutes are shown.
           </p>
 
           <div className="flex w-full max-w-sm flex-col gap-3">

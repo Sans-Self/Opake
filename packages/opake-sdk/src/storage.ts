@@ -121,6 +121,8 @@ export interface Storage {
   loadSession(did: string): Promise<Session>;
   /** Persist the authentication session for a DID. */
   saveSession(did: string, session: Session): Promise<void>;
+  /** Delete only the session for a DID (preserves identity and config). */
+  clearSession(did: string): Promise<void>;
 
   /** Remove all data for an account (identity, session, cache). */
   removeAccount(did: string): Promise<void>;

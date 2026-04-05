@@ -33,10 +33,9 @@ type RequestState =
 function PairRequestPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<RequestState>({ step: "generating" });
-  const { addLoading, removeLoading } = useAppStore();
+  const { addLoading, removeLoading, isLoading } = useAppStore();
   const ephemeralPrivKeyRef = useRef<Uint8Array | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollingRef = useRef(false);
 
   const cleanup = useCallback(() => {
     if (pollRef.current) {
@@ -69,8 +68,8 @@ function PairRequestPage() {
         pollRef.current = setInterval(async () => {
           // Guard: WASM holds RefCell<&mut self> for async calls. Overlapping
           // polls would panic with "recursive use of an object detected."
-          if (pollingRef.current) return;
-          pollingRef.current = true;
+          if (isLoading("pair-request-poll")) return;
+          addLoading("pair-request-poll");
           try {
             const response = await pollForPairResponse(pairResult.rkey, did);
             if (!response || cancelledRef.current) return;
@@ -104,7 +103,7 @@ function PairRequestPage() {
               message: err instanceof Error ? err.message : String(err),
             });
           } finally {
-            pollingRef.current = false;
+            removeLoading("pair-request-poll");
           }
         }, POLL_INTERVAL_MS);
       } catch (err) {
@@ -125,7 +124,7 @@ function PairRequestPage() {
       cancelledRef.current = true;
       cleanup();
     };
-  }, [cleanup, navigate, addLoading, removeLoading]);
+  }, [cleanup, navigate, addLoading, removeLoading, isLoading]);
 
   return (
     <div className="flex w-full max-w-md flex-col items-center">

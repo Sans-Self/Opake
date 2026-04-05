@@ -68,6 +68,10 @@ export class MemoryStorage implements Storage {
     this.sessions.set(did, session);
   }
 
+  async clearSession(did: string): Promise<void> {
+    this.sessions.delete(did);
+  }
+
   async removeAccount(did: string): Promise<void> {
     this.identities.delete(did);
     this.sessions.delete(did);

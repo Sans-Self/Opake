@@ -9,10 +9,20 @@
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Opake, PendingLogin } from "@opake/sdk";
+import type { Opake, PendingLogin, ResolvedIdentity } from "@opake/sdk";
 import type { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { loading } from "@/stores/app";
+
+// Detect auth errors that indicate a dead session (stale/revoked tokens).
+// Duck-typed to avoid importing OpakeError eagerly.
+const DEAD_SESSION_SIGNALS = ["401", "AuthenticationFailed", "invalid_grant"];
+
+function isDeadSessionError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const msg = "message" in err && typeof err.message === "string" ? err.message : "";
+  return DEAD_SESSION_SIGNALS.some((s) => msg.includes(s));
+}
 
 // Lazy SDK imports — static imports trigger WASM evaluation during SSR.
 const loadSdk = () => import("@opake/sdk");
@@ -114,15 +124,22 @@ function requireActiveDid(): string {
   return session.did;
 }
 
-async function resolveIdentityState(
+/** Fetch remote + resolve in one call. Used by post-boot flows that don't have a cached probe. */
+async function fetchAndResolveIdentity(
   opake: Opake,
   did: string,
   storage: IndexedDbStorage,
 ): Promise<IdentityState> {
-  const [localIdentity, remote] = await Promise.all([
-    storage.loadIdentity(did).catch(() => null),
-    opake.resolveIdentity(did).catch(() => null),
-  ]);
+  const remote = await opake.resolveIdentity(did).catch(() => null);
+  return resolveIdentityState(storage, did, remote);
+}
+
+async function resolveIdentityState(
+  storage: IndexedDbStorage,
+  did: string,
+  remote: ResolvedIdentity | null,
+): Promise<IdentityState> {
+  const localIdentity = await storage.loadIdentity(did).catch(() => null);
 
   if (!localIdentity && !remote?.publicKey) return { status: "none" };
   if (!localIdentity) return { status: "remote_only" };
@@ -201,6 +218,25 @@ export const useAuthStore = create<AuthStore>()(
           }
           opakeInstance = opake;
 
+          // Probe: verify the session is actually usable. Opake.init()
+          // loads tokens from storage without validating them — stale
+          // or revoked tokens only fail on the first real XRPC call.
+          try {
+            await opake.checkSession();
+          } catch (err) {
+            if (isDeadSessionError(err)) {
+              opakeInstance = null;
+              opake.destroy();
+              await s.clearSession(did).catch(() => {});
+              bootPromise = null;
+              set((draft) => {
+                draft.session = { status: "none" };
+              });
+              return;
+            }
+            // Non-auth error (network blip, etc.) — continue
+          }
+
           set((draft) => {
             draft.session = {
               status: "active",
@@ -212,7 +248,7 @@ export const useAuthStore = create<AuthStore>()(
             };
           });
 
-          const identityState = await resolveIdentityState(opake, did, s);
+          const identityState = await fetchAndResolveIdentity(opake, did, s);
           set((draft) => {
             draft.identity = identityState;
           });
@@ -302,7 +338,7 @@ export const useAuthStore = create<AuthStore>()(
           };
         });
 
-        const identityState = await resolveIdentityState(opake, pending.did, s);
+        const identityState = await fetchAndResolveIdentity(opake, pending.did, s);
         set((draft) => {
           draft.identity = identityState;
         });
@@ -363,7 +399,7 @@ export const useAuthStore = create<AuthStore>()(
         await deriveAndPersistIdentity(seedPhrase, did);
 
         const s = await getStorage();
-        const identityState = await resolveIdentityState(getOpake(), did, s);
+        const identityState = await fetchAndResolveIdentity(getOpake(), did, s);
         set((draft) => {
           draft.identity = identityState;
         });
@@ -384,7 +420,7 @@ export const useAuthStore = create<AuthStore>()(
         opakeInstance?.destroy();
         opakeInstance = opake;
 
-        const identityState = await resolveIdentityState(opake, did, s);
+        const identityState = await fetchAndResolveIdentity(opake, did, s);
         set((draft) => {
           draft.identity = identityState;
         });

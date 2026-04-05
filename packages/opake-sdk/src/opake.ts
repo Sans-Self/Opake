@@ -414,6 +414,26 @@ export class Opake {
   }
 
   // ---------------------------------------------------------------------------
+  // Session validation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Verify the session is usable by touching the account config record.
+   *
+   * Reads the config, stamps `modifiedAt` with the current time, and
+   * writes it back via `putRecord` (authenticated). Throws on auth
+   * failure — use during boot to detect dead sessions.
+   */
+  @wrapWasmErrors
+  async checkSession(): Promise<void> {
+    const ctx = this.requireContext();
+    const existing = await ctx.getAccountConfig();
+    const config = existing ?? { telemetryEnabled: false };
+    config.modifiedAt = new Date().toISOString();
+    await ctx.setAccountConfig(config);
+  }
+
+  // ---------------------------------------------------------------------------
   // Token lifecycle (called by @withTokenGuard decorator)
   // ---------------------------------------------------------------------------
 
