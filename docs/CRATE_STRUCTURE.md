@@ -111,7 +111,7 @@ crates/
     src/
       lib.rs           Module declarations, WASM init, pure crypto + tree exports (stateless)
       auth_wasm.rs     OAuth login WASM exports: startOAuthLogin, completeOAuthLogin, loginWithAppPasswordWasm. All token handling in WASM.
-      opake_wasm.rs    OpakeContext + WasmFileManagerHandle (owns Opake+FileContext, temporary FileManager borrows per JS call). Also: tokenExpiresAt, proactiveRefresh
+      opake_wasm.rs    OpakeContext + WasmFileManagerHandle (owns Opake+FileContext, temporary FileManager borrows per JS call). Also: tokenExpiresAt, proactiveRefresh, checkSession
       daemon.rs        Service Worker maintenance task exports (session refresh, pair cleanup)
       wasm_util.rs     make_client, make_opake, make_cabinet, make_workspace helpers. WasmOpake = Opake<WasmTransport, OsRng, NoopStorage>
 

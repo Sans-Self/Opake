@@ -432,7 +432,8 @@ export class Opake {
     try {
       await ctx.proactiveRefresh();
     } catch (e) {
-      console.warn("opake: proactive token refresh failed", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("opake: proactive token refresh failed:", msg);
     }
   }
 
