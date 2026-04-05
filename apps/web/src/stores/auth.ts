@@ -18,6 +18,37 @@ import { loading } from "@/stores/app";
 // Duck-typed to avoid importing OpakeError eagerly.
 const DEAD_SESSION_SIGNALS = ["401", "AuthenticationFailed", "invalid_grant"];
 
+const PUBLIC_API = "https://public.api.bsky.app";
+
+/** Only accept avatar/banner URLs from known Bluesky CDN origins. */
+function isSafeCdnUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".bsky.app");
+  } catch {
+    return false;
+  }
+}
+
+/** Fire-and-forget profile fetch — populates avatarUrl/bannerUrl after session is active. */
+function fetchProfileInBackground(did: string): void {
+  void fetch(`${PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`)
+    .then((r) => (r.ok ? (r.json() as Promise<{ avatar?: string; banner?: string }>) : null))
+    .then((profile) => {
+      if (!profile) return;
+      useAuthStore.setState((draft) => {
+        if (draft.session.status !== "active" || draft.session.did !== did) return;
+        draft.session.avatarUrl =
+          profile.avatar && isSafeCdnUrl(profile.avatar) ? profile.avatar : null;
+        draft.session.bannerUrl =
+          profile.banner && isSafeCdnUrl(profile.banner) ? profile.banner : null;
+      });
+    })
+    .catch((err: unknown) => {
+      console.debug("[auth] profile fetch failed:", err);
+    });
+}
+
 function isDeadSessionError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const msg = "message" in err && typeof err.message === "string" ? err.message : "";
@@ -248,6 +279,8 @@ export const useAuthStore = create<AuthStore>()(
             };
           });
 
+          fetchProfileInBackground(did);
+
           const identityState = await fetchAndResolveIdentity(opake, did, s);
           set((draft) => {
             draft.identity = identityState;
@@ -335,6 +368,8 @@ export const useAuthStore = create<AuthStore>()(
             bannerUrl: null,
           };
         });
+
+        fetchProfileInBackground(pending.did);
 
         const identityState = await fetchAndResolveIdentity(opake, pending.did, s);
         set((draft) => {
