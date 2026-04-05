@@ -22,7 +22,11 @@ fn keypair_roundtrips_through_json() {
 fn keypair_debug_redacts_private_key() {
     let kp = DpopKeyPair::generate(&mut OsRng);
     let debug = format!("{kp:?}");
-    assert!(debug.contains("[redacted]"));
+    // RedactedDebug renders String fields as "[N bytes]"
+    assert!(
+        debug.contains("bytes]"),
+        "expected redacted output, got: {debug}"
+    );
     assert!(!debug.contains(&kp.private_key_b64));
 }
 

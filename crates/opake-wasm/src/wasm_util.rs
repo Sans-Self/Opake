@@ -7,12 +7,9 @@ use wasm_bindgen::prelude::*;
 
 /// Create a short-lived XrpcClient from a JS session object.
 ///
-/// Note: Session's custom Deserialize impl goes through serde_json::Value
-/// as an intermediate when called from serde_wasm_bindgen. This double-deser
-/// works because serde_json::Value is a generic serde container, but it means
-/// JS types that serde_json::Value can't represent (BigInt, undefined) would
-/// fail. Session objects from the TS side are well-controlled plain objects,
-/// so this is safe in practice.
+/// Session's custom Deserialize impl uses serde's native tagged enum support
+/// with an untagged fallback for backward compat. This works correctly with
+/// serde_wasm_bindgen (no intermediate serde_json::Value conversion).
 pub fn make_client(
     pds_url: &str,
     session_json: JsValue,

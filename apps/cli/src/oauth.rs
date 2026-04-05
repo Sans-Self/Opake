@@ -65,31 +65,26 @@ pub async fn try_oauth_login(
     // Client ID: for loopback apps, metadata is encoded in the URL query params.
     // Must be http://localhost (not 127.0.0.1) — the AS recognizes this as a
     // loopback client and uses hardcoded metadata instead of fetching it.
-    let scope = "atproto transition:generic";
-    let client_id = format!(
-        "http://localhost?redirect_uri={}&scope={}",
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(scope),
-    );
+    let scope = opake_core::scope::oauth_scope();
+    let client_id = opake_core::client::oauth_token::build_client_id(&redirect_uri, &scope);
 
-    let par_endpoint = asm
-        .pushed_authorization_request_endpoint
-        .as_deref()
-        .unwrap_or(&asm.token_endpoint);
+    let par_endpoint = asm.par_endpoint();
     debug!("PAR endpoint: {par_endpoint}");
 
     let mut dpop_nonce = None;
     let timestamp = Utc::now().timestamp();
 
     // Step 4: Pushed Authorization Request
+    let login_hint = handle.or(Some(identifier));
     let par_response = pushed_authorization_request(
         &transport,
         par_endpoint,
         &client_id,
         &redirect_uri,
         &pkce,
-        scope,
+        &scope,
         &state,
+        login_hint,
         &dpop_key,
         &mut dpop_nonce,
         timestamp,

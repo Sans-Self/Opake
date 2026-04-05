@@ -56,6 +56,8 @@ pub struct OAuthSession {
     pub access_token: String,
     #[redact]
     pub refresh_token: String,
+    // Not #[redact] here — DpopKeyPair has its own RedactedDebug derive
+    // that zeroizes private_key_b64 on drop. Nested zeroization is automatic.
     pub dpop_key: DpopKeyPair,
     pub token_endpoint: String,
     #[serde(default)]
@@ -142,6 +144,7 @@ impl<'de> Deserialize<'de> for Session {
 
         #[derive(Deserialize)]
         #[serde(tag = "type")]
+        #[allow(clippy::large_enum_variant)]
         enum Tagged {
             #[serde(rename = "oauth")]
             OAuth(OAuthSession),
@@ -154,6 +157,7 @@ impl<'de> Deserialize<'de> for Session {
         // use an untagged fallback.
         #[derive(Deserialize)]
         #[serde(untagged)]
+        #[allow(clippy::large_enum_variant)]
         enum Compat {
             Tagged(Tagged),
             LegacyFallback(LegacySession),
@@ -161,9 +165,7 @@ impl<'de> Deserialize<'de> for Session {
 
         match Compat::deserialize(deserializer)? {
             Compat::Tagged(Tagged::OAuth(s)) => Ok(Session::OAuth(s)),
-            Compat::Tagged(Tagged::Legacy(s)) | Compat::LegacyFallback(s) => {
-                Ok(Session::Legacy(s))
-            }
+            Compat::Tagged(Tagged::Legacy(s)) | Compat::LegacyFallback(s) => Ok(Session::Legacy(s)),
         }
     }
 }

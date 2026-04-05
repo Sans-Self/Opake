@@ -346,6 +346,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         self.client.session()
     }
 
+    /// Apply a proactively refreshed session: update the in-memory client and
+    /// persist to storage. Used by the SDK's token guard and the daemon worker.
+    pub async fn persist_refreshed_session(
+        &mut self,
+        session: &crate::client::Session,
+    ) -> Result<(), Error> {
+        self.storage.save_session(&self.did, session).await?;
+        self.client.set_session(session.clone());
+        Ok(())
+    }
+
     /// Persist the session to storage if it was refreshed since the last persist.
     pub(crate) async fn auto_persist_session(&self) -> Result<(), Error> {
         if self.client.session_refreshed() {

@@ -43,6 +43,10 @@ pub struct TokenResponse {
 /// Send a Pushed Authorization Request. Returns the `request_uri` to embed
 /// in the browser authorization URL.
 ///
+/// `login_hint` pre-fills the account selector on the authorization server's
+/// consent page (RFC 9126 §3). Pass the user's handle so the AS skips the
+/// "which account?" step. Optional — the flow works without it, just worse UX.
+///
 /// `dpop_nonce` is updated in-place if the AS provides one.
 pub async fn pushed_authorization_request(
     transport: &impl Transport,
@@ -52,12 +56,13 @@ pub async fn pushed_authorization_request(
     pkce: &PkceChallenge,
     scope: &str,
     state: &str,
+    login_hint: Option<&str>,
     dpop_key: &DpopKeyPair,
     dpop_nonce: &mut Option<String>,
     timestamp: i64,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<ParResponse, Error> {
-    let params = vec![
+    let mut params = vec![
         ("client_id".into(), client_id.into()),
         ("response_type".into(), "code".into()),
         ("redirect_uri".into(), redirect_uri.into()),
@@ -66,6 +71,9 @@ pub async fn pushed_authorization_request(
         ("code_challenge".into(), pkce.challenge.clone()),
         ("code_challenge_method".into(), "S256".into()),
     ];
+    if let Some(hint) = login_hint {
+        params.push(("login_hint".into(), hint.into()));
+    }
 
     let response = send_with_dpop_retry(
         transport,
@@ -86,6 +94,18 @@ pub async fn pushed_authorization_request(
 
     serde_json::from_slice(&response.body)
         .map_err(|e| Error::Auth(format!("invalid PAR response: {e}")))
+}
+
+/// Build the loopback client ID for atproto OAuth (RFC 8252 §7.3).
+///
+/// The scope is embedded in the client ID URL and MUST match what the app
+/// requests in the PAR body — pass the same scope string to both.
+pub fn build_client_id(redirect_uri: &str, scope: &str) -> String {
+    format!(
+        "http://localhost?redirect_uri={}&scope={}",
+        urlencoding::encode(redirect_uri),
+        urlencoding::encode(scope),
+    )
 }
 
 /// Build the authorization URL for the browser redirect.

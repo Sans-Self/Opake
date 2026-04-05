@@ -119,6 +119,21 @@ async fn fetch_json(transport: &impl Transport, url: &str) -> Result<HttpRespons
 }
 
 // ---------------------------------------------------------------------------
+// PAR endpoint resolution
+// ---------------------------------------------------------------------------
+
+impl AuthorizationServerMetadata {
+    /// The PAR endpoint, falling back to the token endpoint if the AS doesn't
+    /// advertise one. The spec requires PAR support — this fallback handles
+    /// older/incomplete AS metadata gracefully.
+    pub fn par_endpoint(&self) -> &str {
+        self.pushed_authorization_request_endpoint
+            .as_deref()
+            .unwrap_or(&self.token_endpoint)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PKCE (RFC 7636)
 // ---------------------------------------------------------------------------
 

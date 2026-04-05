@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
+mod auth_wasm;
+#[cfg(target_arch = "wasm32")]
 mod daemon;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod file_manager_wasm;

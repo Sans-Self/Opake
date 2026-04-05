@@ -9,7 +9,7 @@
 // reactive 401 retries and makes concurrent operations safe — only the
 // refresh itself is serialized.
 
-import type { Storage, OAuthSession } from "./storage";
+import type { Storage } from "./storage";
 import type {
   MutationResult,
   OpakeInitOptions,
@@ -28,15 +28,8 @@ import {
 } from "./schemas";
 import { initWasm } from "./wasm";
 import { FileManager } from "./file-manager";
-import {
-  login as authLogin,
-  loginWithAppPassword as authLoginWithAppPassword,
-  startLogin as authStartLogin,
-  completeLogin as authCompleteLogin,
-  type LoginOptions,
-  type StartLoginOptions,
-  type PendingLogin,
-} from "./auth";
+import type { LoginOptions, StartLoginOptions, PendingLogin } from "./auth";
+import { createStorageAdapter } from "./storage-adapter";
 import {
   createPairRequest as pairingCreate,
   listPairRequests as pairingList,
@@ -56,6 +49,8 @@ type WasmOpakeContext = import("../wasm/opake.js").OpakeContext;
 // ---------------------------------------------------------------------------
 
 const REFRESH_THRESHOLD_MS = 30_000; // refresh 30s before expiry
+const PENDING_STORAGE_KEY = "opake:pendingLogin";
+const PENDING_TTL_MS = 10 * 60 * 1000; // 10 minutes — generous for a redirect round-trip
 
 /**
  * Method decorator: ensures the OAuth token is valid before each call.
@@ -72,55 +67,6 @@ function withTokenGuard(_target: any, _context: ClassMethodDecoratorContext) {
   };
 }
 
-
-// ---------------------------------------------------------------------------
-// Storage adapter bridge
-// ---------------------------------------------------------------------------
-
-/**
- * Create the storage adapter object that the WASM JsStorageAdapter expects.
- */
-function createStorageAdapter(storage: Storage): Record<string, unknown> {
-  return {
-    loadConfig: () => storage.loadConfig(),
-    saveConfig: (config: unknown) =>
-      storage.saveConfig(config as Parameters<Storage["saveConfig"]>[0]),
-    loadIdentity: (did: string) => storage.loadIdentity(did),
-    saveIdentity: (did: string, identity: unknown) =>
-      storage.saveIdentity(
-        did,
-        identity as Parameters<Storage["saveIdentity"]>[1],
-      ),
-    loadSession: (did: string) => storage.loadSession(did),
-    saveSession: (did: string, session: unknown) =>
-      storage.saveSession(
-        did,
-        session as Parameters<Storage["saveSession"]>[1],
-      ),
-    removeAccount: (did: string) => storage.removeAccount(did),
-    cacheGetRecord: (did: string, collection: string, uri: string) =>
-      storage.cacheGetRecord(did, collection, uri),
-    cachePutRecords: (did: string, collection: string, records: unknown) =>
-      storage.cachePutRecords(
-        did,
-        collection,
-        records as Parameters<Storage["cachePutRecords"]>[2],
-      ),
-    cacheRemoveRecord: (did: string, collection: string, uri: string) =>
-      storage.cacheRemoveRecord(did, collection, uri),
-    cacheGetCollection: (did: string, collection: string) =>
-      storage.cacheGetCollection(did, collection),
-    cachePutCollection: (did: string, collection: string, data: unknown) =>
-      storage.cachePutCollection(
-        did,
-        collection,
-        data as Parameters<Storage["cachePutCollection"]>[2],
-      ),
-    cacheInvalidateCollection: (did: string, collection: string) =>
-      storage.cacheInvalidateCollection(did, collection),
-    cacheClear: (did: string) => storage.cacheClear(did),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Opake class
@@ -301,15 +247,55 @@ export class Opake {
    * ```
    */
   static async login(handle: string, options: LoginOptions): Promise<void> {
-    return authLogin(handle, options);
+    const { authUrl, pending } = await Opake.startLogin(handle, {
+      storage: options.storage,
+      redirectUri: options.redirectUri,
+    });
+    const { code, state } = await options.authorize(authUrl);
+    await Opake.completeLogin(code, state, pending, {
+      storage: options.storage,
+      redirectUri: options.redirectUri,
+    });
+  }
+
+  /**
+   * Save pending login state to sessionStorage.
+   *
+   * Use with `startLogin` / `completeLogin` for redirect flows.
+   * `loadPendingLogin` clears the state on read, so the DPoP key material
+   * doesn't linger in sessionStorage after the flow completes (or fails).
+   */
+  static savePendingLogin(pending: PendingLogin): void {
+    const envelope = { pending, savedAt: Date.now() };
+    sessionStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(envelope));
+  }
+
+  /**
+   * Load and clear pending login state from sessionStorage.
+   *
+   * Returns `null` if no pending state exists or if the state is older
+   * than 10 minutes (TTL). Always clears the key — the DPoP key material
+   * must not persist regardless of success or failure.
+   */
+  static loadPendingLogin(): PendingLogin | null {
+    const raw = sessionStorage.getItem(PENDING_STORAGE_KEY);
+    sessionStorage.removeItem(PENDING_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      const envelope = JSON.parse(raw) as { pending: PendingLogin; savedAt: number };
+      if (Date.now() - envelope.savedAt > PENDING_TTL_MS) return null;
+      return envelope.pending;
+    } catch {
+      return null;
+    }
   }
 
   /**
    * Start an OAuth login flow (two-step, redirect-safe).
    *
-   * Returns the auth URL and serializable pending state. The consumer
-   * saves `pending` to sessionStorage, redirects the user, then calls
-   * `Opake.completeLogin()` with the callback parameters.
+   * Returns the auth URL and serializable pending state. Save the pending
+   * state with `Opake.savePendingLogin(pending)` before redirecting, then
+   * load it with `Opake.loadPendingLogin()` on the callback page.
    *
    * @example
    * ```typescript
@@ -317,13 +303,13 @@ export class Opake {
    *   storage,
    *   redirectUri: "https://myapp.com/callback",
    * });
-   * sessionStorage.setItem("opake:pending", JSON.stringify(pending));
+   * Opake.savePendingLogin(pending);
    * window.location.href = authUrl;
    *
    * // ... on callback page:
-   * const pending = JSON.parse(sessionStorage.getItem("opake:pending")!);
+   * const pending = Opake.loadPendingLogin();
    * const params = new URLSearchParams(window.location.search);
-   * await Opake.completeLogin(params.get("code")!, params.get("state")!, pending, {
+   * await Opake.completeLogin(params.get("code")!, params.get("state")!, pending!, {
    *   storage,
    *   redirectUri: "https://myapp.com/callback",
    * });
@@ -333,14 +319,21 @@ export class Opake {
     handle: string,
     options: StartLoginOptions,
   ): Promise<{ authUrl: string; pending: PendingLogin }> {
-    return authStartLogin(handle, options);
+    const wasm = await initWasm();
+    const adapter = createStorageAdapter(options.storage);
+    const result = await wasm.startOAuthLogin(
+      handle,
+      options.redirectUri,
+      adapter,
+    );
+    return result as { authUrl: string; pending: PendingLogin };
   }
 
   /**
    * Complete an OAuth login flow after the user returns from authorization.
    *
    * Validates the CSRF state, exchanges the code for tokens with DPoP,
-   * and saves the session to storage.
+   * and saves the session to storage. Tokens never enter JS memory.
    */
   static async completeLogin(
     code: string,
@@ -348,7 +341,15 @@ export class Opake {
     pending: PendingLogin,
     options: { storage: Storage; redirectUri: string },
   ): Promise<void> {
-    return authCompleteLogin(code, state, pending, options);
+    const wasm = await initWasm();
+    const adapter = createStorageAdapter(options.storage);
+    await wasm.completeOAuthLogin(
+      code,
+      state,
+      pending,
+      options.redirectUri,
+      adapter,
+    );
   }
 
   /**
@@ -369,7 +370,9 @@ export class Opake {
     appPassword: string,
     options: { storage: Storage },
   ): Promise<void> {
-    return authLoginWithAppPassword(handle, appPassword, options);
+    const wasm = await initWasm();
+    const adapter = createStorageAdapter(options.storage);
+    await wasm.loginWithAppPasswordWasm(handle, appPassword, adapter);
   }
 
   // ---------------------------------------------------------------------------
@@ -447,17 +450,13 @@ export class Opake {
    */
   async ensureValidToken(): Promise<void> {
     const ctx = this.requireContext();
-    try {
-      const sessionValue = ctx.session();
-      const session = sessionValue as OAuthSession | null;
-      if (!session || session.type !== "oauth" || !session.expires_at) return;
 
-      const expiresMs = session.expires_at * 1000;
-      if (Date.now() + REFRESH_THRESHOLD_MS < expiresMs) return;
-    } catch {
-      // Can't read session — let the actual call fail with a proper error
-      return;
-    }
+    // tokenExpiresAt returns only the timestamp — no tokens cross to JS.
+    const expiresAt = ctx.tokenExpiresAt();
+    if (expiresAt < 0) return; // legacy session or unknown — skip proactive refresh
+
+    const expiresMs = expiresAt * 1000;
+    if (Date.now() + REFRESH_THRESHOLD_MS < expiresMs) return;
 
     // Token expiring soon — deduplicated refresh
     this.refreshPromise ??= this.doRefresh().finally(() => {
@@ -467,9 +466,12 @@ export class Opake {
   }
 
   private async doRefresh(): Promise<void> {
-    // Proactive refresh: lightweight call that triggers signoff → auto-persists refreshed session.
-    try { await this.requireContext().getAccountConfig(); }
-    catch { /* Best effort — reactive refresh via 401 handler covers failures */ }
+    const ctx = this.requireContext();
+    try {
+      await ctx.proactiveRefresh();
+    } catch {
+      // Best effort — reactive refresh via 401 handler covers failures
+    }
   }
 
   // ---------------------------------------------------------------------------

@@ -38,6 +38,7 @@ pub mod paths;
 pub mod records;
 pub mod reencryption;
 pub mod resolve;
+pub mod scope;
 pub mod sharing;
 pub mod storage;
 pub mod tid;

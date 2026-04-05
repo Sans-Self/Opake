@@ -120,8 +120,8 @@ impl<T: Transport> super::XrpcClient<T> {
         }
     }
 
-    /// Set an OAuth session directly (used by the login command after code exchange).
-    pub fn set_oauth_session(&mut self, session: super::OAuthSession) {
-        self.session = Some(Session::OAuth(session));
+    /// Replace the current session (used after login and proactive refresh).
+    pub fn set_session(&mut self, session: Session) {
+        self.session = Some(session);
     }
 }

@@ -20,9 +20,12 @@ use super::transport::HttpResponse;
 
 /// A P-256 keypair used for DPoP proof generation. Session-scoped, not
 /// identity-scoped — created fresh on each OAuth login.
-#[derive(Clone, Serialize, Deserialize)]
+///
+/// The private key is zeroized on drop via `RedactedDebug`.
+#[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
 pub struct DpopKeyPair {
     /// SEC1-encoded private key bytes (32 bytes), base64url-encoded for storage.
+    #[redact]
     private_key_b64: String,
     /// JWK public key (the `x` and `y` coordinates). Embedded directly in
     /// every DPoP proof header.
@@ -36,15 +39,6 @@ pub struct DpopPublicJwk {
     pub crv: String,
     pub x: String,
     pub y: String,
-}
-
-impl std::fmt::Debug for DpopKeyPair {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DpopKeyPair")
-            .field("private_key_b64", &"[redacted]")
-            .field("public_jwk", &self.public_jwk)
-            .finish()
-    }
 }
 
 impl DpopKeyPair {

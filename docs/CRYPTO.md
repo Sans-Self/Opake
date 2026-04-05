@@ -272,8 +272,9 @@ Sensitive types are zeroized on drop to prevent key material lingering in memory
 - **Types with automatic zeroization:**
   - `ContentKey` — AES-256 content encryption key
   - `Identity` — private_key and signing_key fields (base64 strings zeroed)
+  - `DpopKeyPair` — private_key_b64 (P-256 private key for DPoP proof generation)
   - `LegacySession` — access_jwt, refresh_jwt
-  - `OAuthSession` — access_token, refresh_token
+  - `OAuthSession` — access_token, refresh_token (nested `DpopKeyPair` chains zeroization)
   - `Cabinet` — raw X25519 private key bytes (explicit `#[derive(Zeroize, ZeroizeOnDrop)]`)
   - `Workspace` — workspace key / ContentKey (explicit `#[derive(Zeroize, ZeroizeOnDrop)]`)
 

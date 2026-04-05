@@ -750,6 +750,60 @@ impl WasmOpakeHandle {
         Ok(key.0.to_vec())
     }
 
+    /// Proactively refresh the OAuth token if it's close to expiry.
+    ///
+    /// Calls `refresh_token` directly — no side-effect hacks. The refreshed
+    /// session is persisted to storage.
+    #[wasm_bindgen(js_name = proactiveRefresh)]
+    pub async fn proactive_refresh(&mut self) -> Result<(), JsError> {
+        use opake_core::client::session_refresh::{
+            proactive_refresh, RefreshOutcome, DEFAULT_REFRESH_THRESHOLD_SECONDS,
+        };
+
+        let mut opake = self.opake()?;
+        let now = opake_core::client::time::unix_now();
+
+        // Check expiry before cloning the session (avoids copying tokens/keys
+        // on every token guard call when the token is still fresh).
+        let needs_it = opake
+            .session()
+            .map(|s| s.needs_refresh(DEFAULT_REFRESH_THRESHOLD_SECONDS, now))
+            .unwrap_or(false);
+        if !needs_it {
+            return Ok(());
+        }
+
+        let session = opake
+            .session()
+            .cloned()
+            .ok_or_else(|| JsError::new("no session"))?;
+        let pds_url = opake.client_mut().base_url().to_string();
+        let transport = opake_core::client::WasmTransport::new();
+
+        let outcome = proactive_refresh(
+            &transport,
+            &session,
+            &pds_url,
+            DEFAULT_REFRESH_THRESHOLD_SECONDS,
+            now,
+            &mut opake_core::crypto::OsRng,
+        )
+        .await;
+
+        match outcome {
+            RefreshOutcome::Refreshed(new_session) => {
+                // Persist to storage, then update in-memory client
+                opake
+                    .persist_refreshed_session(&new_session)
+                    .await
+                    .map_err(wasm_err)?;
+                Ok(())
+            }
+            RefreshOutcome::NotNeeded => Ok(()),
+            RefreshOutcome::Failed(e) => Err(wasm_err(e)),
+        }
+    }
+
     /// Get the (potentially refreshed) session.
     pub fn session(&self) -> Result<JsValue, JsError> {
         let borrow = self.inner.borrow();
@@ -758,6 +812,24 @@ impl WasmOpakeHandle {
             .ok_or_else(|| JsError::new("already consumed"))?;
         let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
         serde_wasm_bindgen::to_value(session).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Get the token expiry timestamp without exposing the full session.
+    ///
+    /// Returns the Unix timestamp (seconds) when the access token expires,
+    /// or -1 if unknown/not applicable (legacy sessions).
+    /// This avoids serializing tokens/keys to JS for a simple expiry check.
+    #[wasm_bindgen(js_name = tokenExpiresAt)]
+    pub fn token_expires_at(&self) -> f64 {
+        let borrow = self.inner.borrow();
+        let Some(opake) = borrow.as_ref() else {
+            return -1.0;
+        };
+        opake
+            .session()
+            .and_then(|s| s.expires_at())
+            .map(|t| t as f64)
+            .unwrap_or(-1.0)
     }
 
     fn opake(&self) -> Result<std::cell::RefMut<'_, WasmOpake>, JsError> {

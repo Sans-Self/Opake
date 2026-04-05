@@ -11,6 +11,7 @@ crates/
       atproto.rs       AT-URI parsing, shared AT Protocol primitives
       account_config.rs  Fetch/publish singleton account config from PDS
       resolve.rs       Handle/DID → PDS → public key resolution pipeline
+      scope.rs         OAuth scope registry — OPAKE_COLLECTIONS (single source of truth for all app.opake.* collections) + oauth_scope() builder
       storage.rs       Config, Identity types + Storage trait (cross-platform contract)
       paths.rs         Data directory resolution (env, XDG, fallback)
       daemon.rs        Background task registry (shared definitions for CLI + web). Daemon builds Opake per account per task iteration, auto-persists via signoff
@@ -58,7 +59,8 @@ crates/
         list.rs        Generic paginated collection fetcher
         dpop.rs        DPoP keypair (P-256/ES256) + proof JWT generation
         oauth_discovery.rs  OAuth AS discovery + PKCE S256 generation
-        oauth_token.rs PAR, authorization code exchange, token refresh (all with DPoP)
+        oauth_token.rs PAR, authorization code exchange, token refresh (all with DPoP), build_client_id
+        oauth_discovery.rs also provides AuthorizationServerMetadata::par_endpoint()
         xrpc/
           mod.rs       XrpcClient struct, Session enum (Legacy/OAuth), dual auth dispatch
           auth.rs      login(), refresh_session() (legacy + OAuth)
@@ -108,7 +110,8 @@ crates/
   opake-wasm/          WASM bridge (wasm-pack, wasm_bindgen)
     src/
       lib.rs           Module declarations, WASM init, pure crypto + tree exports (stateless)
-      opake_wasm.rs    OpakeContext + WasmFileManagerHandle (owns Opake+FileContext, temporary FileManager borrows per JS call)
+      auth_wasm.rs     OAuth login WASM exports: startOAuthLogin, completeOAuthLogin, loginWithAppPasswordWasm. All token handling in WASM.
+      opake_wasm.rs    OpakeContext + WasmFileManagerHandle (owns Opake+FileContext, temporary FileManager borrows per JS call). Also: tokenExpiresAt, proactiveRefresh
       daemon.rs        Service Worker maintenance task exports (session refresh, pair cleanup)
       wasm_util.rs     make_client, make_opake, make_cabinet, make_workspace helpers. WasmOpake = Opake<WasmTransport, OsRng, NoopStorage>
 
