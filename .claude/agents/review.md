@@ -147,6 +147,18 @@ Opake -> resolve context -> borrow FileManager -> do ops -> drop FileManager -> 
 - FileManager borrows `&mut Opake` — can't have two alive simultaneously.
 - WASM: `Rc<RefCell<Option<WasmOpake>>>` shared between OpakeContext and FileManagerHandle.
 
+## SDK Ease-of-use
+
+opake-core contains business logic in Rust specialized to a cryptographic application. Many JavaScript developers will not know how to reason about zeroization, borrow semantics, or encrypted metadata lifecycles — nor should they have to.
+
+### SDK Review focus:
+- SDK methods should present clean, idiomatic TypeScript APIs. Rust-isms (Option → null/undefined, snake_case → camelCase, Result → throw) must be fully absorbed at the boundary, never leaked.
+- Error messages must be actionable from a JS perspective ("FileManager has been disposed — call opake.cabinet() again") not Rust-internal ("Opake not available").
+- Lifecycle footguns should be impossible by default. If destroy() is required, the consequence of forgetting it should be documented on the class, not discovered via a cryptic WASM panic.
+- The @withTokenGuard / Mutex serialization is invisible to SDK consumers. If an operation stalls because the Mutex is held, the developer sees a slow promise — never a deadlock, never a panic, never a corrupt state. Verify this contract
+holds.
+- Type exports should be self-documenting. A consumer reading DirectoryTreeSnapshot, DocumentMetadata, WorkspaceSyncResult in their editor should understand the shape without reading Rust source.
+
 ## Testing Patterns
 
 - Core: unit tests in separate `*_tests.rs` files, linked via `#[cfg(test)] #[path = "..."]`.
