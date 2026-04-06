@@ -31,6 +31,7 @@ import { initWasm } from "./wasm";
 import { FileManager } from "./file-manager";
 import type { LoginOptions, StartLoginOptions, PendingLogin } from "./auth";
 import { createStorageAdapter } from "./storage-adapter";
+import { registerCleanup, unregisterCleanup } from "./finalizer";
 import {
   createPairRequest as pairingCreate,
   listPairRequests as pairingList,
@@ -90,7 +91,7 @@ function withTokenGuard(_target: any, _context: ClassMethodDecoratorContext) {
  *
  * const opake = await Opake.init({ storage: new IndexedDbStorage() });
  *
- * const cabinet = opake.cabinet();
+ * const cabinet = await opake.cabinet();
  * const tree = await cabinet.loadTree();
  * cabinet.dispose();
  *
@@ -105,6 +106,7 @@ export class Opake {
   private constructor(ctx: WasmOpakeContext, storage: Storage) {
     this.ctx = ctx;
     this.storage = storage;
+    registerCleanup(this, ctx, this);
   }
 
   // ---------------------------------------------------------------------------
@@ -453,14 +455,16 @@ export class Opake {
    *
    * @example
    * ```typescript
-   * const cabinet = opake.cabinet();
+   * const cabinet = await opake.cabinet();
    * await cabinet.upload(data, "photo.jpg", "image/jpeg");
    * cabinet.dispose();
    * ```
    */
   @wrapWasmErrors
-  cabinet(): FileManager {
-    return new FileManager(this.requireContext().cabinet());
+  async cabinet(): Promise<FileManager> {
+    const ctx = this.requireContext();
+    const handle = await ctx.cabinet();
+    return new FileManager(handle);
   }
 
   /**
@@ -496,9 +500,9 @@ export class Opake {
    * @param workspace - Resolved workspace context with key material.
    */
   @wrapWasmErrors
-  workspaceFromKey(workspace: ResolvedWorkspace): FileManager {
+  async workspaceFromKey(workspace: ResolvedWorkspace): Promise<FileManager> {
     const ctx = this.requireContext();
-    return new FileManager(ctx.workspace(workspace.keyringUri, workspace.ownerDid, workspace.key, BigInt(workspace.rotation)));
+    return new FileManager(await ctx.workspace(workspace.keyringUri, workspace.ownerDid, workspace.key, BigInt(workspace.rotation)));
   }
 
   // ---------------------------------------------------------------------------
@@ -699,6 +703,7 @@ export class Opake {
    */
   destroy(): void {
     if (this.ctx) {
+      unregisterCleanup(this);
       this.ctx.free();
       this.ctx = null;
     }

@@ -4,7 +4,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretUpIcon, FileTextIcon } from "@phosphor-icons/react";
 import { MarkdownPreview } from "./MarkdownPreview";
-import { getOpakeWorker } from "@/lib/worker";
+import { getActiveFileManager } from "@/stores/documents/store";
 
 const COLLAPSED_MAX_HEIGHT = 300;
 
@@ -30,11 +30,17 @@ export function evictReadmeCache(documentUri: string): void {
   readmeCache.delete(documentUri);
 }
 
+/** Clear all cached README promises — called on context switch. */
+export function evictAllReadmeCaches(): void {
+  // eslint-disable-next-line functional/immutable-data -- module-level cache cleanup
+  readmeCache.clear();
+}
+
 async function fetchAndDecryptReadme(documentUri: string): Promise<ReadmeResult> {
   try {
-    const worker = getOpakeWorker();
-    const result = await worker.cabinetDownload(documentUri);
-    return { status: "ready", data: result.plaintext };
+    const fm = getActiveFileManager();
+    const result = await fm.download(documentUri);
+    return { status: "ready", data: result.data };
   } catch (error) {
     return {
       status: "error",
@@ -77,7 +83,7 @@ export function DirectoryReadme({ documentUri }: DirectoryReadmeProps) {
       <div className="relative">
         <div
           ref={contentRef}
-          className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
+          className="min-h-[300px] overflow-hidden transition-[max-height] duration-300 ease-in-out"
           style={{ maxHeight }}
         >
           <MarkdownPreview data={result.data} editorStyle />
@@ -119,11 +125,14 @@ export function DirectoryReadmeSkeleton() {
         <FileTextIcon size={14} className="text-text-faint" />
         <span className="text-caption text-text-muted font-medium">README.md</span>
       </div>
-      <div className="space-y-3 p-6">
-        <div className="skeleton h-5 w-48" />
+      <div className="h-[300px] space-y-3 p-6">
+        <div className="skeleton h-6 w-56" />
         <div className="skeleton h-4 w-full" />
-        <div className="skeleton h-4 w-3/4" />
         <div className="skeleton h-4 w-5/6" />
+        <div className="skeleton mt-2 h-5 w-40" />
+        <div className="skeleton ml-4 h-4 w-3/4" />
+        <div className="skeleton ml-4 h-4 w-2/3" />
+        <div className="skeleton ml-4 h-4 w-1/2" />
       </div>
     </div>
   );

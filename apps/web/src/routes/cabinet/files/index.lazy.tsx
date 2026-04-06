@@ -1,10 +1,14 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
+import { FileView } from "@/components/cabinet/FileView";
 
 function FilesIndex() {
   return (
-    <div className="flex flex-1 items-center justify-center">
-      <p className="text-base-content/40 text-sm">Files view — not yet wired to SDK</p>
-    </div>
+    <FileView
+      rootLabel="Your Cabinet"
+      pathSegments={[]}
+      context={{ kind: "cabinet" }}
+      basePath="/cabinet/files"
+    />
   );
 }
 

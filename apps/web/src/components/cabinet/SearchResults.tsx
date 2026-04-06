@@ -36,7 +36,7 @@ function parentPathForItem(
   ancestorsOf: (dirUri: string | null) => readonly { readonly name: string }[],
 ): string {
   const parentUri = findParentUri(treeSnapshot, uri);
-  if (!parentUri || parentUri === treeSnapshot.root_uri) return "Your Cabinet";
+  if (!parentUri || parentUri === treeSnapshot.rootUri) return "Your Cabinet";
   const ancestors = ancestorsOf(parentUri);
   const parentName = treeSnapshot.directories[parentUri].name;
   const names = [...ancestors.map((a) => a.name), ...(parentName ? [parentName] : [])];
@@ -161,7 +161,7 @@ export function SearchResults() {
 
     // Folder: build path from ancestors
     if (result.item.kind === "folder" && treeSnapshot) {
-      if (result.item.uri === treeSnapshot.root_uri) {
+      if (result.item.uri === treeSnapshot.rootUri) {
         void navigate({ to: "/cabinet/files" });
         return;
       }

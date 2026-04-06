@@ -12,7 +12,7 @@ export async function withFileManager<T>(
   keyringUri: string | null,
   fn: (fm: FileManager) => Promise<T>,
 ): Promise<T> {
-  const fm = keyringUri ? await opake.workspace(keyringUri) : opake.cabinet();
+  const fm = keyringUri ? await opake.workspace(keyringUri) : await opake.cabinet();
   return fn(fm).finally(() => fm.dispose());
 }
 

@@ -166,7 +166,7 @@ const directoryInfoSchema = z
   .object({
     name: z.string(),
     entries: z.array(typedEntrySchema),
-    parent_uri: z.string().nullable(),
+    parent_uri: z.string().nullish(),
   })
   .transform((r) => ({
     name: r.name,
@@ -177,7 +177,7 @@ const directoryInfoSchema = z
 export const directoryTreeSnapshotSchema = z
   .object({
     root_uri: z.string().nullable(),
-    directories: z.record(directoryInfoSchema),
+    directories: z.record(z.string(), directoryInfoSchema),
   })
   .transform((r) => ({
     rootUri: r.root_uri,
@@ -191,7 +191,7 @@ export type DirectoryInfo = z.output<typeof directoryInfoSchema>;
 export const treeWithMetadataSchema = z
   .object({
     snapshot: directoryTreeSnapshotSchema,
-    metadata: z.record(documentMetadataSchema),
+    metadata: z.record(z.string(), documentMetadataSchema).optional().default({}),
   });
 
 // ---------------------------------------------------------------------------

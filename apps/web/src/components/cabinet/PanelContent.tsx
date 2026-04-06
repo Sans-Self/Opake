@@ -5,6 +5,7 @@ import { FileGridCard } from "./FileGridCard";
 import { DirectoryReadme, DirectoryReadmeSkeleton } from "./DirectoryReadme";
 import type { ConfirmDialogHandle } from "@/components/ConfirmDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { findParentUri } from "@/lib/directoryTree";
 import {
   DeleteFolderConfirmDialog,
   type DeleteFolderDialogHandle,
@@ -68,10 +69,9 @@ export function PanelContent({
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
       if (!dir) return { documents: 0, directories: 0 };
       return dir.entries.reduce(
-        (acc, entryUri) => {
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-          if (snapshot.directories[entryUri]) {
-            const sub = countDescendants(entryUri);
+        (acc, entry) => {
+          if (entry.type === "directory") {
+            const sub = countDescendants(entry.uri);
             return {
               documents: acc.documents + sub.documents,
               directories: acc.directories + 1 + sub.directories,
@@ -88,16 +88,12 @@ export function PanelContent({
 
   const handleMoveClick = (item: FileItem) => {
     const snapshot = treeSnapshot;
-    const currentParent = snapshot
-      ? (Object.entries(snapshot.directories).find(([, entry]) =>
-          entry.entries.includes(item.uri),
-        )?.[0] ?? null)
-      : null;
+    const currentParent = snapshot ? findParentUri(snapshot, item.uri) : null;
 
     const collectDescendantUris = (uri: string): string[] => {
       const dir = snapshot?.directories[uri];
       if (!dir) return [];
-      return dir.entries.flatMap((entryUri) => [entryUri, ...collectDescendantUris(entryUri)]);
+      return dir.entries.flatMap((e) => [e.uri, ...collectDescendantUris(e.uri)]);
     };
 
     const disabled: ReadonlySet<string> =

@@ -4,14 +4,25 @@
 // - Call workspace management methods directly (createWorkspace, listWorkspaces, etc.)
 // - Call .cabinet() or .workspace() to get a FileManager for file operations
 //
-// FileManager shares ownership of the Opake via Rc<RefCell<>>. This lets
-// the OpakeContext survive after creating a FileManager — .cabinet() and
-// .workspace() are non-consuming. WASM is single-threaded, so RefCell is safe.
+// FileManager shares access via Rc<Mutex<>>. Both OpakeContext and
+// FileManager hold Rc clones. If the inner Option is set to None,
+// FileManager methods fail cleanly.
+//
+// The inner Mutex (futures_util::lock::Mutex) replaces RefCell. RefCell
+// panics when borrowed concurrently across async boundaries (the JS event
+// loop can interleave WASM calls while a future is suspended at a network
+// await). The async Mutex queues instead of panicking — second caller
+// waits until the first finishes. In WASM's single-threaded context there
+// is no OS-level locking, just a flag + waker.
+//
+// All wasm_bindgen methods take &self (not &mut self) because the Mutex
+// provides interior mutability. Using &mut self on async wasm_bindgen
+// methods triggers wasm-bindgen's internal borrow tracking, which panics
+// when two &mut self async operations overlap across await points.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
-use opake_core::manager::FileContext;
+use futures_util::lock::Mutex;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +39,7 @@ use crate::wasm_util::{
 
 #[wasm_bindgen(js_name = OpakeContext)]
 pub struct WasmOpakeHandle {
-    inner: Rc<RefCell<Option<WasmOpake>>>,
+    inner: Rc<Mutex<Option<WasmOpake>>>,
 }
 
 #[wasm_bindgen(js_class = OpakeContext)]
@@ -43,19 +54,19 @@ impl WasmOpakeHandle {
     ) -> Result<WasmOpakeHandle, JsError> {
         let opake = make_opake_from_storage(did.as_deref(), storage_adapter).await?;
         Ok(Self {
-            inner: Rc::new(RefCell::new(Some(opake))),
+            inner: Rc::new(Mutex::new(Some(opake))),
         })
     }
 
     /// Create a cabinet FileManager. Non-consuming — the OpakeContext
     /// remains usable after the FileManager is freed.
-    pub fn cabinet(&self) -> Result<WasmFileManagerHandle, JsError> {
-        let borrow = self.inner.borrow();
-        let opake = borrow
+    pub async fn cabinet(&self) -> Result<WasmFileManagerHandle, JsError> {
+        let guard = self.inner.lock().await;
+        let opake = guard
             .as_ref()
             .ok_or_else(|| JsError::new("Opake context already consumed"))?;
         let context = cabinet_context(opake)?;
-        drop(borrow);
+        drop(guard);
 
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
@@ -65,7 +76,7 @@ impl WasmOpakeHandle {
 
     /// Create a workspace FileManager. Non-consuming — the OpakeContext
     /// remains usable after the FileManager is freed.
-    pub fn workspace(
+    pub async fn workspace(
         &self,
         keyring_uri: &str,
         owner_did: &str,
@@ -73,11 +84,11 @@ impl WasmOpakeHandle {
         rotation: u64,
     ) -> Result<WasmFileManagerHandle, JsError> {
         // Validate context is alive
-        let borrow = self.inner.borrow();
-        if borrow.is_none() {
+        let guard = self.inner.lock().await;
+        if guard.is_none() {
             return Err(JsError::new("Opake context already consumed"));
         }
-        drop(borrow);
+        drop(guard);
 
         let context = workspace_context(keyring_uri, owner_did, key, rotation)?;
         Ok(WasmFileManagerHandle {
@@ -96,7 +107,7 @@ impl WasmOpakeHandle {
         &self,
         keyring_uri: &str,
     ) -> Result<WasmFileManagerHandle, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let ws = opake
             .resolve_workspace_by_uri(keyring_uri)
             .await
@@ -115,8 +126,8 @@ impl WasmOpakeHandle {
     /// List members of a workspace. Fetches the keyring record and returns
     /// the member list with DIDs and roles.
     #[wasm_bindgen(js_name = listWorkspaceMembers)]
-    pub async fn list_workspace_members(&mut self, keyring_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn list_workspace_members(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let at_uri = opake_core::atproto::parse_at_uri(keyring_uri).map_err(wasm_err)?;
         let entry = opake
             .client_mut()
@@ -130,11 +141,11 @@ impl WasmOpakeHandle {
 
     #[wasm_bindgen(js_name = createWorkspace)]
     pub async fn create_workspace(
-        &mut self,
+        &self,
         name: &str,
         description: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let (keyring_uri, key) = opake
             .create_workspace(name, description.as_deref())
             .await
@@ -157,13 +168,13 @@ impl WasmOpakeHandle {
     /// List all keyrings the user is a member of, with decrypted metadata.
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(
-        &mut self,
+        &self,
         default_appview_url: Option<String>,
     ) -> Result<JsValue, JsError> {
         use opake_core::crypto::{self, KeyringMetadata};
         use opake_core::records::{EncryptedMetadata, KeyringMember};
 
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let identity = opake.require_identity().map_err(wasm_err)?;
         let private_key = identity.private_key_bytes().map_err(wasm_err)?;
         let did = opake.did().to_string();
@@ -229,14 +240,14 @@ impl WasmOpakeHandle {
 
     #[wasm_bindgen(js_name = addWorkspaceMember)]
     pub async fn add_workspace_member(
-        &mut self,
+        &self,
         keyring_uri: &str,
         key: &[u8],
         member_did: &str,
         member_public_key: &[u8],
         role: &str,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let gk = crate::content_key_from_slice(key)?;
         let pubkey = pub_key_from_slice(member_public_key)?;
         let role = parse_role(role)?;
@@ -251,8 +262,8 @@ impl WasmOpakeHandle {
     }
 
     #[wasm_bindgen(js_name = leaveWorkspace)]
-    pub async fn leave_workspace(&mut self, keyring_uri: &str) -> Result<String, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn leave_workspace(&self, keyring_uri: &str) -> Result<String, JsError> {
+        let mut opake = self.opake().await?;
         opake.leave_workspace(keyring_uri).await.map_err(wasm_err)
     }
 
@@ -261,12 +272,12 @@ impl WasmOpakeHandle {
     /// Non-owner: proposes, returns `{ proposed: true }`.
     #[wasm_bindgen(js_name = removeWorkspaceMember)]
     pub async fn remove_workspace_member(
-        &mut self,
+        &self,
         keyring_uri: &str,
         key: &[u8],
         member_did: &str,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let gk = crate::content_key_from_slice(key)?;
         let (key_result, outcome) = opake
             .remove_workspace_member(keyring_uri, &gk, member_did)
@@ -300,14 +311,14 @@ impl WasmOpakeHandle {
     /// Owner: applies directly. Non-owner: creates a keyringUpdate proposal.
     #[wasm_bindgen(js_name = updateWorkspaceMetadata)]
     pub async fn update_workspace_metadata(
-        &mut self,
+        &self,
         keyring_uri: &str,
         key: &[u8],
         name: Option<String>,
         description: Option<String>,
         icon: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let gk = crate::content_key_from_slice(key)?;
         let outcome = opake
             .update_workspace_metadata(
@@ -328,12 +339,12 @@ impl WasmOpakeHandle {
     /// Update a workspace member's role.
     #[wasm_bindgen(js_name = updateMemberRole)]
     pub async fn update_member_role(
-        &mut self,
+        &self,
         keyring_uri: &str,
         member_did: &str,
         role: &str,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let role = parse_role(role)?;
         let outcome = opake
             .update_member_role(keyring_uri, member_did, role)
@@ -351,11 +362,11 @@ impl WasmOpakeHandle {
     /// Create a workspace invitation. Returns `{ uri, token }`.
     #[wasm_bindgen(js_name = createInvitation)]
     pub async fn create_invitation(
-        &mut self,
+        &self,
         keyring_uri: &str,
         role: &str,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let (uri, token) = opake
             .create_invitation(keyring_uri, role)
             .await
@@ -371,8 +382,8 @@ impl WasmOpakeHandle {
 
     /// List all invitations on the caller's PDS.
     #[wasm_bindgen(js_name = listInvitations)]
-    pub async fn list_invitations(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn list_invitations(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let invitations = opake.list_invitations().await.map_err(wasm_err)?;
 
         #[derive(Serialize)]
@@ -408,8 +419,8 @@ impl WasmOpakeHandle {
 
     /// Revoke (delete) an invitation.
     #[wasm_bindgen(js_name = revokeInvitation)]
-    pub async fn revoke_invitation(&mut self, invitation_uri: &str) -> Result<(), JsError> {
-        let mut opake = self.opake()?;
+    pub async fn revoke_invitation(&self, invitation_uri: &str) -> Result<(), JsError> {
+        let mut opake = self.opake().await?;
         opake
             .revoke_invitation(invitation_uri)
             .await
@@ -418,8 +429,8 @@ impl WasmOpakeHandle {
 
     /// Accept an invitation by writing an acceptance record. Returns the acceptance URI.
     #[wasm_bindgen(js_name = acceptInvitation)]
-    pub async fn accept_invitation(&mut self, invitation_uri: &str) -> Result<String, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn accept_invitation(&self, invitation_uri: &str) -> Result<String, JsError> {
+        let mut opake = self.opake().await?;
         opake
             .accept_invitation(invitation_uri)
             .await
@@ -427,8 +438,8 @@ impl WasmOpakeHandle {
     }
 
     #[wasm_bindgen(js_name = downloadFromGrant)]
-    pub async fn download_from_grant(&mut self, grant_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn download_from_grant(&self, grant_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let (filename, plaintext) = opake
             .download_from_grant(grant_uri)
             .await
@@ -441,8 +452,8 @@ impl WasmOpakeHandle {
 
     /// Create a pair request (new device side). Returns { uri, rkey, ephemeralPublicKey, ephemeralPrivateKey }.
     #[wasm_bindgen(js_name = createPairRequest)]
-    pub async fn create_pair_request(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn create_pair_request(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let (record_ref, keypair) = opake.create_pair_request().await.map_err(wasm_err)?;
 
         #[derive(Serialize)]
@@ -470,12 +481,12 @@ impl WasmOpakeHandle {
     /// Approve a pair request (existing device side). Creates the pair response record.
     #[wasm_bindgen(js_name = approvePairRequest)]
     pub async fn approve_pair_request(
-        &mut self,
+        &self,
         request_uri: &str,
         ephemeral_public_key: &[u8],
     ) -> Result<(), JsError> {
         let pubkey = pub_key_from_slice(ephemeral_public_key)?;
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         opake
             .approve_pair_request(request_uri, &pubkey)
             .await
@@ -485,7 +496,7 @@ impl WasmOpakeHandle {
     /// Receive a pair response (new device side). Returns the derived Identity.
     #[wasm_bindgen(js_name = receivePairResponse)]
     pub async fn receive_pair_response(
-        &mut self,
+        &self,
         response_js: JsValue,
         ephemeral_private_key: &[u8],
     ) -> Result<JsValue, JsError> {
@@ -495,7 +506,7 @@ impl WasmOpakeHandle {
         let privkey: opake_core::crypto::X25519PrivateKey = ephemeral_private_key
             .try_into()
             .map_err(|_| JsError::new("ephemeral private key must be 32 bytes"))?;
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let identity = opake
             .receive_pair_response(&response, &privkey)
             .await
@@ -505,15 +516,15 @@ impl WasmOpakeHandle {
 
     /// Sync all owned workspaces and apply pending directory proposals.
     #[wasm_bindgen(js_name = syncOwnedWorkspaces)]
-    pub async fn sync_owned_workspaces(&mut self) -> Result<usize, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn sync_owned_workspaces(&self) -> Result<usize, JsError> {
+        let mut opake = self.opake().await?;
         opake.sync_owned_workspaces().await.map_err(wasm_err)
     }
 
     /// Sync all workspaces with per-workspace result visibility.
     #[wasm_bindgen(js_name = syncOwnedWorkspacesDetailed)]
-    pub async fn sync_owned_workspaces_detailed(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn sync_owned_workspaces_detailed(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let results = opake
             .sync_owned_workspaces_detailed()
             .await
@@ -523,8 +534,8 @@ impl WasmOpakeHandle {
 
     /// Retry all pending shares (resolve recipients, create grants).
     #[wasm_bindgen(js_name = retryPendingSharesViaOpake)]
-    pub async fn retry_pending_shares_via_opake(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn retry_pending_shares_via_opake(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let resolver = opake_core::client::WasmTransport::new();
         let result = opake
             .retry_pending_shares(&resolver)
@@ -544,8 +555,8 @@ impl WasmOpakeHandle {
     /// Reads the config, stamps `modifiedAt`, and writes it back. Throws on
     /// auth failure — the SDK uses this during boot to detect dead sessions.
     #[wasm_bindgen(js_name = checkSession)]
-    pub async fn check_session(&mut self) -> Result<(), JsError> {
-        let mut opake = self.opake()?;
+    pub async fn check_session(&self) -> Result<(), JsError> {
+        let mut opake = self.opake().await?;
         let config = opake.get_account_config().await.map_err(wasm_err)?;
         let mut record = config
             .unwrap_or_else(|| opake_core::records::AccountConfigRecord::new(&crate::now_iso()));
@@ -556,36 +567,36 @@ impl WasmOpakeHandle {
 
     /// Fetch the account config record, if it exists.
     #[wasm_bindgen(js_name = getAccountConfig)]
-    pub async fn get_account_config(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn get_account_config(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let config = opake.get_account_config().await.map_err(wasm_err)?;
         to_js(&config)
     }
 
     /// Write the account config record (upsert).
     #[wasm_bindgen(js_name = setAccountConfig)]
-    pub async fn set_account_config(&mut self, config_js: JsValue) -> Result<String, JsError> {
+    pub async fn set_account_config(&self, config_js: JsValue) -> Result<String, JsError> {
         let config: opake_core::records::AccountConfigRecord =
             serde_wasm_bindgen::from_value(config_js).map_err(|e| JsError::new(&e.to_string()))?;
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         opake.set_account_config(&config).await.map_err(wasm_err)
     }
 
     /// Publish the caller's public key record on the PDS.
     #[wasm_bindgen(js_name = publishPublicKey)]
-    pub async fn publish_public_key(&mut self) -> Result<String, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn publish_public_key(&self) -> Result<String, JsError> {
+        let mut opake = self.opake().await?;
         opake.publish_public_key().await.map_err(wasm_err)
     }
 
     /// Fetch workspace documents from the AppView.
     #[wasm_bindgen(js_name = listWorkspaceDocuments)]
     pub async fn list_workspace_documents(
-        &mut self,
+        &self,
         keyring_uri: &str,
         default_appview_url: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let docs = opake
             .list_workspace_documents(keyring_uri, default_appview_url.as_deref())
             .await
@@ -596,10 +607,10 @@ impl WasmOpakeHandle {
     /// Discover keyrings the user is a member of (across all PDSes).
     #[wasm_bindgen(js_name = discoverMemberKeyrings)]
     pub async fn discover_member_keyrings(
-        &mut self,
+        &self,
         default_appview_url: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         let keyrings = opake
             .discover_member_keyrings(default_appview_url.as_deref())
             .await
@@ -609,8 +620,8 @@ impl WasmOpakeHandle {
 
     /// Fetch all incoming grants from the AppView.
     #[wasm_bindgen(js_name = listInbox)]
-    pub async fn list_inbox(&mut self, appview_url: Option<String>) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn list_inbox(&self, appview_url: Option<String>) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let grants = opake
             .list_inbox(appview_url.as_deref())
             .await
@@ -620,11 +631,8 @@ impl WasmOpakeHandle {
 
     /// Resolve a workspace from a foreign PDS by keyring URI.
     #[wasm_bindgen(js_name = resolveForeignWorkspace)]
-    pub async fn resolve_foreign_workspace(
-        &mut self,
-        keyring_uri: &str,
-    ) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn resolve_foreign_workspace(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let workspace = opake
             .resolve_foreign_workspace(keyring_uri)
             .await
@@ -652,16 +660,16 @@ impl WasmOpakeHandle {
 
     /// List pending pair requests on this account.
     #[wasm_bindgen(js_name = listPairRequests)]
-    pub async fn list_pair_requests(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn list_pair_requests(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let entries = opake.list_pair_requests().await.map_err(wasm_err)?;
         to_js(&entries)
     }
 
     /// List pair responses on this account.
     #[wasm_bindgen(js_name = listPairResponses)]
-    pub async fn list_pair_responses(&mut self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn list_pair_responses(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let entries = opake.list_pair_responses().await.map_err(wasm_err)?;
         to_js(&entries)
     }
@@ -669,11 +677,11 @@ impl WasmOpakeHandle {
     /// Clean up pair request + response records after successful pairing.
     #[wasm_bindgen(js_name = cleanupPairRecords)]
     pub async fn cleanup_pair_records(
-        &mut self,
+        &self,
         request_rkey: &str,
         response_rkey: &str,
     ) -> Result<(), JsError> {
-        let mut opake = self.opake()?;
+        let mut opake = self.opake().await?;
         opake
             .cleanup_pair_records(request_rkey, response_rkey)
             .await
@@ -682,8 +690,8 @@ impl WasmOpakeHandle {
 
     /// Delete all expired pair requests and orphaned responses (daemon use).
     #[wasm_bindgen(js_name = cleanupExpiredPairRequests)]
-    pub async fn cleanup_expired_pair_requests(&mut self) -> Result<usize, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn cleanup_expired_pair_requests(&self) -> Result<usize, JsError> {
+        let mut opake = self.opake().await?;
         let ttl = opake_core::pairing::DEFAULT_PAIR_REQUEST_TTL_SECONDS;
         let result = opake
             .cleanup_expired_pair_requests(ttl)
@@ -694,16 +702,16 @@ impl WasmOpakeHandle {
 
     /// Delete stale grants whose recipients have no valid public key (daemon use).
     #[wasm_bindgen(js_name = healStaleGrants)]
-    pub async fn heal_stale_grants(&mut self) -> Result<usize, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn heal_stale_grants(&self) -> Result<usize, JsError> {
+        let mut opake = self.opake().await?;
         let result = opake.heal_stale_grants().await.map_err(wasm_err)?;
         Ok(result.grants_deleted)
     }
 
     /// Resolve another user's identity (DID, handle, public key).
     #[wasm_bindgen(js_name = resolveIdentity)]
-    pub async fn resolve_identity(&mut self, handle_or_did: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn resolve_identity(&self, handle_or_did: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let resolved = opake
             .resolve_identity(handle_or_did)
             .await
@@ -730,8 +738,8 @@ impl WasmOpakeHandle {
 
     /// Resolve grant metadata without downloading the blob.
     #[wasm_bindgen(js_name = resolveGrantMetadata)]
-    pub async fn resolve_grant_metadata(&mut self, grant_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake()?;
+    pub async fn resolve_grant_metadata(&self, grant_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
         let (name, metadata) = opake
             .resolve_grant_metadata(grant_uri)
             .await
@@ -751,9 +759,9 @@ impl WasmOpakeHandle {
     /// Reads the private key from the Opake's identity — the key never
     /// crosses the WASM/JS boundary.
     #[wasm_bindgen(js_name = unwrapGroupKey)]
-    pub fn unwrap_group_key(&self, members_js: JsValue) -> Result<Vec<u8>, JsError> {
-        let borrow = self.inner.borrow();
-        let opake = borrow
+    pub async fn unwrap_group_key(&self, members_js: JsValue) -> Result<Vec<u8>, JsError> {
+        let guard = self.inner.lock().await;
+        let opake = guard
             .as_ref()
             .ok_or_else(|| JsError::new("Opake context already consumed"))?;
         let identity = opake.require_identity().map_err(wasm_err)?;
@@ -770,31 +778,33 @@ impl WasmOpakeHandle {
     /// Calls `refresh_token` directly — no side-effect hacks. The refreshed
     /// session is persisted to storage.
     #[wasm_bindgen(js_name = proactiveRefresh)]
-    pub async fn proactive_refresh(&mut self) -> Result<(), JsError> {
+    pub async fn proactive_refresh(&self) -> Result<(), JsError> {
         use opake_core::client::session_refresh::{
             proactive_refresh, RefreshOutcome, DEFAULT_REFRESH_THRESHOLD_SECONDS,
         };
 
-        let mut opake = self.opake()?;
         let now = opake_core::client::time::unix_now();
 
-        // Check expiry before cloning the session (avoids copying tokens/keys
-        // on every token guard call when the token is still fresh).
-        let needs_it = opake
-            .session()
-            .map(|s| s.needs_refresh(DEFAULT_REFRESH_THRESHOLD_SECONDS, now))
-            .unwrap_or(false);
-        if !needs_it {
-            return Ok(());
-        }
+        // Extract session + PDS URL while holding the lock, then drop it
+        // so other WASM operations aren't blocked during the network call.
+        let (session, pds_url) = {
+            let mut opake = self.opake().await?;
+            let needs_it = opake
+                .session()
+                .map(|s| s.needs_refresh(DEFAULT_REFRESH_THRESHOLD_SECONDS, now))
+                .unwrap_or(false);
+            if !needs_it {
+                return Ok(());
+            }
+            let session = opake
+                .session()
+                .cloned()
+                .ok_or_else(|| JsError::new("no session"))?;
+            let pds_url = opake.client_mut().base_url().to_string();
+            (session, pds_url)
+        }; // guard dropped — Mutex free during network I/O
 
-        let session = opake
-            .session()
-            .cloned()
-            .ok_or_else(|| JsError::new("no session"))?;
-        let pds_url = opake.client_mut().base_url().to_string();
         let transport = opake_core::client::WasmTransport::new();
-
         let outcome = proactive_refresh(
             &transport,
             &session,
@@ -807,7 +817,8 @@ impl WasmOpakeHandle {
 
         match outcome {
             RefreshOutcome::Refreshed(new_session) => {
-                // Persist to storage, then update in-memory client
+                // Re-acquire to persist the refreshed session
+                let mut opake = self.opake().await?;
                 opake
                     .persist_refreshed_session(&new_session)
                     .await
@@ -821,8 +832,11 @@ impl WasmOpakeHandle {
 
     /// Get the (potentially refreshed) session.
     pub fn session(&self) -> Result<JsValue, JsError> {
-        let borrow = self.inner.borrow();
-        let opake = borrow
+        let guard = self
+            .inner
+            .try_lock()
+            .ok_or_else(|| JsError::new("Opake is busy — an operation is in progress"))?;
+        let opake = guard
             .as_ref()
             .ok_or_else(|| JsError::new("already consumed"))?;
         let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
@@ -834,10 +848,16 @@ impl WasmOpakeHandle {
     /// Returns the Unix timestamp (seconds) when the access token expires,
     /// or -1 if unknown/not applicable (legacy sessions).
     /// This avoids serializing tokens/keys to JS for a simple expiry check.
+    ///
+    /// Uses try_lock — returns -1 if the Mutex is held. The SDK interprets
+    /// -1 as "unknown expiry" and skips proactive refresh, which is correct —
+    /// the in-flight operation holding the lock will complete first.
     #[wasm_bindgen(js_name = tokenExpiresAt)]
     pub fn token_expires_at(&self) -> f64 {
-        let borrow = self.inner.borrow();
-        let Some(opake) = borrow.as_ref() else {
+        let Some(guard) = self.inner.try_lock() else {
+            return -1.0;
+        };
+        let Some(opake) = guard.as_ref() else {
             return -1.0;
         };
         opake
@@ -847,10 +867,29 @@ impl WasmOpakeHandle {
             .unwrap_or(-1.0)
     }
 
-    fn opake(&self) -> Result<std::cell::RefMut<'_, WasmOpake>, JsError> {
-        let borrow = self.inner.borrow_mut();
-        std::cell::RefMut::filter_map(borrow, |opt| opt.as_mut())
-            .map_err(|_| JsError::new("Opake context already consumed"))
+    async fn opake(&self) -> Result<OpakeGuard<'_>, JsError> {
+        let guard = self.inner.lock().await;
+        if guard.is_none() {
+            return Err(JsError::new("Opake context already consumed"));
+        }
+        Ok(OpakeGuard(guard))
+    }
+}
+
+/// Newtype over MutexGuard that derefs to WasmOpake (unwraps the Option).
+/// The Option is checked in `opake()` — callers can use this like `&mut WasmOpake`.
+pub(crate) struct OpakeGuard<'a>(pub(crate) futures_util::lock::MutexGuard<'a, Option<WasmOpake>>);
+
+impl std::ops::Deref for OpakeGuard<'_> {
+    type Target = WasmOpake;
+    fn deref(&self) -> &WasmOpake {
+        self.0.as_ref().unwrap()
+    }
+}
+
+impl std::ops::DerefMut for OpakeGuard<'_> {
+    fn deref_mut(&mut self) -> &mut WasmOpake {
+        self.0.as_mut().unwrap()
     }
 }
 

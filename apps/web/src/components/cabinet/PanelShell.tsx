@@ -53,7 +53,7 @@ export function PanelShell({
   );
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative h-full overflow-hidden">
       {/* Ghost panels — filing cabinet depth */}
       {depth >= 4 && (
         <div className="border-primary/10 bg-bg-ghost-1/60 animate-ghost-panel absolute inset-y-5.5 right-5.5 left-7 z-0 -translate-x-3.75 -translate-y-3.75 rounded-2xl border delay-150" />

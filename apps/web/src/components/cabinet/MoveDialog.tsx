@@ -57,7 +57,9 @@ function TreeNode({
   // Child directories: entries that exist in the snapshot's directories map
   const dirEntry = snapshot.directories[uri];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-  const childDirUris = dirEntry ? dirEntry.entries.filter((e) => e in snapshot.directories) : [];
+  const childDirUris = dirEntry
+    ? dirEntry.entries.filter((e) => e.type === "directory").map((e) => e.uri)
+    : [];
 
   return (
     <li role="treeitem" aria-selected={isSelected} aria-disabled={isDisabled || undefined}>
@@ -149,8 +151,8 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
   const handleMove = useCallback(() => {
     if (!entryUri) return;
     // selectedTarget is null for root, or a directory URI
-    // Resolve null if root is selected (root_uri maps to null in the store)
-    const isRoot = selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri;
+    // Resolve null if root is selected (rootUri maps to null in the store)
+    const isRoot = selectedTarget !== null && selectedTarget === treeSnapshot?.rootUri;
     const targetUri = isRoot ? null : selectedTarget;
     onMove(entryUri, targetUri);
     dismiss();
@@ -160,12 +162,12 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
   const canMove =
     selectedTarget !== null &&
     selectedTarget !== currentParentUri &&
-    !(currentParentUri === null && selectedTarget === treeSnapshot?.root_uri);
+    !(currentParentUri === null && selectedTarget === treeSnapshot?.rootUri);
 
   // Root directory children for the tree
-  const rootDir = treeSnapshot?.root_uri ? treeSnapshot.directories[treeSnapshot.root_uri] : null;
+  const rootDir = treeSnapshot?.rootUri ? treeSnapshot.directories[treeSnapshot.rootUri] : null;
   const rootChildren = rootDir
-    ? rootDir.entries.filter((e) => treeSnapshot && e in treeSnapshot.directories)
+    ? rootDir.entries.filter((e) => e.type === "directory").map((e) => e.uri)
     : [];
 
   return (
@@ -186,12 +188,12 @@ export const MoveDialog = forwardRef<MoveDialogHandle, MoveDialogProps>(function
             {/* Root */}
             <li
               role="treeitem"
-              aria-selected={selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri}
+              aria-selected={selectedTarget !== null && selectedTarget === treeSnapshot?.rootUri}
             >
               <button
-                onClick={() => treeSnapshot?.root_uri && setSelectedTarget(treeSnapshot.root_uri)}
+                onClick={() => treeSnapshot?.rootUri && setSelectedTarget(treeSnapshot.rootUri)}
                 className={`text-ui flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-                  selectedTarget !== null && selectedTarget === treeSnapshot?.root_uri
+                  selectedTarget !== null && selectedTarget === treeSnapshot?.rootUri
                     ? "bg-accent text-accent-content"
                     : "hover:bg-bg-hover"
                 } cursor-pointer`}

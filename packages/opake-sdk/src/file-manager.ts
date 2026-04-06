@@ -13,6 +13,7 @@ import type {
   DeleteRecursiveResult,
 } from "./types";
 import { parseWasmError, wrapWasmErrors } from "./errors";
+import { registerCleanup, unregisterCleanup } from "./finalizer";
 import {
   downloadResultSchema,
   deleteRecursiveResultSchema,
@@ -92,6 +93,7 @@ export class FileManager {
   /** @internal — use `opake.cabinet()` or `opake.workspaceFromKey()` instead. */
   constructor(handle: WasmFileManager) {
     this.handle = handle;
+    registerCleanup(this, handle, this);
   }
 
   // ---------------------------------------------------------------------------
@@ -482,6 +484,7 @@ export class FileManager {
    */
   dispose(): void {
     if (this.handle) {
+      unregisterCleanup(this);
       this.handle.free();
       this.handle = null;
     }

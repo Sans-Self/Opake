@@ -41,6 +41,7 @@ import { Route as CabinetEditorRkeyRouteImport } from './routes/cabinet/editor/$
 import { Route as CabinetDocsSlugRouteImport } from './routes/cabinet/docs/$slug'
 import { Route as PublicDocsSlugRouteImport } from './routes/_public/docs/$slug'
 import { Route as CabinetWorkspaceRkeyRouteRouteImport } from './routes/cabinet/workspace/$rkey/route'
+import { Route as CabinetWorkspaceRkeyIndexRouteImport } from './routes/cabinet/workspace/$rkey/index'
 import { Route as CabinetWorkspaceRkeySplatRouteImport } from './routes/cabinet/workspace/$rkey/$'
 import { Route as CabinetWorkspaceEditorRkeyNewRouteImport } from './routes/cabinet/workspace-editor/$rkey/new'
 import { Route as CabinetWorkspaceEditorRkeyDocRkeyRouteImport } from './routes/cabinet/workspace-editor/$rkey/$docRkey'
@@ -236,13 +237,25 @@ const CabinetWorkspaceRkeyRouteRoute =
     id: '/workspace/$rkey',
     path: '/workspace/$rkey',
     getParentRoute: () => CabinetRouteRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace/$rkey/route.lazy').then((d) => d.Route),
+  )
+const CabinetWorkspaceRkeyIndexRoute =
+  CabinetWorkspaceRkeyIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => CabinetWorkspaceRkeyRouteRoute,
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace/$rkey/index.lazy').then((d) => d.Route),
+  )
 const CabinetWorkspaceRkeySplatRoute =
   CabinetWorkspaceRkeySplatRouteImport.update({
     id: '/$',
     path: '/$',
     getParentRoute: () => CabinetWorkspaceRkeyRouteRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace/$rkey/$.lazy').then((d) => d.Route),
+  )
 const CabinetWorkspaceEditorRkeyNewRoute =
   CabinetWorkspaceEditorRkeyNewRouteImport.update({
     id: '/workspace-editor/$rkey/new',
@@ -290,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
+  '/cabinet/workspace/$rkey/': typeof CabinetWorkspaceRkeyIndexRoute
 }
 export interface FileRoutesByTo {
   '/faq': typeof PublicFaqRoute
@@ -306,7 +320,6 @@ export interface FileRoutesByTo {
   '/': typeof PublicIndexRoute
   '/cabinet': typeof CabinetIndexRoute
   '/devices': typeof DevicesIndexRoute
-  '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   '/docs/$slug': typeof PublicDocsSlugRoute
   '/cabinet/docs/$slug': typeof CabinetDocsSlugRoute
   '/cabinet/editor/$rkey': typeof CabinetEditorRkeyRoute
@@ -321,6 +334,7 @@ export interface FileRoutesByTo {
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
+  '/cabinet/workspace/$rkey': typeof CabinetWorkspaceRkeyIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -358,6 +372,7 @@ export interface FileRoutesById {
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
+  '/cabinet/workspace/$rkey/': typeof CabinetWorkspaceRkeyIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -395,6 +410,7 @@ export interface FileRouteTypes {
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
+    | '/cabinet/workspace/$rkey/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/faq'
@@ -411,7 +427,6 @@ export interface FileRouteTypes {
     | '/'
     | '/cabinet'
     | '/devices'
-    | '/cabinet/workspace/$rkey'
     | '/docs/$slug'
     | '/cabinet/docs/$slug'
     | '/cabinet/editor/$rkey'
@@ -426,6 +441,7 @@ export interface FileRouteTypes {
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
+    | '/cabinet/workspace/$rkey'
   id:
     | '__root__'
     | '/cabinet'
@@ -462,6 +478,7 @@ export interface FileRouteTypes {
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
+    | '/cabinet/workspace/$rkey/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -689,6 +706,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetWorkspaceRkeyRouteRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
+    '/cabinet/workspace/$rkey/': {
+      id: '/cabinet/workspace/$rkey/'
+      path: '/'
+      fullPath: '/cabinet/workspace/$rkey/'
+      preLoaderRoute: typeof CabinetWorkspaceRkeyIndexRouteImport
+      parentRoute: typeof CabinetWorkspaceRkeyRouteRoute
+    }
     '/cabinet/workspace/$rkey/$': {
       id: '/cabinet/workspace/$rkey/$'
       path: '/$'
@@ -741,11 +765,13 @@ const CabinetFilesRouteRouteWithChildren =
 
 interface CabinetWorkspaceRkeyRouteRouteChildren {
   CabinetWorkspaceRkeySplatRoute: typeof CabinetWorkspaceRkeySplatRoute
+  CabinetWorkspaceRkeyIndexRoute: typeof CabinetWorkspaceRkeyIndexRoute
 }
 
 const CabinetWorkspaceRkeyRouteRouteChildren: CabinetWorkspaceRkeyRouteRouteChildren =
   {
     CabinetWorkspaceRkeySplatRoute: CabinetWorkspaceRkeySplatRoute,
+    CabinetWorkspaceRkeyIndexRoute: CabinetWorkspaceRkeyIndexRoute,
   }
 
 const CabinetWorkspaceRkeyRouteRouteWithChildren =

@@ -1520,8 +1520,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         config: &crate::records::AccountConfigRecord,
     ) -> Result<String, Error> {
-        // Update cached appview URL when config changes.
-        self.appview_url = config.appview_url.clone();
+        // Update cached appview URL when config explicitly sets one.
+        // Don't overwrite the compile-time default with None.
+        if config.appview_url.is_some() {
+            self.appview_url = config.appview_url.clone();
+        }
         let result = crate::account_config::publish_account_config(&mut self.client, config).await;
         self.signoff(result).await
     }

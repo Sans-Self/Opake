@@ -1,17 +1,25 @@
 // WasmFileManagerHandle — file operations within a cabinet or workspace.
 //
-// Shares ownership of the Opake via Rc<RefCell<>> with the parent
-// OpakeContext. Creates temporary core FileManager borrows per method
-// call. Non-consuming — the OpakeContext remains usable after this
-// handle is freed.
+// Holds an Rc clone of the parent OpakeContext's async Mutex.
+// If the OpakeContext's Option is set to None, FileManager methods
+// fail cleanly with "Opake not available".
+//
+// All async methods lock the Mutex for the duration of the operation.
+// Concurrent calls (e.g., upload in-flight + token refresh) queue rather
+// than panic — the Mutex handles serialization.
+//
+// Methods take &self (not &mut self) — the Mutex provides interior
+// mutability, avoiding wasm-bindgen's borrow tracking which panics
+// on concurrent async &mut self operations.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
+use futures_util::lock::Mutex;
 use opake_core::manager::{FileContext, UploadRequest};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+use crate::opake_wasm::OpakeGuard;
 use crate::wasm_util::{
     build_snapshot, pub_key_from_slice, to_js, wasm_err, DownloadResult, MutationResultDto,
     WasmOpake,
@@ -20,14 +28,14 @@ use crate::wasm_util::{
 /// WASM FileManager handle.
 #[wasm_bindgen(js_name = FileManager)]
 pub struct WasmFileManagerHandle {
-    pub(crate) opake: Rc<RefCell<Option<WasmOpake>>>,
+    pub(crate) opake: Rc<Mutex<Option<WasmOpake>>>,
     pub(crate) context: Option<FileContext>,
 }
 
 #[wasm_bindgen(js_class = FileManager)]
 impl WasmFileManagerHandle {
     pub async fn upload(
-        &mut self,
+        &self,
         plaintext: &[u8],
         filename: &str,
         mime_type: &str,
@@ -41,7 +49,7 @@ impl WasmFileManagerHandle {
             serde_wasm_bindgen::from_value(tags).map_err(|e| JsError::new(&e.to_string()))?
         };
 
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
             .upload(&UploadRequest {
@@ -61,8 +69,8 @@ impl WasmFileManagerHandle {
         })
     }
 
-    pub async fn download(&mut self, document_uri: &str) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn download(&self, document_uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr.download(document_uri).await.map_err(wasm_err)?;
 
@@ -73,11 +81,11 @@ impl WasmFileManagerHandle {
     }
 
     pub async fn delete(
-        &mut self,
+        &self,
         document_uri: &str,
         parent_directory_uri: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
             .delete(document_uri, parent_directory_uri.as_deref())
@@ -91,12 +99,12 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = moveEntry)]
     pub async fn move_entry(
-        &mut self,
+        &self,
         entry_uri: &str,
         source_dir: &str,
         target_dir: &str,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
             .move_entry(entry_uri, source_dir, target_dir)
@@ -110,11 +118,11 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = createDirectory)]
     pub async fn create_directory(
-        &mut self,
+        &self,
         name: &str,
         parent_uri: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
             .create_directory(name, parent_uri.as_deref())
@@ -127,16 +135,16 @@ impl WasmFileManagerHandle {
     }
 
     #[wasm_bindgen(js_name = ensureRoot)]
-    pub async fn ensure_root(&mut self) -> Result<String, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn ensure_root(&self) -> Result<String, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         mgr.ensure_root().await.map_err(wasm_err)
     }
 
     /// Load the directory tree (read-only, no PDS writes).
     #[wasm_bindgen(js_name = loadTree)]
-    pub async fn load_tree(&mut self) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn load_tree(&self) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let snapshot = build_snapshot(&tree);
@@ -146,10 +154,10 @@ impl WasmFileManagerHandle {
     /// Load tree + metadata (read-only, no proposal application).
     #[wasm_bindgen(js_name = loadTreeWithMetadata)]
     pub async fn load_tree_with_metadata(
-        &mut self,
+        &self,
         metadata_for_dir: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let snapshot = build_snapshot(&tree);
@@ -189,10 +197,10 @@ impl WasmFileManagerHandle {
     /// Load tree, apply proposals, resolve metadata — the full sync cycle.
     #[wasm_bindgen(js_name = syncAndLoadTree)]
     pub async fn sync_and_load_tree(
-        &mut self,
+        &self,
         metadata_for_dir: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let snapshot = build_snapshot(&tree);
@@ -249,8 +257,8 @@ impl WasmFileManagerHandle {
 
     /// Apply pending proposals without metadata resolution (daemon use).
     #[wasm_bindgen(js_name = syncAndApplyProposals)]
-    pub async fn sync_and_apply_proposals(&mut self) -> Result<usize, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn sync_and_apply_proposals(&self) -> Result<usize, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         mgr.apply_pending_proposals(&tree).await.map_err(wasm_err)
@@ -260,11 +268,11 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = renameDirectory)]
     pub async fn rename_directory(
-        &mut self,
+        &self,
         directory_uri: &str,
         new_name: &str,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
             .rename_directory(directory_uri, new_name)
@@ -278,7 +286,7 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = updateMetadata)]
     pub async fn update_metadata(
-        &mut self,
+        &self,
         document_uri: &str,
         name: Option<String>,
         tags: JsValue,
@@ -290,7 +298,7 @@ impl WasmFileManagerHandle {
             Some(serde_wasm_bindgen::from_value(tags).map_err(|e| JsError::new(&e.to_string()))?)
         };
 
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let metadata = mgr
             .update_metadata(document_uri, |meta| {
@@ -312,11 +320,11 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = updateContent)]
     pub async fn update_content(
-        &mut self,
+        &self,
         document_uri: &str,
         new_plaintext: &[u8],
     ) -> Result<String, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         mgr.update_content(document_uri, new_plaintext)
             .await
@@ -324,8 +332,8 @@ impl WasmFileManagerHandle {
     }
 
     #[wasm_bindgen(js_name = fetchContentKey)]
-    pub async fn fetch_content_key(&mut self, document_uri: &str) -> Result<Vec<u8>, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn fetch_content_key(&self, document_uri: &str) -> Result<Vec<u8>, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let key = mgr
             .fetch_content_key(document_uri)
@@ -337,7 +345,7 @@ impl WasmFileManagerHandle {
     // -- Sharing --
 
     pub async fn share(
-        &mut self,
+        &self,
         document_uri: &str,
         recipient_did: &str,
         recipient_public_key: &[u8],
@@ -345,7 +353,7 @@ impl WasmFileManagerHandle {
         note: Option<String>,
     ) -> Result<String, JsError> {
         let pubkey = pub_key_from_slice(recipient_public_key)?;
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         mgr.share(
             document_uri,
@@ -359,23 +367,23 @@ impl WasmFileManagerHandle {
     }
 
     #[wasm_bindgen(js_name = revokeShare)]
-    pub async fn revoke_share(&mut self, grant_uri: &str) -> Result<(), JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn revoke_share(&self, grant_uri: &str) -> Result<(), JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         mgr.revoke_share(grant_uri).await.map_err(wasm_err)
     }
 
     #[wasm_bindgen(js_name = listShares)]
-    pub async fn list_shares(&mut self) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn list_shares(&self) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let shares = mgr.list_shares().await.map_err(wasm_err)?;
         to_js(&shares)
     }
 
     #[wasm_bindgen(js_name = deleteRecursive)]
-    pub async fn delete_recursive(&mut self, uri: &str) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn delete_recursive(&self, uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let resolved = mgr.resolve_entry(&tree, uri).await.map_err(wasm_err)?;
@@ -398,10 +406,10 @@ impl WasmFileManagerHandle {
     /// Resolve document metadata within a directory for a specific set of URIs.
     #[wasm_bindgen(js_name = resolveDocumentMetadataIn)]
     pub async fn resolve_document_metadata_in(
-        &mut self,
+        &self,
         directory_uri: &str,
     ) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+        let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let metadata = mgr
@@ -413,8 +421,8 @@ impl WasmFileManagerHandle {
 
     /// Fetch and decrypt metadata for a single document by URI.
     #[wasm_bindgen(js_name = getDocumentMetadata)]
-    pub async fn get_document_metadata(&mut self, document_uri: &str) -> Result<JsValue, JsError> {
-        let (mut opake, ctx) = self.parts()?;
+    pub async fn get_document_metadata(&self, document_uri: &str) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
         let did = opake.did().to_owned();
         let identity = opake.require_identity().map_err(wasm_err)?;
         let private_key = identity.private_key_bytes().map_err(wasm_err)?;
@@ -441,8 +449,11 @@ impl WasmFileManagerHandle {
 
     #[wasm_bindgen(js_name = isOwner)]
     pub fn is_owner(&self) -> Result<bool, JsError> {
-        let borrow = self.opake.borrow();
-        let opake = borrow
+        let guard = self
+            .opake
+            .try_lock()
+            .ok_or_else(|| JsError::new("Opake is busy — an operation is in progress"))?;
+        let opake = guard
             .as_ref()
             .ok_or_else(|| JsError::new("already finished"))?;
         let ctx = self
@@ -452,24 +463,16 @@ impl WasmFileManagerHandle {
         Ok(opake.did() == ctx.owner_did())
     }
 
-    /// Get the session for JS-side persistence.
-    pub fn session(&self) -> Result<JsValue, JsError> {
-        let borrow = self.opake.borrow();
-        let opake = borrow
-            .as_ref()
-            .ok_or_else(|| JsError::new("already finished"))?;
-        let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
-        serde_wasm_bindgen::to_value(session).map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    /// Borrow the Opake and FileContext for creating a temporary FileManager.
-    fn parts(&self) -> Result<(std::cell::RefMut<'_, WasmOpake>, &FileContext), JsError> {
-        let borrow = std::cell::RefMut::filter_map(self.opake.borrow_mut(), |opt| opt.as_mut())
-            .map_err(|_| JsError::new("Opake not available"))?;
+    /// Lock the Mutex and return the Opake + FileContext.
+    async fn parts(&self) -> Result<(OpakeGuard<'_>, &FileContext), JsError> {
+        let guard = self.opake.lock().await;
+        if guard.is_none() {
+            return Err(JsError::new("Opake not available"));
+        }
         let ctx = self
             .context
             .as_ref()
             .ok_or_else(|| JsError::new("FileManager already finished"))?;
-        Ok((borrow, ctx))
+        Ok((OpakeGuard(guard), ctx))
     }
 }

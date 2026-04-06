@@ -1,2 +1,1 @@
-// Stubbed — replaced by @opake/sdk
-throw new Error("unimplemented");
+export type { DirectoryTreeSnapshot, DirectoryEntry, DirectoryInfo } from "@opake/sdk";

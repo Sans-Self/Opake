@@ -1,2 +1,5 @@
 // Stubbed — replaced by @opake/sdk
-throw new Error("unimplemented");
+
+export function getOpakeWorker() {
+  throw new Error("Worker not implemented");
+}

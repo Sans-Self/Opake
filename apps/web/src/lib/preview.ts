@@ -1,41 +1,40 @@
-// Decrypt functions for file previews — thin wrappers around the worker API.
+// Decrypt functions for file previews — thin wrappers around the active FileManager.
 //
 // Each returns a thunk `() => Promise<DecryptedBlob>` suitable for passing
 // to `<FilePreview decrypt={...} />`.
 
-import { useWorkspaceStore } from "@/stores/workspace";
+import { getActiveFileManager } from "@/stores/documents/store";
 
 export interface DecryptedBlob {
   readonly plaintext: Uint8Array;
   readonly metadata: { readonly name: string; readonly mimeType?: string };
 }
 
-/**
- * Decrypt a cabinet document (owned by the current user).
- * Uses cabinetDownload — core handles key unwrap + blob decrypt.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- param needed when wired
-export function decryptOwnDocument(_documentUri: string): () => Promise<DecryptedBlob> {
-  // eslint-disable-next-line @typescript-eslint/require-await -- stub, will await worker call when wired
+/** Shared implementation — both cabinet and workspace use the active FileManager. */
+function decryptViaActiveManager(documentUri: string): () => Promise<DecryptedBlob> {
   return async () => {
-    throw new Error("unimplemented");
+    const fm = getActiveFileManager();
+    const result = await fm.download(documentUri);
+    return { plaintext: result.data, metadata: { name: result.filename } };
   };
 }
 
 /**
- * Decrypt a workspace document using the workspace FileManager.
- * Handles both same-PDS and cross-PDS transparently.
+ * Decrypt a cabinet document (owned by the current user).
+ * Uses the active FileManager — works for both cabinet and workspace contexts.
+ */
+export function decryptOwnDocument(documentUri: string): () => Promise<DecryptedBlob> {
+  return decryptViaActiveManager(documentUri);
+}
+
+/**
+ * Decrypt a workspace document using the active FileManager.
+ * The keyringUri parameter is kept for API compatibility but the active
+ * context already determines which workspace is in scope.
  */
 export function decryptWorkspaceDocument(
-  _documentUri: string,
-  keyringUri: string,
+  documentUri: string,
+  _keyringUri: string, // eslint-disable-line @typescript-eslint/no-unused-vars -- kept for call-site compatibility
 ): () => Promise<DecryptedBlob> {
-  // eslint-disable-next-line @typescript-eslint/require-await -- stub, will await worker call when wired
-  return async () => {
-    const workspace = useWorkspaceStore.getState().workspaces[keyringUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
-    if (!workspace) throw new Error("Workspace not loaded");
-
-    throw new Error("unimplemented");
-  };
+  return decryptViaActiveManager(documentUri);
 }
