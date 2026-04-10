@@ -53,6 +53,8 @@ defmodule OpakeAppview.Indexer do
     KeyringQueries
   }
 
+  alias OpakeAppview.SSE.Broadcaster
+
   @telemetry_prefix [:opake_appview, :indexer]
 
   # -- State init --
@@ -133,12 +135,14 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "grant upsert", attrs.uri)
     emit_event_telemetry("app.opake.grant", :upsert, status_of(result))
+    Broadcaster.broadcast_grant(attrs, :upsert)
   end
 
   defp dispatch({:delete_grant, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] grant delete: #{uri}")
     GrantQueries.delete_grant(uri)
     emit_event_telemetry("app.opake.grant", :delete, :ok)
+    Broadcaster.broadcast_grant(%{uri: uri}, :delete)
   end
 
   defp dispatch({:upsert_keyring, attrs}, _time_us, _now) do
@@ -159,12 +163,15 @@ defmodule OpakeAppview.Indexer do
       :upsert,
       worst_status([members_result, record_result])
     )
+
+    Broadcaster.broadcast_keyring(attrs, :upsert)
   end
 
   defp dispatch({:delete_keyring, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] keyring delete: #{uri}")
     KeyringQueries.delete_keyring(uri)
     emit_event_telemetry("app.opake.keyring", :delete, :ok)
+    Broadcaster.broadcast_keyring(%{uri: uri, owner_did: nil}, :delete)
   end
 
   defp dispatch({:upsert_directory, attrs}, _time_us, now) do
@@ -184,12 +191,14 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "directory upsert", attrs.directory_uri)
     emit_event_telemetry("app.opake.directory", :upsert, status_of(result))
+    Broadcaster.broadcast_directory(attrs, :upsert)
   end
 
   defp dispatch({:delete_directory, %{directory_uri: directory_uri}}, _time_us, now) do
     Logger.info("[Indexer] directory delete (soft): #{directory_uri}")
     DirectoryQueries.soft_delete_directory(directory_uri, now)
     emit_event_telemetry("app.opake.directory", :delete, :ok)
+    Broadcaster.broadcast_directory(%{directory_uri: directory_uri, owner_did: nil}, :delete)
   end
 
   defp dispatch({:upsert_document, attrs}, _time_us, now) do
@@ -210,12 +219,14 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "document upsert", attrs.document_uri)
     emit_event_telemetry("app.opake.document", :upsert, status_of(result))
+    Broadcaster.broadcast_document(attrs, :upsert)
   end
 
   defp dispatch({:delete_document, %{document_uri: document_uri}}, _time_us, now) do
     Logger.info("[Indexer] document delete (soft): #{document_uri}")
     DocumentQueries.soft_delete_document(document_uri, now)
     emit_event_telemetry("app.opake.document", :delete, :ok)
+    Broadcaster.broadcast_document(%{document_uri: document_uri, owner_did: nil}, :delete)
   end
 
   defp dispatch({:upsert_document_update, attrs}, _time_us, now) do
@@ -232,12 +243,14 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "document update upsert", attrs.uri)
     emit_event_telemetry("app.opake.documentUpdate", :upsert, status_of(result))
+    Broadcaster.broadcast_document_update(attrs, :upsert)
   end
 
   defp dispatch({:delete_document_update, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] document update delete: #{uri}")
     DocumentUpdateQueries.delete_document_update(uri)
     emit_event_telemetry("app.opake.documentUpdate", :delete, :ok)
+    Broadcaster.broadcast_document_update(%{uri: uri}, :delete)
   end
 
   defp dispatch({:upsert_directory_update, attrs}, _time_us, now) do
@@ -262,12 +275,14 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "directory update upsert", attrs.uri)
     emit_event_telemetry("app.opake.directoryUpdate", :upsert, status_of(result))
+    Broadcaster.broadcast_directory_update(attrs, :upsert)
   end
 
   defp dispatch({:delete_directory_update, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] directory update delete: #{uri}")
     DirectoryQueries.delete_directory_update(uri)
     emit_event_telemetry("app.opake.directoryUpdate", :delete, :ok)
+    Broadcaster.broadcast_directory_update(%{uri: uri}, :delete)
   end
 
   defp dispatch({:upsert_keyring_update, attrs}, _time_us, now) do
@@ -297,12 +312,14 @@ defmodule OpakeAppview.Indexer do
     end
 
     emit_event_telemetry("app.opake.keyringUpdate", :upsert, status_of(result))
+    Broadcaster.broadcast_keyring_update(attrs, :upsert)
   end
 
   defp dispatch({:delete_keyring_update, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] keyring update delete: #{uri}")
     KeyringQueries.delete_keyring_update(uri)
     emit_event_telemetry("app.opake.keyringUpdate", :delete, :ok)
+    Broadcaster.broadcast_keyring_update(%{uri: uri}, :delete)
   end
 
   # Heartbeat-only path: log the account config write but don't persist.

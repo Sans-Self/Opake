@@ -8,10 +8,36 @@ import {
 } from "@/components/cabinet/CreateWorkspaceDialog";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { getOpake, useAuthStore } from "@/stores/auth";
+import { useDocumentsStore } from "@/stores/documents/store";
 import { taskStore } from "@/stores/tasks";
 import { startDaemon } from "@opake/daemon";
-import { Opake } from "@opake/sdk";
+import { Opake, type EventStream } from "@opake/sdk";
 import { toastError, toastSuccess } from "@/stores/toast";
+
+/** Re-sync the currently viewed directory from the PDS. */
+function reloadCurrentDirectory(): void {
+  const { loaded, currentDirectoryUri } = useDocumentsStore.getState();
+  if (loaded) {
+    void useDocumentsStore.getState().loadDirectory(currentDirectoryUri);
+  }
+}
+
+/** Debounced proposal sync — multiple SSE events within the window collapse into one call. */
+// eslint-disable-next-line functional/no-let -- mutable timer for debounce
+let proposalSyncTimer: ReturnType<typeof setTimeout> | null = null;
+const PROPOSAL_SYNC_DEBOUNCE_MS = 2000;
+
+function debouncedProposalSync(): void {
+  if (proposalSyncTimer) clearTimeout(proposalSyncTimer);
+  proposalSyncTimer = setTimeout(() => {
+    proposalSyncTimer = null;
+    void getOpake()
+      .syncOwnedWorkspacesDetailed()
+      .catch(() => {
+        // Sync failure is non-fatal — next SSE event will retry
+      });
+  }, PROPOSAL_SYNC_DEBOUNCE_MS);
+}
 
 function CabinetLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -22,13 +48,14 @@ function CabinetLayout() {
     void useWorkspaceStore.getState().loadWorkspaces();
   }, []);
 
-  // Start background daemon — Web Locks ensures only one tab is leader
+  // Background daemon — PDS maintenance writes (share retry, grant healing, pair cleanup).
+  // directory-sync is SSE-driven via debouncedProposalSync above.
   useEffect(() => {
     // eslint-disable-next-line functional/no-let -- handle assigned inside async IIFE
     let handle: ReturnType<typeof startDaemon> | null = null;
     void Opake.taskDefs().then((defs) => {
-      handle = startDaemon(getOpake(), defs, taskStore, {
-        onWorkspaceUpdated: () => void useWorkspaceStore.getState().loadWorkspaces(),
+      const filteredDefs = defs.filter((d) => d.name !== "directory-sync");
+      handle = startDaemon(getOpake(), filteredDefs, taskStore, {
         onSessionExpired: () => {
           handle?.stop();
           void useAuthStore.getState().logout();
@@ -36,6 +63,42 @@ function CabinetLayout() {
       });
     });
     return () => handle?.stop();
+  }, []);
+
+  // Real-time event stream from the appview
+  useEffect(() => {
+    const appviewUrl = import.meta.env.VITE_APPVIEW_URL as string | undefined;
+    if (!appviewUrl) return;
+
+    // eslint-disable-next-line functional/no-let, functional/prefer-immutable-types -- mutable ref for cleanup
+    let stream: EventStream | null = null;
+    try {
+      stream = getOpake().subscribe(
+        {
+          onDirectoryUpsert: () => {
+            reloadCurrentDirectory();
+            debouncedProposalSync();
+          },
+          onDirectoryDelete: () => reloadCurrentDirectory(),
+          onDocumentUpsert: () => reloadCurrentDirectory(),
+          onDocumentDelete: () => reloadCurrentDirectory(),
+          onKeyringUpsert: () => {
+            void useWorkspaceStore.getState().loadWorkspaces();
+            debouncedProposalSync();
+          },
+          onKeyringDelete: () => void useWorkspaceStore.getState().loadWorkspaces(),
+          onReconnect: () => {
+            reloadCurrentDirectory();
+            void useWorkspaceStore.getState().loadWorkspaces();
+            debouncedProposalSync();
+          },
+        },
+        appviewUrl,
+      );
+    } catch {
+      // SSE is optional — don't block the UI if it fails to connect
+    }
+    return () => stream?.close();
   }, []);
 
   // Reset workspace store only when session transitions away from active

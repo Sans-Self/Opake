@@ -16,10 +16,14 @@ defmodule OpakeAppview.Application do
   def start(_type, _args) do
     OpakeAppview.Indexer.init_state()
     OpakeAppview.Jetstream.Compression.init()
+    OpakeAppview.SSE.TokenStore.init_table()
+    OpakeAppview.SSE.ConnectionTracker.init_table()
 
     children =
       [
         OpakeAppview.Repo,
+        {Phoenix.PubSub, name: OpakeAppview.PubSub},
+        OpakeAppview.SSE.TokenStore,
         OpakeAppview.Auth.KeyCache,
         OpakeAppviewWeb.Endpoint
       ] ++

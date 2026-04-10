@@ -22,7 +22,7 @@ defmodule OpakeAppviewWeb.Plugs.CORS do
     conn =
       conn
       |> put_resp_header("access-control-allow-origin", origin)
-      |> put_resp_header("access-control-allow-methods", "GET, OPTIONS")
+      |> put_resp_header("access-control-allow-methods", "GET, POST, OPTIONS")
       |> put_resp_header("access-control-allow-headers", "authorization, content-type")
       |> put_resp_header("access-control-max-age", "86400")
 

@@ -29,7 +29,7 @@ defmodule OpakeAppviewWeb.TreeHelpers do
 
   def parse_since(_), do: {:error, "since parameter is required"}
 
-  defp format_directory(dir) do
+  def format_directory(dir) do
     base = %{
       directory_uri: dir.directory_uri,
       owner_did: dir.owner_did,
@@ -44,7 +44,7 @@ defmodule OpakeAppviewWeb.TreeHelpers do
     |> maybe_put(:deleted_at, format_datetime(dir.deleted_at))
   end
 
-  defp format_document(doc) do
+  def format_document(doc) do
     base = %{
       document_uri: doc.document_uri,
       owner_did: doc.owner_did,
@@ -60,7 +60,7 @@ defmodule OpakeAppviewWeb.TreeHelpers do
     |> maybe_put(:deleted_at, format_datetime(doc.deleted_at))
   end
 
-  defp format_proposal(update) do
+  def format_proposal(update) do
     format_update_base(update)
     |> maybe_put(:directory_uri, update.directory_uri)
     |> maybe_put(:entry_uri, update.entry_uri)
@@ -88,6 +88,16 @@ defmodule OpakeAppviewWeb.TreeHelpers do
     |> maybe_put(:supersedes_uri, update.supersedes_uri)
   end
 
+  def format_grant(grant) do
+    %{
+      uri: grant[:uri] || grant.uri,
+      owner_did: grant[:owner_did] || grant.owner_did,
+      document_uri: grant[:document_uri] || grant.document_uri,
+      created_at: grant[:created_at] || grant.created_at
+    }
+    |> maybe_put(:recipient_did, grant[:recipient_did])
+  end
+
   defp format_update_base(update) do
     %{
       uri: update.uri,
@@ -100,9 +110,9 @@ defmodule OpakeAppviewWeb.TreeHelpers do
   defp encode_binary(nil), do: nil
   defp encode_binary(bin) when is_binary(bin), do: Base.encode64(bin)
 
-  defp format_datetime(nil), do: nil
-  defp format_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  def format_datetime(nil), do: nil
+  def format_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  def maybe_put(map, _key, nil), do: map
+  def maybe_put(map, key, value), do: Map.put(map, key, value)
 end

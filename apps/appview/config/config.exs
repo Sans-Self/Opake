@@ -16,6 +16,9 @@ config :opake_appview,
 config :opake_appview, OpakeAppviewWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
+  # SSE connections are long-lived — raise the idle timeout so keepalive
+  # chunks (every 15s) don't race the default limit.
+  thousand_island_options: [read_timeout: 86_400_000],
   render_errors: [
     formats: [json: OpakeAppviewWeb.ErrorJSON],
     layout: false

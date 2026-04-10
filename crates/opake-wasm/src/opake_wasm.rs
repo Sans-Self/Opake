@@ -618,6 +618,16 @@ impl WasmOpakeHandle {
         to_js(&keyrings)
     }
 
+    /// Request a short-lived SSE token from the AppView.
+    #[wasm_bindgen(js_name = requestSseToken)]
+    pub async fn request_sse_token(&self, appview_url: Option<String>) -> Result<String, JsError> {
+        let mut opake = self.opake().await?;
+        opake
+            .request_sse_token(appview_url.as_deref())
+            .await
+            .map_err(wasm_err)
+    }
+
     /// Fetch all incoming grants from the AppView.
     #[wasm_bindgen(js_name = listInbox)]
     pub async fn list_inbox(&self, appview_url: Option<String>) -> Result<JsValue, JsError> {

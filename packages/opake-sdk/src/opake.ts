@@ -32,6 +32,7 @@ import { FileManager } from "./file-manager";
 import type { LoginOptions, StartLoginOptions, PendingLogin } from "./auth";
 import { createStorageAdapter } from "./storage-adapter";
 import { registerCleanup, unregisterCleanup } from "./finalizer";
+import { EventStream, type EventStreamHandlers } from "./event-stream";
 import {
   createPairRequest as pairingCreate,
   listPairRequests as pairingList,
@@ -616,6 +617,54 @@ export class Opake {
   @wrapWasmErrors @withTokenGuard
   publishPublicKey(): Promise<string> {
     return this.requireContext().publishPublicKey();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Real-time event streaming (SSE)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Request a short-lived SSE token from the appview.
+   *
+   * The token authenticates the EventSource connection (which cannot
+   * carry custom headers). Valid for ~60 seconds, single-use.
+   */
+  @wrapWasmErrors
+  requestSseToken(appviewUrl?: string): Promise<string> {
+    return this.requireContext().requestSseToken(appviewUrl ?? null);
+  }
+
+  /**
+   * Subscribe to real-time events from the appview via SSE.
+   *
+   * Opens a persistent connection that receives full indexed records
+   * as they're processed by the firehose indexer. Auto-reconnects with
+   * exponential backoff; fires `onReconnect` so the consumer can
+   * full-sync to cover the gap.
+   *
+   * @returns An `EventStream` — call `.close()` to disconnect.
+   *
+   * @example
+   * ```typescript
+   * const stream = opake.subscribe({
+   *   onDirectoryUpsert: (dir) => console.log("changed:", dir.directory_uri),
+   *   onReconnect: () => store.fullSync(),
+   * });
+   * // later:
+   * stream.close();
+   * ```
+   */
+  subscribe(
+    handlers: EventStreamHandlers,
+    appviewUrl: string,
+  ): EventStream {
+    const stream = new EventStream({
+      appviewUrl,
+      getToken: () => this.requestSseToken(appviewUrl),
+      handlers,
+    });
+    void stream.connect();
+    return stream;
   }
 
   // ---------------------------------------------------------------------------

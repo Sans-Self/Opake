@@ -1386,6 +1386,26 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             })
     }
 
+    // -- SSE token (for EventSource auth) --
+
+    /// Request a short-lived SSE token from the AppView.
+    ///
+    /// The token is passed as a query parameter to the SSE endpoint,
+    /// sidestepping EventSource's inability to send custom headers.
+    pub async fn request_sse_token(
+        &mut self,
+        default_appview_url: Option<&str>,
+    ) -> Result<String, Error> {
+        let identity = self.require_identity()?;
+        let signing_key = identity
+            .signing_key_bytes()?
+            .ok_or_else(|| Error::Auth("no signing key for SSE token request".into()))?;
+
+        let url = self.resolve_appview_url(default_appview_url)?;
+        crate::client::request_sse_token(self.client.transport(), &url, &self.did, &signing_key)
+            .await
+    }
+
     // -- Inbox (incoming grants via AppView) --
 
     /// Fetch all incoming grants from the AppView.

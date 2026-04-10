@@ -21,6 +21,12 @@ defmodule OpakeAppviewWeb.Router do
     plug OpakeAppview.Auth.Plug
   end
 
+  # SSE stream — token-authenticated, outside the :authenticated pipeline.
+  # Rate limiting excluded (long-lived connection, not a burst endpoint).
+  scope "/api", OpakeAppviewWeb do
+    get "/events", EventsController, :stream
+  end
+
   scope "/api", OpakeAppviewWeb do
     pipe_through :api
 
@@ -28,6 +34,7 @@ defmodule OpakeAppviewWeb.Router do
 
     pipe_through :authenticated
 
+    post "/events/token", EventsController, :create_token
     get "/inbox", InboxController, :index
     get "/keyrings", KeyringsController, :index
 

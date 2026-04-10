@@ -54,3 +54,15 @@ export {
   type InvitationEntry,
   type TaskDef,
 } from "./types";
+
+// Real-time event streaming
+export {
+  EventStream,
+  type EventStreamHandlers,
+  type EventStreamOptions,
+  type SSEDirectory,
+  type SSEDocument,
+  type SSEKeyring,
+  type SSEGrant,
+  type SSEDelete,
+} from "./event-stream";

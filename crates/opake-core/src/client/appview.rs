@@ -331,6 +331,44 @@ pub async fn fetch_workspace_sync(
     })
 }
 
+/// Request a short-lived SSE token from the appview.
+///
+/// The token authenticates the EventSource connection (which cannot carry
+/// custom headers). Valid for ~60 seconds, single-use.
+pub async fn request_sse_token(
+    transport: &impl Transport,
+    appview_url: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+) -> Result<String, Error> {
+    let path = "/api/events/token";
+    let timestamp = super::time::unix_now() as u64;
+    let auth = sign_appview_request("POST", path, did, signing_key, timestamp);
+
+    let request = HttpRequest {
+        method: HttpMethod::Post,
+        url: format!("{appview_url}{path}"),
+        headers: vec![("Authorization".into(), auth)],
+        body: None,
+    };
+
+    let response = transport.send(request).await?;
+    check_appview_response(response.status, &response.body)?;
+
+    #[derive(serde::Deserialize)]
+    struct TokenResponse {
+        token: String,
+    }
+
+    let parsed: TokenResponse =
+        serde_json::from_slice(&response.body).map_err(|e| Error::Appview {
+            status: response.status,
+            message: format!("failed to parse SSE token response: {e}"),
+        })?;
+
+    Ok(parsed.token)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
