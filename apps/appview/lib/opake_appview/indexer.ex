@@ -1,11 +1,48 @@
 defmodule OpakeAppview.Indexer do
   @moduledoc """
-  Dispatches parsed Jetstream events to the appropriate query module.
-  Tracks indexer connection state via ETS (read by the health endpoint)
-  and saves the cursor to Postgres every 100 events.
+  Dispatches parsed Jetstream events to query modules and maintains the
+  shared `OpakeAppview.Indexer.State`.
+
+  ## Per-event flow
+
+      raw json
+        ↓
+      Event.parse/1          (single Jason.decode + tagged tuple)
+        ↓
+      bump counters + last_event_at
+        ↓
+      dispatch (if not :ignore)
+        ↓
+      maybe_save_cursor      (time-throttled, see @cursor_save_interval_ms)
+        ↓
+      :telemetry.execute     (see :opake_appview events below)
+
+  ## Cursor save policy
+
+  Cursor saves are time-throttled, not count-throttled. We persist at most
+  once every `@cursor_save_interval_ms` regardless of event volume. The
+  previous count-based policy hammered Postgres at firehose rates because
+  the constant was set to 1 (see git history).
+
+  ## Telemetry events
+
+    * `[:opake_appview, :indexer, :event]`
+      Measurement: `%{count: 1}`
+      Metadata: `%{collection: "app.opake.grant", action: :upsert | :delete | :ignore, status: :ok | :error | :ignored}`
+
+    * `[:opake_appview, :indexer, :cursor_saved]`
+      Measurement: `%{time_us: integer}`
+      Metadata: `%{}`
+
+  Cursor saves are time-throttled in tests (interval forced to 0) so each
+  call to `process_message/2` writes the cursor — keeps the existing
+  pipeline tests behaviorally identical.
   """
 
   require Logger
+
+  alias OpakeAppview.Jetstream.Event
+  alias OpakeAppview.Indexer.State
 
   alias OpakeAppview.Queries.{
     CursorQueries,
@@ -16,293 +53,338 @@ defmodule OpakeAppview.Indexer do
     KeyringQueries
   }
 
-  alias OpakeAppview.Jetstream.Event
+  @telemetry_prefix [:opake_appview, :indexer]
 
-  @cursor_save_interval 1
-  @state_table :indexer_state
+  # -- State init --
 
-  @spec init_state() :: :ets.table()
-  def init_state do
-    :ets.new(@state_table, [:named_table, :set, :public, read_concurrency: true])
-    :ets.insert(@state_table, {:connected, false})
+  @doc """
+  Creates the `:indexer_state` ETS table. Called once from
+  `OpakeAppview.Application.start/2`.
+  """
+  defdelegate init_state, to: State, as: :init
+
+  defdelegate set_connected(connected), to: State
+
+  defdelegate connected?, to: State
+
+  # -- Configuration --
+
+  defp cursor_save_interval_ms do
+    Application.get_env(:opake_appview, :cursor_save_interval_ms, 5_000)
   end
 
-  @spec set_connected(boolean()) :: true
-  def set_connected(connected) when is_boolean(connected) do
-    :ets.insert(@state_table, {:connected, connected})
-  end
+  # -- Public entry point --
 
-  @spec connected?() :: boolean()
-  def connected? do
-    case :ets.lookup(@state_table, :connected) do
-      [{:connected, val}] -> val
-      [] -> false
-    end
-  end
-
+  @doc """
+  Process a raw Jetstream JSON frame. Returns the updated event_count
+  (preserved for backwards compat with the existing `WebSockex` consumer
+  loop and the pipeline tests).
+  """
   @spec process_message(binary(), non_neg_integer()) :: non_neg_integer()
   def process_message(json, event_count) do
     now = DateTime.utc_now()
 
-    case Event.parse(json) do
+    {time_us, collection, payload} = Event.parse(json)
+
+    State.bump_total()
+    State.mark_event_received()
+    if collection, do: State.bump_collection(collection)
+
+    case payload do
       :ignore ->
-        # Still advance the counter so the cursor saves periodically.
-        # Extract time_us from the raw JSON for cursor position.
-        time_us = extract_time_us(json)
-        maybe_save_cursor(time_us, event_count + 1)
+        State.bump_ignored()
+        emit_event_telemetry(collection, :ignore, :ignored)
 
-      event ->
-        dispatch(event, now, event_count)
+      _ ->
+        State.bump_indexed()
+        dispatch(payload, time_us, now)
     end
+
+    maybe_save_cursor(time_us)
+    event_count + 1
   end
 
-  defp extract_time_us(json) do
-    case Jason.decode(json) do
-      {:ok, %{"time_us" => t}} when is_integer(t) -> t
-      _ -> 0
-    end
-  end
+  # -- Dispatch --
+  #
+  # Every clause here is, by construction, processing an opake event —
+  # the parser already routed everything else into the :ignore branch
+  # upstream. So per-event info logging is safe: there's no flooding
+  # risk from bsky traffic. Opake events are rare and meaningful, and
+  # their log lines are exactly the operational signal you want to see
+  # ("the appview just indexed a real user action").
+  #
+  # Errors are logged but not raised — one bad event cannot stall the
+  # whole indexer.
 
-  # -- Grant --
-
-  defp dispatch({:upsert_grant, attrs}, now, event_count) do
+  defp dispatch({:upsert_grant, attrs}, _time_us, now) do
     Logger.info(
-      "Indexing grant upsert: #{attrs.uri} (owner=#{attrs.owner_did}, recipient=#{attrs.recipient_did})"
+      "[Indexer] grant upsert: #{attrs.uri} (owner=#{attrs.owner_did}, recipient=#{attrs.recipient_did})"
     )
 
-    case GrantQueries.upsert_grant(%{
-           uri: attrs.uri,
-           owner_did: attrs.owner_did,
-           recipient_did: attrs.recipient_did,
-           document_uri: attrs.document_uri,
-           created_at: attrs.created_at,
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
+    result =
+      GrantQueries.upsert_grant(%{
+        uri: attrs.uri,
+        owner_did: attrs.owner_did,
+        recipient_did: attrs.recipient_did,
+        document_uri: attrs.document_uri,
+        created_at: attrs.created_at,
+        indexed_at: now
+      })
 
-      {:error, changeset} ->
-        Logger.warning("Failed to upsert grant #{attrs.uri}: #{inspect(changeset)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    log_query_error(result, "grant upsert", attrs.uri)
+    emit_event_telemetry("app.opake.grant", :upsert, status_of(result))
   end
 
-  defp dispatch({:delete_grant, %{uri: uri, time_us: time_us}}, _now, event_count) do
-    Logger.info("Indexing grant delete: #{uri}")
+  defp dispatch({:delete_grant, %{uri: uri}}, _time_us, _now) do
+    Logger.info("[Indexer] grant delete: #{uri}")
     GrantQueries.delete_grant(uri)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.grant", :delete, :ok)
   end
 
-  # -- Keyring --
-
-  defp dispatch({:upsert_keyring, attrs}, _now, event_count) do
+  defp dispatch({:upsert_keyring, attrs}, _time_us, _now) do
     Logger.info(
-      "Indexing keyring upsert: #{attrs.uri} (owner=#{attrs.owner_did}, members=#{length(attrs.member_entries)})"
+      "[Indexer] keyring upsert: #{attrs.uri} (owner=#{attrs.owner_did}, members=#{length(attrs.member_entries)})"
     )
 
-    case KeyringQueries.upsert_keyring(attrs.uri, attrs.owner_did, attrs.member_entries) do
-      {:ok, _} ->
-        :ok
+    members_result =
+      KeyringQueries.upsert_keyring(attrs.uri, attrs.owner_did, attrs.member_entries)
 
-      {:error, reason} ->
-        Logger.warning("Failed to upsert keyring members #{attrs.uri}: #{inspect(reason)}")
-    end
+    log_query_error(members_result, "keyring members upsert", attrs.uri)
 
-    case KeyringQueries.upsert_keyring_record(attrs) do
-      {:ok, _} ->
-        :ok
+    record_result = KeyringQueries.upsert_keyring_record(attrs)
+    log_query_error(record_result, "keyring record upsert", attrs.uri)
 
-      {:error, reason} ->
-        Logger.warning("Failed to upsert keyring record #{attrs.uri}: #{inspect(reason)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    emit_event_telemetry(
+      "app.opake.keyring",
+      :upsert,
+      worst_status([members_result, record_result])
+    )
   end
 
-  defp dispatch({:delete_keyring, %{uri: uri, time_us: time_us}}, _now, event_count) do
-    Logger.info("Indexing keyring delete: #{uri}")
+  defp dispatch({:delete_keyring, %{uri: uri}}, _time_us, _now) do
+    Logger.info("[Indexer] keyring delete: #{uri}")
     KeyringQueries.delete_keyring(uri)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.keyring", :delete, :ok)
   end
 
-  # -- Directory --
+  defp dispatch({:upsert_directory, attrs}, _time_us, now) do
+    Logger.info("[Indexer] directory upsert: #{attrs.directory_uri}")
 
-  defp dispatch({:upsert_directory, attrs}, now, event_count) do
-    Logger.info("Indexing directory: #{attrs.directory_uri}")
+    result =
+      DirectoryQueries.upsert_directory(%{
+        directory_uri: attrs.directory_uri,
+        keyring_uri: attrs.keyring_uri,
+        owner_did: attrs.owner_did,
+        entries: attrs.entries,
+        encrypted_metadata: attrs.encrypted_metadata,
+        key_wrapping: attrs.key_wrapping,
+        deleted_at: nil,
+        indexed_at: now
+      })
 
-    case DirectoryQueries.upsert_directory(%{
-           directory_uri: attrs.directory_uri,
-           keyring_uri: attrs.keyring_uri,
-           owner_did: attrs.owner_did,
-           entries: attrs.entries,
-           encrypted_metadata: attrs.encrypted_metadata,
-           key_wrapping: attrs.key_wrapping,
-           deleted_at: nil,
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
-
-      {:error, cs} ->
-        Logger.warning("Failed to upsert directory #{attrs.directory_uri}: #{inspect(cs)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    log_query_error(result, "directory upsert", attrs.directory_uri)
+    emit_event_telemetry("app.opake.directory", :upsert, status_of(result))
   end
 
-  defp dispatch(
-         {:delete_directory, %{directory_uri: directory_uri, time_us: time_us}},
-         now,
-         event_count
-       ) do
-    Logger.info("Indexing directory delete (soft): #{directory_uri}")
+  defp dispatch({:delete_directory, %{directory_uri: directory_uri}}, _time_us, now) do
+    Logger.info("[Indexer] directory delete (soft): #{directory_uri}")
     DirectoryQueries.soft_delete_directory(directory_uri, now)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.directory", :delete, :ok)
   end
 
-  defp dispatch({:upsert_document, attrs}, now, event_count) do
-    Logger.info("Indexing document: #{attrs.document_uri}")
+  defp dispatch({:upsert_document, attrs}, _time_us, now) do
+    Logger.info("[Indexer] document upsert: #{attrs.document_uri}")
 
-    case DocumentQueries.upsert_document(%{
-           document_uri: attrs.document_uri,
-           keyring_uri: attrs.keyring_uri,
-           owner_did: attrs.owner_did,
-           rotation: attrs.rotation,
-           encrypted_metadata: attrs.encrypted_metadata,
-           encryption: attrs.encryption,
-           blob_ref: attrs.blob_ref,
-           deleted_at: nil,
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
+    result =
+      DocumentQueries.upsert_document(%{
+        document_uri: attrs.document_uri,
+        keyring_uri: attrs.keyring_uri,
+        owner_did: attrs.owner_did,
+        rotation: attrs.rotation,
+        encrypted_metadata: attrs.encrypted_metadata,
+        encryption: attrs.encryption,
+        blob_ref: attrs.blob_ref,
+        deleted_at: nil,
+        indexed_at: now
+      })
 
-      {:error, cs} ->
-        Logger.warning("Failed to upsert document #{attrs.document_uri}: #{inspect(cs)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    log_query_error(result, "document upsert", attrs.document_uri)
+    emit_event_telemetry("app.opake.document", :upsert, status_of(result))
   end
 
-  defp dispatch(
-         {:delete_document, %{document_uri: document_uri, time_us: time_us}},
-         now,
-         event_count
-       ) do
-    Logger.info("Indexing document delete (soft): #{document_uri}")
+  defp dispatch({:delete_document, %{document_uri: document_uri}}, _time_us, now) do
+    Logger.info("[Indexer] document delete (soft): #{document_uri}")
     DocumentQueries.soft_delete_document(document_uri, now)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.document", :delete, :ok)
   end
 
-  # -- Document updates --
+  defp dispatch({:upsert_document_update, attrs}, _time_us, now) do
+    Logger.info("[Indexer] document update: #{attrs.uri} -> #{attrs.document_uri}")
 
-  defp dispatch({:upsert_document_update, attrs}, now, event_count) do
-    Logger.info("Indexing document update: #{attrs.uri} → #{attrs.document_uri}")
+    result =
+      DocumentUpdateQueries.upsert_document_update(%{
+        uri: attrs.uri,
+        document_uri: attrs.document_uri,
+        author_did: attrs.author_did,
+        supersedes_uri: attrs.supersedes_uri,
+        indexed_at: now
+      })
 
-    case DocumentUpdateQueries.upsert_document_update(%{
-           uri: attrs.uri,
-           document_uri: attrs.document_uri,
-           author_did: attrs.author_did,
-           supersedes_uri: attrs.supersedes_uri,
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
-
-      {:error, cs} ->
-        Logger.warning("Failed to upsert document update #{attrs.uri}: #{inspect(cs)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    log_query_error(result, "document update upsert", attrs.uri)
+    emit_event_telemetry("app.opake.documentUpdate", :upsert, status_of(result))
   end
 
-  defp dispatch({:delete_document_update, %{uri: uri, time_us: time_us}}, _now, event_count) do
-    Logger.info("Indexing document update delete: #{uri}")
+  defp dispatch({:delete_document_update, %{uri: uri}}, _time_us, _now) do
+    Logger.info("[Indexer] document update delete: #{uri}")
     DocumentUpdateQueries.delete_document_update(uri)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.documentUpdate", :delete, :ok)
   end
 
-  # -- Directory updates --
+  defp dispatch({:upsert_directory_update, attrs}, _time_us, now) do
+    Logger.info(
+      "[Indexer] directory update: #{attrs.uri} -> #{attrs.keyring_uri} (#{attrs.action_type})"
+    )
 
-  defp dispatch({:upsert_directory_update, attrs}, now, event_count) do
-    Logger.info("Indexing directory update: #{attrs.uri} → #{attrs.keyring_uri}")
+    result =
+      DirectoryQueries.upsert_directory_update(%{
+        uri: attrs.uri,
+        keyring_uri: attrs.keyring_uri,
+        author_did: attrs.author_did,
+        action_type: attrs.action_type,
+        directory_uri: attrs.directory_uri,
+        entry_uri: attrs.entry_uri,
+        encrypted_metadata: attrs[:encrypted_metadata],
+        source_directory_uri: attrs[:source_directory_uri],
+        target_directory_uri: attrs[:target_directory_uri],
+        parent_directory_uri: attrs[:parent_directory_uri],
+        indexed_at: now
+      })
 
-    case DirectoryQueries.upsert_directory_update(%{
-           uri: attrs.uri,
-           keyring_uri: attrs.keyring_uri,
-           author_did: attrs.author_did,
-           action_type: attrs.action_type,
-           directory_uri: attrs.directory_uri,
-           entry_uri: attrs.entry_uri,
-           encrypted_metadata: attrs[:encrypted_metadata],
-           source_directory_uri: attrs[:source_directory_uri],
-           target_directory_uri: attrs[:target_directory_uri],
-           parent_directory_uri: attrs[:parent_directory_uri],
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
-
-      {:error, cs} ->
-        Logger.warning("Failed to upsert directory update #{attrs.uri}: #{inspect(cs)}")
-    end
-
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    log_query_error(result, "directory update upsert", attrs.uri)
+    emit_event_telemetry("app.opake.directoryUpdate", :upsert, status_of(result))
   end
 
-  defp dispatch({:delete_directory_update, %{uri: uri, time_us: time_us}}, _now, event_count) do
-    Logger.info("Indexing directory update delete: #{uri}")
+  defp dispatch({:delete_directory_update, %{uri: uri}}, _time_us, _now) do
+    Logger.info("[Indexer] directory update delete: #{uri}")
     DirectoryQueries.delete_directory_update(uri)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.directoryUpdate", :delete, :ok)
   end
 
-  # -- Keyring updates --
+  defp dispatch({:upsert_keyring_update, attrs}, _time_us, now) do
+    Logger.info(
+      "[Indexer] keyring update: #{attrs.uri} -> #{attrs.keyring_uri} (#{attrs.action_type})"
+    )
 
-  defp dispatch({:upsert_keyring_update, attrs}, now, event_count) do
-    Logger.info("Indexing keyring update: #{attrs.uri} → #{attrs.keyring_uri}")
+    result =
+      KeyringQueries.upsert_keyring_update(%{
+        uri: attrs.uri,
+        keyring_uri: attrs.keyring_uri,
+        author_did: attrs.author_did,
+        action_type: attrs.action_type,
+        member_did: attrs[:member_did],
+        member_public_key: attrs[:member_public_key],
+        role: attrs[:role],
+        encrypted_metadata: attrs[:encrypted_metadata],
+        indexed_at: now
+      })
 
-    case KeyringQueries.upsert_keyring_update(%{
-           uri: attrs.uri,
-           keyring_uri: attrs.keyring_uri,
-           author_did: attrs.author_did,
-           action_type: attrs.action_type,
-           member_did: attrs[:member_did],
-           member_public_key: attrs[:member_public_key],
-           role: attrs[:role],
-           encrypted_metadata: attrs[:encrypted_metadata],
-           indexed_at: now
-         }) do
-      {:ok, _} ->
-        :ok
-
-      {:error, cs} ->
-        Logger.warning("Failed to upsert keyring update #{attrs.uri}: #{inspect(cs)}")
-    end
+    log_query_error(result, "keyring update upsert", attrs.uri)
 
     # Immediate visibility: "leave" removes the member from the AppView's index
     if attrs.action_type == "leave" do
-      Logger.info("Keyring leave: #{attrs.author_did} left #{attrs.keyring_uri}")
+      Logger.info("[Indexer] keyring leave: #{attrs.author_did} left #{attrs.keyring_uri}")
       KeyringQueries.remove_member(attrs.keyring_uri, attrs.author_did)
     end
 
-    maybe_save_cursor(attrs.time_us, event_count + 1)
+    emit_event_telemetry("app.opake.keyringUpdate", :upsert, status_of(result))
   end
 
-  defp dispatch({:delete_keyring_update, %{uri: uri, time_us: time_us}}, _now, event_count) do
-    Logger.info("Indexing keyring update delete: #{uri}")
+  defp dispatch({:delete_keyring_update, %{uri: uri}}, _time_us, _now) do
+    Logger.info("[Indexer] keyring update delete: #{uri}")
     KeyringQueries.delete_keyring_update(uri)
-    maybe_save_cursor(time_us, event_count + 1)
+    emit_event_telemetry("app.opake.keyringUpdate", :delete, :ok)
   end
 
-  # -- Cursor --
+  # Heartbeat-only path: log the account config write but don't persist.
+  # Web clients write `app.opake.accountConfig` periodically as a proof-of-life
+  # signal — surfacing it here lets us see the indexer is processing real PDS
+  # writes from active sessions even when no file/workspace activity exists.
+  defp dispatch({:account_config_seen, %{did: did, op: op}}, _time_us, _now) do
+    Logger.info("[Indexer] accountConfig #{op}: #{did}")
 
-  defp maybe_save_cursor(time_us, event_count) do
-    if rem(event_count, @cursor_save_interval) == 0 do
+    action =
+      case op do
+        "create" -> :upsert
+        "update" -> :upsert
+        "delete" -> :delete
+      end
+
+    emit_event_telemetry("app.opake.accountConfig", action, :ok)
+  end
+
+  # -- Cursor save (time-throttled + monotonic) --
+  #
+  # Monotonicity matters: in `:full` mode we receive interleaved commits
+  # from thousands of PDSes. Jetstream orders events by `time_us` *globally*
+  # but retries, small server-side reorderings, and cross-PDS clock skew
+  # can still present a slightly older event to us right after a newer one.
+  # If we blindly save whatever time_us was latest in the throttle window,
+  # the persisted cursor can jump backwards — and on reconnect we'd replay
+  # everything we already processed. Save only when the new time_us is
+  # strictly greater than the last value we persisted.
+
+  defp maybe_save_cursor(nil), do: :ok
+
+  defp maybe_save_cursor(time_us) when is_integer(time_us) do
+    interval = cursor_save_interval_ms()
+    age = State.cursor_saved_age_ms()
+    throttle_ok? = interval == 0 or age == nil or age >= interval
+
+    if throttle_ok? and monotonic?(time_us) do
       CursorQueries.save_cursor(time_us)
-      Logger.debug("Saved cursor at #{time_us} (#{event_count} events)")
+      State.record_cursor_save(time_us)
+      Logger.debug(fn -> "Saved cursor at #{time_us}" end)
+
+      :telemetry.execute(
+        @telemetry_prefix ++ [:cursor_saved],
+        %{time_us: time_us},
+        %{}
+      )
     end
 
-    event_count
+    :ok
+  end
+
+  defp monotonic?(time_us) do
+    case State.last_cursor_time_us() do
+      nil -> true
+      previous when is_integer(previous) -> time_us > previous
+    end
+  end
+
+  # -- Helpers --
+
+  defp log_query_error({:ok, _}, _label, _uri), do: :ok
+
+  defp log_query_error({:error, reason}, label, uri) do
+    Logger.warning("Failed #{label} for #{uri}: #{inspect(reason)}")
+  end
+
+  defp log_query_error(_, _, _), do: :ok
+
+  defp status_of({:ok, _}), do: :ok
+  defp status_of({:error, _}), do: :error
+  defp status_of(_), do: :ok
+
+  defp worst_status(results) do
+    if Enum.any?(results, &match?({:error, _}, &1)), do: :error, else: :ok
+  end
+
+  defp emit_event_telemetry(collection, action, status) do
+    :telemetry.execute(
+      @telemetry_prefix ++ [:event],
+      %{count: 1},
+      %{collection: collection, action: action, status: status}
+    )
   end
 end

@@ -14,17 +14,39 @@ defmodule OpakeAppview.Jetstream.EventPropertyTest do
     :delete_grant,
     :upsert_keyring,
     :delete_keyring,
-    :upsert_workspace_document,
-    :delete_workspace_document,
+    :upsert_directory,
+    :delete_directory,
+    :upsert_document,
+    :delete_document,
     :upsert_document_update,
     :delete_document_update,
-    :keyring_leave
+    :upsert_directory_update,
+    :delete_directory_update,
+    :upsert_keyring_update,
+    :delete_keyring_update
   ]
+
+  defp valid_result?(result) do
+    case result do
+      {time_us, collection, :ignore}
+      when (is_integer(time_us) or is_nil(time_us)) and
+             (is_binary(collection) or is_nil(collection)) ->
+        true
+
+      {time_us, collection, {tag, attrs}}
+      when (is_integer(time_us) or is_nil(time_us)) and
+             (is_binary(collection) or is_nil(collection)) and
+             is_map(attrs) ->
+        tag in @valid_event_tags
+
+      _ ->
+        false
+    end
+  end
 
   property "parse/1 never crashes on arbitrary binaries" do
     check all(input <- binary()) do
-      result = Event.parse(input)
-      assert result == :ignore or match?({tag, _} when tag in @valid_event_tags, result)
+      assert valid_result?(Event.parse(input))
     end
   end
 
@@ -45,8 +67,7 @@ defmodule OpakeAppview.Jetstream.EventPropertyTest do
               )
           ) do
       json = Jason.encode!(map)
-      result = Event.parse(json)
-      assert result == :ignore or match?({tag, _} when tag in @valid_event_tags, result)
+      assert valid_result?(Event.parse(json))
     end
   end
 
@@ -77,7 +98,10 @@ defmodule OpakeAppview.Jetstream.EventPropertyTest do
         })
 
       result = Event.parse(json)
-      assert result == :ignore or match?({:upsert_grant, _}, result)
+      assert valid_result?(result)
+
+      assert match?({1_709_330_400_000_000, "app.opake.grant", :ignore}, result) or
+               match?({1_709_330_400_000_000, "app.opake.grant", {:upsert_grant, _}}, result)
     end
   end
 

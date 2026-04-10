@@ -15,5 +15,11 @@ config :opake_appview, OpakeAppviewWeb.Endpoint,
 
 config :opake_appview, :indexer_enabled, false
 
+# Tests don't talk to Jetstream — they call Indexer.process_message
+# directly. Make cursor saves immediate so the existing pipeline tests
+# behave identically to before the time-based throttling.
+config :opake_appview, :cursor_save_interval_ms, 0
+config :opake_appview, :firehose_mode, {:custom, []}
+
 config :logger, level: :warning
 config :phoenix, :plug_init_mode, :runtime

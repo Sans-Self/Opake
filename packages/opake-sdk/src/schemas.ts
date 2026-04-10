@@ -93,11 +93,7 @@ export const workspaceSyncResultSchema = z
 
 export type WorkspaceSyncResult = z.output<typeof workspaceSyncResultSchema>;
 
-export const syncDetailedResultSchema = z
-  .object({
-    workspaces: z.array(workspaceSyncResultSchema),
-  })
-  .transform((r) => r.workspaces);
+export const syncDetailedResultSchema = z.array(workspaceSyncResultSchema);
 
 // ---------------------------------------------------------------------------
 // File operations
@@ -176,11 +172,11 @@ const directoryInfoSchema = z
 
 export const directoryTreeSnapshotSchema = z
   .object({
-    root_uri: z.string().nullable(),
+    root_uri: z.string().nullish(),
     directories: z.record(z.string(), directoryInfoSchema),
   })
   .transform((r) => ({
-    rootUri: r.root_uri,
+    rootUri: r.root_uri ?? null,
     directories: r.directories,
   }));
 

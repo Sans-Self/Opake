@@ -45,8 +45,6 @@ function kindMeta(kind: DaemonTask["kind"]): {
   detail?: string;
 } {
   switch (kind.type) {
-    case "sessionRefresh":
-      return { label: "Session refresh", icon: ArrowsClockwiseIcon };
     case "pairCleanup":
       return {
         label: "Pair cleanup",
@@ -63,8 +61,8 @@ function kindMeta(kind: DaemonTask["kind"]): {
         icon: ArrowsClockwiseIcon,
         detail: `${kind.proposalsApplied} applied`,
       };
-    case "reEncryption":
-      return { label: "Re-encryption", icon: ShieldCheckIcon };
+    case "unknown":
+      return { label: "Background task", icon: ArrowsClockwiseIcon };
   }
 }
 
@@ -83,23 +81,6 @@ function TaskCard({ task }: { readonly task: DaemonTask }) {
 
       {kindDetail && <p className="text-caption text-text-faint mt-1">{kindDetail}</p>}
 
-      {task.progress && statusIs(task.status, "running") && (
-        <div className="mt-2">
-          <div className="text-caption text-text-faint mb-1 flex justify-between">
-            <span>
-              {task.progress.completed}/{task.progress.completed + task.progress.remaining}{" "}
-              documents
-            </span>
-            <span>{formatBytes(task.progress.bytesProcessed)}</span>
-          </div>
-          <progress
-            className="progress progress-primary w-full"
-            value={task.progress.completed}
-            max={task.progress.completed + task.progress.remaining}
-          />
-        </div>
-      )}
-
       {typeof task.status === "object" && "failed" in task.status && (
         <p className="text-error text-caption mt-1">{task.status.failed}</p>
       )}
@@ -112,27 +93,15 @@ function TaskCard({ task }: { readonly task: DaemonTask }) {
 }
 
 function statusLabel(s: TaskStatus): string {
-  if (s === "pending") return "Pending";
   if (s === "running") return "Running";
   if (s === "completed") return "Completed";
   return "Failed";
 }
 
 function statusColorClass(s: TaskStatus): string {
-  if (s === "pending") return "badge-ghost";
   if (s === "running") return "badge-primary";
   if (s === "completed") return "badge-success";
   return "badge-error";
-}
-
-function statusIs(s: TaskStatus, check: string): boolean {
-  return s === check;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
-  return `${Math.round(bytes / (1024 * 1024))}MB`;
 }
 
 export const Route = createLazyFileRoute("/cabinet/tasks")({

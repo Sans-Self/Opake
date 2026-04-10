@@ -1,24 +1,51 @@
 defmodule OpakeAppviewWeb.HealthController do
   @moduledoc """
-  Unauthenticated health endpoint. Returns indexer connection state, cursor
-  position, and cursor lag. Intentionally omits row counts — those are internal
-  metrics, not public health signals.
+  Unauthenticated health endpoint. Surfaces enough indexer state for an
+  operator (or a monitoring probe) to distinguish "WS connected and
+  flowing" from "WS connected but idle" from "WS dead". Row counts are
+  intentionally omitted — those are internal metrics, not public signals.
+
+  ## Response shape
+
+      {
+        "indexer_connected": true,
+        "cursor_time": "2026-04-06T12:34:56.789Z",
+        "cursor_age_secs": 2,
+        "events": {
+          "total": 12470,
+          "indexed": 14,
+          "ignored": 12456,
+          "last_event_age_ms": 320
+        },
+        "per_collection": {
+          "app.bsky.feed.post": 11200,
+          "app.opake.document": 4
+        }
+      }
   """
 
   use OpakeAppviewWeb, :controller
 
-  alias OpakeAppview.Indexer
+  alias OpakeAppview.Indexer.State
   alias OpakeAppview.Queries.CursorQueries
 
   @micros_per_second 1_000_000
 
   def index(conn, _params) do
+    snapshot = State.snapshot()
     cursor = CursorQueries.load_cursor()
 
     response = %{
-      indexer_connected: Indexer.connected?(),
+      indexer_connected: snapshot.connected,
       cursor_time: format_cursor_time(cursor),
-      cursor_age_secs: cursor_age_secs(cursor)
+      cursor_age_secs: cursor_age_secs(cursor),
+      events: %{
+        total: snapshot.total,
+        indexed: snapshot.indexed,
+        ignored: snapshot.ignored,
+        last_event_age_ms: snapshot.last_event_age_ms
+      },
+      per_collection: snapshot.per_collection
     }
 
     json(conn, response)

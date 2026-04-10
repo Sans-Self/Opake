@@ -15,6 +15,7 @@ defmodule OpakeAppview.Application do
   @impl true
   def start(_type, _args) do
     OpakeAppview.Indexer.init_state()
+    OpakeAppview.Jetstream.Compression.init()
 
     children =
       [
@@ -30,7 +31,11 @@ defmodule OpakeAppview.Application do
 
   defp maybe_indexer_children do
     if Application.get_env(:opake_appview, :indexer_enabled, true) do
-      [OpakeAppview.TombstoneCleanup, OpakeAppview.Jetstream.Consumer]
+      [
+        OpakeAppview.TombstoneCleanup,
+        OpakeAppview.Jetstream.Consumer,
+        OpakeAppview.Indexer.Heartbeat
+      ]
     else
       []
     end

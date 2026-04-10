@@ -7,7 +7,10 @@ import {
   type CreateWorkspaceDialogHandle,
 } from "@/components/cabinet/CreateWorkspaceDialog";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useAuthStore } from "@/stores/auth";
+import { getOpake, useAuthStore } from "@/stores/auth";
+import { taskStore } from "@/stores/tasks";
+import { startDaemon } from "@opake/daemon";
+import { Opake } from "@opake/sdk";
 import { toastError, toastSuccess } from "@/stores/toast";
 
 function CabinetLayout() {
@@ -17,6 +20,22 @@ function CabinetLayout() {
   // Load workspaces on mount (deduped by module-level promise)
   useEffect(() => {
     void useWorkspaceStore.getState().loadWorkspaces();
+  }, []);
+
+  // Start background daemon — Web Locks ensures only one tab is leader
+  useEffect(() => {
+    // eslint-disable-next-line functional/no-let -- handle assigned inside async IIFE
+    let handle: ReturnType<typeof startDaemon> | null = null;
+    void Opake.taskDefs().then((defs) => {
+      handle = startDaemon(getOpake(), defs, taskStore, {
+        onWorkspaceUpdated: () => void useWorkspaceStore.getState().loadWorkspaces(),
+        onSessionExpired: () => {
+          handle?.stop();
+          void useAuthStore.getState().logout();
+        },
+      });
+    });
+    return () => handle?.stop();
   }, []);
 
   // Reset workspace store only when session transitions away from active

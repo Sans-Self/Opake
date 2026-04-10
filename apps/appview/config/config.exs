@@ -2,7 +2,16 @@ import Config
 
 config :opake_appview,
   ecto_repos: [OpakeAppview.Repo],
-  generators: [timestamp_type: :utc_datetime_usec]
+  generators: [timestamp_type: :utc_datetime_usec],
+  # Subscription mode for the Jetstream consumer.
+  # See OpakeAppview.Jetstream.Consumer for the full set of options.
+  firehose_mode: :full,
+  # zstd-compressed binary frames using the vendored bsky dictionary.
+  # Set to :none to receive raw JSON instead (debugging only).
+  compression: :zstd,
+  # Persist the cursor to Postgres at most once per N milliseconds, no
+  # matter how many events flow through the indexer in between.
+  cursor_save_interval_ms: 5_000
 
 config :opake_appview, OpakeAppviewWeb.Endpoint,
   url: [host: "localhost"],

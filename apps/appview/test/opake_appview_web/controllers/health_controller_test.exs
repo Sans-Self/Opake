@@ -10,9 +10,17 @@ defmodule OpakeAppviewWeb.HealthControllerTest do
     assert response["indexer_connected"] == false
     assert response["cursor_time"] == nil
     assert response["cursor_age_secs"] == nil
+
+    # New fields surfaced by the indexer state ETS table — present even
+    # when the indexer is disabled.
+    assert is_map(response["events"])
+    assert is_integer(response["events"]["total"])
+    assert is_integer(response["events"]["indexed"])
+    assert is_integer(response["events"]["ignored"])
+    assert is_map(response["per_collection"])
   end
 
-  test "health omits counts", %{conn: conn} do
+  test "health omits row counts (those are internal metrics)", %{conn: conn} do
     {:ok, _} =
       GrantQueries.upsert_grant(%{
         uri: "at://did:plc:owner/app.opake.grant/3abc",

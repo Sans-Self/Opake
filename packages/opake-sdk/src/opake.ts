@@ -693,6 +693,57 @@ export class Opake {
   }
 
   // ---------------------------------------------------------------------------
+  // Invitations
+  // ---------------------------------------------------------------------------
+
+  /** Create a workspace invitation. Returns `{ uri, token }`. */
+  @wrapWasmErrors @withTokenGuard
+  createInvitation(keyringUri: string, role: string): Promise<{ uri: string; token: string }> {
+    return this.requireContext().createInvitation(keyringUri, role) as Promise<{ uri: string; token: string }>;
+  }
+
+  /** List all invitations on this account. */
+  @wrapWasmErrors @withTokenGuard
+  async listInvitations(): Promise<readonly import("./types").InvitationEntry[]> {
+    const raw = await this.requireContext().listInvitations() as readonly Record<string, unknown>[];
+    return raw.map((r) => ({
+      uri: r.uri as string,
+      target: r.target as string,
+      invitationType: (r.invitation_type ?? r.invitationType) as string,
+      role: (r.role ?? null) as string | null,
+      token: r.token as string,
+      maxUses: (r.max_uses ?? r.maxUses ?? null) as number | null,
+      uses: (r.uses ?? 0) as number,
+      expiresAt: (r.expires_at ?? r.expiresAt ?? null) as string | null,
+      createdAt: (r.created_at ?? r.createdAt) as string,
+    }));
+  }
+
+  /** Revoke (delete) an invitation. */
+  @wrapWasmErrors @withTokenGuard
+  revokeInvitation(invitationUri: string): Promise<void> {
+    return this.requireContext().revokeInvitation(invitationUri);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Daemon task definitions
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Load background task definitions from the core registry.
+   *
+   * Returns the canonical task list with camelCase field names, excluding
+   * `session-refresh` (handled by the SDK's `@withTokenGuard`).
+   */
+  static async taskDefs(): Promise<readonly import("./types").TaskDef[]> {
+    const wasm = await initWasm();
+    const raw = wasm.daemonTaskDefs() as readonly { name: string; interval_seconds: number; description: string }[];
+    return raw
+      .filter((t) => t.name !== "session-refresh")
+      .map((t) => ({ name: t.name, intervalSeconds: t.interval_seconds, description: t.description }));
+  }
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 

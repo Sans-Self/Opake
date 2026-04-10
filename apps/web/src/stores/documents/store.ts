@@ -11,7 +11,7 @@ import { immer } from "zustand/middleware/immer";
 import type { FileManager, DownloadResult, DocumentMetadata } from "@opake/sdk";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import type { FileItem } from "@/components/cabinet/types";
-import { findParentUri, ancestorsOf } from "@/lib/directoryTree";
+import { findParentUri, ancestorsOf, resolveDirectoryFromSplat } from "@/lib/directoryTree";
 import { mimeTypeToFileType, formatFileSize, formatRelativeDate } from "@/lib/format";
 import { rkeyFromUri } from "@/lib/atUri";
 import { getOpake } from "@/stores/auth";
@@ -168,7 +168,7 @@ interface DocumentsState {
 interface DocumentsActions {
   open(context: FileContext): Promise<void>;
   close(): void;
-  loadDirectory(directoryUri: string | null): Promise<void>;
+  loadDirectory(directoryUri: string | null, pathSegments?: readonly string[]): Promise<void>;
 
   // Mutations (serialized via mutationChain)
   uploadFile(
@@ -340,7 +340,7 @@ export const useDocumentsStore = create<DocumentsStore>()(
       });
     },
 
-    async loadDirectory(directoryUri) {
+    async loadDirectory(directoryUri, pathSegments) {
       if (!activeManager) return;
 
       const gen = generation;
@@ -348,6 +348,15 @@ export const useDocumentsStore = create<DocumentsStore>()(
 
       try {
         const fm = activeManager;
+
+        // When pathSegments are provided, we need the tree first to resolve
+        // rkey path → directory URI. Load tree with root metadata, then
+        // re-fetch metadata for the resolved directory if different.
+        if (pathSegments && pathSegments.length > 0 && !directoryUri) {
+          const { snapshot: tree } = await fm.syncAndLoadTree("");
+          if (gen !== generation) return;
+          directoryUri = resolveDirectoryFromSplat(tree, pathSegments);
+        }
 
         // Single call: sync proposals + load tree + resolve metadata for target
         const targetUri = directoryUri ?? "";
@@ -437,10 +446,13 @@ export const useDocumentsStore = create<DocumentsStore>()(
 
     async moveEntry(entryUri, targetDirectoryUri) {
       await runMutation("documents-move", "Moved", "Move failed", async (fm) => {
-        const snapshot = get().treeSnapshot;
-        const sourceUri = snapshot ? findParentUri(snapshot, entryUri) : null;
+        // Use the current directory as source — that's the directory being viewed,
+        // so the entry is guaranteed to be there. Avoids stale-snapshot mismatches
+        // where findParentUri returns a directory the PDS no longer agrees with.
+        const { currentDirectoryUri, treeSnapshot } = get();
+        const sourceUri = currentDirectoryUri ?? treeSnapshot?.rootUri;
         if (!sourceUri) throw new Error("Cannot determine source directory");
-        const target = targetDirectoryUri ?? snapshot?.rootUri;
+        const target = targetDirectoryUri ?? treeSnapshot?.rootUri;
         if (!target) throw new Error("No target directory");
         await fm.move(entryUri, sourceUri, target);
       });

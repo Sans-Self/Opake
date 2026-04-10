@@ -136,7 +136,15 @@ impl LoginCommand {
         ensure_identity_and_publish(&mut client, storage, session.did(), force).await?;
         println!("Logged in as {}", session.handle());
 
-        Ok(Some(session))
+        // Return the client's current session, not the original. If
+        // ensure_identity_and_publish triggered a refresh, the original
+        // session is stale and persisting it would lock the user out.
+        let final_session = client
+            .session()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("XRPC client lost its session during login"))?;
+
+        Ok(Some(final_session))
     }
 }
 

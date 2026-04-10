@@ -33,6 +33,7 @@ defmodule OpakeAppview.MixProject do
       {:jason, "~> 1.4"},
       {:bandit, "~> 1.6"},
       {:websockex, "~> 0.4.3"},
+      {:ezstd, "~> 1.2"},
       {:hammer, "~> 6.2"},
       {:req, "~> 0.5"},
       {:mox, "~> 1.2", only: :test},

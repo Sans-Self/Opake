@@ -2,9 +2,25 @@ defmodule OpakeAppview.Jetstream.Event do
   @moduledoc """
   Parses raw Jetstream JSON messages into tagged tuples for the indexer.
 
-  Recognized collections: `app.opake.grant`, `app.opake.keyring`,
-  `app.opake.directory`, and `app.opake.document`. Everything else
-  (identity events, unknown collections, malformed JSON) returns `:ignore`.
+  ## Return shape
+
+  `parse/1` always returns `{time_us, collection, payload}` where:
+
+    * `time_us` — the event's `time_us` field if present, else `nil`
+    * `collection` — the commit's collection string if present, else `nil`
+      (set even for collections we ignore, so the indexer can bump
+      per-collection counters without re-decoding)
+    * `payload` — one of the tagged event tuples below, or `:ignore`
+
+  Returning these three pieces from a single decode means the indexer
+  never has to re-parse the JSON to advance its cursor or update its
+  per-collection counters.
+
+  ## Recognized collections
+
+  Seven `app.opake.*` collections (grant, keyring, document, directory,
+  documentUpdate, directoryUpdate, keyringUpdate). Everything else
+  (identity events, bsky lexicons, malformed JSON) returns `:ignore`.
   """
 
   @grant_collection "app.opake.grant"
@@ -14,8 +30,9 @@ defmodule OpakeAppview.Jetstream.Event do
   @document_update_collection "app.opake.documentUpdate"
   @directory_update_collection "app.opake.directoryUpdate"
   @keyring_update_collection "app.opake.keyringUpdate"
+  @account_config_collection "app.opake.accountConfig"
 
-  @type event ::
+  @type event_payload ::
           {:upsert_grant, map()}
           | {:delete_grant, map()}
           | {:upsert_keyring, map()}
@@ -30,89 +47,123 @@ defmodule OpakeAppview.Jetstream.Event do
           | {:delete_directory_update, map()}
           | {:upsert_keyring_update, map()}
           | {:delete_keyring_update, map()}
+          | {:account_config_seen, map()}
           | :ignore
 
-  @spec parse(binary()) :: event()
+  @type result ::
+          {time_us :: integer() | nil, collection :: String.t() | nil, event_payload()}
+
+  @doc """
+  Parses a Jetstream WebSocket frame.
+
+  Always decodes the JSON exactly once and returns
+  `{time_us, collection, payload}`. Time_us and collection may both be
+  `nil` for malformed JSON or non-commit events.
+  """
+  @spec parse(binary()) :: result()
   def parse(json) when is_binary(json) do
     case Jason.decode(json) do
-      {:ok, payload} -> parse_payload(payload)
-      {:error, _} -> :ignore
+      {:ok, payload} ->
+        time_us = extract_time_us(payload)
+        {collection, parsed} = parse_payload(payload)
+        {time_us, collection, parsed}
+
+      {:error, _} ->
+        {nil, nil, :ignore}
     end
   end
+
+  # -- Internal --
+
+  defp extract_time_us(%{"time_us" => t}) when is_integer(t), do: t
+  defp extract_time_us(_), do: nil
 
   defp parse_payload(%{
          "kind" => "commit",
          "did" => did,
-         "time_us" => time_us,
          "commit" => commit
        }) do
-    parse_commit(did, time_us, commit)
+    parse_commit(did, commit)
   end
 
-  defp parse_payload(_), do: :ignore
+  defp parse_payload(_), do: {nil, :ignore}
 
   defp parse_commit(
          did,
-         time_us,
          %{
            "operation" => operation,
            "collection" => collection,
            "rkey" => rkey
          } = commit
-       ) do
+       )
+       when is_binary(collection) do
     uri = "at://#{did}/#{collection}/#{rkey}"
 
+    parsed = parse_commit_op(uri, did, collection, operation, commit)
+    {collection, parsed}
+  end
+
+  defp parse_commit(_, _), do: {nil, :ignore}
+
+  defp parse_commit_op(uri, did, collection, operation, commit) do
     case {collection, operation} do
       {@grant_collection, op} when op in ["create", "update"] ->
-        parse_grant_upsert(uri, did, time_us, commit)
+        parse_grant_upsert(uri, did, commit)
 
       {@grant_collection, "delete"} ->
-        {:delete_grant, %{uri: uri, time_us: time_us}}
+        {:delete_grant, %{uri: uri}}
 
       {@keyring_collection, op} when op in ["create", "update"] ->
-        parse_keyring_upsert(uri, did, time_us, commit)
+        parse_keyring_upsert(uri, did, commit)
 
       {@keyring_collection, "delete"} ->
-        {:delete_keyring, %{uri: uri, time_us: time_us}}
+        {:delete_keyring, %{uri: uri}}
 
       {@directory_collection, op} when op in ["create", "update"] ->
-        parse_directory_upsert(uri, did, time_us, commit)
+        parse_directory_upsert(uri, did, commit)
 
       {@directory_collection, "delete"} ->
-        {:delete_directory, %{directory_uri: uri, time_us: time_us}}
+        {:delete_directory, %{directory_uri: uri}}
 
       {@document_collection, op} when op in ["create", "update"] ->
-        parse_document_upsert(uri, did, time_us, commit)
+        parse_document_upsert(uri, did, commit)
 
       {@document_collection, "delete"} ->
-        {:delete_document, %{document_uri: uri, time_us: time_us}}
+        {:delete_document, %{document_uri: uri}}
 
       {@document_update_collection, op} when op in ["create", "update"] ->
-        parse_document_update_upsert(uri, did, time_us, commit)
+        parse_document_update_upsert(uri, did, commit)
 
       {@document_update_collection, "delete"} ->
-        {:delete_document_update, %{uri: uri, time_us: time_us}}
+        {:delete_document_update, %{uri: uri}}
 
       {@directory_update_collection, op} when op in ["create", "update"] ->
-        parse_directory_update_upsert(uri, did, time_us, commit)
+        parse_directory_update_upsert(uri, did, commit)
 
       {@directory_update_collection, "delete"} ->
-        {:delete_directory_update, %{uri: uri, time_us: time_us}}
+        {:delete_directory_update, %{uri: uri}}
 
       {@keyring_update_collection, op} when op in ["create", "update"] ->
-        parse_keyring_update_upsert(uri, did, time_us, commit)
+        parse_keyring_update_upsert(uri, did, commit)
 
       {@keyring_update_collection, "delete"} ->
-        {:delete_keyring_update, %{uri: uri, time_us: time_us}}
+        {:delete_keyring_update, %{uri: uri}}
+
+      # Heartbeat signal: web app writes accountConfig periodically. Logged
+      # only — not persisted to the appview DB. Provides a regular proof-of-life
+      # for the indexer when no real Opake activity is happening.
+      {@account_config_collection, op} when op in ["create", "update"] ->
+        {:account_config_seen, %{did: did, op: op}}
+
+      {@account_config_collection, "delete"} ->
+        {:account_config_seen, %{did: did, op: "delete"}}
 
       _ ->
         :ignore
     end
   end
 
-  defp parse_commit(_, _, _), do: :ignore
-
-  defp parse_grant_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+  defp parse_grant_upsert(uri, did, %{"record" => record}) when is_map(record) do
     recipient = record["recipient"]
     document = record["document"]
     created_at = record["createdAt"]
@@ -124,17 +175,16 @@ defmodule OpakeAppview.Jetstream.Event do
          owner_did: did,
          recipient_did: recipient,
          document_uri: document,
-         created_at: created_at,
-         time_us: time_us
+         created_at: created_at
        }}
     else
       :ignore
     end
   end
 
-  defp parse_grant_upsert(_, _, _, _), do: :ignore
+  defp parse_grant_upsert(_, _, _), do: :ignore
 
-  defp parse_keyring_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+  defp parse_keyring_upsert(uri, did, %{"record" => record}) when is_map(record) do
     members = record["members"] || []
 
     member_entries =
@@ -153,14 +203,13 @@ defmodule OpakeAppview.Jetstream.Event do
        member_entries: member_entries,
        rotation: record["rotation"],
        encrypted_metadata: record["encryptedMetadata"],
-       created_at: record["createdAt"],
-       time_us: time_us
+       created_at: record["createdAt"]
      }}
   end
 
-  defp parse_keyring_upsert(_, _, _, _), do: :ignore
+  defp parse_keyring_upsert(_, _, _), do: :ignore
 
-  defp parse_directory_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+  defp parse_directory_upsert(uri, did, %{"record" => record}) when is_map(record) do
     key_wrapping = record["keyWrapping"]
     encrypted_metadata = record["encryptedMetadata"]
 
@@ -183,14 +232,13 @@ defmodule OpakeAppview.Jetstream.Event do
        owner_did: did,
        entries: entries,
        encrypted_metadata: encrypted_metadata,
-       key_wrapping: key_wrapping,
-       time_us: time_us
+       key_wrapping: key_wrapping
      }}
   end
 
-  defp parse_directory_upsert(_, _, _, _), do: :ignore
+  defp parse_directory_upsert(_, _, _), do: :ignore
 
-  defp parse_document_upsert(uri, did, time_us, %{"record" => record}) when is_map(record) do
+  defp parse_document_upsert(uri, did, %{"record" => record}) when is_map(record) do
     encryption = record["encryption"]
     encrypted_metadata = record["encryptedMetadata"]
     blob = record["blob"]
@@ -213,14 +261,13 @@ defmodule OpakeAppview.Jetstream.Event do
        rotation: rotation,
        encrypted_metadata: encrypted_metadata,
        encryption: encryption,
-       blob_ref: blob,
-       time_us: time_us
+       blob_ref: blob
      }}
   end
 
-  defp parse_document_upsert(_, _, _, _), do: :ignore
+  defp parse_document_upsert(_, _, _), do: :ignore
 
-  defp parse_document_update_upsert(uri, did, time_us, %{"record" => record})
+  defp parse_document_update_upsert(uri, did, %{"record" => record})
        when is_map(record) do
     document = record["document"]
     supersedes = record["supersedes"]
@@ -231,23 +278,23 @@ defmodule OpakeAppview.Jetstream.Event do
          uri: uri,
          author_did: did,
          document_uri: document,
-         supersedes_uri: supersedes,
-         time_us: time_us
+         supersedes_uri: supersedes
        }}
     else
       :ignore
     end
   end
 
-  defp parse_document_update_upsert(_, _, _, _), do: :ignore
+  defp parse_document_update_upsert(_, _, _), do: :ignore
 
-  defp parse_directory_update_upsert(uri, did, time_us, %{"record" => record})
+  defp parse_directory_update_upsert(uri, did, %{"record" => record})
        when is_map(record) do
     keyring = record["keyring"]
     action_type = record["actionType"]
 
-    valid_fields = is_binary(keyring) and is_binary(action_type) and
-      valid_directory_update_fields?(action_type, record)
+    valid_fields =
+      is_binary(keyring) and is_binary(action_type) and
+        valid_directory_update_fields?(action_type, record)
 
     if not valid_fields and is_binary(action_type) do
       require Logger
@@ -266,15 +313,14 @@ defmodule OpakeAppview.Jetstream.Event do
          encrypted_metadata: record["encryptedMetadata"],
          source_directory_uri: record["sourceDirectory"],
          target_directory_uri: record["targetDirectory"],
-         parent_directory_uri: record["parentDirectory"],
-         time_us: time_us
+         parent_directory_uri: record["parentDirectory"]
        }}
     else
       :ignore
     end
   end
 
-  defp parse_directory_update_upsert(_, _, _, _), do: :ignore
+  defp parse_directory_update_upsert(_, _, _), do: :ignore
 
   # Validate that action-specific required fields are present (camelCase wire format).
   # Rejects records with snake_case fields from old WASM builds.
@@ -298,7 +344,7 @@ defmodule OpakeAppview.Jetstream.Event do
 
   defp valid_directory_update_fields?(_, _), do: true
 
-  defp parse_keyring_update_upsert(uri, did, time_us, %{"record" => record})
+  defp parse_keyring_update_upsert(uri, did, %{"record" => record})
        when is_map(record) do
     keyring = record["keyring"]
     action_type = record["actionType"]
@@ -319,13 +365,12 @@ defmodule OpakeAppview.Jetstream.Event do
          member_did: record["memberDid"],
          member_public_key: member_public_key,
          role: record["role"],
-         encrypted_metadata: record["encryptedMetadata"],
-         time_us: time_us
+         encrypted_metadata: record["encryptedMetadata"]
        }}
     else
       :ignore
     end
   end
 
-  defp parse_keyring_update_upsert(_, _, _, _), do: :ignore
+  defp parse_keyring_update_upsert(_, _, _), do: :ignore
 end

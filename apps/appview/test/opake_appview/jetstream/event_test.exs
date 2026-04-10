@@ -135,24 +135,28 @@ defmodule OpakeAppview.Jetstream.EventTest do
   test "parses grant create" do
     json = grant_event_json("create")
 
-    assert {:upsert_grant, attrs} = Event.parse(json)
-    assert attrs.time_us == 1_709_330_400_000_000
+    assert {1_709_330_400_000_000, "app.opake.grant", {:upsert_grant, attrs}} =
+             Event.parse(json)
+
     assert attrs.uri == "at://did:plc:owner123/app.opake.grant/3abc"
     assert attrs.owner_did == "did:plc:owner123"
     assert attrs.recipient_did == "did:plc:recipient456"
     assert attrs.document_uri == "at://did:plc:owner123/app.opake.document/3xyz"
     assert attrs.created_at == "2026-03-01T12:00:00Z"
+    refute Map.has_key?(attrs, :time_us)
   end
 
   test "parses grant update" do
     json = grant_event_json("update")
-    assert {:upsert_grant, _attrs} = Event.parse(json)
+    assert {_time, "app.opake.grant", {:upsert_grant, _attrs}} = Event.parse(json)
   end
 
   test "parses grant delete" do
     json = delete_event_json("app.opake.grant", "3abc")
 
-    assert {:delete_grant, %{uri: uri}} = Event.parse(json)
+    assert {1_709_330_600_000_000, "app.opake.grant", {:delete_grant, %{uri: uri}}} =
+             Event.parse(json)
+
     assert uri == "at://did:plc:owner123/app.opake.grant/3abc"
   end
 
@@ -161,21 +165,22 @@ defmodule OpakeAppview.Jetstream.EventTest do
   test "parses keyring create" do
     json = keyring_event_json("create")
 
-    assert {:upsert_keyring, attrs} = Event.parse(json)
-    assert attrs.time_us == 1_709_330_500_000_000
+    assert {1_709_330_500_000_000, "app.opake.keyring", {:upsert_keyring, attrs}} =
+             Event.parse(json)
+
     assert attrs.uri == "at://did:plc:owner123/app.opake.keyring/3def"
     assert attrs.owner_did == "did:plc:owner123"
 
-    assert attrs.member_entries == [
+    assert [
              %{did: "did:plc:alice", role: "manager"},
              %{did: "did:plc:bob", role: "editor"}
-           ]
+           ] = Enum.map(attrs.member_entries, &Map.take(&1, [:did, :role]))
   end
 
   test "parses keyring delete" do
     json = delete_event_json("app.opake.keyring", "3def")
 
-    assert {:delete_keyring, %{uri: uri}} = Event.parse(json)
+    assert {_time, "app.opake.keyring", {:delete_keyring, %{uri: uri}}} = Event.parse(json)
     assert uri == "at://did:plc:owner123/app.opake.keyring/3def"
   end
 
@@ -193,7 +198,7 @@ defmodule OpakeAppview.Jetstream.EventTest do
 
     json = directory_event_json("create", key_wrapping)
 
-    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert {_time, "app.opake.directory", {:upsert_directory, attrs}} = Event.parse(json)
     assert attrs.directory_uri == "at://did:plc:owner123/app.opake.directory/3dir"
     assert attrs.owner_did == "did:plc:owner123"
     assert attrs.keyring_uri == "at://did:plc:owner123/app.opake.keyring/3def"
@@ -212,7 +217,7 @@ defmodule OpakeAppview.Jetstream.EventTest do
 
     json = directory_event_json("create", key_wrapping)
 
-    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert {_time, "app.opake.directory", {:upsert_directory, attrs}} = Event.parse(json)
     assert attrs.directory_uri == "at://did:plc:owner123/app.opake.directory/3dir"
     assert attrs.owner_did == "did:plc:owner123"
     assert attrs.keyring_uri == nil
@@ -223,7 +228,8 @@ defmodule OpakeAppview.Jetstream.EventTest do
   test "parses directory delete" do
     json = delete_event_json("app.opake.directory", "3dir")
 
-    assert {:delete_directory, %{directory_uri: uri}} = Event.parse(json)
+    assert {_time, "app.opake.directory", {:delete_directory, %{directory_uri: uri}}} =
+             Event.parse(json)
     assert uri == "at://did:plc:owner123/app.opake.directory/3dir"
   end
 
@@ -245,7 +251,7 @@ defmodule OpakeAppview.Jetstream.EventTest do
         }
       })
 
-    assert {:upsert_directory, attrs} = Event.parse(json)
+    assert {_time, "app.opake.directory", {:upsert_directory, attrs}} = Event.parse(json)
     assert attrs.entries == ["at://valid", "at://also-valid"]
   end
 
@@ -263,7 +269,7 @@ defmodule OpakeAppview.Jetstream.EventTest do
 
     json = document_event_json("create", encryption)
 
-    assert {:upsert_document, attrs} = Event.parse(json)
+    assert {_time, "app.opake.document", {:upsert_document, attrs}} = Event.parse(json)
     assert attrs.document_uri == "at://did:plc:owner123/app.opake.document/3doc"
     assert attrs.owner_did == "did:plc:owner123"
     assert attrs.keyring_uri == "at://did:plc:owner123/app.opake.keyring/3def"
@@ -284,7 +290,7 @@ defmodule OpakeAppview.Jetstream.EventTest do
 
     json = document_event_json("create", encryption)
 
-    assert {:upsert_document, attrs} = Event.parse(json)
+    assert {_time, "app.opake.document", {:upsert_document, attrs}} = Event.parse(json)
     assert attrs.document_uri == "at://did:plc:owner123/app.opake.document/3doc"
     assert attrs.owner_did == "did:plc:owner123"
     assert attrs.keyring_uri == nil
@@ -295,7 +301,8 @@ defmodule OpakeAppview.Jetstream.EventTest do
   test "parses document delete" do
     json = delete_event_json("app.opake.document", "3doc")
 
-    assert {:delete_document, %{document_uri: uri}} = Event.parse(json)
+    assert {_time, "app.opake.document", {:delete_document, %{document_uri: uri}}} =
+             Event.parse(json)
     assert uri == "at://did:plc:owner123/app.opake.document/3doc"
   end
 
@@ -303,10 +310,10 @@ defmodule OpakeAppview.Jetstream.EventTest do
 
   test "ignores identity events" do
     json = Jason.encode!(%{"kind" => "identity", "did" => "did:plc:test"})
-    assert :ignore = Event.parse(json)
+    assert {nil, nil, :ignore} = Event.parse(json)
   end
 
-  test "ignores unknown collections" do
+  test "ignores unknown collections but extracts time_us and collection so cursor + counters advance" do
     json =
       Jason.encode!(%{
         "did" => "did:plc:test",
@@ -321,14 +328,14 @@ defmodule OpakeAppview.Jetstream.EventTest do
         }
       })
 
-    assert :ignore = Event.parse(json)
+    assert {1_000_000, "app.bsky.feed.post", :ignore} = Event.parse(json)
   end
 
-  test "ignores malformed json" do
-    assert :ignore = Event.parse("not json at all")
+  test "ignores malformed json with nil time_us and nil collection" do
+    assert {nil, nil, :ignore} = Event.parse("not json at all")
   end
 
-  test "ignores grant with invalid record" do
+  test "ignores grant with invalid record but reports its collection" do
     json =
       Jason.encode!(%{
         "did" => "did:plc:owner123",
@@ -343,6 +350,6 @@ defmodule OpakeAppview.Jetstream.EventTest do
         }
       })
 
-    assert :ignore = Event.parse(json)
+    assert {1_000_000, "app.opake.grant", :ignore} = Event.parse(json)
   end
 end

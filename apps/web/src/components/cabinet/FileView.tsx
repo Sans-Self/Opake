@@ -21,9 +21,9 @@ import {
 } from "@/stores/documents/store";
 import { rkeyFromUri } from "@/lib/atUri";
 import { ancestorsOf } from "@/lib/directoryTree";
-import { resolveDirectoryFromSplat } from "@/lib/directoryTree";
 import { triggerBrowserDownload } from "@/lib/download";
 import { toastError } from "@/stores/toast";
+import { NewFolderDialog, type NewFolderDialogHandle } from "./NewFolderDialog";
 import type { FileItem } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +87,7 @@ function ErrorBanner({ message }: { readonly message: string }) {
 export function FileView({ rootLabel, pathSegments, context, basePath }: FileViewProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const newFolderDialogRef = useRef<NewFolderDialogHandle>(null);
 
   // Items is now a stable array ref in the store (not derived via Object.values)
   const items = useDocumentsStore((s) => s.items);
@@ -108,12 +109,9 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     void store.open(context).then(() => {
       // Guard: context may have switched between open() and this callback
       if (!useDocumentsStore.getState().loaded && useDocumentsStore.getState().error) return;
-      const snapshot = useDocumentsStore.getState().treeSnapshot;
-      const dirUri =
-        pathSegments.length > 0 && snapshot
-          ? resolveDirectoryFromSplat(snapshot, pathSegments)
-          : null;
-      void store.loadDirectory(dirUri);
+      // Pass pathSegments so loadDirectory can resolve rkeys against a fresh
+      // tree snapshot — avoids the stale/null snapshot on first navigation.
+      void store.loadDirectory(null, pathSegments.length > 0 ? pathSegments : undefined);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- contextKey and pathKey are stable string representations
   }, [contextKey, pathKey]);
@@ -179,11 +177,11 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   }, []);
 
   const handleCreateFolder = useCallback(() => {
-    // Simple prompt for now — needs a proper dialog before shipping
-    const name = window.prompt("Folder name");
-    if (name?.trim()) {
-      void useDocumentsStore.getState().createDirectory(name.trim());
-    }
+    newFolderDialogRef.current?.show();
+  }, []);
+
+  const handleNewFolderConfirm = useCallback((name: string) => {
+    void useDocumentsStore.getState().createDirectory(name);
   }, []);
 
   const handleUploadClick = useCallback(() => {
@@ -303,6 +301,8 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         onChange={handleFileSelected}
         aria-hidden="true"
       />
+
+      <NewFolderDialog ref={newFolderDialogRef} onConfirm={handleNewFolderConfirm} />
     </TreeSnapshotProvider>
   );
 }

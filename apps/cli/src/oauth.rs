@@ -211,7 +211,19 @@ pub async fn try_oauth_login(
     ensure_identity_and_publish(&mut client, storage, &did, force).await?;
     println!("Logged in as {handle} (OAuth)");
 
-    Ok(session)
+    // If publish_public_key triggered a token refresh (e.g., access token
+    // expired during a slow network call or interactive seed-phrase prompt),
+    // the client now holds the refreshed session — but our local `session`
+    // variable still has the original tokens. Returning the original would
+    // persist a stale refresh_token to disk while the AS has already rotated
+    // it, leaving the next CLI command unable to refresh. Always return the
+    // client's current session so the rotation reaches storage.
+    let final_session = client
+        .session()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("XRPC client lost its session during login"))?;
+
+    Ok(final_session)
 }
 
 /// Wait for the OAuth callback on the loopback server.

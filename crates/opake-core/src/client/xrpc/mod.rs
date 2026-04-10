@@ -409,9 +409,19 @@ impl<T: Transport> XrpcClient<T> {
             self.update_dpop_nonce(&response);
         }
 
-        // After a nonce fix (or on the first attempt), the token itself may be
-        // expired. Refresh and retry. A second nonce error here is not retried —
-        // one retry is the spec-expected behavior (RFC 9449 §7.1).
+        // Some PDSes (including the official self-hosted PDS) return
+        // "AuthenticationFailed" for DPoP nonce mismatches instead of the
+        // spec-mandated "use_dpop_nonce". If the failing response carries a
+        // DPoP-Nonce header, it's telling us the nonce to use — retry with
+        // fresh auth before assuming the token itself is dead.
+        if Self::is_expired_token(&response) && extract_dpop_nonce(&response).is_some() {
+            let retried = self.replace_auth_headers(request.clone())?;
+            response = self.transport.send(retried).await?;
+            self.update_dpop_nonce(&response);
+        }
+
+        // After nonce fixes, the token itself may genuinely be expired.
+        // Refresh and retry once.
         if Self::is_expired_token(&response) {
             self.refresh_session().await?;
             let retried = self.replace_auth_headers(request)?;

@@ -2,7 +2,8 @@ defmodule OpakeAppview.IndexerTest do
   use OpakeAppview.DataCase, async: true
 
   alias OpakeAppview.Indexer
-  alias OpakeAppview.Queries.{GrantQueries, KeyringQueries, DirectoryQueries}
+  alias OpakeAppview.Indexer.State
+  alias OpakeAppview.Queries.{CursorQueries, GrantQueries, KeyringQueries, DirectoryQueries}
 
   # Grant helpers
 
@@ -359,5 +360,88 @@ defmodule OpakeAppview.IndexerTest do
     {_dirs, changed_docs} = DirectoryQueries.cabinet_changes_since("did:plc:owner", past)
     assert length(changed_docs) == 1
     assert hd(changed_docs).deleted_at != nil
+  end
+
+  # Cursor monotonicity — regression for the lag-ping-pong bug
+  #
+  # :full mode receives interleaved commits from thousands of PDSes. A
+  # slightly-older event arriving right after a newer one must NOT roll
+  # the saved cursor backwards, or cold-start replay would reprocess
+  # everything between the new high-water mark and the regressed value.
+
+  describe "cursor save monotonicity" do
+    setup do
+      # Pipeline tests run with cursor_save_interval_ms = 0 so every event
+      # is eligible to save. Set it explicitly and reset the State counters
+      # so this test group is deterministic regardless of test order.
+      prev_interval = Application.get_env(:opake_appview, :cursor_save_interval_ms)
+      Application.put_env(:opake_appview, :cursor_save_interval_ms, 0)
+
+      # Clear any cursor state leaked from a prior test.
+      :ets.insert(:indexer_state, {:cursor_time_us, nil})
+      :ets.insert(:indexer_state, {:cursor_saved_at_ms, nil})
+      CursorQueries.save_cursor(0)
+      :ets.insert(:indexer_state, {:cursor_time_us, nil})
+
+      on_exit(fn ->
+        if prev_interval do
+          Application.put_env(:opake_appview, :cursor_save_interval_ms, prev_interval)
+        else
+          Application.delete_env(:opake_appview, :cursor_save_interval_ms)
+        end
+      end)
+
+      :ok
+    end
+
+    defp grant_json_with_time(time_us) do
+      Jason.encode!(%{
+        "did" => "did:plc:owner",
+        "time_us" => time_us,
+        "kind" => "commit",
+        "commit" => %{
+          "rev" => "abc",
+          "operation" => "create",
+          "collection" => "app.opake.grant",
+          "rkey" => "3mono#{time_us}",
+          "record" => %{
+            "recipient" => "did:plc:recipient",
+            "document" => "at://did:plc:owner/app.opake.document/3xyz",
+            "createdAt" => "2026-03-01T12:00:00Z"
+          }
+        }
+      })
+    end
+
+    test "advances the cursor for strictly-increasing time_us" do
+      Indexer.process_message(grant_json_with_time(1_000_000), 0)
+      assert State.last_cursor_time_us() == 1_000_000
+
+      Indexer.process_message(grant_json_with_time(2_000_000), 1)
+      assert State.last_cursor_time_us() == 2_000_000
+
+      Indexer.process_message(grant_json_with_time(5_000_000), 2)
+      assert State.last_cursor_time_us() == 5_000_000
+    end
+
+    test "ignores an older time_us after a newer one (no rollback)" do
+      Indexer.process_message(grant_json_with_time(5_000_000), 0)
+      assert State.last_cursor_time_us() == 5_000_000
+
+      # Older event arrives — cursor must stay at the high-water mark.
+      Indexer.process_message(grant_json_with_time(3_000_000), 1)
+      assert State.last_cursor_time_us() == 5_000_000
+
+      # And the persisted cursor in PG agrees.
+      assert %{time_us: 5_000_000} = CursorQueries.load_cursor()
+    end
+
+    test "ignores an equal time_us (strictly monotonic)" do
+      Indexer.process_message(grant_json_with_time(5_000_000), 0)
+      assert State.last_cursor_time_us() == 5_000_000
+
+      Indexer.process_message(grant_json_with_time(5_000_000), 1)
+      assert State.last_cursor_time_us() == 5_000_000
+    end
   end
 end

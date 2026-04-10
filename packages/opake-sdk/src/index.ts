@@ -51,4 +51,6 @@ export {
   type PairRequestResult,
   type PendingPairRequest,
   type PairResponseRecord,
+  type InvitationEntry,
+  type TaskDef,
 } from "./types";

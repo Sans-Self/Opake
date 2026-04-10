@@ -139,6 +139,34 @@ export interface PendingPairRequest {
 export type PairResponseRecord = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
+// Invitations
+// ---------------------------------------------------------------------------
+
+/** A workspace invitation as returned by listInvitations. */
+export interface InvitationEntry {
+  readonly uri: string;
+  readonly target: string;
+  readonly invitationType: string;
+  readonly role: string | null;
+  readonly token: string;
+  readonly maxUses: number | null;
+  readonly uses: number;
+  readonly expiresAt: string | null;
+  readonly createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Daemon task definitions
+// ---------------------------------------------------------------------------
+
+/** A background task definition from the core registry. */
+export interface TaskDef {
+  readonly name: string;
+  readonly intervalSeconds: number;
+  readonly description: string;
+}
+
+// ---------------------------------------------------------------------------
 // Init options
 // ---------------------------------------------------------------------------
 
