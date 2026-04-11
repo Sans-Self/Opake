@@ -65,4 +65,7 @@ export {
   type SSEKeyring,
   type SSEGrant,
   type SSEDelete,
+  type SSEDirectoryUpdate,
+  type SSEKeyringUpdate,
+  type SSEDocumentUpdate,
 } from "./event-stream";

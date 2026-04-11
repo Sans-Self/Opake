@@ -58,6 +58,39 @@ export const sseDeleteSchema = z.object({
   document_uri: z.string().optional(),
 });
 
+// Proposal schemas — workspace change proposals pending owner approval.
+// All proposals carry the same identity fields (uri + author + keyring);
+// individual schemas extend the base with their type-specific payload.
+
+const sseProposalBaseSchema = z.object({
+  uri: z.string(),
+  author_did: z.string(),
+  keyring_uri: z.string().nullish(),
+});
+
+export const sseDirectoryUpdateSchema = sseProposalBaseSchema.extend({
+  action_type: z.string(),
+  directory_uri: z.string().nullish(),
+  entry_uri: z.string().nullish(),
+  encrypted_metadata: z.unknown().nullish(),
+  source_directory_uri: z.string().nullish(),
+  target_directory_uri: z.string().nullish(),
+  parent_directory_uri: z.string().nullish(),
+});
+
+export const sseKeyringUpdateSchema = sseProposalBaseSchema.extend({
+  action_type: z.string(),
+  member_did: z.string().nullish(),
+  member_public_key: z.string().nullish(),
+  role: z.string().nullish(),
+  encrypted_metadata: z.unknown().nullish(),
+});
+
+export const sseDocumentUpdateSchema = sseProposalBaseSchema.extend({
+  document_uri: z.string(),
+  supersedes_uri: z.string().nullish(),
+});
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -67,6 +100,9 @@ export type SSEDocument = z.output<typeof sseDocumentSchema>;
 export type SSEKeyring = z.output<typeof sseKeyringSchema>;
 export type SSEGrant = z.output<typeof sseGrantSchema>;
 export type SSEDelete = z.output<typeof sseDeleteSchema>;
+export type SSEDirectoryUpdate = z.output<typeof sseDirectoryUpdateSchema>;
+export type SSEKeyringUpdate = z.output<typeof sseKeyringUpdateSchema>;
+export type SSEDocumentUpdate = z.output<typeof sseDocumentUpdateSchema>;
 
 /** Handlers for SSE events. All optional — subscribe to what you need. */
 export interface EventStreamHandlers {
@@ -78,6 +114,12 @@ export interface EventStreamHandlers {
   readonly onKeyringDelete?: (data: SSEDelete) => void;
   readonly onGrantUpsert?: (data: SSEGrant) => void;
   readonly onGrantDelete?: (data: SSEDelete) => void;
+  readonly onDirectoryUpdateUpsert?: (data: SSEDirectoryUpdate) => void;
+  readonly onDirectoryUpdateDelete?: (data: SSEDelete) => void;
+  readonly onKeyringUpdateUpsert?: (data: SSEKeyringUpdate) => void;
+  readonly onKeyringUpdateDelete?: (data: SSEDelete) => void;
+  readonly onDocumentUpdateUpsert?: (data: SSEDocumentUpdate) => void;
+  readonly onDocumentUpdateDelete?: (data: SSEDelete) => void;
   /** Fired on reconnect — consumer should perform a full sync to cover the gap. */
   readonly onReconnect?: () => void;
   readonly onError?: (error: Error) => void;
@@ -172,6 +214,13 @@ export class EventStream {
       this.on(es, "keyring:delete", sseDeleteSchema, this.handlers.onKeyringDelete);
       this.on(es, "grant:upsert", sseGrantSchema, this.handlers.onGrantUpsert);
       this.on(es, "grant:delete", sseDeleteSchema, this.handlers.onGrantDelete);
+      // Proposal events (workspace change proposals pending owner approval)
+      this.on(es, "directory_update:upsert", sseDirectoryUpdateSchema, this.handlers.onDirectoryUpdateUpsert);
+      this.on(es, "directory_update:delete", sseDeleteSchema, this.handlers.onDirectoryUpdateDelete);
+      this.on(es, "keyring_update:upsert", sseKeyringUpdateSchema, this.handlers.onKeyringUpdateUpsert);
+      this.on(es, "keyring_update:delete", sseDeleteSchema, this.handlers.onKeyringUpdateDelete);
+      this.on(es, "document_update:upsert", sseDocumentUpdateSchema, this.handlers.onDocumentUpdateUpsert);
+      this.on(es, "document_update:delete", sseDeleteSchema, this.handlers.onDocumentUpdateDelete);
     } catch (e) {
       this.handlers.onError?.(e instanceof Error ? e : new Error(String(e)));
       this.scheduleReconnect();

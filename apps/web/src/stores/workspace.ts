@@ -16,6 +16,31 @@ import { loading } from "@/stores/app";
 // eslint-disable-next-line functional/no-let
 let loadPromise: Promise<void> | null = null;
 
+/**
+ * Shallow change detection over the workspace record. Rotation bumps on
+ * every keyring mutation so it's a reliable signal — combined with name,
+ * description, and member count, it catches everything a user cares about
+ * without a full deep-equal.
+ */
+function workspacesChanged(
+  prev: Readonly<Record<string, WorkspaceEntry>>,
+  next: Readonly<Record<string, WorkspaceEntry>>,
+): boolean {
+  const prevKeys = Object.keys(prev);
+  const nextKeys = Object.keys(next);
+  if (prevKeys.length !== nextKeys.length) return true;
+  for (const key of nextKeys) {
+    const a = prev[key];
+    const b = next[key];
+    if (!a) return true;
+    if (a.rotation !== b.rotation) return true;
+    if (a.memberCount !== b.memberCount) return true;
+    if (a.name !== b.name) return true;
+    if (a.description !== b.description) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -58,6 +83,14 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           const record = Object.fromEntries(entries.map((e) => [e.uri, e]));
 
           set((draft) => {
+            // Skip the write if the record is shallow-equal to the current
+            // state — avoids spurious Zustand notifications on no-op reloads
+            // (common under SSE event bursts).
+            if (!workspacesChanged(draft.workspaces, record)) {
+              draft.loaded = true;
+              draft.error = null;
+              return;
+            }
             draft.workspaces = record;
             draft.loaded = true;
             draft.error = null;
@@ -81,7 +114,9 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       // Dialog disables its button during the async call.
       const done = loading("create-workspace");
       try {
-        const result = await getOpake().createWorkspace(name, description ?? "");
+        const opake = getOpake();
+        opake.markWrite();
+        const result = await opake.createWorkspace(name, description ?? "");
         loadPromise = null;
         await useWorkspaceStore.getState().loadWorkspaces();
         return result.keyringUri;

@@ -1,19 +1,28 @@
 // Daemon scheduler — Web Locks leader election + setInterval orchestration.
 //
+// When `options.sse` is provided, SSE-driven proposal sync replaces the
+// `directory-sync` timer. Other tasks (pair-cleanup, grant-healing,
+// share-retry) always run on intervals.
+//
 // Returns a DaemonHandle that the caller uses to stop the daemon.
 // No module-level state — multiple handles can coexist (though only one
 // leader runs per Web Locks scope).
 
 import type { Opake } from "@opake/sdk";
-import type { DaemonOptions, TaskDef, TaskStore } from "./types";
+import type { DaemonOptions, SSEConfig, TaskDef, TaskStore } from "./types";
 import { runTasks } from "./tasks";
+import { startSSEConsumer, type SSEConsumerHandle } from "./sse-consumer";
 
 const DEFAULT_INITIAL_DELAY_MS = 5_000;
 const DEFAULT_PRUNE_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// Reduced interval for directory-sync when SSE is active. SSE handles most
+// sync, but document_update proposals can't route to workspace topics (the
+// lexicon has no keyring field) so this timer catches what SSE misses.
+const DIRECTORY_SYNC_FALLBACK_MS = 60_000;
 
 /** Handle returned by `startDaemon` — call `stop()` to shut down. */
 export interface DaemonHandle {
-  /** Stop all intervals and release the leader lock. */
+  /** Stop all intervals, SSE subscription, and release the leader lock. */
   stop(): void;
 }
 
@@ -24,6 +33,11 @@ export interface DaemonHandle {
  * background tasks. Schedules all tasks from the core registry at their
  * configured intervals.
  *
+ * When `options.sse` is provided, SSE-driven proposal sync replaces the
+ * normal `directory-sync` interval — proposal events trigger immediate
+ * targeted syncs, and the `directory-sync` timer downgrades to a
+ * low-frequency fallback for events SSE can't route.
+ *
  * @returns A handle to stop the daemon.
  *
  * @example
@@ -33,6 +47,10 @@ export interface DaemonHandle {
  *
  * const opake = await Opake.init();
  * const daemon = startDaemon(opake, taskDefs, taskStore, {
+ *   sse: {
+ *     appviewUrl: "https://appview.opake.app",
+ *     onRecordChanged: () => reloadCurrentView(),
+ *   },
  *   onWorkspaceUpdated: (uris) => reloadWorkspace(uris),
  * });
  *
@@ -47,9 +65,16 @@ export function startDaemon(
   options?: DaemonOptions,
 ): DaemonHandle {
   const intervalIds: ReturnType<typeof setInterval>[] = [];
+  // eslint-disable-next-line functional/no-let -- mutable ref for cleanup
   let releaseLock: (() => void) | null = null;
+  // eslint-disable-next-line functional/no-let -- mutable ref for cleanup
+  let sseConsumer: SSEConsumerHandle | null = null;
+
+  const sse: SSEConfig | undefined = options?.sse;
 
   function stop(): void {
+    sseConsumer?.close();
+    sseConsumer = null;
     for (const id of intervalIds) {
       clearInterval(id);
     }
@@ -68,9 +93,20 @@ export function startDaemon(
       const handler = handlers[task.name];
       if (!handler) continue;
 
-      const intervalMs = task.intervalSeconds * 1000;
+      // When SSE is active, directory-sync becomes a low-frequency fallback
+      // (60s) instead of the normal interval. SSE handles most proposal sync,
+      // but document_update events can't be workspace-routed (no keyring_uri
+      // in the lexicon) so the timer catches what SSE misses.
+      const intervalMs = (sse && task.name === "directory-sync")
+        ? DIRECTORY_SYNC_FALLBACK_MS
+        : task.intervalSeconds * 1000;
+
       setTimeout(() => void handler(), initialDelay);
       intervalIds.push(setInterval(() => void handler(), intervalMs));
+    }
+
+    if (sse) {
+      sseConsumer = startSSEConsumer(opake, taskStore, options ?? {}, sse);
     }
   }
 

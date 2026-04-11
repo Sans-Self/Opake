@@ -461,6 +461,26 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(results)
     }
 
+    /// Sync a single workspace identified by its keyring URI.
+    ///
+    /// Fetches all member keyrings from the appview (same as the full sync),
+    /// finds the target, and syncs only that one. Returns `None` if the
+    /// keyring URI wasn't found in the member list.
+    pub async fn sync_workspace_by_uri(
+        &mut self,
+        keyring_uri: &str,
+    ) -> Result<Option<crate::daemon::WorkspaceSyncResult>, Error> {
+        let appview_keyrings = self.discover_member_keyrings(None).await?;
+        let target = appview_keyrings.iter().find(|kr| kr.uri == keyring_uri);
+        let Some(kr) = target else { return Ok(None) };
+
+        let identity = self.require_identity()?;
+        let private_key = identity.private_key_bytes()?;
+        let result = self.sync_single_workspace(kr, &private_key).await;
+        self.auto_persist_session().await?;
+        Ok(Some(result))
+    }
+
     /// Sync a single workspace: cleanup + apply proposals.
     ///
     /// Captures all errors into `WorkspaceSyncResult::error` instead of

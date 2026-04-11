@@ -1,10 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { LinkIcon, CopyIcon, TrashIcon, CheckIcon, ShareNetworkIcon } from "@phosphor-icons/react";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
-import { getOpakeWorker } from "@/lib/worker";
+import { getOpake } from "@/stores/auth";
 import { toastSuccess, toastError } from "@/stores/toast";
-import type { InvitationEntry } from "@/workers/api/workspace";
-import type { WorkspaceRole } from "@/lib/workspaceSchemas";
+import type { InvitationEntry, WorkspaceRole } from "@opake/sdk";
 
 export interface InviteDialogHandle {
   readonly show: (keyringUri: string) => void;
@@ -41,8 +40,8 @@ export const InviteDialog = forwardRef<InviteDialogHandle, object>(
     const loadInvitations = useCallback(async () => {
       setLoading(true);
       try {
-        const worker = getOpakeWorker();
-        const all = await worker.listInvitations();
+        const opake = getOpake();
+        const all = await opake.listInvitations();
         // Filter to invitations for this workspace
         setInvitations(keyringUri ? all.filter((inv) => inv.target === keyringUri) : []);
       } catch {
@@ -59,8 +58,8 @@ export const InviteDialog = forwardRef<InviteDialogHandle, object>(
     const handleCreate = useCallback(async () => {
       if (!keyringUri) return;
       try {
-        const worker = getOpakeWorker();
-        await worker.createInvitation(keyringUri, role);
+        const opake = getOpake();
+        await opake.createInvitation(keyringUri, role);
         toastSuccess("Invitation created");
         await loadInvitations();
       } catch (err) {
@@ -73,8 +72,8 @@ export const InviteDialog = forwardRef<InviteDialogHandle, object>(
     const handleRevoke = useCallback(
       async (invitationUri: string) => {
         try {
-          const worker = getOpakeWorker();
-          await worker.revokeInvitation(invitationUri);
+          const opake = getOpake();
+          await opake.revokeInvitation(invitationUri);
           toastSuccess("Invitation revoked");
           await loadInvitations();
         } catch (err) {

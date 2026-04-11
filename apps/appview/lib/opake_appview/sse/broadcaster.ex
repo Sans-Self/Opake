@@ -156,6 +156,7 @@ defmodule OpakeAppview.SSE.Broadcaster do
 
   defp format_proposal(attrs) do
     %{uri: get(attrs, :uri), author_did: get(attrs, :author_did), action_type: get(attrs, :action_type)}
+    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
     |> TreeHelpers.maybe_put(:directory_uri, get(attrs, :directory_uri))
     |> TreeHelpers.maybe_put(:entry_uri, get(attrs, :entry_uri))
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
@@ -166,6 +167,7 @@ defmodule OpakeAppview.SSE.Broadcaster do
 
   defp format_keyring_proposal(attrs) do
     %{uri: get(attrs, :uri), author_did: get(attrs, :author_did), action_type: get(attrs, :action_type)}
+    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
     |> TreeHelpers.maybe_put(:member_did, get(attrs, :member_did))
     |> TreeHelpers.maybe_put(:member_public_key, get(attrs, :member_public_key))
     |> TreeHelpers.maybe_put(:role, get(attrs, :role))
@@ -174,6 +176,7 @@ defmodule OpakeAppview.SSE.Broadcaster do
 
   defp format_document_proposal(attrs) do
     %{uri: get(attrs, :uri), document_uri: get(attrs, :document_uri), author_did: get(attrs, :author_did)}
+    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
     |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
   end
 end

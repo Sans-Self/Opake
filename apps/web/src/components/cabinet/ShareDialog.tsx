@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "
 import { ShareNetworkIcon } from "@phosphor-icons/react";
 import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
-import { getOpakeWorker } from "@/lib/worker";
+import { getActiveFileManager } from "@/stores/documents/store";
 import { toastSuccess, toastError } from "@/stores/toast";
 import { useDocumentsStore } from "@/stores/documents/store";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
@@ -67,8 +67,13 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         setStatus("sharing");
 
         // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        const worker = getOpakeWorker();
-        await worker.cabinetShare(documentUri, recipient.did, recipient.publicKey, "read", null);
+        await getActiveFileManager().share(
+          documentUri,
+          recipient.did,
+          recipient.publicKey,
+          "read",
+          null,
+        );
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
           // REMOVE: pending share needs core domain method (Opake::create_pending_share)

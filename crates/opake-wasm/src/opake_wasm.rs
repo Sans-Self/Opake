@@ -532,6 +532,18 @@ impl WasmOpakeHandle {
         to_js(&results)
     }
 
+    /// Sync a single workspace by keyring URI. Returns null if the URI is not
+    /// in the member list, or the sync result otherwise.
+    #[wasm_bindgen(js_name = syncWorkspaceByUri)]
+    pub async fn sync_workspace_by_uri(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let result = opake
+            .sync_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&result)
+    }
+
     /// Retry all pending shares (resolve recipients, create grants).
     #[wasm_bindgen(js_name = retryPendingSharesViaOpake)]
     pub async fn retry_pending_shares_via_opake(&self) -> Result<JsValue, JsError> {
@@ -851,6 +863,22 @@ impl WasmOpakeHandle {
             .ok_or_else(|| JsError::new("already consumed"))?;
         let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
         serde_wasm_bindgen::to_value(session).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Get the authenticated DID without exposing the full session.
+    ///
+    /// Returns the DID string, or an error if the context is busy or has
+    /// no session. Used for self-event filtering in the SSE consumer.
+    #[wasm_bindgen(js_name = getDid)]
+    pub fn get_did(&self) -> Result<String, JsError> {
+        let guard = self
+            .inner
+            .try_lock()
+            .ok_or_else(|| JsError::new("Opake is busy"))?;
+        let opake = guard
+            .as_ref()
+            .ok_or_else(|| JsError::new("already consumed"))?;
+        Ok(opake.did().to_string())
     }
 
     /// Get the token expiry timestamp without exposing the full session.

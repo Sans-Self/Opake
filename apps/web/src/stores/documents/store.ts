@@ -223,6 +223,9 @@ async function runMutation(
   try {
     await enqueueMutation(async () => {
       if (gen !== generation) return;
+      // Open the suppression window BEFORE the write — SSE echo can arrive
+      // as early as the appview indexes the firehose frame, before fn resolves.
+      getOpake().markWrite();
       await fn(getActiveFileManager());
     });
     if (gen !== generation) return;

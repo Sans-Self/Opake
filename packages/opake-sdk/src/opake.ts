@@ -26,6 +26,7 @@ import {
   createWorkspaceResultSchema,
   listWorkspacesResultSchema,
   syncDetailedResultSchema,
+  syncSingleResultSchema,
 } from "./schemas";
 import { initWasm } from "./wasm";
 import { FileManager } from "./file-manager";
@@ -402,6 +403,37 @@ export class Opake {
   }
 
   // ---------------------------------------------------------------------------
+  // Identity
+  // ---------------------------------------------------------------------------
+
+  /** The authenticated DID, or null if the context is busy/unavailable. */
+  getDid(): string | null {
+    try {
+      return this.requireContext().getDid();
+    } catch {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Write tracking (for self-event filtering in SSE consumers)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Timestamp of the most recent local write. SSE consumers read this to
+   * suppress echo events — if an SSE event from our own DID arrives within
+   * the suppression window, it's assumed to be our own write echoing back.
+   *
+   * Callers should invoke `markWrite()` BEFORE starting a mutation so the
+   * window opens at the earliest point the echo can arrive.
+   */
+  lastWriteAt = 0;
+
+  markWrite(): void {
+    this.lastWriteAt = Date.now();
+  }
+
+  // ---------------------------------------------------------------------------
   // Token lifecycle (called by @withTokenGuard decorator)
   // ---------------------------------------------------------------------------
 
@@ -681,6 +713,12 @@ export class Opake {
   @wrapWasmErrors @withTokenGuard
   syncOwnedWorkspacesDetailed(): Promise<readonly WorkspaceSyncResult[]> {
     return this.requireContext().syncOwnedWorkspacesDetailed().then(syncDetailedResultSchema.parse);
+  }
+
+  /** Sync a single workspace by keyring URI. Returns null if not a member. */
+  @wrapWasmErrors @withTokenGuard
+  syncWorkspaceByUri(keyringUri: string): Promise<WorkspaceSyncResult | null> {
+    return this.requireContext().syncWorkspaceByUri(keyringUri).then(syncSingleResultSchema.parse);
   }
 
   /** Retry pending shares — resolve recipients and create grants. */

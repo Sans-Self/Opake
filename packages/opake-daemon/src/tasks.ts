@@ -45,20 +45,12 @@ export function runTasks(
           0,
         );
 
-        // Per-workspace task entries
         await Promise.all(
           results
             .filter((r: WorkspaceSyncResult) => r.proposalsApplied > 0 || r.error)
-            .map((r: WorkspaceSyncResult) =>
-              persistTask(taskStore, `sync-${r.keyringUri}`, {
-                type: "proposalSync",
-                keyringUri: r.keyringUri,
-                proposalsApplied: r.proposalsApplied,
-              }, r.error ? { failed: r.error } : "completed"),
-            ),
+            .map((r: WorkspaceSyncResult) => persistSyncResult(taskStore, r)),
         );
 
-        // Notify host app of updated workspaces
         if (totalApplied > 0 && options?.onWorkspaceUpdated) {
           const updatedUris = results
             .filter((r: WorkspaceSyncResult) => r.proposalsApplied > 0)
@@ -100,15 +92,35 @@ async function tracked(
     }
     // No work done — don't persist at all (avoids write amplification)
   } catch (err) {
-    // Auth errors are transient — the token may have been rotated by a
-    // concurrent refresh. Skip this cycle silently.
-    if (err instanceof OpakeError && err.kind === "Auth") {
-      options?.onSessionExpired?.();
-      return;
-    }
-
+    if (handleDaemonError(err, options)) return;
     await persistTask(taskStore, id, initialKind, { failed: String(err) }, createdAt);
   }
+}
+
+/**
+ * Shared error branch for daemon operations. Returns true if the error was
+ * handled (caller should return early), false if it should be persisted or
+ * propagated. Auth errors fire `onSessionExpired` and are considered handled.
+ */
+export function handleDaemonError(err: unknown, options?: DaemonOptions): boolean {
+  if (err instanceof OpakeError && err.kind === "Auth") {
+    options?.onSessionExpired?.();
+    return true;
+  }
+  return false;
+}
+
+/** Persist a single workspace sync result as a task record. */
+export async function persistSyncResult(
+  taskStore: TaskStore,
+  result: WorkspaceSyncResult,
+): Promise<void> {
+  await persistTask(
+    taskStore,
+    `sync-${result.keyringUri}`,
+    { type: "proposalSync", keyringUri: result.keyringUri, proposalsApplied: result.proposalsApplied },
+    result.error ? { failed: result.error } : "completed",
+  );
 }
 
 async function persistTask(
