@@ -44,9 +44,13 @@ pub const TASKS: &[TaskDef] = &[
         description: "Retry pending shares for recipients who haven't set up yet",
     },
     TaskDef {
+        // CLI-only. The web daemon deliberately has no handler for
+        // this task — web clients drive proposal application via the
+        // WASM SSE consumer. The CLI still polls because it doesn't
+        // run an SSE consumer of its own yet.
         name: "directory-sync",
-        interval_seconds: 5,
-        description: "Apply pending directory updates from workspace members",
+        interval_seconds: 60,
+        description: "CLI-only: apply pending directory updates from workspace members",
     },
 ];
 

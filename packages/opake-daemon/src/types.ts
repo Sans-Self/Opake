@@ -21,25 +21,15 @@ export interface TaskRecord {
 }
 
 /**
- * SSE-specific daemon configuration. Presence of this field switches the
- * daemon into event-driven mode: `directory-sync` becomes a low-frequency
- * fallback timer while SSE events drive targeted per-workspace sync.
- * Absence keeps the daemon in classic timer-polling mode.
+ * Configuration for the daemon scheduler.
+ *
+ * The web daemon runs only the maintenance tasks that don't benefit
+ * from SSE: pair-cleanup, grant-healing, share-retry. The core
+ * `directory-sync` TaskDef is skipped here because web clients drive
+ * proposal application via SSE events (`opake.startSseConsumer`).
+ * The native CLI daemon still polls `directory-sync` until it grows
+ * its own SSE consumer.
  */
-export interface SSEConfig {
-  /** Appview base URL for the SSE stream + token exchange. */
-  readonly appviewUrl: string;
-
-  /**
-   * Called when any SSE event arrives that affects directory/document
-   * state (excluding self-events). Unlike `onWorkspaceUpdated`, this fires
-   * for every non-self record mutation so the host app can reload the
-   * current view.
-   */
-  readonly onRecordChanged?: () => void;
-}
-
-/** Configuration for the daemon scheduler. */
 export interface DaemonOptions {
   /**
    * Delay before the first task execution (ms). Gives the app time to
@@ -53,20 +43,6 @@ export interface DaemonOptions {
    * @default 604800000 (7 days)
    */
   readonly pruneAgeMs?: number;
-
-  /**
-   * SSE streaming config. When present, the daemon subscribes to the
-   * appview's event stream and reacts to proposal events with targeted
-   * per-workspace sync. When absent, all sync happens via interval polling.
-   */
-  readonly sse?: SSEConfig;
-
-  /**
-   * Called when a workspace's directory tree is updated by proposal
-   * application. The daemon can't update UI state directly — this
-   * callback lets the host app trigger a reload.
-   */
-  readonly onWorkspaceUpdated?: (keyringUris: readonly string[]) => void;
 
   /** Called when the daemon detects an expired session. */
   readonly onSessionExpired?: () => void;

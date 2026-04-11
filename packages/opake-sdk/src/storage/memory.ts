@@ -98,7 +98,11 @@ export class MemoryStorage implements Storage {
     return `${did}::${collection}`;
   }
 
-  async cacheGetRecord<T>(did: string, collection: string, uri: string): Promise<CachedRecord<T> | null> {
+  async cacheGetRecord<T>(
+    did: string,
+    collection: string,
+    uri: string,
+  ): Promise<CachedRecord<T> | null> {
     const records = this.cacheRecords.get(this.cacheKey(did, collection));
     return (records?.get(uri) as CachedRecord<T> | undefined) ?? null;
   }
@@ -125,7 +129,10 @@ export class MemoryStorage implements Storage {
 
   // -- Cache: collection-level -----------------------------------------------
 
-  async cacheGetCollection<T>(did: string, collection: string): Promise<CachedCollection<T> | null> {
+  async cacheGetCollection<T>(
+    did: string,
+    collection: string,
+  ): Promise<CachedCollection<T> | null> {
     const key = this.cacheKey(did, collection);
     const fetchedAt = this.cacheMeta.get(key);
     if (fetchedAt === undefined) return null;

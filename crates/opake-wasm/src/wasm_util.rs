@@ -75,6 +75,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Serialization(_) => "Serialization",
         Error::Mnemonic(_) => "Mnemonic",
         Error::Storage(_) => "Storage",
+        Error::Sse(_) => "Sse",
     };
     JsError::new(&format!("{kind}: {e}"))
 }

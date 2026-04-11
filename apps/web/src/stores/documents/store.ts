@@ -8,7 +8,7 @@
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { FileManager, DownloadResult, DocumentMetadata } from "@opake/sdk";
+import type { FileManager, DownloadResult, DocumentMetadata, DirectoryWatcher } from "@opake/sdk";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import type { FileItem } from "@/components/cabinet/types";
 import { findParentUri, ancestorsOf, resolveDirectoryFromSplat } from "@/lib/directoryTree";
@@ -58,10 +58,80 @@ let openPromiseContext: FileContext | null = null;
 // eslint-disable-next-line functional/no-let
 let mutationChain: Promise<unknown> = Promise.resolve();
 
+// SSE-driven live updates for the current directory. installed by
+// `loadDirectory` after a successful load, closed by `close()` and
+// re-installed when the directory URI changes. See the comment on
+// `installDirectoryWatcher` below for debounce semantics.
+// eslint-disable-next-line functional/no-let
+let activeWatcher: DirectoryWatcher | null = null;
+// Per-watcher debounce timer. Bound to a closure reference so two
+// overlapping watchers (during a fast directory switch) can't steal
+// each other's scheduled reloads.
+// eslint-disable-next-line functional/no-let
+let watcherReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+const WATCHER_RELOAD_DEBOUNCE_MS = 250;
+
 /** Access the active FileManager. Throws if none — only call within an active context. */
 export function getActiveFileManager(): FileManager {
   if (!activeManager) throw new Error("No active file context — call open() first");
   return activeManager;
+}
+
+/**
+ * Install a SSE-driven watcher for the given directory URI. Replaces any
+ * previously-active watcher.
+ *
+ * The eager fire that `watchDirectory` delivers at install time is NOT
+ * swallowed — it schedules a real `loadDirectory` through the
+ * FileManager, which re-syncs and re-fetches metadata unconditionally.
+ * That's one extra round-trip per directory navigation, accepted
+ * because it also closes the drift window between `syncAndLoadTree`
+ * (T0) and watcher registration (T2): any SSE event that patched the
+ * TreeKeeper in between shows up here instead of being lost.
+ *
+ * On a `null` snapshot (watched directory deleted) we clear
+ * `currentDirectoryUri` synchronously — otherwise any consumer
+ * reading the store between this tick and the async load completing
+ * would see a dead URI.
+ */
+function installDirectoryWatcher(directoryUri: string): void {
+  closeDirectoryWatcher();
+  if (!activeManager) return;
+
+  activeWatcher = activeManager.watchDirectory(directoryUri, (snapshot) => {
+    if (snapshot === null) {
+      // Deletion: drop the stale pointer synchronously before the
+      // async load kicks off. Otherwise any caller reading
+      // `currentDirectoryUri` between this tick and the store update
+      // inside `loadDirectory` would see the deleted URI.
+      useDocumentsStore.setState((draft) => {
+        draft.currentDirectoryUri = null;
+      });
+      void useDocumentsStore.getState().loadDirectory(null);
+      return;
+    }
+    // Debounce: collapse rapid SSE bursts (e.g., 10 events in 100ms)
+    // into one reload. Also swallows the eager first fire on watcher
+    // installation when the store state is already current — the
+    // scheduled reload is a no-op refresh in that case.
+    if (watcherReloadTimer) return;
+    watcherReloadTimer = setTimeout(() => {
+      watcherReloadTimer = null;
+      void useDocumentsStore
+        .getState()
+        .loadDirectory(useDocumentsStore.getState().currentDirectoryUri);
+    }, WATCHER_RELOAD_DEBOUNCE_MS);
+  });
+}
+
+function closeDirectoryWatcher(): void {
+  activeWatcher?.close();
+  activeWatcher = null;
+  if (watcherReloadTimer) {
+    clearTimeout(watcherReloadTimer);
+    watcherReloadTimer = null;
+  }
 }
 
 function contextsMatch(a: FileContext | null, b: FileContext): boolean {
@@ -223,9 +293,6 @@ async function runMutation(
   try {
     await enqueueMutation(async () => {
       if (gen !== generation) return;
-      // Open the suppression window BEFORE the write — SSE echo can arrive
-      // as early as the appview indexes the firehose frame, before fn resolves.
-      getOpake().markWrite();
       await fn(getActiveFileManager());
     });
     if (gen !== generation) return;
@@ -274,6 +341,9 @@ export const useDocumentsStore = create<DocumentsStore>()(
         try {
           // Increment generation — stale async ops will check this
           generation++;
+
+          // Close any watcher bound to the previous context
+          closeDirectoryWatcher();
 
           // Dispose previous manager
           activeManager?.dispose();
@@ -327,6 +397,7 @@ export const useDocumentsStore = create<DocumentsStore>()(
 
     close() {
       generation++;
+      closeDirectoryWatcher();
       activeManager?.dispose();
       activeManager = null;
       activeContext = null;
@@ -369,7 +440,9 @@ export const useDocumentsStore = create<DocumentsStore>()(
         // Resolve the actual directory (may be root if targetUri was undefined)
         const resolvedUri = directoryUri ?? snapshot.rootUri;
         if (!resolvedUri) {
-          // No root directory exists yet — empty cabinet/workspace
+          // No root directory exists yet — empty cabinet/workspace.
+          // Close any stale watcher; there's nothing to observe.
+          closeDirectoryWatcher();
           set((draft) => {
             draft.items = [];
             // Cast: SDK snapshot is deeply readonly, immer draft expects mutable.
@@ -392,6 +465,11 @@ export const useDocumentsStore = create<DocumentsStore>()(
           draft.loaded = true;
           draft.error = null;
         });
+
+        // Install SSE watcher for live updates. We watch the resolved URI
+        // so the watcher stays bound to an existing tree node (the
+        // persistent tree needs a real URI, not null).
+        installDirectoryWatcher(resolvedUri);
       } catch (err) {
         if (gen !== generation) return;
         set((draft) => {

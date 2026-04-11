@@ -33,7 +33,6 @@ import { FileManager } from "./file-manager";
 import type { LoginOptions, StartLoginOptions, PendingLogin } from "./auth";
 import { createStorageAdapter } from "./storage-adapter";
 import { registerCleanup, unregisterCleanup } from "./finalizer";
-import { EventStream, type EventStreamHandlers } from "./event-stream";
 import {
   createPairRequest as pairingCreate,
   listPairRequests as pairingList,
@@ -63,14 +62,12 @@ const PENDING_TTL_MS = 10 * 60 * 1000; // 10 minutes — generous for a redirect
  * refresh (concurrent callers share the same promise). Eliminates reactive
  * 401 retries and makes concurrent dispatch safe.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- TC39 decorator type erasure
 function withTokenGuard(_target: any, _context: ClassMethodDecoratorContext) {
   return async function (this: Opake, ...args: any[]): Promise<any> {
     await this.ensureValidToken();
     return _target.call(this, ...args);
   };
 }
-
 
 // ---------------------------------------------------------------------------
 // Opake class
@@ -174,16 +171,11 @@ export class Opake {
     did: string,
   ): Promise<import("./storage").Identity> {
     const wasm = await initWasm();
-    return wasm.deriveIdentityFromMnemonic(
-      seedPhrase,
-      did,
-    ) as import("./storage").Identity;
+    return wasm.deriveIdentityFromMnemonic(seedPhrase, did) as import("./storage").Identity;
   }
 
   /** Generate a fresh random encryption identity. */
-  static async generateIdentity(
-    did: string,
-  ): Promise<import("./storage").Identity> {
+  static async generateIdentity(did: string): Promise<import("./storage").Identity> {
     const wasm = await initWasm();
     return wasm.generateIdentity(did) as import("./storage").Identity;
   }
@@ -291,11 +283,7 @@ export class Opake {
   ): Promise<{ authUrl: string; pending: PendingLogin }> {
     const wasm = await initWasm();
     const adapter = createStorageAdapter(options.storage);
-    const result = await wasm.startOAuthLogin(
-      handle,
-      options.redirectUri,
-      adapter,
-    );
+    const result = await wasm.startOAuthLogin(handle, options.redirectUri, adapter);
     return result as { authUrl: string; pending: PendingLogin };
   }
 
@@ -313,13 +301,7 @@ export class Opake {
   ): Promise<void> {
     const wasm = await initWasm();
     const adapter = createStorageAdapter(options.storage);
-    await wasm.completeOAuthLogin(
-      code,
-      state,
-      pending,
-      options.redirectUri,
-      adapter,
-    );
+    await wasm.completeOAuthLogin(code, state, pending, options.redirectUri, adapter);
   }
 
   /**
@@ -400,37 +382,6 @@ export class Opake {
   @wrapWasmErrors
   async checkSession(): Promise<void> {
     await this.requireContext().checkSession();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Identity
-  // ---------------------------------------------------------------------------
-
-  /** The authenticated DID, or null if the context is busy/unavailable. */
-  getDid(): string | null {
-    try {
-      return this.requireContext().getDid();
-    } catch {
-      return null;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Write tracking (for self-event filtering in SSE consumers)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Timestamp of the most recent local write. SSE consumers read this to
-   * suppress echo events — if an SSE event from our own DID arrives within
-   * the suppression window, it's assumed to be our own write echoing back.
-   *
-   * Callers should invoke `markWrite()` BEFORE starting a mutation so the
-   * window opens at the earliest point the echo can arrive.
-   */
-  lastWriteAt = 0;
-
-  markWrite(): void {
-    this.lastWriteAt = Date.now();
   }
 
   // ---------------------------------------------------------------------------
@@ -519,7 +470,8 @@ export class Opake {
    * ws.dispose();
    * ```
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   async workspace(keyringUri: string): Promise<FileManager> {
     return new FileManager(await this.requireContext().workspaceByUri(keyringUri));
   }
@@ -535,7 +487,14 @@ export class Opake {
   @wrapWasmErrors
   async workspaceFromKey(workspace: ResolvedWorkspace): Promise<FileManager> {
     const ctx = this.requireContext();
-    return new FileManager(await ctx.workspace(workspace.keyringUri, workspace.ownerDid, workspace.key, BigInt(workspace.rotation)));
+    return new FileManager(
+      await ctx.workspace(
+        workspace.keyringUri,
+        workspace.ownerDid,
+        workspace.key,
+        BigInt(workspace.rotation),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -552,9 +511,15 @@ export class Opake {
    * const { keyringUri, key } = await opake.createWorkspace("family-photos");
    * ```
    */
-  @wrapWasmErrors @withTokenGuard
-  createWorkspace(name: string, description?: string): Promise<{ keyringUri: string; key: Uint8Array }> {
-    return this.requireContext().createWorkspace(name, description ?? null).then(createWorkspaceResultSchema.parse);
+  @wrapWasmErrors
+  @withTokenGuard
+  createWorkspace(
+    name: string,
+    description?: string,
+  ): Promise<{ keyringUri: string; key: Uint8Array }> {
+    return this.requireContext()
+      .createWorkspace(name, description ?? null)
+      .then(createWorkspaceResultSchema.parse);
   }
 
   /**
@@ -565,9 +530,12 @@ export class Opake {
    *
    * @returns Array of workspace entries with decrypted names and roles.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   listWorkspaces(appviewUrl?: string): Promise<readonly WorkspaceEntry[]> {
-    return this.requireContext().listWorkspaces(appviewUrl ?? null).then(listWorkspacesResultSchema.parse);
+    return this.requireContext()
+      .listWorkspaces(appviewUrl ?? null)
+      .then(listWorkspacesResultSchema.parse);
   }
 
   /**
@@ -576,19 +544,33 @@ export class Opake {
    * @param keyringUri - Workspace keyring URI.
    * @returns Array of keyring member records with DIDs and roles.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   listWorkspaceMembers(keyringUri: string): Promise<readonly WorkspaceMember[]> {
-    return this.requireContext().listWorkspaceMembers(keyringUri) as Promise<readonly WorkspaceMember[]>;
+    return this.requireContext().listWorkspaceMembers(keyringUri) as Promise<
+      readonly WorkspaceMember[]
+    >;
   }
 
   /**
    * Add a member to a workspace.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   addWorkspaceMember(
-    keyringUri: string, key: Uint8Array, memberDid: string, memberPublicKey: Uint8Array, role: WorkspaceRole,
+    keyringUri: string,
+    key: Uint8Array,
+    memberDid: string,
+    memberPublicKey: Uint8Array,
+    role: WorkspaceRole,
   ): Promise<MutationResult> {
-    return this.requireContext().addWorkspaceMember(keyringUri, key, memberDid, memberPublicKey, role) as Promise<MutationResult>;
+    return this.requireContext().addWorkspaceMember(
+      keyringUri,
+      key,
+      memberDid,
+      memberPublicKey,
+      role,
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -597,33 +579,57 @@ export class Opake {
    * For owners: rotates the group key and returns the new key + rotation.
    * For non-owners: creates a proposal.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   removeWorkspaceMember(
-    keyringUri: string, key: Uint8Array, memberDid: string,
+    keyringUri: string,
+    key: Uint8Array,
+    memberDid: string,
   ): Promise<{ key?: Uint8Array; rotation?: number; proposed: boolean }> {
-    return this.requireContext().removeWorkspaceMember(keyringUri, key, memberDid) as Promise<{ key?: Uint8Array; rotation?: number; proposed: boolean }>;
+    return this.requireContext().removeWorkspaceMember(keyringUri, key, memberDid) as Promise<{
+      key?: Uint8Array;
+      rotation?: number;
+      proposed: boolean;
+    }>;
   }
 
   /** Leave a workspace you're a member of. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   leaveWorkspace(keyringUri: string): Promise<string> {
     return this.requireContext().leaveWorkspace(keyringUri);
   }
 
   /** Update workspace metadata (name, description, icon). */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   updateWorkspaceMetadata(
-    keyringUri: string, key: Uint8Array, updates: { name?: string; description?: string; icon?: string },
+    keyringUri: string,
+    key: Uint8Array,
+    updates: { name?: string; description?: string; icon?: string },
   ): Promise<MutationResult> {
     return this.requireContext().updateWorkspaceMetadata(
-      keyringUri, key, updates.name ?? null, updates.description ?? null, updates.icon ?? null,
+      keyringUri,
+      key,
+      updates.name ?? null,
+      updates.description ?? null,
+      updates.icon ?? null,
     ) as Promise<MutationResult>;
   }
 
   /** Update a workspace member's role. */
-  @wrapWasmErrors @withTokenGuard
-  updateMemberRole(keyringUri: string, memberDid: string, role: WorkspaceRole): Promise<MutationResult> {
-    return this.requireContext().updateMemberRole(keyringUri, memberDid, role) as Promise<MutationResult>;
+  @wrapWasmErrors
+  @withTokenGuard
+  updateMemberRole(
+    keyringUri: string,
+    memberDid: string,
+    role: WorkspaceRole,
+  ): Promise<MutationResult> {
+    return this.requireContext().updateMemberRole(
+      keyringUri,
+      memberDid,
+      role,
+    ) as Promise<MutationResult>;
   }
 
   // ---------------------------------------------------------------------------
@@ -635,7 +641,8 @@ export class Opake {
    *
    * @param handleOrDid - AT Protocol handle or DID.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   resolveIdentity(handleOrDid: string): Promise<ResolvedIdentity> {
     return this.requireContext().resolveIdentity(handleOrDid).then(resolvedIdentitySchema.parse);
   }
@@ -646,57 +653,45 @@ export class Opake {
    * Required before other users can encrypt files for you or add you
    * to workspaces.
    */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   publishPublicKey(): Promise<string> {
     return this.requireContext().publishPublicKey();
   }
 
   // ---------------------------------------------------------------------------
-  // Real-time event streaming (SSE)
+  // Real-time event streaming (WASM-owned SSE consumer)
   // ---------------------------------------------------------------------------
 
   /**
-   * Request a short-lived SSE token from the appview.
+   * Start the WASM-level SSE consumer.
    *
-   * The token authenticates the EventSource connection (which cannot
-   * carry custom headers). Valid for ~60 seconds, single-use.
+   * Spawns a background task inside WASM that connects to the appview's
+   * `/api/events` endpoint, pulls events, and applies them to any
+   * installed directory trees via the Rust-side `TreeKeeper`. Once
+   * started, `FileManager.watchDirectory` handlers fire automatically
+   * as events arrive.
+   *
+   * Events are parsed and applied entirely in Rust — only serialized
+   * snapshots cross into JS. Idempotent: safe to call multiple times
+   * (StrictMode double-mount is handled internally).
+   *
+   * `appviewUrl` is optional: if omitted, the URL is resolved from the
+   * Opake instance's stored config (loaded during `init`). Pass an
+   * explicit value as a fallback for instances without stored config.
    */
   @wrapWasmErrors
-  requestSseToken(appviewUrl?: string): Promise<string> {
-    return this.requireContext().requestSseToken(appviewUrl ?? null);
+  startSseConsumer(appviewUrl?: string): Promise<void> {
+    return this.requireContext().startSseConsumer(appviewUrl ?? null);
   }
 
   /**
-   * Subscribe to real-time events from the appview via SSE.
-   *
-   * Opens a persistent connection that receives full indexed records
-   * as they're processed by the firehose indexer. Auto-reconnects with
-   * exponential backoff; fires `onReconnect` so the consumer can
-   * full-sync to cover the gap.
-   *
-   * @returns An `EventStream` — call `.close()` to disconnect.
-   *
-   * @example
-   * ```typescript
-   * const stream = opake.subscribe({
-   *   onDirectoryUpsert: (dir) => console.log("changed:", dir.directory_uri),
-   *   onReconnect: () => store.fullSync(),
-   * });
-   * // later:
-   * stream.close();
-   * ```
+   * Stop the WASM SSE consumer. Clears the internal running flag so a
+   * subsequent `startSseConsumer` call can spawn a fresh consumer.
    */
-  subscribe(
-    handlers: EventStreamHandlers,
-    appviewUrl: string,
-  ): EventStream {
-    const stream = new EventStream({
-      appviewUrl,
-      getToken: () => this.requestSseToken(appviewUrl),
-      handlers,
-    });
-    void stream.connect();
-    return stream;
+  stopSseConsumer(): void {
+    const ctx = this.ctx;
+    if (ctx) ctx.stopSseConsumer();
   }
 
   // ---------------------------------------------------------------------------
@@ -704,26 +699,36 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /** Sync all owned workspaces — apply pending proposals from members. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   syncOwnedWorkspaces(): Promise<number> {
     return this.requireContext().syncOwnedWorkspaces();
   }
 
   /** Sync with per-workspace result visibility (daemon use). */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   syncOwnedWorkspacesDetailed(): Promise<readonly WorkspaceSyncResult[]> {
     return this.requireContext().syncOwnedWorkspacesDetailed().then(syncDetailedResultSchema.parse);
   }
 
   /** Sync a single workspace by keyring URI. Returns null if not a member. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   syncWorkspaceByUri(keyringUri: string): Promise<WorkspaceSyncResult | null> {
     return this.requireContext().syncWorkspaceByUri(keyringUri).then(syncSingleResultSchema.parse);
   }
 
   /** Retry pending shares — resolve recipients and create grants. */
-  @wrapWasmErrors @withTokenGuard
-  retryPendingShares(): Promise<{ checked: number; completed: number; expired: number; still_pending: number; failed: number }> {
+  @wrapWasmErrors
+  @withTokenGuard
+  retryPendingShares(): Promise<{
+    checked: number;
+    completed: number;
+    expired: number;
+    still_pending: number;
+    failed: number;
+  }> {
     return this.requireContext().retryPendingSharesViaOpake();
   }
 
@@ -732,49 +737,62 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /** Create a pair request (new device). Returns the record URI + ephemeral keypair. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   createPairRequest(): Promise<import("./types").PairRequestResult> {
     return pairingCreate(this.requireContext());
   }
 
   /** List pending pair requests on this account. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   listPairRequests(): Promise<readonly import("./types").PendingPairRequest[]> {
     return pairingList(this.requireContext());
   }
 
   /** List pair responses on this account. */
-  @wrapWasmErrors @withTokenGuard
-  listPairResponses(): Promise<readonly { uri: string; requestUri: string; value: import("./types").PairResponseRecord }[]> {
+  @wrapWasmErrors
+  @withTokenGuard
+  listPairResponses(): Promise<
+    readonly { uri: string; requestUri: string; value: import("./types").PairResponseRecord }[]
+  > {
     return pairingListResponses(this.requireContext());
   }
 
   /** Approve a pair request (existing device). Encrypts and sends the identity. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   approvePairRequest(requestUri: string, ephemeralPublicKey: Uint8Array): Promise<void> {
     return pairingApprove(this.requireContext(), requestUri, ephemeralPublicKey);
   }
 
   /** Receive a pair response (new device). Decrypts the identity from the approving device. */
-  @wrapWasmErrors @withTokenGuard
-  receivePairResponse(response: import("./types").PairResponseRecord, ephemeralPrivateKey: Uint8Array): Promise<import("./storage").Identity> {
+  @wrapWasmErrors
+  @withTokenGuard
+  receivePairResponse(
+    response: import("./types").PairResponseRecord,
+    ephemeralPrivateKey: Uint8Array,
+  ): Promise<import("./storage").Identity> {
     return pairingReceive(this.requireContext(), response, ephemeralPrivateKey);
   }
 
   /** Clean up pair request + response records after successful pairing. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   cleanupPairRecords(requestRkey: string, responseRkey: string): Promise<void> {
     return pairingCleanup(this.requireContext(), requestRkey, responseRkey);
   }
 
   /** Delete expired pair requests and orphaned responses. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   cleanupExpiredPairRequests(): Promise<number> {
     return pairingCleanupExpired(this.requireContext());
   }
 
   /** Delete stale grants whose recipients have no valid public key. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   healStaleGrants(): Promise<number> {
     return this.requireContext().healStaleGrants();
   }
@@ -784,15 +802,23 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /** Create a workspace invitation. Returns `{ uri, token }`. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   createInvitation(keyringUri: string, role: string): Promise<{ uri: string; token: string }> {
-    return this.requireContext().createInvitation(keyringUri, role) as Promise<{ uri: string; token: string }>;
+    return this.requireContext().createInvitation(keyringUri, role) as Promise<{
+      uri: string;
+      token: string;
+    }>;
   }
 
   /** List all invitations on this account. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   async listInvitations(): Promise<readonly import("./types").InvitationEntry[]> {
-    const raw = await this.requireContext().listInvitations() as readonly Record<string, unknown>[];
+    const raw = (await this.requireContext().listInvitations()) as readonly Record<
+      string,
+      unknown
+    >[];
     return raw.map((r) => ({
       uri: r.uri as string,
       target: r.target as string,
@@ -807,7 +833,8 @@ export class Opake {
   }
 
   /** Revoke (delete) an invitation. */
-  @wrapWasmErrors @withTokenGuard
+  @wrapWasmErrors
+  @withTokenGuard
   revokeInvitation(invitationUri: string): Promise<void> {
     return this.requireContext().revokeInvitation(invitationUri);
   }
@@ -824,10 +851,18 @@ export class Opake {
    */
   static async taskDefs(): Promise<readonly import("./types").TaskDef[]> {
     const wasm = await initWasm();
-    const raw = wasm.daemonTaskDefs() as readonly { name: string; interval_seconds: number; description: string }[];
+    const raw = wasm.daemonTaskDefs() as readonly {
+      name: string;
+      interval_seconds: number;
+      description: string;
+    }[];
     return raw
       .filter((t) => t.name !== "session-refresh")
-      .map((t) => ({ name: t.name, intervalSeconds: t.interval_seconds, description: t.description }));
+      .map((t) => ({
+        name: t.name,
+        intervalSeconds: t.interval_seconds,
+        description: t.description,
+      }));
   }
 
   // ---------------------------------------------------------------------------
@@ -854,5 +889,4 @@ export class Opake {
     }
     return this.ctx;
   }
-
 }

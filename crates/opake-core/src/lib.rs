@@ -40,8 +40,10 @@ pub mod reencryption;
 pub mod resolve;
 pub mod scope;
 pub mod sharing;
+pub mod sse;
 pub mod storage;
 pub mod tid;
+pub mod tree_keeper;
 pub mod workspace;
 
 #[cfg(any(test, feature = "test-utils"))]

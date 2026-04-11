@@ -3,9 +3,15 @@
 // Each handler calls operations on the Opake instance and reports results
 // via the TaskStore. The handlers don't know about scheduling — they're
 // called by the scheduler at the configured intervals.
+//
+// NOTE: `directory-sync` is intentionally NOT handled here. Web clients
+// drive proposal application via SSE events (see `sse_wasm.rs`
+// `dispatch_proposal_sync`) — the `directory-sync` TaskDef still exists
+// in the core registry for the native CLI daemon, but the web scheduler
+// silently skips tasks without handlers.
 
-import type { Opake, WorkspaceSyncResult } from "@opake/sdk";
 import { OpakeError } from "@opake/sdk";
+import type { Opake } from "@opake/sdk";
 import type { DaemonOptions, TaskRecord, TaskStore } from "./types";
 
 type Handler = () => Promise<void>;
@@ -18,51 +24,41 @@ export function runTasks(
 ): Readonly<Record<string, Handler>> {
   return {
     "pair-cleanup": () =>
-      tracked(taskStore, "pair-cleanup", { type: "pairCleanup", deleted: 0 }, async () => {
-        const deleted = await opake.cleanupExpiredPairRequests();
-        return { didWork: deleted > 0, kind: { type: "pairCleanup", deleted } };
-      }, options),
+      tracked(
+        taskStore,
+        "pair-cleanup",
+        { type: "pairCleanup", deleted: 0 },
+        async () => {
+          const deleted = await opake.cleanupExpiredPairRequests();
+          return { didWork: deleted > 0, kind: { type: "pairCleanup", deleted } };
+        },
+        options,
+      ),
 
     "grant-healing": () =>
-      tracked(taskStore, "grant-healing", { type: "grantHealing", healed: 0 }, async () => {
-        const healed = await opake.healStaleGrants();
-        return { didWork: healed > 0, kind: { type: "grantHealing", healed } };
-      }, options),
+      tracked(
+        taskStore,
+        "grant-healing",
+        { type: "grantHealing", healed: 0 },
+        async () => {
+          const healed = await opake.healStaleGrants();
+          return { didWork: healed > 0, kind: { type: "grantHealing", healed } };
+        },
+        options,
+      ),
 
     "share-retry": () =>
-      tracked(taskStore, "share-retry", { type: "shareRetry", retried: 0 }, async () => {
-        const result = await opake.retryPendingShares();
-        const retried = result.completed ?? 0;
-        return { didWork: retried > 0, kind: { type: "shareRetry", retried } };
-      }, options),
-
-    "directory-sync": () =>
-      tracked(taskStore, "directory-sync", { type: "proposalSync", proposalsApplied: 0 }, async () => {
-        const results = await opake.syncOwnedWorkspacesDetailed();
-
-        const totalApplied = results.reduce(
-          (sum: number, r: WorkspaceSyncResult) => sum + r.proposalsApplied,
-          0,
-        );
-
-        await Promise.all(
-          results
-            .filter((r: WorkspaceSyncResult) => r.proposalsApplied > 0 || r.error)
-            .map((r: WorkspaceSyncResult) => persistSyncResult(taskStore, r)),
-        );
-
-        if (totalApplied > 0 && options?.onWorkspaceUpdated) {
-          const updatedUris = results
-            .filter((r: WorkspaceSyncResult) => r.proposalsApplied > 0)
-            .map((r: WorkspaceSyncResult) => r.keyringUri);
-          options.onWorkspaceUpdated(updatedUris);
-        }
-
-        return {
-          didWork: totalApplied > 0,
-          kind: { type: "proposalSync", proposalsApplied: totalApplied },
-        };
-      }, options),
+      tracked(
+        taskStore,
+        "share-retry",
+        { type: "shareRetry", retried: 0 },
+        async () => {
+          const result = await opake.retryPendingShares();
+          const retried = result.completed;
+          return { didWork: retried > 0, kind: { type: "shareRetry", retried } };
+        },
+        options,
+      ),
   };
 }
 
@@ -102,25 +98,12 @@ async function tracked(
  * handled (caller should return early), false if it should be persisted or
  * propagated. Auth errors fire `onSessionExpired` and are considered handled.
  */
-export function handleDaemonError(err: unknown, options?: DaemonOptions): boolean {
+function handleDaemonError(err: unknown, options?: DaemonOptions): boolean {
   if (err instanceof OpakeError && err.kind === "Auth") {
     options?.onSessionExpired?.();
     return true;
   }
   return false;
-}
-
-/** Persist a single workspace sync result as a task record. */
-export async function persistSyncResult(
-  taskStore: TaskStore,
-  result: WorkspaceSyncResult,
-): Promise<void> {
-  await persistTask(
-    taskStore,
-    `sync-${result.keyringUri}`,
-    { type: "proposalSync", keyringUri: result.keyringUri, proposalsApplied: result.proposalsApplied },
-    result.error ? { failed: result.error } : "completed",
-  );
 }
 
 async function persistTask(

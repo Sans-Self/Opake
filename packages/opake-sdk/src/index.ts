@@ -2,7 +2,7 @@
 
 // Main entry point
 export { Opake } from "./opake";
-export { FileManager } from "./file-manager";
+export { FileManager, type DirectoryWatcher } from "./file-manager";
 
 // Errors
 export { OpakeError, type OpakeErrorKind } from "./errors";
@@ -55,17 +55,6 @@ export {
   type TaskDef,
 } from "./types";
 
-// Real-time event streaming
-export {
-  EventStream,
-  type EventStreamHandlers,
-  type EventStreamOptions,
-  type SSEDirectory,
-  type SSEDocument,
-  type SSEKeyring,
-  type SSEGrant,
-  type SSEDelete,
-  type SSEDirectoryUpdate,
-  type SSEKeyringUpdate,
-  type SSEDocumentUpdate,
-} from "./event-stream";
+// Real-time event streaming is now WASM-owned. Subscribe via
+// `opake.startSseConsumer(appviewUrl)` + `fileManager.watchDirectory(uri, handler)`
+// which returns a `DirectoryWatcher` handle (exported above).

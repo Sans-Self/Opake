@@ -30,7 +30,10 @@ interface TreeMutationOptions<TInput, TResult> {
    * Optimistic tree update — return the updated snapshot.
    * Return the original to skip optimistic update.
    */
-  readonly optimisticUpdate?: (snapshot: DirectoryTreeSnapshot, input: TInput) => DirectoryTreeSnapshot;
+  readonly optimisticUpdate?: (
+    snapshot: DirectoryTreeSnapshot,
+    input: TInput,
+  ) => DirectoryTreeSnapshot;
 }
 
 /**
@@ -50,12 +53,16 @@ export function useTreeMutation<TInput, TResult>(
 
     onMutate: options.optimisticUpdate
       ? async (input) => {
+          // Narrow the optimisticUpdate callback once so the closure
+          // below isn't fighting the "options might have changed"
+          // widening. This also avoids the non-null assertion.
+          const apply = options.optimisticUpdate;
           await queryClient.cancelQueries({ queryKey: key });
           const previous = queryClient.getQueryData<DirectoryTreeSnapshot>(key);
 
           if (previous) {
             queryClient.setQueryData<DirectoryTreeSnapshot>(key, (old) =>
-              old ? options.optimisticUpdate!(old, input) : old,
+              old ? apply(old, input) : old,
             );
           }
 

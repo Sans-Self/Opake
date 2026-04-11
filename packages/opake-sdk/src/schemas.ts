@@ -185,11 +185,10 @@ export type DirectoryTreeSnapshot = z.output<typeof directoryTreeSnapshotSchema>
 export type DirectoryEntry = z.output<typeof typedEntrySchema>;
 export type DirectoryInfo = z.output<typeof directoryInfoSchema>;
 
-export const treeWithMetadataSchema = z
-  .object({
-    snapshot: directoryTreeSnapshotSchema,
-    metadata: z.record(z.string(), documentMetadataSchema).optional().default({}),
-  });
+export const treeWithMetadataSchema = z.object({
+  snapshot: directoryTreeSnapshotSchema,
+  metadata: z.record(z.string(), documentMetadataSchema).optional().default({}),
+});
 
 // ---------------------------------------------------------------------------
 // Pairing

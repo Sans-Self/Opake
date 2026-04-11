@@ -1,49 +1,46 @@
-import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+"use client";
+
+import { useEffect } from "react";
 import type { DaemonOptions, TaskDef, TaskStore } from "@opake/daemon";
 import { startDaemon } from "@opake/daemon";
 import { useOpake } from "../provider";
-import { opakeKeys } from "../keys";
 
-interface UseDaemonOptions extends Omit<DaemonOptions, "onWorkspaceUpdated"> {
+interface UseDaemonOptions extends DaemonOptions {
   readonly taskDefs: readonly TaskDef[];
   readonly taskStore: TaskStore;
-  readonly onWorkspaceUpdated?: (keyringUris: readonly string[]) => void;
 }
 
 /**
- * Start the background daemon and integrate with React Query.
+ * Start the background daemon (pair-cleanup, grant-healing, share-retry).
  *
- * Automatically invalidates workspace tree queries when the daemon
- * applies proposals. Stops the daemon on unmount.
+ * The daemon is pure maintenance polling in the React package — live
+ * tree updates come from the SSE consumer via `useDirectory`, not
+ * from daemon task callbacks. If you need react-query cache
+ * invalidation on live updates, migrate to `useDirectory` which
+ * subscribes to `FileManager.watchDirectory` and receives fresh
+ * snapshots as they arrive from SSE.
  *
  * @example
  * ```tsx
- * useDaemon({ taskDefs, taskStore });
+ * import { Opake } from "@opake/sdk";
+ * useDaemon({
+ *   taskDefs: await Opake.taskDefs(),
+ *   taskStore,
+ *   onSessionExpired: () => logout(),
+ * });
  * ```
  */
 export function useDaemon(options: UseDaemonOptions): void {
   const opake = useOpake();
-  const queryClient = useQueryClient();
-
-  // Ref for callbacks — avoids restarting daemon when callbacks change
-  const callbacksRef = useRef(options);
-  callbacksRef.current = options;
 
   useEffect(() => {
     const handle = startDaemon(opake, options.taskDefs, options.taskStore, {
       initialDelayMs: options.initialDelayMs,
       pruneAgeMs: options.pruneAgeMs,
-      onSessionExpired: () => callbacksRef.current.onSessionExpired?.(),
-      onWorkspaceUpdated: (uris) => {
-        for (const uri of uris) {
-          void queryClient.invalidateQueries({ queryKey: opakeKeys.workspaceTree(uri) });
-        }
-        void queryClient.invalidateQueries({ queryKey: opakeKeys.workspaces() });
-        callbacksRef.current.onWorkspaceUpdated?.(uris);
-      },
+      onSessionExpired: options.onSessionExpired,
     });
 
     return () => handle.stop();
-  }, [opake, options.taskDefs, options.taskStore, queryClient]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable via closure
+  }, [opake, options.taskDefs, options.taskStore]);
 }

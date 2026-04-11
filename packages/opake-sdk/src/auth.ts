@@ -44,9 +44,7 @@ export interface LoginOptions {
    * - CLI: print URL, start localhost server, wait for callback
    * - Electron: open BrowserWindow, intercept redirect
    */
-  readonly authorize: (
-    authUrl: string,
-  ) => Promise<{ code: string; state: string }>;
+  readonly authorize: (authUrl: string) => Promise<{ code: string; state: string }>;
   /** Abort signal for timeout/cancellation. */
   readonly signal?: AbortSignal;
 }

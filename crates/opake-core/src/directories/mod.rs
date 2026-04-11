@@ -18,7 +18,9 @@ pub(crate) use entries::{add_entry, prepare_add_entry, prepare_remove_entry, rem
 pub(crate) use get_or_create_root::{get_or_create_root, get_or_create_workspace_root};
 pub use move_entry::{check_cycle, move_entry, MoveResult};
 pub use remove::{remove, RemoveResult};
-pub use tree::{DirectoryTree, DocumentNameResolver, EntryKind, ResolvedPath};
+pub use tree::{
+    DecryptionCtx, DirectoryTree, DocumentNameResolver, EntryKind, ResolvedPath, TreeChange,
+};
 
 pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";

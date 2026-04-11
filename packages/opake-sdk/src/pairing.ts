@@ -22,38 +22,60 @@ export function createPairRequest(ctx: Ctx): Promise<PairRequestResult> {
 }
 
 export function listPairRequests(ctx: Ctx): Promise<readonly PendingPairRequest[]> {
-  return ctx.listPairRequests().then((entries: readonly {
-    uri: string;
-    value: { ephemeralKey: { $bytes: string }; createdAt: string };
-  }[]) => entries.map((e) => ({
-    uri: e.uri,
-    ephemeralKey: base64ToBytes(e.value.ephemeralKey.$bytes),
-    createdAt: e.value.createdAt,
-  })));
+  return ctx.listPairRequests().then(
+    (
+      entries: readonly {
+        uri: string;
+        value: { ephemeralKey: { $bytes: string }; createdAt: string };
+      }[],
+    ) =>
+      entries.map((e) => ({
+        uri: e.uri,
+        ephemeralKey: base64ToBytes(e.value.ephemeralKey.$bytes),
+        createdAt: e.value.createdAt,
+      })),
+  );
 }
 
 export function listPairResponses(
   ctx: Ctx,
 ): Promise<readonly { uri: string; requestUri: string; value: PairResponseRecord }[]> {
-  return ctx.listPairResponses().then((entries: readonly {
-    uri: string;
-    value: { request: string; [key: string]: unknown };
-  }[]) => entries.map((e) => ({
-    uri: e.uri,
-    requestUri: e.value.request,
-    value: e.value as PairResponseRecord,
-  })));
+  return ctx.listPairResponses().then(
+    (
+      entries: readonly {
+        uri: string;
+        value: { request: string; [key: string]: unknown };
+      }[],
+    ) =>
+      entries.map((e) => ({
+        uri: e.uri,
+        requestUri: e.value.request,
+        value: e.value as PairResponseRecord,
+      })),
+  );
 }
 
-export function approvePairRequest(ctx: Ctx, requestUri: string, ephemeralPublicKey: Uint8Array): Promise<void> {
+export function approvePairRequest(
+  ctx: Ctx,
+  requestUri: string,
+  ephemeralPublicKey: Uint8Array,
+): Promise<void> {
   return ctx.approvePairRequest(requestUri, ephemeralPublicKey);
 }
 
-export function receivePairResponse(ctx: Ctx, response: PairResponseRecord, ephemeralPrivateKey: Uint8Array): Promise<Identity> {
+export function receivePairResponse(
+  ctx: Ctx,
+  response: PairResponseRecord,
+  ephemeralPrivateKey: Uint8Array,
+): Promise<Identity> {
   return ctx.receivePairResponse(response, ephemeralPrivateKey) as Promise<Identity>;
 }
 
-export function cleanupPairRecords(ctx: Ctx, requestRkey: string, responseRkey: string): Promise<void> {
+export function cleanupPairRecords(
+  ctx: Ctx,
+  requestRkey: string,
+  responseRkey: string,
+): Promise<void> {
   return ctx.cleanupPairRecords(requestRkey, responseRkey);
 }
 

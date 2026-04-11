@@ -23,6 +23,7 @@
 use std::rc::Rc;
 
 use futures_util::lock::Mutex;
+use opake_core::tree_keeper::TreeKeeper;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -39,7 +40,17 @@ use crate::wasm_util::{
 
 #[wasm_bindgen(js_name = OpakeContext)]
 pub struct WasmOpakeHandle {
-    inner: Rc<Mutex<Option<WasmOpake>>>,
+    pub(crate) inner: Rc<Mutex<Option<WasmOpake>>>,
+    /// Persistent tree state + SSE watcher registry. Held behind its own
+    /// Mutex (separate from the Opake mutex) so SSE event application and
+    /// file operations don't block each other.
+    pub(crate) tree_keeper: Rc<Mutex<TreeKeeper>>,
+    /// `true` while an SSE consumer task is alive. Doubles as both the
+    /// idempotency gate on `startSseConsumer` and the cancellation
+    /// signal read by the consumer loop — `stopSseConsumer` clears it,
+    /// the loop checks it after each `next_event().await` and breaks
+    /// on `false`. Single-threaded WASM — `Cell<bool>` is enough.
+    pub(crate) sse_started: Rc<std::cell::Cell<bool>>,
 }
 
 #[wasm_bindgen(js_class = OpakeContext)]
@@ -53,8 +64,11 @@ impl WasmOpakeHandle {
         storage_adapter: JsStorageAdapter,
     ) -> Result<WasmOpakeHandle, JsError> {
         let opake = make_opake_from_storage(did.as_deref(), storage_adapter).await?;
+        let did_owned = opake.did().to_string();
         Ok(Self {
             inner: Rc::new(Mutex::new(Some(opake))),
+            tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
+            sse_started: Rc::new(std::cell::Cell::new(false)),
         })
     }
 
@@ -70,6 +84,7 @@ impl WasmOpakeHandle {
 
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
+            tree_keeper: Rc::clone(&self.tree_keeper),
             context: Some(context),
         })
     }
@@ -93,6 +108,7 @@ impl WasmOpakeHandle {
         let context = workspace_context(keyring_uri, owner_did, key, rotation)?;
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
+            tree_keeper: Rc::clone(&self.tree_keeper),
             context: Some(context),
         })
     }
@@ -117,6 +133,7 @@ impl WasmOpakeHandle {
 
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
+            tree_keeper: Rc::clone(&self.tree_keeper),
             context: Some(context),
         })
     }

@@ -23,6 +23,8 @@ pub(crate) mod js_storage;
 #[cfg(target_arch = "wasm32")]
 mod opake_wasm;
 #[cfg(target_arch = "wasm32")]
+mod sse_wasm;
+#[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_util;
 
 #[wasm_bindgen(start)]

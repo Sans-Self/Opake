@@ -143,7 +143,11 @@ export class IndexedDbStorage implements Storage {
 
   // -- Cache: record-level --------------------------------------------------
 
-  async cacheGetRecord<T>(did: string, collection: string, uri: string): Promise<CachedRecord<T> | null> {
+  async cacheGetRecord<T>(
+    did: string,
+    collection: string,
+    uri: string,
+  ): Promise<CachedRecord<T> | null> {
     const row = await this.db.cacheRecords.get([did, collection, uri]);
     if (!row) return null;
     return { uri: row.uri, cid: row.cid, value: row.value as T };
@@ -170,7 +174,10 @@ export class IndexedDbStorage implements Storage {
 
   // -- Cache: collection-level ----------------------------------------------
 
-  async cacheGetCollection<T>(did: string, collection: string): Promise<CachedCollection<T> | null> {
+  async cacheGetCollection<T>(
+    did: string,
+    collection: string,
+  ): Promise<CachedCollection<T> | null> {
     const [meta, rows] = await Promise.all([
       this.db.cacheMeta.get([did, collection]),
       this.db.cacheRecords.where("[did+collection]").equals([did, collection]).toArray(),
@@ -180,7 +187,11 @@ export class IndexedDbStorage implements Storage {
     return { records, fetched_at: meta.fetchedAt };
   }
 
-  async cachePutCollection<T>(did: string, collection: string, data: CachedCollection<T>): Promise<void> {
+  async cachePutCollection<T>(
+    did: string,
+    collection: string,
+    data: CachedCollection<T>,
+  ): Promise<void> {
     await this.db.transaction("rw", [this.db.cacheRecords, this.db.cacheMeta], async () => {
       await this.db.cacheRecords.where("[did+collection]").equals([did, collection]).delete();
       const rows = data.records.map((r) => ({
@@ -229,7 +240,13 @@ export class IndexedDbStorage implements Storage {
     const key = sanitizeDid(did);
     await this.db.transaction(
       "rw",
-      [this.db.configs, this.db.identities, this.db.sessions, this.db.cacheRecords, this.db.cacheMeta],
+      [
+        this.db.configs,
+        this.db.identities,
+        this.db.sessions,
+        this.db.cacheRecords,
+        this.db.cacheMeta,
+      ],
       async () => {
         await this.db.configs.put({ key: CONFIG_KEY, value: updatedConfig });
         await this.db.identities.delete(key);

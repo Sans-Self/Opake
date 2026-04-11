@@ -25,7 +25,11 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "typedoc": "typedoc"
+    "typedoc": "typedoc",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'"
   },
   "peerDependencies": {
     "dexie": "^4.0.0"

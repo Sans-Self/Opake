@@ -44,4 +44,7 @@ pub enum Error {
 
     #[error("storage error: {0}")]
     Storage(String),
+
+    #[error("SSE error: {0}")]
+    Sse(String),
 }

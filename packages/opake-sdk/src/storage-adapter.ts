@@ -4,14 +4,7 @@
 // typed interface mirrors the Rust JsStorageAdapter extern — if WASM adds or
 // renames a method, TS compilation will catch the mismatch here.
 
-import type {
-  Storage,
-  Config,
-  Identity,
-  Session,
-  CachedRecord,
-  CachedCollection,
-} from "./storage";
+import type { Storage, Config, Identity, Session, CachedRecord, CachedCollection } from "./storage";
 
 /**
  * Typed interface matching the Rust `JsStorageAdapter` extern in js_storage.rs.
@@ -31,34 +24,12 @@ export interface WasmStorageAdapter {
   loadSession(did: string): Promise<Session>;
   saveSession(did: string, session: Session): Promise<void>;
   removeAccount(did: string): Promise<void>;
-  cacheGetRecord(
-    did: string,
-    collection: string,
-    uri: string,
-  ): Promise<CachedRecord | null>;
-  cachePutRecords(
-    did: string,
-    collection: string,
-    records: readonly CachedRecord[],
-  ): Promise<void>;
-  cacheRemoveRecord(
-    did: string,
-    collection: string,
-    uri: string,
-  ): Promise<void>;
-  cacheGetCollection(
-    did: string,
-    collection: string,
-  ): Promise<CachedCollection | null>;
-  cachePutCollection(
-    did: string,
-    collection: string,
-    data: CachedCollection,
-  ): Promise<void>;
-  cacheInvalidateCollection(
-    did: string,
-    collection: string,
-  ): Promise<void>;
+  cacheGetRecord(did: string, collection: string, uri: string): Promise<CachedRecord | null>;
+  cachePutRecords(did: string, collection: string, records: readonly CachedRecord[]): Promise<void>;
+  cacheRemoveRecord(did: string, collection: string, uri: string): Promise<void>;
+  cacheGetCollection(did: string, collection: string): Promise<CachedCollection | null>;
+  cachePutCollection(did: string, collection: string, data: CachedCollection): Promise<void>;
+  cacheInvalidateCollection(did: string, collection: string): Promise<void>;
   cacheClear(did: string): Promise<void>;
 }
 
@@ -74,14 +45,11 @@ export function createStorageAdapter(storage: Storage): WasmStorageAdapter {
     loadSession: (did) => storage.loadSession(did),
     saveSession: (did, session) => storage.saveSession(did, session),
     removeAccount: (did) => storage.removeAccount(did),
-    cacheGetRecord: (did, collection, uri) =>
-      storage.cacheGetRecord(did, collection, uri),
+    cacheGetRecord: (did, collection, uri) => storage.cacheGetRecord(did, collection, uri),
     cachePutRecords: (did, collection, records) =>
       storage.cachePutRecords(did, collection, records),
-    cacheRemoveRecord: (did, collection, uri) =>
-      storage.cacheRemoveRecord(did, collection, uri),
-    cacheGetCollection: (did, collection) =>
-      storage.cacheGetCollection(did, collection),
+    cacheRemoveRecord: (did, collection, uri) => storage.cacheRemoveRecord(did, collection, uri),
+    cacheGetCollection: (did, collection) => storage.cacheGetCollection(did, collection),
     cachePutCollection: (did, collection, data) =>
       storage.cachePutCollection(did, collection, data),
     cacheInvalidateCollection: (did, collection) =>

@@ -101,12 +101,31 @@ defmodule OpakeAppview.Indexer.Heartbeat do
     now_us = DateTime.utc_now() |> DateTime.to_unix(:microsecond)
     lag_secs = div(now_us - time_us, 1_000_000)
 
+    # Composite units (1m30s, 8h24m, 2d4h) rather than rounded decimals
+    # so live-updating lag values visibly tick per minute when the
+    # indexer is catching up — `8.4h` stayed `8.4h` for 20 minutes,
+    # whereas `8h24m` ticks every minute.
     cond do
-      lag_secs < 0 -> "0s"
-      lag_secs < 60 -> "#{lag_secs}s"
-      lag_secs < 3600 -> "#{div(lag_secs, 60)}m"
-      lag_secs < 86_400 -> "#{Float.round(lag_secs / 3600, 1)}h"
-      true -> "#{Float.round(lag_secs / 86_400, 1)}d"
+      lag_secs < 0 ->
+        "0s"
+
+      lag_secs < 60 ->
+        "#{lag_secs}s"
+
+      lag_secs < 3600 ->
+        mins = div(lag_secs, 60)
+        secs = rem(lag_secs, 60)
+        if secs == 0, do: "#{mins}m", else: "#{mins}m#{secs}s"
+
+      lag_secs < 86_400 ->
+        hours = div(lag_secs, 3600)
+        mins = div(rem(lag_secs, 3600), 60)
+        if mins == 0, do: "#{hours}h", else: "#{hours}h#{mins}m"
+
+      true ->
+        days = div(lag_secs, 86_400)
+        hours = div(rem(lag_secs, 86_400), 3600)
+        if hours == 0, do: "#{days}d", else: "#{days}d#{hours}h"
     end
   end
 

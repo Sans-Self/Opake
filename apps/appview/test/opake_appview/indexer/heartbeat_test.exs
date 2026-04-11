@@ -82,13 +82,46 @@ defmodule OpakeAppview.Indexer.HeartbeatTest do
     assert line =~ "cursor_lag=0s"
   end
 
-  test "cursor_lag formats stale cursors in human units" do
-    one_hour_ago_us =
+  test "cursor_lag formats minute-granular lag under an hour" do
+    ninety_seconds_ago =
       DateTime.utc_now()
-      |> DateTime.add(-3700, :second)
+      |> DateTime.add(-90, :second)
       |> DateTime.to_unix(:microsecond)
 
-    line = Heartbeat.format_snapshot(base_snapshot(%{cursor_time_us: one_hour_ago_us}))
-    assert line =~ "cursor_lag=1.0h"
+    line = Heartbeat.format_snapshot(base_snapshot(%{cursor_time_us: ninety_seconds_ago}))
+    assert line =~ "cursor_lag=1m30s"
+  end
+
+  test "cursor_lag formats hours and minutes together" do
+    # 8 hours 24 minutes ago = 30240 seconds
+    lag_us =
+      DateTime.utc_now()
+      |> DateTime.add(-30_240, :second)
+      |> DateTime.to_unix(:microsecond)
+
+    line = Heartbeat.format_snapshot(base_snapshot(%{cursor_time_us: lag_us}))
+    assert line =~ "cursor_lag=8h24m"
+  end
+
+  test "cursor_lag formats whole hours without minute suffix" do
+    two_hours_ago =
+      DateTime.utc_now()
+      |> DateTime.add(-7200, :second)
+      |> DateTime.to_unix(:microsecond)
+
+    line = Heartbeat.format_snapshot(base_snapshot(%{cursor_time_us: two_hours_ago}))
+    assert line =~ "cursor_lag=2h"
+    refute line =~ "cursor_lag=2h0m"
+  end
+
+  test "cursor_lag formats days and hours together" do
+    # 2 days 4 hours = 187200 seconds
+    lag_us =
+      DateTime.utc_now()
+      |> DateTime.add(-187_200, :second)
+      |> DateTime.to_unix(:microsecond)
+
+    line = Heartbeat.format_snapshot(base_snapshot(%{cursor_time_us: lag_us}))
+    assert line =~ "cursor_lag=2d4h"
   end
 end

@@ -21,10 +21,7 @@ import { withFileManager } from "./use-tree-mutation";
  * console.log(doc?.name, doc?.mimeType, doc?.size);
  * ```
  */
-export function useDirectoryMetadata(
-  keyringUri: string | null,
-  directoryUri: string | null,
-) {
+export function useDirectoryMetadata(keyringUri: string | null, directoryUri: string | null) {
   const opake = useOpake();
 
   return useQuery<Readonly<Record<string, DocumentMetadata>>>({

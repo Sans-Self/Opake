@@ -5,13 +5,19 @@ import { opakeKeys } from "../keys";
 import { withFileManager } from "./use-tree-mutation";
 
 /**
- * Load a directory tree (cabinet or workspace).
+ * Load a directory tree (cabinet or workspace) as a one-shot query.
  *
- * Read-only — loads from cache + AppView sync, no PDS writes.
- * Pass null for cabinet, or a workspace keyring URI.
+ * Read-only — loads from cache + AppView sync, no PDS writes. Uses
+ * `keepPreviousData` so navigation between directories doesn't flash
+ * a loading state when refetching.
  *
- * Uses `keepPreviousData` so navigation between directories doesn't
- * flash a loading state when refetching.
+ * @deprecated Prefer `useDirectory(keyringUri, directoryUri)` for
+ * subscription-based reads. `useTree` is query-cache-based and only
+ * refreshes when a local mutation invalidates the cache — remote
+ * changes from other clients never appear unless the consumer
+ * manually invalidates. `useDirectory` subscribes via
+ * `FileManager.watchDirectory` so SSE-driven updates surface
+ * automatically.
  *
  * @param keyringUri - Workspace keyring URI, or null for cabinet.
  *

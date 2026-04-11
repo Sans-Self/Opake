@@ -50,13 +50,38 @@ type WasmFileManager = {
   ): Promise<unknown>;
   updateContent(documentUri: string, newPlaintext: Uint8Array): Promise<unknown>;
   deleteRecursive(uri: string): Promise<unknown>;
-  share(documentUri: string, recipientDid: string, recipientPublicKey: Uint8Array, permissions: string, note: string | null): Promise<unknown>;
+  share(
+    documentUri: string,
+    recipientDid: string,
+    recipientPublicKey: Uint8Array,
+    permissions: string,
+    note: string | null,
+  ): Promise<unknown>;
   revokeShare(grantUri: string): Promise<void>;
   listShares(): Promise<unknown>;
   syncAndApplyProposals(): Promise<number>;
   isOwner(): boolean;
+  watchDirectory(
+    directoryUri: string,
+    callback: (snapshot: unknown) => void,
+  ): Promise<WasmDirectoryWatcher>;
   free(): void;
 };
+
+/** WASM DirectoryWatcher handle — returned by watchDirectory. */
+type WasmDirectoryWatcher = {
+  close(): Promise<void>;
+  free(): void;
+};
+
+/**
+ * Handle returned by `FileManager.watchDirectory`. Call `.close()` to
+ * unsubscribe — typically from a React useEffect cleanup.
+ */
+export interface DirectoryWatcher {
+  /** Stop receiving notifications. Idempotent. */
+  close(): void;
+}
 
 /**
  * File operations within a cabinet or workspace.
@@ -141,8 +166,12 @@ export class FileManager {
     },
   ): Promise<UploadResult> {
     return this.requireHandle().upload(
-      data, filename, mimeType,
-      options?.description ?? null, options?.tags ? [...options.tags] : null, options?.directoryUri ?? null,
+      data,
+      filename,
+      mimeType,
+      options?.description ?? null,
+      options?.tags ? [...options.tags] : null,
+      options?.directoryUri ?? null,
     ) as Promise<UploadResult>;
   }
 
@@ -182,7 +211,10 @@ export class FileManager {
    */
   @wrapWasmErrors
   delete(documentUri: string, parentDirectoryUri?: string): Promise<MutationResult> {
-    return this.requireHandle().delete(documentUri, parentDirectoryUri ?? null) as Promise<MutationResult>;
+    return this.requireHandle().delete(
+      documentUri,
+      parentDirectoryUri ?? null,
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -197,7 +229,11 @@ export class FileManager {
    */
   @wrapWasmErrors
   move(entryUri: string, sourceDirUri: string, targetDirUri: string): Promise<MutationResult> {
-    return this.requireHandle().moveEntry(entryUri, sourceDirUri, targetDirUri) as Promise<MutationResult>;
+    return this.requireHandle().moveEntry(
+      entryUri,
+      sourceDirUri,
+      targetDirUri,
+    ) as Promise<MutationResult>;
   }
 
   // ---------------------------------------------------------------------------
@@ -242,7 +278,7 @@ export class FileManager {
       for (const entry of parent.entries) {
         if (entry.type === "directory") {
           const dir = tree.directories[entry.uri];
-          if (dir && dir.name === name) {
+          if (dir?.name === name) {
             return { uri: entry.uri, created: false };
           }
         }
@@ -303,10 +339,12 @@ export class FileManager {
    */
   @wrapWasmErrors
   loadTree(): Promise<DirectoryTreeSnapshot> {
-    return (this.requireHandle().loadTree() as Promise<{ snapshot: unknown }>)
-      // Zod 4 z.record() with .transform() inner schemas loses type info.
-      // Runtime validation is correct — the cast bridges the inference gap.
-      .then((r) => directoryTreeSnapshotSchema.parse(r.snapshot) as DirectoryTreeSnapshot);
+    return (
+      (this.requireHandle().loadTree() as Promise<{ snapshot: unknown }>)
+        // Zod 4 z.record() with .transform() inner schemas loses type info.
+        // Runtime validation is correct — the cast bridges the inference gap.
+        .then((r) => directoryTreeSnapshotSchema.parse(r.snapshot) as DirectoryTreeSnapshot)
+    );
   }
 
   /**
@@ -321,8 +359,12 @@ export class FileManager {
   syncAndLoadTree(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    return this.requireHandle().syncAndLoadTree(directoryUri ?? null)
-      .then(treeWithMetadataSchema.parse) as Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }>;
+    return this.requireHandle()
+      .syncAndLoadTree(directoryUri ?? null)
+      .then(treeWithMetadataSchema.parse) as Promise<{
+      snapshot: DirectoryTreeSnapshot;
+      metadata: Record<string, DocumentMetadata>;
+    }>;
   }
 
   /**
@@ -337,8 +379,12 @@ export class FileManager {
   loadTreeWithMetadata(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    return this.requireHandle().loadTreeWithMetadata(directoryUri ?? null)
-      .then(treeWithMetadataSchema.parse) as Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }>;
+    return this.requireHandle()
+      .loadTreeWithMetadata(directoryUri ?? null)
+      .then(treeWithMetadataSchema.parse) as Promise<{
+      snapshot: DirectoryTreeSnapshot;
+      metadata: Record<string, DocumentMetadata>;
+    }>;
   }
 
   /**
@@ -382,7 +428,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   deleteRecursive(directoryUri: string): Promise<DeleteRecursiveResult> {
-    return this.requireHandle().deleteRecursive(directoryUri).then(deleteRecursiveResultSchema.parse);
+    return this.requireHandle()
+      .deleteRecursive(directoryUri)
+      .then(deleteRecursiveResultSchema.parse);
   }
 
   // ---------------------------------------------------------------------------
@@ -401,7 +449,10 @@ export class FileManager {
     updates: { filename?: string; description?: string; tags?: readonly string[] },
   ): Promise<MutationResult> {
     return this.requireHandle().updateMetadata(
-      documentUri, updates.filename ?? null, updates.tags ? [...updates.tags] : null, updates.description ?? null,
+      documentUri,
+      updates.filename ?? null,
+      updates.tags ? [...updates.tags] : null,
+      updates.description ?? null,
     ) as Promise<MutationResult>;
   }
 
@@ -433,9 +484,19 @@ export class FileManager {
    */
   @wrapWasmErrors
   share(
-    documentUri: string, recipientDid: string, recipientPublicKey: Uint8Array, permissions: string, note?: string,
+    documentUri: string,
+    recipientDid: string,
+    recipientPublicKey: Uint8Array,
+    permissions: string,
+    note?: string,
   ): Promise<MutationResult> {
-    return this.requireHandle().share(documentUri, recipientDid, recipientPublicKey, permissions, note ?? null) as Promise<MutationResult>;
+    return this.requireHandle().share(
+      documentUri,
+      recipientDid,
+      recipientPublicKey,
+      permissions,
+      note ?? null,
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -470,6 +531,96 @@ export class FileManager {
   @wrapWasmErrors
   syncAndApplyProposals(): Promise<number> {
     return this.requireHandle().syncAndApplyProposals();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live tree subscriptions (SSE-driven)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Subscribe to live changes for a specific directory.
+   *
+   * Fires the handler with the current snapshot once on registration
+   * (if the tree has been loaded), then again whenever an SSE event
+   * affects the tree. The handler receives `null` when the watched
+   * directory is deleted — the watcher auto-closes after that call.
+   *
+   * Must be paired with `opake.startSseConsumer(appviewUrl)` to actually
+   * receive events. Without the consumer, the watcher only fires once
+   * with the initial snapshot.
+   *
+   * @param directoryUri - The AT URI of the directory to watch.
+   * @param handler - Callback fired with a fresh snapshot per change.
+   * @returns A watcher handle. Call `.close()` on unmount to unsubscribe.
+   *
+   * @example
+   * ```typescript
+   * useEffect(() => {
+   *   const watcher = fm.watchDirectory(dirUri, (snapshot) => {
+   *     if (snapshot === null) {
+   *       // directory was deleted — route away
+   *       navigate("/");
+   *       return;
+   *     }
+   *     setTree(snapshot);
+   *   });
+   *   return () => watcher.close();
+   * }, [dirUri]);
+   * ```
+   */
+  watchDirectory(
+    directoryUri: string,
+    handler: (snapshot: DirectoryTreeSnapshot | null) => void,
+  ): DirectoryWatcher {
+    // The WASM binding is async (awaits the tree keeper mutex), but we
+    // want to return a synchronous handle so React effects can use it
+    // directly without an intermediate Promise. Kick off the registration
+    // eagerly and expose a close() that chains onto the promise.
+    const adapter = (snapshot: unknown) => {
+      // WASM calls back with either the serialized snapshot or null.
+      if (snapshot === null) {
+        handler(null);
+        return;
+      }
+      try {
+        // The WASM-side snapshot is pre-serialized; trust the shape but
+        // skip the full Zod parse for hot-path perf (React will re-render
+        // regardless).
+        handler(snapshot as DirectoryTreeSnapshot);
+      } catch (err) {
+        // One broken handler shouldn't break the event loop.
+        console.warn("[opake-sdk] watchDirectory handler threw:", err);
+      }
+    };
+
+    const pending = this.requireHandle().watchDirectory(directoryUri, adapter);
+    let closed = false;
+    let wasmWatcher: WasmDirectoryWatcher | null = null;
+
+    pending.then(
+      (w) => {
+        if (closed) {
+          // close() was called before the handle resolved — clean up now.
+          void w.close();
+          return;
+        }
+        wasmWatcher = w;
+      },
+      (err: unknown) => {
+        console.warn("[opake-sdk] watchDirectory registration failed:", err);
+      },
+    );
+
+    return {
+      close: () => {
+        if (closed) return;
+        closed = true;
+        if (wasmWatcher) {
+          void wasmWatcher.close();
+          wasmWatcher = null;
+        }
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------

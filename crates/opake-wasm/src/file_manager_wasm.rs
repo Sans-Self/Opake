@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use futures_util::lock::Mutex;
 use opake_core::manager::{FileContext, UploadRequest};
+use opake_core::tree_keeper::TreeKeeper;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -29,6 +30,9 @@ use crate::wasm_util::{
 #[wasm_bindgen(js_name = FileManager)]
 pub struct WasmFileManagerHandle {
     pub(crate) opake: Rc<Mutex<Option<WasmOpake>>>,
+    /// Shared TreeKeeper cloned from the parent OpakeContext. Used for
+    /// SSE-driven watcher registration.
+    pub(crate) tree_keeper: Rc<Mutex<TreeKeeper>>,
     pub(crate) context: Option<FileContext>,
 }
 

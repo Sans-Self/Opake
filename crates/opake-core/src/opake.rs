@@ -1395,7 +1395,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     }
 
     /// Resolve the appview URL: cached config → caller default → error.
-    fn resolve_appview_url(&self, default: Option<&str>) -> Result<String, Error> {
+    /// Resolve the appview URL to use for a request.
+    ///
+    /// Returns the URL stored on this Opake instance (loaded from config
+    /// during `init`), falling back to the provided `default` if no URL
+    /// is stored. Returns `NotFound` if neither source has a URL.
+    ///
+    /// This is the shared helper behind every appview-touching method
+    /// (`request_sse_token`, `list_inbox`, `discover_member_keyrings`,
+    /// etc.) and also used by WASM bindings that need to auto-resolve
+    /// the URL before starting long-lived tasks like the SSE consumer.
+    pub fn resolve_appview_url(&self, default: Option<&str>) -> Result<String, Error> {
         self.appview_url
             .clone()
             .or_else(|| default.map(|s| s.to_string()))

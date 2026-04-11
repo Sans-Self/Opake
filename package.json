@@ -1,4 +1,22 @@
 {
   "private": true,
-  "workspaces": ["apps/web", "packages/*", "tests"]
+  "workspaces": ["apps/web", "packages/*", "tests"],
+  "scripts": {
+    "lint": "bun run --filter '@opake/sdk' --filter '@opake/daemon' --filter '@opake/react' --filter opake-web lint",
+    "format": "bun run --filter '@opake/sdk' --filter '@opake/daemon' --filter '@opake/react' --filter opake-web format",
+    "format:check": "bun run --filter '@opake/sdk' --filter '@opake/daemon' --filter '@opake/react' --filter opake-web format:check"
+  },
+  "devDependencies": {
+    "eslint": "^10.0.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-functional": "^9.0.4",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-no-secrets": "^2.3.3",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-security": "^4.0.0",
+    "eslint-plugin-sonarjs": "^4.0.1",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1"
+  }
 }

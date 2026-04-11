@@ -8,19 +8,10 @@ import {
 } from "@/components/cabinet/CreateWorkspaceDialog";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { getOpake, useAuthStore } from "@/stores/auth";
-import { useDocumentsStore } from "@/stores/documents/store";
 import { taskStore } from "@/stores/tasks";
 import { startDaemon } from "@opake/daemon";
 import { Opake } from "@opake/sdk";
 import { toastError, toastSuccess } from "@/stores/toast";
-
-/** Re-sync the currently viewed directory from the PDS. */
-function reloadCurrentDirectory(): void {
-  const { loaded, currentDirectoryUri } = useDocumentsStore.getState();
-  if (loaded) {
-    void useDocumentsStore.getState().loadDirectory(currentDirectoryUri);
-  }
-}
 
 function CabinetLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -31,24 +22,31 @@ function CabinetLayout() {
     void useWorkspaceStore.getState().loadWorkspaces();
   }, []);
 
-  // Background daemon — PDS maintenance writes + SSE-driven proposal sync.
-  // When `sse` is provided, directory-sync downgrades to a low-frequency
-  // fallback and SSE events drive targeted per-workspace sync. Other tasks
-  // (pair-cleanup, grant-healing, share-retry) always run on intervals.
+  // Start the WASM SSE consumer; stop it on teardown so
+  // `TreeKeeper::uninstall_all` runs and the previous user's
+  // `ContentKey`s / decrypted names don't linger across login.
   useEffect(() => {
     const appviewUrl = import.meta.env.VITE_APPVIEW_URL as string | undefined;
+    if (!appviewUrl) return;
+    const opake = getOpake();
+    void opake.startSseConsumer(appviewUrl).catch((err: unknown) => {
+      console.warn("[opake] startSseConsumer failed:", err);
+    });
+    return () => {
+      try {
+        opake.stopSseConsumer();
+      } catch (err) {
+        console.warn("[opake] stopSseConsumer failed:", err);
+      }
+    };
+  }, []);
+
+  // Background daemon — timer polling for maintenance tasks only.
+  useEffect(() => {
     // eslint-disable-next-line functional/no-let -- handle assigned inside async IIFE
     let handle: ReturnType<typeof startDaemon> | null = null;
     void Opake.taskDefs().then((defs) => {
       handle = startDaemon(getOpake(), defs, taskStore, {
-        sse: appviewUrl ? {
-          appviewUrl,
-          onRecordChanged: () => reloadCurrentDirectory(),
-        } : undefined,
-        onWorkspaceUpdated: () => {
-          reloadCurrentDirectory();
-          void useWorkspaceStore.getState().loadWorkspaces();
-        },
         onSessionExpired: () => {
           handle?.stop();
           void useAuthStore.getState().logout();

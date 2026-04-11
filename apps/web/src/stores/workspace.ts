@@ -29,16 +29,17 @@ function workspacesChanged(
   const prevKeys = Object.keys(prev);
   const nextKeys = Object.keys(next);
   if (prevKeys.length !== nextKeys.length) return true;
-  for (const key of nextKeys) {
-    const a = prev[key];
-    const b = next[key];
-    if (!a) return true;
-    if (a.rotation !== b.rotation) return true;
-    if (a.memberCount !== b.memberCount) return true;
-    if (a.name !== b.name) return true;
-    if (a.description !== b.description) return true;
-  }
-  return false;
+  return nextKeys.some((key) => {
+    const a = prev[key] as WorkspaceEntry | undefined;
+    const b = next[key] as WorkspaceEntry | undefined;
+    if (!a || !b) return true;
+    return (
+      a.rotation !== b.rotation ||
+      a.memberCount !== b.memberCount ||
+      a.name !== b.name ||
+      a.description !== b.description
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -114,9 +115,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       // Dialog disables its button during the async call.
       const done = loading("create-workspace");
       try {
-        const opake = getOpake();
-        opake.markWrite();
-        const result = await opake.createWorkspace(name, description ?? "");
+        const result = await getOpake().createWorkspace(name, description ?? "");
         loadPromise = null;
         await useWorkspaceStore.getState().loadWorkspaces();
         return result.keyringUri;
