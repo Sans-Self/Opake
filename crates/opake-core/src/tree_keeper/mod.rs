@@ -244,12 +244,28 @@ impl TreeKeeper {
                     self.apply_directory_delete(uri)?;
                 }
             }
-            // Document events: documents aren't in the DirectoryTree (they're
-            // leaf URIs referenced from parents). A document upsert doesn't
-            // change tree structure, but watcher consumers may still want to
-            // know — for the POC, we skip these. TODO: expose a doc event
-            // channel later for document-metadata reloads.
-            SseEvent::DocumentUpsert(_) | SseEvent::DocumentDelete(_) => {}
+            // Document upsert: documents aren't in the DirectoryTree — they're
+            // leaf URIs referenced from parents — so no tree mutation runs.
+            // But a document's encrypted metadata may have changed (rename,
+            // tag edit, description update) and watchers need to know so
+            // consumers can refetch metadata. Route by scope and fire every
+            // watcher in that scope with the unchanged tree; the reload
+            // debounce on the consumer side picks up the metadata delta.
+            SseEvent::DocumentUpsert(record) => {
+                let scope = match record.keyring_uri.as_deref() {
+                    Some(uri) => TreeScope::Workspace(uri.to_string()),
+                    None => TreeScope::Cabinet,
+                };
+                self.notify_scope(&scope);
+            }
+            // Document delete: handled implicitly by the companion
+            // `DirectoryUpsert` that removes the entry from the parent
+            // directory. Firing watchers here too would double-notify
+            // without adding a signal the parent event doesn't already
+            // carry. Cabinet deletions that somehow arrive without a
+            // parent update are a single dropped refresh — the next SSE
+            // event or navigation will catch them.
+            SseEvent::DocumentDelete(_) => {}
             // Keyring events: TODO — detect rotation bump and call
             // invalidate_decrypted_names on the affected workspace tree.
             SseEvent::KeyringUpsert(_) | SseEvent::KeyringDelete(_) => {}
@@ -425,6 +441,34 @@ impl TreeKeeper {
 
         for handle in auto_close {
             watchers.remove(&handle);
+        }
+    }
+
+    /// Fire every watcher in the given scope with the current tree
+    /// snapshot, without any deletion handling. Used for non-structural
+    /// events (document metadata changes) where the tree hasn't mutated
+    /// but consumers still need to re-derive their view — typically by
+    /// refetching document metadata through the FileManager.
+    fn notify_scope(&mut self, scope: &TreeScope) {
+        let Self {
+            cabinet,
+            workspaces,
+            watchers,
+            ..
+        } = self;
+
+        let tree = match scope {
+            TreeScope::Cabinet => cabinet.as_ref().map(|h| &h.tree),
+            TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| &h.tree),
+        };
+        let Some(tree) = tree else {
+            return;
+        };
+
+        for watcher in watchers.values_mut() {
+            if &watcher.scope == scope {
+                (watcher.callback)(Some(tree));
+            }
         }
     }
 

@@ -101,7 +101,28 @@ defmodule OpakeAppview.SSE.Broadcaster do
         :delete -> %{uri: get(attrs, :uri)}
       end
 
-    if did = get(attrs, :author_did), do: broadcast(Topics.personal(did), "document_update:#{action}", payload)
+    event_type = "document_update:#{action}"
+
+    cond do
+      # Preferred path: route via the workspace keyring topic so all
+      # members (including the document owner who needs to apply the
+      # proposal) receive it. The lexicon carries no `keyring` field,
+      # so the indexer enriches upsert attrs with `keyring_uri` via
+      # a JOIN through the documents table before calling this.
+      kr = get(attrs, :keyring_uri) ->
+        broadcast(Topics.workspace(kr), event_type, payload)
+
+      # Fallback: cabinet documents (no keyring) or the race where a
+      # proposal arrives before its document has been indexed. The
+      # author's personal topic at least reaches their own other
+      # devices; the owner's next `sync_workspace_by_uri` will still
+      # catch up from the DB.
+      did = get(attrs, :author_did) ->
+        broadcast(Topics.personal(did), event_type, payload)
+
+      true ->
+        :ok
+    end
   rescue
     e -> Logger.warning("[Broadcaster] document_update broadcast failed: #{inspect(e)}")
   end

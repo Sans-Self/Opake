@@ -160,6 +160,50 @@ defmodule OpakeAppview.PipelineTest do
     assert update.author_did == "did:plc:editor"
   end
 
+  test "documentUpdate on a workspace document broadcasts to the keyring topic" do
+    # Seed a workspace document so the indexer's keyring lookup succeeds
+    # when the documentUpdate event arrives. The JOIN through the documents
+    # table is what routes this event to workspace members (the lexicon
+    # itself has no `keyring` reference).
+    keyring_uri = "at://did:plc:owner/app.opake.keyring/3kr"
+    document_uri = "at://did:plc:owner/app.opake.document/3xyz"
+
+    {:ok, _doc} =
+      DocumentQueries.upsert_document(%{
+        document_uri: document_uri,
+        keyring_uri: keyring_uri,
+        owner_did: "did:plc:owner",
+        indexed_at: DateTime.utc_now()
+      })
+
+    Phoenix.PubSub.subscribe(OpakeAppview.PubSub, OpakeAppview.SSE.Topics.workspace(keyring_uri))
+
+    json = document_update_create_json("did:plc:editor", "3upd", document_uri)
+    Indexer.process_message(json, 0)
+
+    assert_receive {:sse_event, "document_update:upsert", payload}
+    assert payload.document_uri == document_uri
+    assert payload.keyring_uri == keyring_uri
+    assert payload.author_did == "did:plc:editor"
+  end
+
+  test "documentUpdate for an unindexed document falls back to personal topic" do
+    # Race condition: the proposal arrives before the document record is
+    # indexed. The indexer can't resolve a keyring, so it falls back to
+    # broadcasting on the author's personal topic. The DB row is still
+    # written so the owner's next sync picks it up.
+    document_uri = "at://did:plc:owner/app.opake.document/3xyz"
+
+    Phoenix.PubSub.subscribe(OpakeAppview.PubSub, OpakeAppview.SSE.Topics.personal("did:plc:editor"))
+
+    json = document_update_create_json("did:plc:editor", "3upd", document_uri)
+    Indexer.process_message(json, 0)
+
+    assert_receive {:sse_event, "document_update:upsert", payload}
+    assert payload.document_uri == document_uri
+    refute Map.has_key?(payload, :keyring_uri)
+  end
+
   test "keyringLeave removes the leaving member" do
     keyring_uri = "at://did:plc:owner/app.opake.keyring/3kr"
 

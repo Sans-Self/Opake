@@ -304,32 +304,106 @@ fn uninstall_all_drains_every_scope() {
     assert_eq!(keeper.watcher_count(), 0);
 }
 
-#[test]
-fn apply_document_events_are_noops_for_tree_state() {
-    // Document events don't touch the DirectoryTree (documents are leaves
-    // referenced from parent directories). Calling apply_event with a
-    // document upsert should neither error nor fire watchers.
+fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
     use crate::sse::events::SseDocumentRecord;
+    SseEvent::DocumentUpsert(SseDocumentRecord {
+        document_uri: uri.into(),
+        owner_did: TEST_DID.into(),
+        encrypted_metadata: None,
+        encryption: None,
+        blob_ref: None,
+        keyring_uri: keyring_uri.map(str::to_owned),
+        rotation: None,
+        deleted_at: None,
+        indexed_at: None,
+    })
+}
 
+fn sse_doc_delete(uri: &str) -> SseEvent {
+    use crate::sse::events::SseDeletePayload;
+    SseEvent::DocumentDelete(SseDeletePayload {
+        uri: None,
+        directory_uri: None,
+        document_uri: Some(uri.into()),
+    })
+}
+
+#[test]
+fn document_upsert_fires_cabinet_watchers_when_keyring_uri_is_none() {
+    // A cabinet document's metadata changed — the tree structure is
+    // untouched but consumers need to refetch the document's encrypted
+    // metadata. TreeKeeper fires cabinet-scoped watchers with the
+    // current (unchanged) tree and lets the consumer's reload cycle
+    // pick up the delta.
     let mut keeper = cabinet_keeper();
     let sink = RecordingSink::new();
     keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
     let start = sink.count();
 
-    let doc = SseEvent::DocumentUpsert(SseDocumentRecord {
-        document_uri: DOC_BEACH_URI.into(),
-        owner_did: TEST_DID.into(),
-        encrypted_metadata: None,
-        encryption: None,
-        blob_ref: None,
-        keyring_uri: None,
-        rotation: None,
-        deleted_at: None,
-        indexed_at: None,
-    });
-    keeper.apply_event(&doc).unwrap();
+    keeper
+        .apply_event(&sse_doc_upsert(DOC_BEACH_URI, None))
+        .unwrap();
 
-    assert_eq!(sink.count(), start); // no watcher fire
+    assert_eq!(sink.count(), start + 1);
+}
+
+#[test]
+fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
+    // A workspace document upsert should fire watchers for that
+    // specific workspace — not cabinet, not other workspaces.
+    let mut keeper = cabinet_keeper();
+    let ws_a = "at://did:plc:test/app.opake.keyring/a".to_string();
+    let ws_b = "at://did:plc:test/app.opake.keyring/b".to_string();
+    keeper.install_workspace_tree(
+        ws_a.clone(),
+        DirectoryTree::from_records(std::iter::empty()),
+        ContentKey([0u8; 32]),
+    );
+    keeper.install_workspace_tree(
+        ws_b.clone(),
+        DirectoryTree::from_records(std::iter::empty()),
+        ContentKey([1u8; 32]),
+    );
+
+    let cabinet_sink = RecordingSink::new();
+    let ws_a_sink = RecordingSink::new();
+    let ws_b_sink = RecordingSink::new();
+    keeper.watch_cabinet(ROOT_URI.into(), cabinet_sink.callback());
+    keeper.watch_workspace(
+        ws_a.clone(),
+        "at://did:plc:test/app.opake.directory/a-root".into(),
+        ws_a_sink.callback(),
+    );
+    keeper.watch_workspace(
+        ws_b.clone(),
+        "at://did:plc:test/app.opake.directory/b-root".into(),
+        ws_b_sink.callback(),
+    );
+
+    let [cab0, a0, b0] = [cabinet_sink.count(), ws_a_sink.count(), ws_b_sink.count()];
+
+    keeper
+        .apply_event(&sse_doc_upsert(DOC_BEACH_URI, Some(&ws_a)))
+        .unwrap();
+
+    assert_eq!(cabinet_sink.count(), cab0);
+    assert_eq!(ws_a_sink.count(), a0 + 1);
+    assert_eq!(ws_b_sink.count(), b0);
+}
+
+#[test]
+fn document_delete_does_not_fire_watchers() {
+    // Document deletion is handled implicitly by the companion
+    // DirectoryUpsert that removes the entry from the parent — we
+    // don't need to double-notify here.
+    let mut keeper = cabinet_keeper();
+    let sink = RecordingSink::new();
+    keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
+    let start = sink.count();
+
+    keeper.apply_event(&sse_doc_delete(DOC_BEACH_URI)).unwrap();
+
+    assert_eq!(sink.count(), start);
 }
 
 #[test]

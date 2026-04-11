@@ -243,7 +243,21 @@ defmodule OpakeAppview.Indexer do
 
     log_query_error(result, "document update upsert", attrs.uri)
     emit_event_telemetry("app.opake.documentUpdate", :upsert, status_of(result))
-    Broadcaster.broadcast_document_update(attrs, :upsert)
+
+    # Enrich the broadcast with the workspace keyring URI so the
+    # broadcaster can route to the workspace topic (where the document
+    # owner is subscribed). The `app.opake.documentUpdate` lexicon has
+    # no `keyring` field, so we join through the documents table here.
+    # If the document hasn't been indexed yet (race), fall through to
+    # the personal-topic broadcast path; the owner's next
+    # `sync_workspace_by_uri` call will still pick up the proposal.
+    enriched =
+      case DocumentQueries.keyring_uri_for_document(attrs.document_uri) do
+        {:ok, keyring_uri} -> Map.put(attrs, :keyring_uri, keyring_uri)
+        :not_found -> attrs
+      end
+
+    Broadcaster.broadcast_document_update(enriched, :upsert)
   end
 
   defp dispatch({:delete_document_update, %{uri: uri}}, _time_us, _now) do
