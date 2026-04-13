@@ -8,6 +8,7 @@ import {
   SquaresFourIcon,
   FolderPlusIcon,
   UploadSimpleIcon,
+  NotePencilIcon,
 } from "@phosphor-icons/react";
 import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
@@ -92,7 +93,6 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   // Items is now a stable array ref in the store (not derived via Object.values)
   const items = useDocumentsStore((s) => s.items);
   const viewMode = useDocumentsStore((s) => s.viewMode);
-  // eslint-disable-next-line @typescript-eslint/unbound-method -- zustand store method, no `this` binding
   const setViewMode = useDocumentsStore((s) => s.setViewMode);
   const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
   const currentDirectoryUri = useDocumentsStore((s) => s.currentDirectoryUri);
@@ -142,6 +142,39 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     },
     [navigate, basePath, pathSegments, pathKey],
   );
+
+  const handleEdit = useCallback(
+    (item: FileItem) => {
+      const rkey = rkeyFromUri(item.uri);
+      if (context.kind === "workspace") {
+        const wsRkey = rkeyFromUri(context.keyringUri);
+        void navigate({
+          to: "/cabinet/workspace-editor/$rkey/$docRkey" as never,
+          params: { rkey: wsRkey, docRkey: rkey } as never,
+        });
+      } else {
+        void navigate({ to: "/cabinet/editor/$rkey" as never, params: { rkey } as never });
+      }
+    },
+    [navigate, context],
+  );
+
+  const handleNewNote = useCallback(() => {
+    const search = currentDirectoryUri ? { directoryUri: currentDirectoryUri } : {};
+    if (context.kind === "workspace") {
+      const wsRkey = rkeyFromUri(context.keyringUri);
+      void navigate({
+        to: "/cabinet/workspace-editor/$rkey/new" as never,
+        params: { rkey: wsRkey } as never,
+        search: search as never,
+      });
+    } else {
+      void navigate({
+        to: "/cabinet/editor/new" as never,
+        search: search as never,
+      });
+    }
+  }, [navigate, context, currentDirectoryUri]);
 
   const handleDownload = useCallback((uri: string) => {
     void useDocumentsStore
@@ -240,6 +273,13 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const toolbar = (
     <>
       <button
+        onClick={handleNewNote}
+        className="btn btn-ghost btn-xs btn-square rounded-md"
+        aria-label="New note"
+      >
+        <NotePencilIcon size={15} />
+      </button>
+      <button
         onClick={handleCreateFolder}
         className="btn btn-ghost btn-xs btn-square rounded-md"
         aria-label="New folder"
@@ -282,6 +322,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
             items={items}
             viewMode={viewMode}
             onOpen={handleOpen}
+            onEdit={handleEdit}
             onDownload={handleDownload}
             onDelete={handleDelete}
             onDeleteFolder={handleDeleteFolder}

@@ -93,6 +93,8 @@ interface MarkdownEditorProps {
   readonly documentName: string;
   readonly onSave: (content: string) => Promise<void>;
   readonly onClose: () => void;
+  /** Called when dirty state changes so the parent can track unsaved state. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
   readonly saving: boolean;
 }
 
@@ -314,9 +316,19 @@ export function MarkdownEditor({
   documentName,
   onSave,
   onClose,
+  onDirtyChange,
   saving,
 }: MarkdownEditorProps) {
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirtyRaw] = useState(false);
+
+  const setDirty = useCallback(
+    (value: boolean) => {
+      setDirtyRaw(value);
+      onDirtyChange?.(value);
+    },
+    [onDirtyChange],
+  );
+
   const [previewMarkdown, setPreviewMarkdown] = useState(initialContent);
   const [previewing, setPreviewing] = useState(false);
   const [inTable, setInTable] = useState(false);
@@ -337,7 +349,7 @@ export function MarkdownEditor({
       lastSavedRef.current = markdown;
       setDirty(false);
     },
-    [onSave, getMarkdown],
+    [onSave, getMarkdown, setDirty],
   );
 
   const editor = useEditor({

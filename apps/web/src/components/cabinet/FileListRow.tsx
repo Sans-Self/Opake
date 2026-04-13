@@ -13,6 +13,7 @@ interface FileListRowProps {
   readonly renderActions?: () => ReactNode;
   readonly hideStatus?: boolean;
   readonly onPreview?: () => void;
+  readonly onEdit?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
@@ -31,6 +32,7 @@ export function FileListRow({
   renderActions,
   hideStatus,
   onPreview,
+  onEdit,
   onEditMetadata,
   onRename,
   onMove,
@@ -83,6 +85,7 @@ export function FileListRow({
           <FileActionMenu
             item={item}
             onPreview={onPreview}
+            onEdit={onEdit}
             onEditMetadata={onEditMetadata}
             onRename={onRename}
             onMove={onMove}

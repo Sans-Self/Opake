@@ -3,6 +3,7 @@ import {
   DotsThreeVerticalIcon,
   DownloadSimpleIcon,
   EyeIcon,
+  NotePencilIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
   TrashIcon,
@@ -14,6 +15,7 @@ import type { FileItem } from "./types";
 interface FileActionMenuProps {
   readonly item: FileItem;
   readonly onPreview?: () => void;
+  readonly onEdit?: () => void;
   readonly onEditMetadata?: () => void;
   readonly onRename?: () => void;
   readonly onMove?: () => void;
@@ -23,22 +25,49 @@ interface FileActionMenuProps {
   readonly onDeleteFolder?: () => void;
 }
 
-export function FileActionMenu({
-  item,
-  onPreview,
-  onEditMetadata,
-  onRename,
-  onMove,
-  onShare,
-  onDownload,
-  onDelete,
-  onDeleteFolder,
-}: FileActionMenuProps) {
-  const isFolder = item.kind === "folder";
+interface MenuItem {
+  readonly icon: typeof EyeIcon;
+  readonly label: string;
+  readonly onClick?: () => void;
+}
+
+function buildProposalItems(props: FileActionMenuProps): readonly MenuItem[] {
+  return [
+    ...(props.onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: props.onPreview }] : []),
+    ...(props.item.kind !== "folder"
+      ? [{ icon: DownloadSimpleIcon, label: "Download", onClick: props.onDownload }]
+      : []),
+  ];
+}
+
+function buildFolderItems(props: FileActionMenuProps): readonly MenuItem[] {
+  return [
+    { icon: PencilSimpleIcon, label: "Rename", onClick: props.onRename },
+    { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: props.onMove },
+    { icon: TrashIcon, label: "Delete", onClick: props.onDeleteFolder },
+  ];
+}
+
+function buildFileItems(props: FileActionMenuProps): readonly MenuItem[] {
+  return [
+    ...(props.onEdit ? [{ icon: NotePencilIcon, label: "Edit", onClick: props.onEdit }] : []),
+    ...(props.onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: props.onPreview }] : []),
+    { icon: PencilSimpleIcon, label: "Edit details", onClick: props.onEditMetadata },
+    { icon: ShareNetworkIcon, label: "Share\u2026", onClick: props.onShare },
+    { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: props.onMove },
+    { icon: DownloadSimpleIcon, label: "Download", onClick: props.onDownload },
+    { icon: TrashIcon, label: "Delete", onClick: props.onDelete },
+  ];
+}
+
+export function FileActionMenu(props: FileActionMenuProps) {
+  const { item } = props;
   const downloading = useAppStore((s) => s.isLoading(`download:${item.uri}`));
   const deleting = useAppStore((s) => s.isLoading(`delete:${item.uri}`));
 
-  if (!isFolder && (!item.decrypted || item.name === "[Keyring encrypted]")) return null;
+  if (item.kind !== "folder" && (!item.decrypted || item.name === "[Keyring encrypted]")) {
+    return null;
+  }
 
   if (downloading || deleting) {
     return (
@@ -51,28 +80,11 @@ export function FileActionMenu({
   }
 
   const isProposal = item.proposal != null;
-
   const items = isProposal
-    ? [
-        ...(onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: onPreview }] : []),
-        ...(!isFolder
-          ? [{ icon: DownloadSimpleIcon, label: "Download", onClick: onDownload }]
-          : []),
-      ]
-    : isFolder
-      ? [
-          { icon: PencilSimpleIcon, label: "Rename", onClick: onRename },
-          { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
-          { icon: TrashIcon, label: "Delete", onClick: onDeleteFolder },
-        ]
-      : [
-          ...(onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: onPreview }] : []),
-          { icon: PencilSimpleIcon, label: "Edit details", onClick: onEditMetadata },
-          { icon: ShareNetworkIcon, label: "Share\u2026", onClick: onShare },
-          { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: onMove },
-          { icon: DownloadSimpleIcon, label: "Download", onClick: onDownload },
-          { icon: TrashIcon, label: "Delete", onClick: onDelete },
-        ];
+    ? buildProposalItems(props)
+    : item.kind === "folder"
+      ? buildFolderItems(props)
+      : buildFileItems(props);
 
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- stopPropagation wrapper to prevent folder row navigation

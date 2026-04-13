@@ -444,6 +444,7 @@ export class Opake {
    * ```
    */
   @wrapWasmErrors
+  @withTokenGuard
   async cabinet(): Promise<FileManager> {
     const ctx = this.requireContext();
     const handle = await ctx.cabinet();

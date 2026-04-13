@@ -104,6 +104,7 @@ export function PanelContent({
 
   const handleItemClick = (item: FileItem) => {
     if (item.kind === "folder") onOpen(item);
+    else if (onEdit && isEditable(item)) onEdit(item);
     else if (onPreview && isPreviewable(item)) onPreview(item);
     else onDownload(item.uri);
   };
@@ -138,6 +139,7 @@ export function PanelContent({
       item={item}
       isActive={item.uri === activeUri}
       onClick={() => handleItemClick(item)}
+      onEdit={editHandler(item)}
       onDoubleClick={editHandler(item)}
       onPreview={previewHandler(item)}
       onEditMetadata={onUpdateMetadata ? () => metadataDialogRef.current?.show(item) : undefined}

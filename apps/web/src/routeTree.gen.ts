@@ -261,13 +261,21 @@ const CabinetWorkspaceEditorRkeyNewRoute =
     id: '/workspace-editor/$rkey/new',
     path: '/workspace-editor/$rkey/new',
     getParentRoute: () => CabinetRouteRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace-editor/$rkey/new.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const CabinetWorkspaceEditorRkeyDocRkeyRoute =
   CabinetWorkspaceEditorRkeyDocRkeyRouteImport.update({
     id: '/workspace-editor/$rkey/$docRkey',
     path: '/workspace-editor/$rkey/$docRkey',
     getParentRoute: () => CabinetRouteRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace-editor/$rkey/$docRkey.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 
 export interface FileRoutesByFullPath {
   '/cabinet': typeof CabinetRouteRouteWithChildren
