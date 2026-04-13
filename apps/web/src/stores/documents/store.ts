@@ -58,12 +58,19 @@ let openPromiseContext: FileContext | null = null;
 // eslint-disable-next-line functional/no-let
 let mutationChain: Promise<unknown> = Promise.resolve();
 
-// SSE-driven live updates for the current directory. installed by
-// `loadDirectory` after a successful load, closed by `close()` and
-// re-installed when the directory URI changes. See the comment on
-// `installDirectoryWatcher` below for debounce semantics.
+// SSE-driven live updates for the current directory. Installed once per
+// `(FileManager, directoryUri)` pair and re-used across subsequent
+// `loadDirectory` calls on the same URI. Re-installing on every load
+// produced a feedback loop — each new watcher eager-fired, which
+// scheduled another `loadDirectory`, which installed another watcher —
+// resulting in ~2 syncs/sec of busy-work.
 // eslint-disable-next-line functional/no-let
 let activeWatcher: DirectoryWatcher | null = null;
+// The directory URI the current `activeWatcher` is bound to. Used as
+// the idempotency key in `installDirectoryWatcher`: if the target URI
+// matches this, we skip re-installation entirely.
+// eslint-disable-next-line functional/no-let
+let activeWatcherUri: string | null = null;
 // Per-watcher debounce timer. Bound to a closure reference so two
 // overlapping watchers (during a fast directory switch) can't steal
 // each other's scheduled reloads.
@@ -79,16 +86,22 @@ export function getActiveFileManager(): FileManager {
 }
 
 /**
- * Install a SSE-driven watcher for the given directory URI. Replaces any
- * previously-active watcher.
+ * Install an SSE-driven watcher for the given directory URI.
  *
- * The eager fire that `watchDirectory` delivers at install time is NOT
- * swallowed — it schedules a real `loadDirectory` through the
- * FileManager, which re-syncs and re-fetches metadata unconditionally.
- * That's one extra round-trip per directory navigation, accepted
- * because it also closes the drift window between `syncAndLoadTree`
- * (T0) and watcher registration (T2): any SSE event that patched the
- * TreeKeeper in between shows up here instead of being lost.
+ * **Idempotent.** If a watcher is already bound to the same URI, this
+ * is a no-op. Callers (`loadDirectory`, mutation reloads) invoke this
+ * on every completion; we must NOT tear down and re-install on each
+ * call, because the eager first fire that `watchDirectory` delivers
+ * would then schedule another `loadDirectory`, which would call us
+ * again, which would re-install — a ~2 syncs/sec feedback loop.
+ *
+ * On a genuine URI change (navigation between directories, workspace
+ * switch), the caller resolves the new URI, we close the old watcher,
+ * and we install a fresh one. The eager fire on that new install IS
+ * useful: it closes the drift window between the preceding
+ * `syncAndLoadTree` (T0) and watcher registration (T2). Any SSE event
+ * that patched the TreeKeeper in between arrives via that initial
+ * callback rather than being silently lost.
  *
  * On a `null` snapshot (watched directory deleted) we clear
  * `currentDirectoryUri` synchronously — otherwise any consumer
@@ -96,9 +109,16 @@ export function getActiveFileManager(): FileManager {
  * would see a dead URI.
  */
 function installDirectoryWatcher(directoryUri: string): void {
+  // Idempotency gate: same URI + live watcher → nothing to do.
+  // This is the fix for the "~2 syncs/sec" feedback loop.
+  if (activeWatcherUri === directoryUri && activeWatcher) {
+    return;
+  }
+
   closeDirectoryWatcher();
   if (!activeManager) return;
 
+  activeWatcherUri = directoryUri;
   activeWatcher = activeManager.watchDirectory(directoryUri, (snapshot) => {
     if (snapshot === null) {
       // Deletion: drop the stale pointer synchronously before the
@@ -112,9 +132,9 @@ function installDirectoryWatcher(directoryUri: string): void {
       return;
     }
     // Debounce: collapse rapid SSE bursts (e.g., 10 events in 100ms)
-    // into one reload. Also swallows the eager first fire on watcher
-    // installation when the store state is already current — the
-    // scheduled reload is a no-op refresh in that case.
+    // into one reload. The initial eager fire also goes through this
+    // path — its scheduled reload is a harmless refresh on first
+    // install that catches any T0→T2 drift events.
     if (watcherReloadTimer) return;
     watcherReloadTimer = setTimeout(() => {
       watcherReloadTimer = null;
@@ -128,6 +148,7 @@ function installDirectoryWatcher(directoryUri: string): void {
 function closeDirectoryWatcher(): void {
   activeWatcher?.close();
   activeWatcher = null;
+  activeWatcherUri = null;
   if (watcherReloadTimer) {
     clearTimeout(watcherReloadTimer);
     watcherReloadTimer = null;

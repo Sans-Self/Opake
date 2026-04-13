@@ -25,7 +25,6 @@ import {
   resolvedIdentitySchema,
   createWorkspaceResultSchema,
   listWorkspacesResultSchema,
-  syncDetailedResultSchema,
   syncSingleResultSchema,
 } from "./schemas";
 import { initWasm } from "./wasm";
@@ -697,20 +696,6 @@ export class Opake {
   // ---------------------------------------------------------------------------
   // Daemon operations
   // ---------------------------------------------------------------------------
-
-  /** Sync all owned workspaces — apply pending proposals from members. */
-  @wrapWasmErrors
-  @withTokenGuard
-  syncOwnedWorkspaces(): Promise<number> {
-    return this.requireContext().syncOwnedWorkspaces();
-  }
-
-  /** Sync with per-workspace result visibility (daemon use). */
-  @wrapWasmErrors
-  @withTokenGuard
-  syncOwnedWorkspacesDetailed(): Promise<readonly WorkspaceSyncResult[]> {
-    return this.requireContext().syncOwnedWorkspacesDetailed().then(syncDetailedResultSchema.parse);
-  }
 
   /** Sync a single workspace by keyring URI. Returns null if not a member. */
   @wrapWasmErrors

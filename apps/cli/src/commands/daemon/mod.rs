@@ -1,17 +1,30 @@
 mod service;
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use log::{info, warn};
 use opake_core::client::ReqwestTransport;
-use opake_core::crypto::OsRng;
+use opake_core::crypto::{OsRng, RngCore};
 use opake_core::daemon::{self, TASKS};
 use opake_core::opake::Opake;
+use opake_core::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
+use opake_core::sse::events::SseEvent;
+use opake_core::sse::reqwest_connection::ReqwestSseTransport;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::LocalSet;
 
 use crate::config::FileStorage;
 use crate::session;
+
+/// Shared handle to a CLI-side Opake. Held behind `tokio::sync::Mutex`
+/// so the SSE consumer's token fetcher and the event handler serialize
+/// correctly — only one can hold the mutable reference at a time. `Rc`
+/// (not `Arc`) because each consumer runs inside a `LocalSet` and
+/// never crosses thread boundaries.
+type SharedOpake = Rc<Mutex<Opake<ReqwestTransport, OsRng, FileStorage>>>;
 
 /// Background daemon for proactive session maintenance
 #[derive(Args)]
@@ -67,38 +80,70 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
         .map(|t| format!("{}={}s", t.name, t.interval_seconds))
         .collect::<Vec<_>>()
         .join(", ");
-    println!("opake daemon starting ({task_summary})");
+    println!("opake daemon starting ({task_summary}, sync=SSE)");
 
-    let mut pair_tick = tokio::time::interval(task_interval("pair-cleanup"));
-    let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
-    let mut share_tick = tokio::time::interval(task_interval("share-retry"));
-    let mut dir_sync_tick = tokio::time::interval(task_interval("directory-sync"));
+    // Everything runs inside a LocalSet so the SSE consumer tasks (which
+    // are `!Send` — the `TokenFetcher` trait object doesn't carry a Send
+    // bound to stay compatible with WASM) can use `tokio::task::spawn_local`.
+    let local = LocalSet::new();
+    local
+        .run_until(async move {
+            let cancel = Rc::new(Notify::new());
 
-    loop {
-        tokio::select! {
-            _ = pair_tick.tick() => {
-                info!("running: pair-cleanup");
-                run_pair_cleanup(storage).await;
+            // Spawn one long-lived SSE consumer per configured account.
+            // Each consumer does an initial catch-up sync on connect,
+            // then streams events from the appview and applies proposals
+            // as they arrive. Record events (DirectoryUpsert,
+            // DocumentUpsert, etc.) are dropped — the CLI has no
+            // TreeKeeper or UI that needs live tree state.
+            if let Some(config) = load_config_or_warn(storage, "sync") {
+                for did in config.accounts.keys() {
+                    let storage = storage.clone();
+                    let did = did.clone();
+                    let cancel = Rc::clone(&cancel);
+                    tokio::task::spawn_local(async move {
+                        run_sync_consumer_for_did(&storage, &did, cancel).await;
+                    });
+                }
             }
-            _ = grant_tick.tick() => {
-                info!("running: grant-healing");
-                run_grant_healing(storage).await;
+
+            // Maintenance intervals run alongside the consumer tasks.
+            // These rebuild Opake per tick (fresh session read from
+            // storage each time) and are short-lived per invocation.
+            let mut pair_tick = tokio::time::interval(task_interval("pair-cleanup"));
+            let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
+            let mut share_tick = tokio::time::interval(task_interval("share-retry"));
+
+            loop {
+                tokio::select! {
+                    _ = pair_tick.tick() => {
+                        info!("running: pair-cleanup");
+                        run_pair_cleanup(storage).await;
+                    }
+                    _ = grant_tick.tick() => {
+                        info!("running: grant-healing");
+                        run_grant_healing(storage).await;
+                    }
+                    _ = share_tick.tick() => {
+                        info!("running: share-retry");
+                        run_share_retry(storage).await;
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("received SIGINT, shutting down");
+                        println!("shutting down");
+                        cancel.notify_waiters();
+                        // Give the spawned consumers a moment to observe
+                        // cancellation and exit cleanly. Their next
+                        // `next_event().await` yield is the cancel point;
+                        // 250ms is far more than enough for the select
+                        // arm to pick it up.
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        break;
+                    }
+                }
             }
-            _ = share_tick.tick() => {
-                info!("running: share-retry");
-                run_share_retry(storage).await;
-            }
-            _ = dir_sync_tick.tick() => {
-                info!("running: directory-sync");
-                run_directory_sync(storage).await;
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("received SIGINT, shutting down");
-                println!("shutting down");
-                break;
-            }
-        }
-    }
+        })
+        .await;
 
     Ok(())
 }
@@ -180,29 +225,173 @@ async fn run_share_retry(storage: &FileStorage) {
 }
 
 // ---------------------------------------------------------------------------
-// Task: directory sync (apply member proposals to owned workspaces)
+// SSE consumer — long-lived sync task, one per configured DID
 // ---------------------------------------------------------------------------
+//
+// Replaces the old `directory-sync` timer-based task. Flow per DID:
+//
+//   1. Build an Opake (reads session from storage)
+//   2. Initial catch-up: call `sync_owned_workspaces_detailed` to apply
+//      every proposal we missed while the daemon was offline
+//   3. Start an `SseConsumer` loop over `ReqwestSseTransport`
+//   4. On each event:
+//      - proposal events → call `sync_workspace_by_uri` for the target
+//        workspace. The routine applies directory/keyring/document
+//        proposals in one pass.
+//      - `SseEvent::Reconnect` → another `sync_owned_workspaces_detailed`
+//        to catch anything we missed during the disconnect. Phoenix
+//        PubSub doesn't buffer events for offline subscribers, so the
+//        catch-up sync is what makes reconnection "not lossy."
+//      - record events → drop silently. The CLI has no TreeKeeper or
+//        UI that needs live tree state.
+//   5. On cancellation (SIGINT from the main loop), exit cleanly.
+//
+// Session refresh: OAuth tokens are managed internally by the XrpcClient
+// on 401 responses, so a long-lived Opake recovers from stale sessions
+// transparently. The `session-refresh` interval task independently
+// updates storage — our Opake may briefly hold a stale in-memory session
+// but the XRPC client heals on the next call. SSE tokens themselves are
+// Ed25519-signed from the identity, which is stable for the account's
+// lifetime.
 
-async fn run_directory_sync(storage: &FileStorage) {
-    let Some(config) = load_config_or_warn(storage, "directory-sync") else {
-        return;
+async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<Notify>) {
+    let opake = match build_opake(storage, did).await {
+        Ok(o) => o,
+        Err(e) => {
+            warn!("sync: failed to build opake for {did}: {e}");
+            return;
+        }
     };
 
-    for did in config.accounts.keys() {
-        let mut opake = match build_opake(storage, did).await {
-            Ok(o) => o,
-            Err(e) => {
-                warn!("directory-sync: failed to build opake for {did}: {e}");
-                continue;
-            }
-        };
+    let appview_url = match opake.resolve_appview_url(None) {
+        Ok(url) => url,
+        Err(e) => {
+            warn!("sync: no appview URL for {did}: {e}");
+            return;
+        }
+    };
 
-        match opake.sync_owned_workspaces().await {
-            Ok(0) => {}
-            Ok(n) => info!("directory-sync: applied {n} proposals for {did}"),
-            Err(e) => warn!("directory-sync: failed for {did}: {e}"),
+    let opake = Rc::new(Mutex::new(opake));
+
+    // Initial catch-up before opening the event stream. Any proposal
+    // that landed while the daemon was offline gets applied here.
+    {
+        let mut guard = opake.lock().await;
+        match guard.sync_owned_workspaces_detailed().await {
+            Ok(results) => {
+                let applied: usize = results.iter().map(|r| r.proposals_applied).sum();
+                if applied > 0 {
+                    info!("sync: initial catch-up applied {applied} proposals for {did}");
+                }
+            }
+            Err(e) => {
+                warn!("sync: initial catch-up failed for {did}: {e}");
+                // Non-fatal — we still start the consumer. The DB
+                // still has the proposals; a later reconnect or event
+                // will trigger another sync that may succeed.
+            }
         }
     }
+
+    // Build the consumer's dependencies. The token fetcher and sleep
+    // function are Box<dyn FnMut>s, owned by the consumer.
+    let token_fetcher = make_native_token_fetcher(Rc::clone(&opake));
+    let sleep_fn: SleepFn = Box::new(|d| Box::pin(tokio::time::sleep(d)));
+    let jitter_fn: JitterRng = Box::new(|| {
+        let u = OsRng.next_u64();
+        (u as f64) / (u64::MAX as f64 + 1.0)
+    });
+
+    let transport = ReqwestSseTransport::with_default_client();
+    let mut consumer = SseConsumer::new(transport, appview_url, token_fetcher, sleep_fn, jitter_fn);
+
+    info!("sync: consumer started for {did}");
+
+    loop {
+        tokio::select! {
+            _ = cancel.notified() => {
+                info!("sync: consumer stopping for {did}");
+                return;
+            }
+            event_result = consumer.next_event() => {
+                match event_result {
+                    Ok(event) => handle_sse_event(&opake, event, did).await,
+                    Err(e) => {
+                        // The consumer only returns Err for fatal errors
+                        // (all recoverable ones are handled via internal
+                        // backoff). Log and exit — another daemon run
+                        // will restart us.
+                        warn!("sync: consumer terminated for {did}: {e}");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Dispatch an SSE event to the shared Opake for this DID.
+///
+/// Proposal events trigger a single-workspace sync. Reconnect triggers
+/// a full catch-up across every owned workspace (same as initial). All
+/// other event variants are dropped — the CLI has no TreeKeeper to
+/// patch.
+async fn handle_sse_event(opake: &SharedOpake, event: SseEvent, did: &str) {
+    if event.is_proposal() {
+        let Some(keyring_uri) = event.keyring_uri() else {
+            // Unroutable proposal — in practice a `documentUpdate`
+            // whose parent document hasn't been indexed yet, so the
+            // broadcaster couldn't attach a keyring. The DB still
+            // has the proposal; the next syncable event or reconnect
+            // will pick it up.
+            return;
+        };
+        let keyring_uri = keyring_uri.to_string();
+        let mut guard = opake.lock().await;
+        match guard.sync_workspace_by_uri(&keyring_uri).await {
+            Ok(Some(result)) if result.proposals_applied > 0 => {
+                info!(
+                    "sync: applied {} proposals on {} for {did}",
+                    result.proposals_applied, keyring_uri
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!("sync: failed to apply proposals on {keyring_uri} for {did}: {e}");
+            }
+        }
+    } else if matches!(event, SseEvent::Reconnect) {
+        // Reconnect after a disconnect — phoenix PubSub doesn't buffer,
+        // so we may have missed events. Catch up everything we own.
+        let mut guard = opake.lock().await;
+        match guard.sync_owned_workspaces_detailed().await {
+            Ok(results) => {
+                let applied: usize = results.iter().map(|r| r.proposals_applied).sum();
+                if applied > 0 {
+                    info!("sync: reconnect catch-up applied {applied} proposals for {did}");
+                }
+            }
+            Err(e) => {
+                warn!("sync: reconnect catch-up failed for {did}: {e}");
+            }
+        }
+    }
+    // Record events (DirectoryUpsert, DocumentUpsert, GrantUpsert, etc.)
+    // are dropped intentionally. The CLI has no TreeKeeper or UI that
+    // needs live tree state.
+}
+
+/// Build a token fetcher that uses the shared Opake to request a fresh
+/// SSE token on every connect attempt. Mirrors the WASM-side
+/// `make_token_fetcher` in `crates/opake-wasm/src/sse_wasm.rs`.
+fn make_native_token_fetcher(opake: SharedOpake) -> TokenFetcher {
+    Box::new(move || {
+        let opake = Rc::clone(&opake);
+        Box::pin(async move {
+            let mut guard = opake.lock().await;
+            guard.request_sse_token(None).await
+        })
+    })
 }
 
 async fn build_opake(

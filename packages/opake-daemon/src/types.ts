@@ -23,12 +23,10 @@ export interface TaskRecord {
 /**
  * Configuration for the daemon scheduler.
  *
- * The web daemon runs only the maintenance tasks that don't benefit
- * from SSE: pair-cleanup, grant-healing, share-retry. The core
- * `directory-sync` TaskDef is skipped here because web clients drive
- * proposal application via SSE events (`opake.startSseConsumer`).
- * The native CLI daemon still polls `directory-sync` until it grows
- * its own SSE consumer.
+ * Runs the maintenance tasks that aren't served by SSE: pair-cleanup,
+ * grant-healing, share-retry. Proposal application flows through
+ * `opake.startSseConsumer` in both web and CLI tracks — no timer
+ * task for that.
  */
 export interface DaemonOptions {
   /**

@@ -2,10 +2,9 @@
 //
 // Runs whichever tasks have handlers in `runTasks` (pair-cleanup,
 // grant-healing, share-retry). Task definitions without a matching
-// handler are silently skipped — see `tasks.ts` and the `directory-sync`
-// note in `crates/opake-core/src/daemon.rs` for why `directory-sync`
-// isn't wired here. Live tree updates come from the WASM SSE consumer,
-// not this scheduler.
+// handler are silently skipped. Proposal sync is not a timer task —
+// it flows through the WASM SSE consumer instead; see `tasks.ts` for
+// the full explanation.
 //
 // Returns a DaemonHandle that the caller uses to stop the daemon.
 // No module-level state — multiple handles can coexist (though only one

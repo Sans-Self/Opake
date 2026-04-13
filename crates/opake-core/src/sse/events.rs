@@ -154,15 +154,14 @@ pub struct SseKeyringUpdate {
 
 /// A document update proposal.
 ///
-/// Note: `keyring_uri` is nearly always absent because the
-/// `app.opake.documentUpdate` lexicon has no `keyring` field. The
-/// appview routes these to the author's personal topic, not a workspace
-/// topic, so the workspace owner never receives them via SSE. The CLI
-/// daemon's `directory-sync` polling task still picks them up, but the
-/// web client has no polling fallback — document proposals authored on
-/// other devices won't apply until either the lexicon grows a `keyring`
-/// field or the appview indexer joins through the documents table.
-/// Tracked in the post-POC cleanup sweep.
+/// Note: the `app.opake.documentUpdate` lexicon itself has no
+/// `keyring` field — the appview's indexer injects `keyring_uri` at
+/// dispatch time by joining through the documents table. When the
+/// join succeeds, the broadcaster routes on the workspace topic
+/// (where owners subscribe); when it fails (cabinet documents or a
+/// backfill ordering edge case), the event is dropped and the
+/// owner's next `sync_workspace_by_uri` call picks up the proposal
+/// from the DB.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SseDocumentUpdate {
     pub uri: String,

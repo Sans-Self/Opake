@@ -93,7 +93,6 @@ export const workspaceSyncResultSchema = z
 
 export type WorkspaceSyncResult = z.output<typeof workspaceSyncResultSchema>;
 
-export const syncDetailedResultSchema = z.array(workspaceSyncResultSchema);
 export const syncSingleResultSchema = workspaceSyncResultSchema.nullable();
 
 // ---------------------------------------------------------------------------

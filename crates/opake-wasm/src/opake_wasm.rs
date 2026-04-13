@@ -531,24 +531,6 @@ impl WasmOpakeHandle {
         to_js(&identity)
     }
 
-    /// Sync all owned workspaces and apply pending directory proposals.
-    #[wasm_bindgen(js_name = syncOwnedWorkspaces)]
-    pub async fn sync_owned_workspaces(&self) -> Result<usize, JsError> {
-        let mut opake = self.opake().await?;
-        opake.sync_owned_workspaces().await.map_err(wasm_err)
-    }
-
-    /// Sync all workspaces with per-workspace result visibility.
-    #[wasm_bindgen(js_name = syncOwnedWorkspacesDetailed)]
-    pub async fn sync_owned_workspaces_detailed(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let results = opake
-            .sync_owned_workspaces_detailed()
-            .await
-            .map_err(wasm_err)?;
-        to_js(&results)
-    }
-
     /// Sync a single workspace by keyring URI. Returns null if the URI is not
     /// in the member list, or the sync result otherwise.
     #[wasm_bindgen(js_name = syncWorkspaceByUri)]

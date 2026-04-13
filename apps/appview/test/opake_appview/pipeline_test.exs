@@ -165,43 +165,55 @@ defmodule OpakeAppview.PipelineTest do
     # when the documentUpdate event arrives. The JOIN through the documents
     # table is what routes this event to workspace members (the lexicon
     # itself has no `keyring` reference).
-    keyring_uri = "at://did:plc:owner/app.opake.keyring/3kr"
-    document_uri = "at://did:plc:owner/app.opake.document/3xyz"
+    keyring_uri = "at://did:plc:docupdate_routed/app.opake.keyring/3kr"
+    document_uri = "at://did:plc:docupdate_routed/app.opake.document/3xyz"
 
     {:ok, _doc} =
       DocumentQueries.upsert_document(%{
         document_uri: document_uri,
         keyring_uri: keyring_uri,
-        owner_did: "did:plc:owner",
+        owner_did: "did:plc:docupdate_routed",
         indexed_at: DateTime.utc_now()
       })
 
     Phoenix.PubSub.subscribe(OpakeAppview.PubSub, OpakeAppview.SSE.Topics.workspace(keyring_uri))
 
-    json = document_update_create_json("did:plc:editor", "3upd", document_uri)
+    json = document_update_create_json("did:plc:docupdate_editor", "3upd_routed", document_uri)
     Indexer.process_message(json, 0)
 
     assert_receive {:sse_event, "document_update:upsert", payload}
     assert payload.document_uri == document_uri
     assert payload.keyring_uri == keyring_uri
-    assert payload.author_did == "did:plc:editor"
+    assert payload.author_did == "did:plc:docupdate_editor"
   end
 
-  test "documentUpdate for an unindexed document falls back to personal topic" do
-    # Race condition: the proposal arrives before the document record is
-    # indexed. The indexer can't resolve a keyring, so it falls back to
-    # broadcasting on the author's personal topic. The DB row is still
-    # written so the owner's next sync picks it up.
-    document_uri = "at://did:plc:owner/app.opake.document/3xyz"
+  test "documentUpdate for an unknown document is dropped (no broadcast)" do
+    # The proposal arrives without a resolvable parent document — either
+    # the document belongs to the cabinet (no workspace to route to) or
+    # it hasn't been indexed yet (backfill ordering edge case). The
+    # broadcaster drops it silently. The DB row IS still written, so the
+    # owner's next `sync_workspace_by_uri` call will pick it up from the
+    # persistent proposal store whenever it runs.
+    document_uri = "at://did:plc:docupdate_unknown_owner/app.opake.document/3xyz"
+    author_did = "did:plc:docupdate_unknown_editor"
 
-    Phoenix.PubSub.subscribe(OpakeAppview.PubSub, OpakeAppview.SSE.Topics.personal("did:plc:editor"))
+    # Subscribe to both topics that could plausibly carry the event. We
+    # expect NEITHER to fire.
+    Phoenix.PubSub.subscribe(OpakeAppview.PubSub, OpakeAppview.SSE.Topics.personal(author_did))
 
-    json = document_update_create_json("did:plc:editor", "3upd", document_uri)
+    Phoenix.PubSub.subscribe(
+      OpakeAppview.PubSub,
+      OpakeAppview.SSE.Topics.workspace("at://did:plc:docupdate_unknown_owner/app.opake.keyring/3kr")
+    )
+
+    json = document_update_create_json(author_did, "3upd_unknown", document_uri)
     Indexer.process_message(json, 0)
 
-    assert_receive {:sse_event, "document_update:upsert", payload}
-    assert payload.document_uri == document_uri
-    refute Map.has_key?(payload, :keyring_uri)
+    refute_receive {:sse_event, "document_update:upsert", _}, 50
+
+    # And the DB row was written — that's the backstop.
+    {updates, _} = DocumentUpdateQueries.list_document_updates(document_uri)
+    assert length(updates) == 1
   end
 
   test "keyringLeave removes the leaving member" do

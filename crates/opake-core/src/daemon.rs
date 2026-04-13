@@ -43,20 +43,12 @@ pub const TASKS: &[TaskDef] = &[
         interval_seconds: 300,
         description: "Retry pending shares for recipients who haven't set up yet",
     },
-    TaskDef {
-        // CLI-only. The web daemon deliberately has no handler for
-        // this task — web clients drive proposal application via the
-        // WASM SSE consumer. The CLI still polls because it doesn't
-        // run an SSE consumer of its own yet.
-        //
-        // Despite the "directory-sync" name, the underlying routine
-        // applies every proposal kind for a workspace: directory,
-        // keyring, AND document. See `Opake::sync_single_workspace`.
-        name: "directory-sync",
-        interval_seconds: 60,
-        description:
-            "CLI-only: apply pending directory/keyring/document proposals from workspace members",
-    },
+    // Note: proposal sync is no longer a timer-polling task. The web
+    // client runs a WASM-owned SSE consumer, the CLI daemon runs a
+    // native `SseConsumer` (via `ReqwestSseTransport`), and both route
+    // proposal events directly to `Opake::sync_workspace_by_uri`. The
+    // pre-SSE `directory-sync` TaskDef was removed when the CLI SSE
+    // migration landed.
 ];
 
 /// Look up a task by name.

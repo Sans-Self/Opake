@@ -4,11 +4,12 @@
 // via the TaskStore. The handlers don't know about scheduling — they're
 // called by the scheduler at the configured intervals.
 //
-// NOTE: `directory-sync` is intentionally NOT handled here. Web clients
-// drive proposal application via SSE events (see `sse_wasm.rs`
-// `dispatch_proposal_sync`) — the `directory-sync` TaskDef still exists
-// in the core registry for the native CLI daemon, but the web scheduler
-// silently skips tasks without handlers.
+// Proposal sync is not represented here as a timer task: web clients
+// drive proposal application via SSE events (see the WASM consumer in
+// `crates/opake-wasm/src/sse_wasm.rs`), and the native CLI daemon runs
+// its own native SSE consumer. There's no fallback polling in either
+// track — the proposal store in the appview DB is the backstop if a
+// real-time event is missed.
 
 import { OpakeError } from "@opake/sdk";
 import type { Opake } from "@opake/sdk";

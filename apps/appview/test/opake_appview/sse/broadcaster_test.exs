@@ -110,52 +110,58 @@ defmodule OpakeAppview.SSE.BroadcasterTest do
 
   describe "broadcast_document_update/2" do
     test "routes upsert to workspace topic when keyring_uri is present" do
-      keyring = "at://did:plc:owner/app.opake.keyring/3kr"
+      keyring = "at://did:plc:bctest_doccast_routed/app.opake.keyring/3kr"
       Phoenix.PubSub.subscribe(@pubsub, OpakeAppview.SSE.Topics.workspace(keyring))
 
       Broadcaster.broadcast_document_update(
         %{
-          uri: "at://did:plc:editor/app.opake.documentUpdate/3upd",
-          document_uri: "at://did:plc:owner/app.opake.document/3doc",
-          author_did: "did:plc:editor",
+          uri: "at://did:plc:bctest_doccast_ed/app.opake.documentUpdate/3upd",
+          document_uri: "at://did:plc:bctest_doccast_routed/app.opake.document/3doc",
+          author_did: "did:plc:bctest_doccast_ed",
           keyring_uri: keyring
         },
         :upsert
       )
 
       assert_receive {:sse_event, "document_update:upsert", payload}
-      assert payload.document_uri == "at://did:plc:owner/app.opake.document/3doc"
+      assert payload.document_uri == "at://did:plc:bctest_doccast_routed/app.opake.document/3doc"
       assert payload.keyring_uri == keyring
     end
 
-    test "falls back to author's personal topic when keyring_uri is absent" do
-      Phoenix.PubSub.subscribe(@pubsub, OpakeAppview.SSE.Topics.personal("did:plc:editor"))
+    test "drops upsert silently when keyring_uri is absent" do
+      author = "did:plc:bctest_doccast_dropped"
+      Phoenix.PubSub.subscribe(@pubsub, OpakeAppview.SSE.Topics.personal(author))
 
       Broadcaster.broadcast_document_update(
         %{
-          uri: "at://did:plc:editor/app.opake.documentUpdate/3upd",
-          document_uri: "at://did:plc:owner/app.opake.document/3doc",
-          author_did: "did:plc:editor"
+          uri: "at://did:plc:bctest_doccast_dropped/app.opake.documentUpdate/3upd",
+          document_uri: "at://did:plc:bctest_doccast_dropped/app.opake.document/3doc",
+          author_did: author
         },
         :upsert
       )
 
-      assert_receive {:sse_event, "document_update:upsert", payload}
-      assert payload.document_uri == "at://did:plc:owner/app.opake.document/3doc"
+      # No broadcast reaches any topic — the event is dropped at the
+      # broadcaster, logged at debug. The DB row (written by the
+      # indexer) is the backstop: the owner's next
+      # `sync_workspace_by_uri` call will pick it up from the
+      # persistent proposal store.
+      refute_receive {:sse_event, "document_update:upsert", _}, 50
     end
 
-    test "delete broadcasts to author's personal topic" do
-      Phoenix.PubSub.subscribe(@pubsub, OpakeAppview.SSE.Topics.personal("did:plc:editor"))
+    test "drops delete silently when keyring_uri is absent" do
+      author = "did:plc:bctest_doccast_delete"
+      Phoenix.PubSub.subscribe(@pubsub, OpakeAppview.SSE.Topics.personal(author))
 
       Broadcaster.broadcast_document_update(
         %{
-          uri: "at://did:plc:editor/app.opake.documentUpdate/3upd",
-          author_did: "did:plc:editor"
+          uri: "at://did:plc:bctest_doccast_delete/app.opake.documentUpdate/3upd",
+          author_did: author
         },
         :delete
       )
 
-      assert_receive {:sse_event, "document_update:delete", %{uri: _}}
+      refute_receive {:sse_event, "document_update:delete", _}, 50
     end
   end
 end

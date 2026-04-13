@@ -392,10 +392,33 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
 }
 
 #[test]
-fn document_delete_does_not_fire_watchers() {
-    // Document deletion is handled implicitly by the companion
-    // DirectoryUpsert that removes the entry from the parent — we
-    // don't need to double-notify here.
+fn document_upsert_with_empty_string_keyring_routes_to_cabinet() {
+    // `SseDocumentRecord.keyring_uri` is `Option<String>`. Upstream
+    // serde deserialization can land an empty string in the field
+    // where None was intended. Routing that to `Workspace("")`
+    // would match no installed tree and silently drop the event.
+    // Treat empty string as None → cabinet.
+    let mut keeper = cabinet_keeper();
+    let sink = RecordingSink::new();
+    keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
+    let start = sink.count();
+
+    keeper
+        .apply_event(&sse_doc_upsert(DOC_BEACH_URI, Some("")))
+        .unwrap();
+
+    assert_eq!(sink.count(), start + 1);
+}
+
+#[test]
+fn document_delete_fires_all_watchers_defensively() {
+    // `remove_document` in the core client is not atomic —
+    // `delete_record` can succeed while the subsequent
+    // `remove_entry` fails, leaving the parent directory listing
+    // a now-dead URI with no companion `DirectoryUpsert` to come.
+    // Firing watchers on the delete event gives the UI a
+    // defensive refresh signal so the stale entry gets culled
+    // whenever the consumer's reload cycle next runs.
     let mut keeper = cabinet_keeper();
     let sink = RecordingSink::new();
     keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
@@ -403,7 +426,7 @@ fn document_delete_does_not_fire_watchers() {
 
     keeper.apply_event(&sse_doc_delete(DOC_BEACH_URI)).unwrap();
 
-    assert_eq!(sink.count(), start);
+    assert_eq!(sink.count(), start + 1);
 }
 
 #[test]

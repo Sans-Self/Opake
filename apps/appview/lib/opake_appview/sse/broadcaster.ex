@@ -103,25 +103,27 @@ defmodule OpakeAppview.SSE.Broadcaster do
 
     event_type = "document_update:#{action}"
 
-    cond do
-      # Preferred path: route via the workspace keyring topic so all
-      # members (including the document owner who needs to apply the
-      # proposal) receive it. The lexicon carries no `keyring` field,
-      # so the indexer enriches upsert attrs with `keyring_uri` via
-      # a JOIN through the documents table before calling this.
-      kr = get(attrs, :keyring_uri) ->
-        broadcast(Topics.workspace(kr), event_type, payload)
-
-      # Fallback: cabinet documents (no keyring) or the race where a
-      # proposal arrives before its document has been indexed. The
-      # author's personal topic at least reaches their own other
-      # devices; the owner's next `sync_workspace_by_uri` will still
-      # catch up from the DB.
-      did = get(attrs, :author_did) ->
-        broadcast(Topics.personal(did), event_type, payload)
-
-      true ->
+    # `app.opake.documentUpdate` carries no `keyring` field in the
+    # lexicon, so the indexer injects `keyring_uri` at dispatch time
+    # via a JOIN through the documents table. When the lookup
+    # succeeds we broadcast on the workspace topic where the owner
+    # (and every other member) is subscribed.
+    #
+    # When the lookup fails — cabinet documents (ill-formed for this
+    # event type, since cabinets have single owners) or a backfill
+    # edge case where the proposal is indexed before its parent
+    # document — we drop the event silently. The proposal row is
+    # still written to the DB, so the owner's next
+    # `sync_workspace_by_uri` call picks it up from the proposal
+    # store whenever that fires. Nothing is lost; only the real-time
+    # hop is skipped.
+    case get(attrs, :keyring_uri) do
+      nil ->
+        Logger.debug("[Broadcaster] document_update: no keyring for #{get(attrs, :uri)}, dropping")
         :ok
+
+      kr ->
+        broadcast(Topics.workspace(kr), event_type, payload)
     end
   rescue
     e -> Logger.warning("[Broadcaster] document_update broadcast failed: #{inspect(e)}")

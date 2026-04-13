@@ -232,6 +232,24 @@ impl TreeKeeper {
         }
     }
 
+    /// Resolve an optional keyring URI to a TreeScope.
+    ///
+    /// Non-empty `Some(uri)` → workspace scope. `None` → cabinet scope.
+    /// **Empty string** `Some("")` is treated as `None`: the
+    /// broadcaster should never emit it, but `#[serde(default)]`
+    /// deserialization rules mean an absent-or-empty field would
+    /// otherwise land in `TreeScope::Workspace("")`, which matches
+    /// no installed tree and drops the event silently. Routing to
+    /// cabinet is the safer interpretation — it's visible (cabinet
+    /// watchers fire) and any real workspace event with a malformed
+    /// URI was already broken upstream.
+    fn scope_from_keyring_uri(keyring_uri: Option<&str>) -> TreeScope {
+        match keyring_uri {
+            Some(uri) if !uri.is_empty() => TreeScope::Workspace(uri.to_string()),
+            _ => TreeScope::Cabinet,
+        }
+    }
+
     // -- Event application --
 
     /// Apply one SSE event, patching the affected tree and firing
@@ -252,20 +270,27 @@ impl TreeKeeper {
             // watcher in that scope with the unchanged tree; the reload
             // debounce on the consumer side picks up the metadata delta.
             SseEvent::DocumentUpsert(record) => {
-                let scope = match record.keyring_uri.as_deref() {
-                    Some(uri) => TreeScope::Workspace(uri.to_string()),
-                    None => TreeScope::Cabinet,
-                };
+                let scope = Self::scope_from_keyring_uri(record.keyring_uri.as_deref());
                 self.notify_scope(&scope);
             }
-            // Document delete: handled implicitly by the companion
+            // Document delete: under normal flow the companion
             // `DirectoryUpsert` that removes the entry from the parent
-            // directory. Firing watchers here too would double-notify
-            // without adding a signal the parent event doesn't already
-            // carry. Cabinet deletions that somehow arrive without a
-            // parent update are a single dropped refresh — the next SSE
-            // event or navigation will catch them.
-            SseEvent::DocumentDelete(_) => {}
+            // directory covers this — watchers see the structural
+            // change and refetch. But `remove_document` in the core
+            // client is not atomic: it calls `delete_record` then
+            // `remove_entry`, and if the second call fails (network
+            // blip, DPoP nonce race, etc.) the document is deleted
+            // on the PDS but the parent still lists it. Firing
+            // watchers here too gives the UI a defensive refresh
+            // signal so the stale entry gets culled on the next
+            // reload pass, even when the parent-update event never
+            // arrives.
+            //
+            // `SseDeletePayload` doesn't carry `keyring_uri`, so we
+            // can't route by scope; fire all watchers.
+            SseEvent::DocumentDelete(_) => {
+                self.notify_all_watchers();
+            }
             // Keyring events: TODO — detect rotation bump and call
             // invalidate_decrypted_names on the affected workspace tree.
             SseEvent::KeyringUpsert(_) | SseEvent::KeyringDelete(_) => {}
@@ -295,10 +320,7 @@ impl TreeKeeper {
     }
 
     fn apply_directory_upsert(&mut self, record: &SseDirectoryRecord) -> Result<(), Error> {
-        let scope = match record.keyring_uri.as_deref() {
-            Some(uri) => TreeScope::Workspace(uri.to_string()),
-            None => TreeScope::Cabinet,
-        };
+        let scope = Self::scope_from_keyring_uri(record.keyring_uri.as_deref());
 
         // Split the borrow across held's disjoint fields so apply_directory_delta
         // can take &mut tree while DecryptionCtx borrows &private_key and &group_keys.

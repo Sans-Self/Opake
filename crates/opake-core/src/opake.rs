@@ -443,12 +443,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub async fn sync_owned_workspaces_detailed(
         &mut self,
     ) -> Result<Vec<crate::daemon::WorkspaceSyncResult>, Error> {
-        log::trace!("directory-sync: discovering workspaces for {}", self.did);
+        log::trace!("sync: discovering workspaces for {}", self.did);
         let appview_keyrings = self.discover_member_keyrings(None).await?;
-        log::trace!(
-            "directory-sync: found {} workspaces",
-            appview_keyrings.len()
-        );
+        log::trace!("sync: found {} workspaces", appview_keyrings.len());
         let identity = self.require_identity()?;
         let private_key = identity.private_key_bytes()?;
 
@@ -493,7 +490,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         use crate::daemon::WorkspaceSyncResult;
 
         let is_owner = kr.owner_did == self.did;
-        log::trace!("directory-sync: processing {} (owner={is_owner})", kr.uri);
+        log::trace!("sync: processing {} (owner={is_owner})", kr.uri);
 
         let members: Vec<crate::records::KeyringMember> = kr
             .members
