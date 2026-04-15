@@ -163,8 +163,11 @@ defmodule OpakeAppviewWeb.EventsController do
     was_subscribed = uri && MapSet.member?(state.subscribed_keyrings, uri)
 
     cond do
-      # New membership — subscribe
-      is_member and uri and not was_subscribed ->
+      # New membership — subscribe.
+      # `uri` can be nil (malformed keyring event), so gate via `is_nil/1`
+      # rather than using it as a truthy test in `and`, which demands a
+      # boolean on both sides and crashes on raw strings.
+      is_member and not is_nil(uri) and not was_subscribed ->
         Phoenix.PubSub.subscribe(@pubsub, Topics.workspace(uri))
         %{state | subscribed_keyrings: MapSet.put(state.subscribed_keyrings, uri)}
 
