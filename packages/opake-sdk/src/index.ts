@@ -34,6 +34,7 @@ export { MemoryStorage } from "./storage/memory";
 // Domain types
 export {
   type OpakeInitOptions,
+  type AccountConfig,
   type MutationResult,
   type UploadResult,
   type DownloadResult,

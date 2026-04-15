@@ -11,6 +11,7 @@
 
 import type { Storage } from "./storage";
 import type {
+  AccountConfig,
   MutationResult,
   OpakeInitOptions,
   ResolvedIdentity,
@@ -675,6 +676,46 @@ export class Opake {
   @withTokenGuard
   publishPublicKey(): Promise<string> {
     return this.requireContext().publishPublicKey();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Account config (per-account preferences synced to PDS)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch the account config record (`app.opake.accountConfig/self`), if
+   * one exists on the PDS. Returns null when the account has never
+   * written a config.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  getAccountConfig(): Promise<AccountConfig | null> {
+    return this.requireContext().getAccountConfig() as Promise<AccountConfig | null>;
+  }
+
+  /**
+   * Write (upsert) the account config record. Merges with whatever the
+   * caller passes — if a field is omitted from `updates`, the current
+   * stored value is preserved.
+   *
+   * @returns The updated config.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  async updateAccountConfig(updates: Partial<AccountConfig>): Promise<AccountConfig> {
+    const ctx = this.requireContext();
+    const current = ((await ctx.getAccountConfig()) as AccountConfig | null) ?? {
+      opakeVersion: 1,
+      telemetryEnabled: false,
+      modifiedAt: new Date().toISOString(),
+    };
+    const next: AccountConfig = {
+      ...current,
+      ...updates,
+      modifiedAt: new Date().toISOString(),
+    };
+    await ctx.setAccountConfig(next);
+    return next;
   }
 
   // ---------------------------------------------------------------------------

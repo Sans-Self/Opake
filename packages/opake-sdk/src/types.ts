@@ -4,6 +4,20 @@
 // TypeScript interfaces. The SDK validates WASM output and returns
 // these typed values — consumers never see raw JsValue.
 
+/**
+ * Per-account config synced to the user's PDS as a singleton record
+ * under `app.opake.accountConfig/self`. Holds non-sensitive preferences
+ * that should follow the account across devices.
+ */
+export interface AccountConfig {
+  readonly opakeVersion: number;
+  readonly telemetryEnabled: boolean;
+  /** Override the default appview. Leave undefined to use the built-in default. */
+  readonly appviewUrl?: string;
+  /** ISO-8601 timestamp of last write. */
+  readonly modifiedAt: string;
+}
+
 /** Result of a mutation that may be applied directly or proposed for owner approval. */
 export interface MutationResult {
   /** URI of the created/updated record (null for proposals on other owners' PDS). */

@@ -1,37 +1,147 @@
+import { useCallback, useEffect, useState } from "react";
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { useAuthStore } from "@/stores/auth";
+import { UserIcon, FloppyDiskIcon, GearIcon } from "@phosphor-icons/react";
+import type { AccountConfig } from "@opake/sdk";
+import { PanelShell } from "@/components/cabinet/PanelShell";
+import { getOpake, useAuthStore } from "@/stores/auth";
+import { truncateDid } from "@/lib/format";
+import { toastSuccess, toastError } from "@/stores/toast";
 
-function Settings() {
+function SettingsPage() {
   const session = useAuthStore((s) => s.session);
   const did = session.status === "active" ? session.did : null;
   const handle = session.status === "active" ? session.handle : null;
   const pdsUrl = session.status === "active" ? session.pdsUrl : null;
 
+  const [config, setConfig] = useState<AccountConfig | null>(null);
+  const [appviewUrl, setAppviewUrl] = useState("");
+  const [savedAppviewUrl, setSavedAppviewUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Load the persisted config once per session. The cancelled flag
+  // silences setState-after-unmount under React StrictMode double-fire.
+  useEffect(() => {
+    if (!did) return;
+
+    const cancelled = { current: false };
+
+    void (async () => {
+      try {
+        const result = await getOpake().getAccountConfig();
+        if (cancelled.current) return;
+        const url = result?.appviewUrl ?? "";
+        setConfig(result);
+        setAppviewUrl(url);
+        setSavedAppviewUrl(url);
+      } catch (err) {
+        if (cancelled.current) return;
+        console.error("[settings] failed to load account config:", err);
+      }
+    })();
+
+    return () => {
+      cancelled.current = true;
+    };
+  }, [did]);
+
+  const handleAppviewSave = useCallback(() => {
+    if (!did) return;
+    const trimmed = appviewUrl.trim();
+    setSaving(true);
+    void (async () => {
+      try {
+        const updated = await getOpake().updateAccountConfig({
+          appviewUrl: trimmed.length > 0 ? trimmed : undefined,
+        });
+        setConfig(updated);
+        setSavedAppviewUrl(updated.appviewUrl ?? "");
+        toastSuccess("AppView URL saved");
+      } catch (err) {
+        toastError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        setSaving(false);
+      }
+    })();
+  }, [appviewUrl, did]);
+
+  const appviewDirty = appviewUrl !== savedAppviewUrl;
+
+  const breadcrumbs = <span>Settings</span>;
+
+  if (!did || !handle || !pdsUrl) {
+    return (
+      <PanelShell depth={0} breadcrumbs={breadcrumbs} footer="">
+        <div className="text-base-content/50 flex h-full items-center justify-center">
+          Log in to view settings
+        </div>
+      </PanelShell>
+    );
+  }
+
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
-      <h1 className="text-base-content text-lg font-semibold">Settings</h1>
-      <div className="text-base-content/60 space-y-1 text-sm">
-        {did && (
-          <p>
-            DID: <span className="font-mono text-xs">{did}</span>
+    <PanelShell depth={0} breadcrumbs={breadcrumbs} footer="">
+      <div className="mx-auto max-w-2xl space-y-8 p-6">
+        <h1 className="flex items-center gap-2 text-2xl font-bold">
+          <GearIcon size={24} /> Settings
+        </h1>
+
+        {/* Account info */}
+        <section className="card bg-base-200 space-y-2 p-4">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <UserIcon size={18} /> Account
+          </h2>
+          <div className="space-y-1 text-sm">
+            <div>
+              <span className="text-base-content/60">Handle:</span>{" "}
+              <span className="font-mono">{handle}</span>
+            </div>
+            <div>
+              <span className="text-base-content/60">DID:</span>{" "}
+              <span className="font-mono text-xs">{truncateDid(did)}</span>
+            </div>
+            <div>
+              <span className="text-base-content/60">PDS:</span>{" "}
+              <span className="font-mono text-xs">{pdsUrl}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* AppView URL */}
+        <section className="card bg-base-200 space-y-3 p-4">
+          <h2 className="font-semibold">AppView URL</h2>
+          <p className="text-base-content/60 text-sm">
+            The AppView indexes workspace membership and incoming shares. Leave blank to use the
+            default.
           </p>
-        )}
-        {handle && (
-          <p>
-            Handle: <span className="font-mono text-xs">{handle}</span>
-          </p>
-        )}
-        {pdsUrl && (
-          <p>
-            PDS: <span className="font-mono text-xs">{pdsUrl}</span>
-          </p>
-        )}
+          <div className="flex gap-2">
+            <input
+              type="url"
+              className="input input-bordered input-sm flex-1"
+              placeholder="https://appview.opake.app"
+              value={appviewUrl}
+              onChange={(e) => setAppviewUrl(e.target.value)}
+              disabled={saving}
+            />
+            <button
+              type="button"
+              className="btn btn-sm btn-primary gap-1.5"
+              disabled={!appviewDirty || saving}
+              onClick={handleAppviewSave}
+            >
+              <FloppyDiskIcon size={16} /> Save
+            </button>
+          </div>
+          {config && (
+            <p className="text-base-content/40 text-xs">
+              Last saved: {new Date(config.modifiedAt).toLocaleString()}
+            </p>
+          )}
+        </section>
       </div>
-      <p className="text-base-content/40 text-sm">Settings — not yet wired to SDK</p>
-    </div>
+    </PanelShell>
   );
 }
 
 export const Route = createLazyFileRoute("/cabinet/settings")({
-  component: Settings,
+  component: SettingsPage,
 });
