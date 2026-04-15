@@ -112,29 +112,45 @@ async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session
 
 async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     let mut opake = ctx.opake().await?;
-    let entries = opake.list_workspaces().await?;
 
-    if entries.is_empty() {
+    // Single source: the appview indexes every keyring the caller is a
+    // member of — owned workspaces included, since the owner is always a
+    // member of their own. Staleness window exists after `workspace
+    // create` until Jetstream delivers the commit to the appview indexer.
+    let keyrings = opake.discover_member_keyrings(None).await?;
+
+    if keyrings.is_empty() {
         println!("no workspaces");
         return Ok(None);
     }
 
     let private_key = opake.require_identity()?.private_key_bytes()?;
-    for entry in &entries {
-        let name = keyrings::decrypt_keyring_name(entry, opake.did(), &private_key)
+    let did = opake.did();
+
+    for kr in &keyrings {
+        let name = keyrings::decrypt_appview_keyring_name(kr, did, &private_key)
             .unwrap_or_else(|| "<encrypted>".into());
+        let role_tag = if kr.owner_did == did {
+            ""
+        } else {
+            "\t(member)"
+        };
 
         if args.long {
             println!(
-                "{}\t{} member(s)\trotation:{}\t{}",
-                name, entry.member_count, entry.rotation, entry.uri,
+                "{}\t{} member(s)\trotation:{}\t{}{}",
+                name,
+                kr.members.len(),
+                kr.rotation,
+                kr.uri,
+                role_tag,
             );
         } else {
-            println!("{}\t{} member(s)", name, entry.member_count);
+            println!("{}\t{} member(s){}", name, kr.members.len(), role_tag);
         }
     }
 
-    println!("\n{} workspace(s)", entries.len());
+    println!("\n{} workspace(s)", keyrings.len());
     Ok(None)
 }
 

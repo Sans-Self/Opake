@@ -23,7 +23,7 @@ pub enum Error {
     #[error("record not found: {0}")]
     NotFound(String),
 
-    #[error("{count} documents named {name:?} — specify an AT URI instead: {}", uris.join(", "))]
+    #[error("{count} records named {name:?} — specify an AT URI instead: {}", uris.join(", "))]
     AmbiguousName {
         name: String,
         count: usize,

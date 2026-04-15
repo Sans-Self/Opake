@@ -21,9 +21,7 @@ use crate::cabinet::Cabinet;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{ContentKey, CryptoRng, DidMember, RngCore, X25519PublicKey};
 use crate::error::Error;
-use crate::keyrings::{
-    self, AddMemberParams, CreateKeyringParams, KeyringEntry, KEYRING_COLLECTION,
-};
+use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::{
@@ -205,25 +203,49 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Workspace resolution --
 
-    /// Resolve a workspace by name: fetch the keyring, unwrap the group key.
+    /// Resolve a workspace by name via the appview member-keyrings index.
     ///
-    /// Pure XRPC + crypto — uses the client to find the keyring by name and
-    /// the identity's private key to unwrap the symmetric group key.
+    /// The appview indexes every keyring from the firehose and serves them
+    /// via `/api/keyrings` filtered to ones where the caller is a member —
+    /// which includes workspaces the caller owns (they're always a member
+    /// of their own). That makes it the single source of truth for
+    /// name → URI resolution regardless of who owns the keyring.
+    ///
+    /// Once a unique URI is picked, [`resolve_workspace_by_uri`] fetches
+    /// the canonical record from the owner's PDS and unwraps the group
+    /// key there — so the appview is only trusted for the name → URI map,
+    /// not for the group key material.
+    ///
+    /// Limitation: workspace creation writes to the caller's PDS, which
+    /// the appview indexes with some lag (seconds) through the firehose.
+    /// A `workspace ls` immediately after `workspace create` may miss the
+    /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
         let identity = self.require_identity()?;
         let private_key = identity.private_key_bytes()?;
-        let entry =
-            keyrings::resolve_keyring_uri(&mut self.client, name, &self.did, &private_key).await?;
-        let at_uri = atproto::parse_at_uri(&entry.uri)?;
-        let group_key = Self::unwrap_workspace_key(&entry.members, &self.did, &private_key)?;
-        Ok(Workspace::from_keyring(
-            entry.uri,
-            name.to_string(),
-            None,
-            at_uri.authority,
-            group_key,
-            entry.rotation,
-        ))
+
+        let keyrings = self.discover_member_keyrings(None).await?;
+        let matches: Vec<String> = keyrings
+            .iter()
+            .filter(|kr| {
+                keyrings::decrypt_appview_keyring_name(kr, &self.did, &private_key).as_deref()
+                    == Some(name)
+            })
+            .map(|kr| kr.uri.clone())
+            .collect();
+
+        match matches.as_slice() {
+            [] => Err(Error::NotFound(format!("no keyring named {name:?}"))),
+            [uri] => {
+                let uri = uri.clone();
+                self.resolve_workspace_by_uri(&uri).await
+            }
+            uris => Err(Error::AmbiguousName {
+                name: name.to_string(),
+                count: uris.len(),
+                uris: uris.to_vec(),
+            }),
+        }
     }
 
     /// Resolve a workspace by keyring URI.
@@ -992,13 +1014,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 0
             }
         }
-    }
-
-    /// List all keyrings (workspaces) on the caller's PDS.
-    pub async fn list_workspaces(&mut self) -> Result<Vec<KeyringEntry>, Error> {
-        let result = keyrings::list_keyrings(&mut self.client).await?;
-        self.auto_persist_session().await?;
-        Ok(result)
     }
 
     /// Add a member to a workspace.
