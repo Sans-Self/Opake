@@ -1,6 +1,6 @@
 {
-  "name": "Opake",
-  "short_name": "Opake",
+  "name": "Opake — Development",
+  "short_name": "Opake Dev",
   "start_url": "/cabinet/files",
   "scope": "/",
   "icons": [

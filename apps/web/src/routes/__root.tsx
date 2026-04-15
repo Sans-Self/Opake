@@ -38,7 +38,10 @@ function RootDocument({ children }: Readonly<{ children: React.ReactNode }>) {
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="manifest" href="/site.webmanifest" />
+        <link
+          rel="manifest"
+          href={import.meta.env.DEV ? "/site.dev.webmanifest" : "/site.webmanifest"}
+        />
         <meta name="theme-color" content="#f4f0e8" />
         <link rel="stylesheet" href={css} />
         <HeadContent />

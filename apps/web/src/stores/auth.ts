@@ -12,6 +12,7 @@ import { immer } from "zustand/middleware/immer";
 import type { Opake, ResolvedIdentity } from "@opake/sdk";
 import type { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
 import { base64ToUint8Array } from "@/lib/encoding";
+import { ensurePersistentStorage } from "@/lib/persistent-storage";
 import { loading } from "@/stores/app";
 
 // Detect auth errors that indicate a dead session (stale/revoked tokens).
@@ -72,6 +73,13 @@ let bootPromise: Promise<void> | null = null;
 
 async function getStorage(): Promise<IndexedDbStorage> {
   if (!storage) {
+    // Request persistent storage BEFORE first IDB write. Without this,
+    // the browser may evict our identity keys under disk pressure,
+    // forcing full seed-phrase recovery. Fire-and-forget — the outcome
+    // is logged and memoized; we don't block boot on the browser's
+    // permission decision.
+    void ensurePersistentStorage();
+
     const { IndexedDbStorage } = await loadStorage();
     storage ??= new IndexedDbStorage();
   }
