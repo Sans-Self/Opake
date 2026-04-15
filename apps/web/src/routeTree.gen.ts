@@ -198,7 +198,11 @@ const CabinetWorkspaceSettingsRkeyRoute =
     id: '/workspace-settings/$rkey',
     path: '/workspace-settings/$rkey',
     getParentRoute: () => CabinetRouteRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/cabinet/workspace-settings/$rkey.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const CabinetFilesSplatRoute = CabinetFilesSplatRouteImport.update({
   id: '/$',
   path: '/$',
