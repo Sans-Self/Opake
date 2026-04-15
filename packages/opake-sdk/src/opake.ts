@@ -553,6 +553,24 @@ export class Opake {
   }
 
   /**
+   * Unwrap the group (content) key for a workspace using the current
+   * identity's private key. Required before calling any member-management
+   * method that takes a `key: Uint8Array` parameter.
+   *
+   * Note: returning the key to JS is a pragmatic escape hatch for the
+   * web management UI — the proper path keeps the key inside WASM. Do
+   * not persist, log, or transmit the returned bytes.
+   *
+   * @param members - Raw keyring member records (from `listWorkspaceMembers`).
+   * @returns The 32-byte group key as a Uint8Array.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  unwrapGroupKey(members: readonly WorkspaceMember[]): Promise<Uint8Array> {
+    return this.requireContext().unwrapGroupKey(members);
+  }
+
+  /**
    * Add a member to a workspace.
    */
   @wrapWasmErrors

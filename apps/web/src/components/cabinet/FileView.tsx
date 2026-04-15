@@ -9,6 +9,7 @@ import {
   FolderPlusIcon,
   UploadSimpleIcon,
   NotePencilIcon,
+  GearIcon,
 } from "@phosphor-icons/react";
 import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
@@ -293,6 +294,16 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
       >
         <UploadSimpleIcon size={15} />
       </button>
+      {context.kind === "workspace" && (
+        <Link
+          to="/cabinet/workspace-settings/$rkey"
+          params={{ rkey: rkeyFromUri(context.keyringUri) }}
+          className="btn btn-ghost btn-xs btn-square rounded-md"
+          aria-label="Workspace settings"
+        >
+          <GearIcon size={15} />
+        </Link>
+      )}
       <SegmentedToggle
         options={[
           { value: "list" as const, icon: ListBulletsIcon },

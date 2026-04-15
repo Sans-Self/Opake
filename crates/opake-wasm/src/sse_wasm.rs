@@ -277,6 +277,18 @@ impl WasmOpakeHandle {
                         log::warn!("[sse] tree_keeper apply failed: {e}");
                     }
                 }
+
+                // Notify JS of keyring-record-level changes so stores
+                // tracking workspace metadata (name, icon, members)
+                // can re-fetch against the now-indexed appview. Fires
+                // only for direct record events — proposals flow
+                // through the owner's apply step, which emits a
+                // subsequent KeyringUpsert.
+                if is_keyring_record_event(&event) {
+                    if let Some(uri) = event.keyring_uri() {
+                        dispatch_workspace_updated(uri);
+                    }
+                }
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -435,6 +447,43 @@ async fn wasm_sleep(duration: Duration) {
         }
     });
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+}
+
+/// True for keyring-record-level events — i.e. direct writes/deletes of
+/// the keyring record, not proposal variants. These are the signals the
+/// workspace list wants (name/icon/member changes are visible on the
+/// keyring record itself).
+fn is_keyring_record_event(event: &opake_core::sse::events::SseEvent) -> bool {
+    use opake_core::sse::events::SseEvent;
+    matches!(
+        event,
+        SseEvent::KeyringUpsert(_) | SseEvent::KeyringDelete(_)
+    )
+}
+
+/// Dispatch `opake:workspace-updated` as a window CustomEvent so JS
+/// stores can reload the affected workspace. The detail payload is the
+/// keyring URI as a string. Soft-fails on any web-sys error — this
+/// notification is best-effort and losing one means users wait until
+/// the next full reload, which is acceptable.
+fn dispatch_workspace_updated(keyring_uri: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let detail = JsValue::from_str(keyring_uri);
+    let init = web_sys::CustomEventInit::new();
+    init.set_detail(&detail);
+    let event =
+        match web_sys::CustomEvent::new_with_event_init_dict("opake:workspace-updated", &init) {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("[sse] failed to construct CustomEvent: {e:?}");
+                return;
+            }
+        };
+    if let Err(e) = window.dispatch_event(&event) {
+        log::warn!("[sse] failed to dispatch workspace-updated: {e:?}");
+    }
 }
 
 /// Wrap a JS function as a `WatcherCallback` that builds a snapshot on

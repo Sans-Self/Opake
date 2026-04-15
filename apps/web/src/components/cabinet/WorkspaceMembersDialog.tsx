@@ -40,7 +40,8 @@ export const WorkspaceMembersDialog = forwardRef<
 >(function WorkspaceMembersDialog({ members, isManager, onRemoveMember, onAddMember }, ref) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<Readonly<Record<string, MemberProfile>>>({});
+  // `null` = resolved but no profile available; absence = not yet resolved.
+  const [profiles, setProfiles] = useState<Readonly<Record<string, MemberProfile | null>>>({});
   const [visible, setVisible] = useState(false);
 
   const session = useAuthStore((s) => s.session);

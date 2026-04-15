@@ -2,6 +2,13 @@
 //
 // Module-level promise dedup prevents StrictMode double-effect from
 // sending concurrent `&mut self` borrows into WASM (RefCell panic).
+//
+// Real-time refresh: the WASM SSE consumer dispatches an
+// `opake:workspace-updated` CustomEvent on the `window` whenever the
+// appview broadcasts a keyring record change (this device's writes,
+// peer writes, other-device writes). We listen and re-fetch. A
+// visibility listener catches edge cases where SSE is disconnected or
+// the page was hidden across events.
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -134,3 +141,27 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
     },
   })),
 );
+
+// SSE-driven refresh: the WASM consumer fires this CustomEvent on any
+// keyring-record-level change. Only relevant after the initial load
+// (so we don't fetch before login). `loadWorkspaces` dedups concurrent
+// calls, so event bursts coalesce naturally.
+if (typeof window !== "undefined") {
+  window.addEventListener("opake:workspace-updated", () => {
+    const state = useWorkspaceStore.getState();
+    if (!state.loaded) return;
+    void state.loadWorkspaces();
+  });
+}
+
+// Visibility fallback: covers the case where SSE was disconnected
+// while the page was hidden (browser backgrounding, sleep, etc).
+// Same dedup semantics as the SSE path.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const state = useWorkspaceStore.getState();
+    if (!state.loaded) return;
+    void state.loadWorkspaces();
+  });
+}
