@@ -67,13 +67,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         setStatus("sharing");
 
         // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        await getActiveFileManager().share(
-          documentUri,
-          recipient.did,
-          recipient.publicKey,
-          "read",
-          null,
-        );
+        await getActiveFileManager().share(documentUri, recipient.did, recipient.publicKey, "read");
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
           // REMOVE: pending share needs core domain method (Opake::create_pending_share)
@@ -87,15 +81,14 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         throw resolveError;
       }
 
-      // Optimistically mark the item as shared in the store
-      const { items } = useDocumentsStore.getState();
-      const item = items[documentUri];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-      if (item) {
-        useDocumentsStore.setState((state) => ({
-          items: { ...state.items, [documentUri]: { ...item, status: "shared" as const } },
-        }));
-      }
+      // Optimistically mark the item as shared in the store. `items` is
+      // an array of FileItems for the current directory — find by URI,
+      // replace in place. SSE / directory reload will reconcile later.
+      useDocumentsStore.setState((state) => ({
+        items: state.items.map((item) =>
+          item.uri === documentUri ? { ...item, status: "shared" as const } : item,
+        ),
+      }));
 
       setStatus("done");
       toastSuccess(`Shared "${documentName}" with ${handle}`);
