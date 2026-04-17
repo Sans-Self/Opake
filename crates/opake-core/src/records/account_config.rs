@@ -29,3 +29,49 @@ impl AccountConfigRecord {
         }
     }
 }
+
+/// Partial update payload for `AccountConfigRecord`.
+///
+/// Field semantics: `Some(v)` replaces the current value, `None` leaves it
+/// untouched. `appview_url` uses a nested `Option` so callers can clear it
+/// by passing `Some(None)` — serialized as an explicit JSON `null`, which
+/// is distinct from an absent/`undefined` field (the latter leaves the
+/// current value intact).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AccountConfigUpdates {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry_enabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "double_option"
+    )]
+    pub appview_url: Option<Option<String>>,
+}
+
+/// Distinguish absent (`None`) from explicit null (`Some(None)`) for
+/// nested `Option` fields. Absent: field wasn't in the input. Explicit
+/// null: caller wants the field cleared.
+mod double_option {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T, S>(value: &Option<Option<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        T: Serialize,
+        S: Serializer,
+    {
+        match value {
+            Some(inner) => inner.serialize(s),
+            None => s.serialize_unit(),
+        }
+    }
+
+    pub fn deserialize<'de, T, D>(d: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(d).map(Some)
+    }
+}

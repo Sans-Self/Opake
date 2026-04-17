@@ -160,7 +160,7 @@ defmodule OpakeAppviewWeb.EventsController do
       |> MapSet.new()
 
     is_member = MapSet.member?(member_dids, state.did)
-    was_subscribed = uri && MapSet.member?(state.subscribed_keyrings, uri)
+    was_subscribed = not is_nil(uri) and MapSet.member?(state.subscribed_keyrings, uri)
 
     cond do
       # New membership — subscribe.

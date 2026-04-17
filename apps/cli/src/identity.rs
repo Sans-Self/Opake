@@ -106,7 +106,7 @@ mod tests {
         assert_eq!(loaded.verify_key, identity.verify_key);
 
         assert_eq!(loaded.public_key_bytes().unwrap(), [1u8; 32]);
-        assert_eq!(loaded.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(*loaded.private_key_bytes().unwrap(), [2u8; 32]);
         assert_eq!(loaded.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(loaded.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
     }
@@ -159,7 +159,7 @@ mod tests {
         assert!(identity.has_signing_keys());
         // X25519 keys preserved.
         assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
-        assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(*identity.private_key_bytes().unwrap(), [2u8; 32]);
 
         // Re-load should have signing keys persisted.
         let reloaded = load_identity(&storage, did).unwrap();

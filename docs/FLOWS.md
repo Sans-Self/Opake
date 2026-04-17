@@ -20,3 +20,35 @@ This document has been split into per-topic files for maintainability. See [flow
 | [flows/revisions.md](flows/revisions.md) | Collaborative editing via revision records (planned) |
 | [flows/pairing.md](flows/pairing.md) | Device-to-device identity transfer via PDS relay |
 | [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) | Seed phrase derivation, identity recovery |
+
+## Workspace live updates
+
+The workspace list is kept current without polling via the SSE consumer and `WorkspaceKeeper`.
+
+**Cold start (bootstrap)**
+
+1. `listWorkspaces` calls `discover_member_keyrings` → fetches all keyrings from the appview.
+2. Each keyring is run through `try_build_entry` (identity key material from `Identity::private_key_bytes`) to produce a `WorkspaceEntry` with decrypted name/description.
+3. `WorkspaceKeeper::bootstrap` replaces the entry set and flips `loaded = true`. All registered `watchWorkspaces` callbacks receive an updated snapshot immediately.
+
+**Incremental updates (SSE)**
+
+SSE `keyring:upsert` events route to `apply_keyring_to_workspace_keeper`:
+
+1. Acquire the `Opake` mutex to read the caller's DID and identity private key.
+2. Release `Opake` mutex.
+3. Call `try_build_entry_from_sse_record` — returns `Some(entry)` if the caller is a member, `None` if the DID is absent (rotated out), or `Some(entry with name=None)` if the key-unwrap transiently fails.
+4. Acquire the `WorkspaceKeeper` mutex and call `apply_keyring_record` (upsert or delete).
+5. `WorkspaceKeeper` deduplicates: if the new entry equals the existing one (SSE echo after a local write), no callbacks fire.
+
+SSE `keyring:delete` events skip step 1–3 and call `keeper.delete(uri)` directly.
+
+**Optimistic insert**
+
+After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry` from the known-fresh data and calls `keeper.upsert` immediately. The sidebar reflects the new workspace within the current render cycle rather than waiting 1–4 s for the appview cursor lag. The later SSE echo is a no-op (dedup short-circuits).
+
+**Watcher teardown**
+
+`stopSseConsumer` → `WorkspaceKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). `detachWatcher` (store-level) closes the JS watcher handle and clears the bootstrap promise without touching store state, so a remount reinstalls a fresh watcher without a flash-to-empty.
+
+See `WorkspaceKeeper` in `crates/opake-core/src/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.

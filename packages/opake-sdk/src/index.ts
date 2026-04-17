@@ -1,8 +1,11 @@
 // @opake/sdk — public API
 
 // Main entry point
-export { Opake } from "./opake";
+export { Opake, type WorkspaceWatcher } from "./opake";
 export { FileManager, type DirectoryWatcher } from "./file-manager";
+
+// Schema-driven derived types
+export { type WorkspaceSnapshot } from "./schemas";
 
 // Errors
 export { OpakeError, type OpakeErrorKind } from "./errors";
@@ -35,6 +38,7 @@ export { MemoryStorage } from "./storage/memory";
 export {
   type OpakeInitOptions,
   type AccountConfig,
+  type AccountConfigPatch,
   type MutationResult,
   type UploadResult,
   type DownloadResult,
@@ -56,6 +60,8 @@ export {
   type TaskDef,
 } from "./types";
 
-// Real-time event streaming is now WASM-owned. Subscribe via
-// `opake.startSseConsumer(appviewUrl)` + `fileManager.watchDirectory(uri, handler)`
-// which returns a `DirectoryWatcher` handle (exported above).
+// Real-time event streaming is WASM-owned:
+//   - Start the consumer: `opake.startSseConsumer(appviewUrl?)`
+//   - Directory tree updates: `fileManager.watchDirectory(uri, handler)` → `DirectoryWatcher`
+//   - Workspace list updates: `opake.watchWorkspaces(handler)` → `WorkspaceWatcher`
+// Both watcher handles are exported above.

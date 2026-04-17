@@ -15,6 +15,7 @@ use crate::crypto::{
     X25519PrivateKey, X25519PublicKey,
 };
 use crate::error::Error;
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Cache types
@@ -151,8 +152,8 @@ impl Identity {
         decode_key_bytes(&self.public_key, "public_key")
     }
 
-    pub fn private_key_bytes(&self) -> Result<X25519PrivateKey, Error> {
-        decode_key_bytes(&self.private_key, "private_key")
+    pub fn private_key_bytes(&self) -> Result<Zeroizing<X25519PrivateKey>, Error> {
+        decode_key_bytes(&self.private_key, "private_key").map(Zeroizing::new)
     }
 
     pub fn signing_key_bytes(&self) -> Result<Option<Ed25519SecretKey>, Error> {
@@ -504,7 +505,7 @@ mod tests {
             verify_key: Some(BASE64.encode([4u8; 32])),
         };
         assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
-        assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(*identity.private_key_bytes().unwrap(), [2u8; 32]);
         assert_eq!(identity.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(identity.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
     }

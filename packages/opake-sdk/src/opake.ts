@@ -12,6 +12,7 @@
 import type { Storage } from "./storage";
 import type {
   AccountConfig,
+  AccountConfigPatch,
   MutationResult,
   OpakeInitOptions,
   ResolvedIdentity,
@@ -27,6 +28,8 @@ import {
   createWorkspaceResultSchema,
   listWorkspacesResultSchema,
   syncSingleResultSchema,
+  workspaceSnapshotSchema,
+  type WorkspaceSnapshot,
 } from "./schemas";
 import { initWasm } from "./wasm";
 import { FileManager } from "./file-manager";
@@ -46,6 +49,21 @@ import {
 // The WASM module types. We import dynamically after init.
 type WasmModule = typeof import("../wasm/opake.js");
 type WasmOpakeContext = import("../wasm/opake.js").OpakeContext;
+
+/** Internal shape of the WASM `WorkspaceWatcher` object. */
+type WasmWorkspaceWatcherHandle = {
+  close(): Promise<void>;
+  free(): void;
+};
+
+/**
+ * Handle returned by `Opake.watchWorkspaces`. Call `.close()` to
+ * unsubscribe — typically from a React useEffect cleanup.
+ */
+export interface WorkspaceWatcher {
+  /** Stop receiving notifications. Idempotent. */
+  close(): void;
+}
 
 // ---------------------------------------------------------------------------
 // Token guard decorator
@@ -373,6 +391,27 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /**
+   * Override the cached appview URL at runtime.
+   *
+   * `Opake.init` seeds the instance with the compile-time
+   * `DEFAULT_APPVIEW_URL` baked into the WASM binary. Call this at boot
+   * to inject a host-specific runtime default (e.g. the web app's
+   * `VITE_APPVIEW_URL`, which can't be baked in because one WASM binary
+   * is shipped to multiple deployments).
+   *
+   * After this call, methods that resolve the appview URL internally
+   * (`listWorkspaces`, `startSseConsumer`, etc.) pick up the new value
+   * automatically — JS callers don't pass the URL at the call site.
+   *
+   * Writes to `accountConfig` on the PDS still override this value, so
+   * a user-configured appview (from settings) wins over the host default.
+   */
+  @wrapWasmErrors
+  async setAppviewUrl(url: string): Promise<void> {
+    await this.requireContext().setAppviewUrl(url);
+  }
+
+  /**
    * Verify the session is usable by touching the account config record.
    *
    * Reads the config, stamps `modifiedAt` with the current time, and
@@ -526,16 +565,20 @@ export class Opake {
   /**
    * List all workspaces the current user is a member of.
    *
-   * Also populates the in-memory group key cache for subsequent
-   * `workspaceFromKey()` calls.
+   * Also bootstraps the in-memory `WorkspaceKeeper` — `watchWorkspaces`
+   * callers see a fresh snapshot with `loaded = true` as a side effect.
+   *
+   * The appview URL is resolved internally from the stored config
+   * (set during `init` and overridable via `setAppviewUrl` or
+   * by writing an `accountConfig` record). Callers do not pass it.
    *
    * @returns Array of workspace entries with decrypted names and roles.
    */
   @wrapWasmErrors
   @withTokenGuard
-  listWorkspaces(appviewUrl?: string): Promise<readonly WorkspaceEntry[]> {
+  listWorkspaces(): Promise<readonly WorkspaceEntry[]> {
     return this.requireContext()
-      .listWorkspaces(appviewUrl ?? null)
+      .listWorkspaces(null)
       .then(listWorkspacesResultSchema.parse);
   }
 
@@ -554,38 +597,19 @@ export class Opake {
   }
 
   /**
-   * Unwrap the group (content) key for a workspace using the current
-   * identity's private key. Required before calling any member-management
-   * method that takes a `key: Uint8Array` parameter.
-   *
-   * Note: returning the key to JS is a pragmatic escape hatch for the
-   * web management UI — the proper path keeps the key inside WASM. Do
-   * not persist, log, or transmit the returned bytes.
-   *
-   * @param members - Raw keyring member records (from `listWorkspaceMembers`).
-   * @returns The 32-byte group key as a Uint8Array.
-   */
-  @wrapWasmErrors
-  @withTokenGuard
-  unwrapGroupKey(members: readonly WorkspaceMember[]): Promise<Uint8Array> {
-    return this.requireContext().unwrapGroupKey(members);
-  }
-
-  /**
-   * Add a member to a workspace.
+   * Add a member to a workspace. The WASM binding resolves the keyring
+   * and unwraps the group key internally — the key never crosses into JS.
    */
   @wrapWasmErrors
   @withTokenGuard
   addWorkspaceMember(
     keyringUri: string,
-    key: Uint8Array,
     memberDid: string,
     memberPublicKey: Uint8Array,
     role: WorkspaceRole,
   ): Promise<MutationResult> {
     return this.requireContext().addWorkspaceMember(
       keyringUri,
-      key,
       memberDid,
       memberPublicKey,
       role,
@@ -595,18 +619,18 @@ export class Opake {
   /**
    * Remove a member from a workspace.
    *
-   * For owners: rotates the group key and returns the new key + rotation.
-   * For non-owners: creates a proposal.
+   * For owners: rotates the group key in-place inside WASM and returns
+   * the new `rotation` number. For non-owners: creates a proposal. The
+   * rotated key bytes never cross into JS — the next workspace operation
+   * re-resolves via the keyring URI.
    */
   @wrapWasmErrors
   @withTokenGuard
   removeWorkspaceMember(
     keyringUri: string,
-    key: Uint8Array,
     memberDid: string,
-  ): Promise<{ key?: Uint8Array; rotation?: number; proposed: boolean }> {
-    return this.requireContext().removeWorkspaceMember(keyringUri, key, memberDid) as Promise<{
-      key?: Uint8Array;
+  ): Promise<{ rotation?: number; proposed: boolean }> {
+    return this.requireContext().removeWorkspaceMember(keyringUri, memberDid) as Promise<{
       rotation?: number;
       proposed: boolean;
     }>;
@@ -619,17 +643,19 @@ export class Opake {
     return this.requireContext().leaveWorkspace(keyringUri);
   }
 
-  /** Update workspace metadata (name, description, icon). */
+  /**
+   * Update workspace metadata (name, description, icon). The WASM binding
+   * resolves the keyring and unwraps the group key internally — the key
+   * never crosses into JS.
+   */
   @wrapWasmErrors
   @withTokenGuard
   updateWorkspaceMetadata(
     keyringUri: string,
-    key: Uint8Array,
     updates: { name?: string; description?: string; icon?: string },
   ): Promise<MutationResult> {
     return this.requireContext().updateWorkspaceMetadata(
       keyringUri,
-      key,
       updates.name ?? null,
       updates.description ?? null,
       updates.icon ?? null,
@@ -694,28 +720,34 @@ export class Opake {
   }
 
   /**
-   * Write (upsert) the account config record. Merges with whatever the
-   * caller passes — if a field is omitted from `updates`, the current
-   * stored value is preserved.
+   * Patch the account config record. Read-merge-write happens in core
+   * under a single mutex — concurrent calls serialize rather than
+   * clobbering each other.
    *
-   * @returns The updated config.
+   * Tri-state semantics (see `AccountConfigPatch`):
+   * - absent key / `undefined` → field unchanged on the PDS.
+   * - `null` (`appviewUrl` only) → field cleared on the PDS.
+   * - concrete value → field updated to that value.
+   *
+   * @returns The freshly-written record.
    */
   @wrapWasmErrors
   @withTokenGuard
-  async updateAccountConfig(updates: Partial<AccountConfig>): Promise<AccountConfig> {
+  async updateAccountConfig(updates: AccountConfigPatch): Promise<AccountConfig> {
     const ctx = this.requireContext();
-    const current = ((await ctx.getAccountConfig()) as AccountConfig | null) ?? {
-      opakeVersion: 1,
-      telemetryEnabled: false,
-      modifiedAt: new Date().toISOString(),
-    };
-    const next: AccountConfig = {
-      ...current,
-      ...updates,
-      modifiedAt: new Date().toISOString(),
-    };
-    await ctx.setAccountConfig(next);
-    return next;
+    // WASM AccountConfigUpdates uses `double_option` serde semantics:
+    // absent = leave alone, explicit null = clear, value = set.
+    // Only include keys the caller explicitly provided.
+    const patch: Record<string, unknown> = {};
+    if (updates.telemetryEnabled !== undefined) {
+      patch.telemetryEnabled = updates.telemetryEnabled;
+    }
+    if (updates.appviewUrl !== undefined) {
+      // string or explicit null — both forwarded; Rust interprets null as clear.
+      patch.appviewUrl = updates.appviewUrl;
+    }
+    const record = await ctx.updateAccountConfig(patch);
+    return record as AccountConfig;
   }
 
   // ---------------------------------------------------------------------------
@@ -747,10 +779,86 @@ export class Opake {
   /**
    * Stop the WASM SSE consumer. Clears the internal running flag so a
    * subsequent `startSseConsumer` call can spawn a fresh consumer.
+   * Also drains the WASM-side WorkspaceKeeper so account switches don't
+   * leak the previous user's workspace list.
    */
   stopSseConsumer(): void {
     const ctx = this.ctx;
     if (ctx) ctx.stopSseConsumer();
+  }
+
+  /**
+   * Subscribe to live changes in the workspace list.
+   *
+   * Fires the handler once immediately with the current snapshot
+   * (`loaded: false` with an empty `entries` list if the keeper hasn't
+   * been bootstrapped yet), and again on every subsequent mutation —
+   * the initial `listWorkspaces` call populates the keeper, and SSE
+   * `keyring:upsert` / `keyring:delete` events patch it incrementally.
+   *
+   * The returned handle is synchronous — registration is kicked off
+   * eagerly and `close()` chains onto the pending Promise. This
+   * mirrors `FileManager.watchDirectory`, letting React effects use
+   * the result without an intermediate Promise.
+   *
+   * @example
+   * ```typescript
+   * useEffect(() => {
+   *   const watcher = opake.watchWorkspaces((snapshot) => {
+   *     setWorkspaces(snapshot.entries);
+   *     setLoaded(snapshot.loaded);
+   *   });
+   *   return () => watcher.close();
+   * }, [opake]);
+   * ```
+   */
+  watchWorkspaces(handler: (snapshot: WorkspaceSnapshot) => void): WorkspaceWatcher {
+    // WASM calls back with the raw snapshot object — validate + transform
+    // via the Zod schema so consumers never see snake_case or untyped values.
+    const adapter = (raw: unknown) => {
+      let snapshot: WorkspaceSnapshot;
+      try {
+        snapshot = workspaceSnapshotSchema.parse(raw);
+      } catch (err) {
+        console.warn("[opake-sdk] watchWorkspaces snapshot parse failed:", err);
+        return;
+      }
+      try {
+        handler(snapshot);
+      } catch (err) {
+        // One broken handler shouldn't break the event loop.
+        console.warn("[opake-sdk] watchWorkspaces handler threw:", err);
+      }
+    };
+
+    const pending = this.requireContext().watchWorkspaces(adapter);
+    let closed = false;
+    let wasmWatcher: WasmWorkspaceWatcherHandle | null = null;
+
+    pending.then(
+      (w) => {
+        if (closed) {
+          // close() fired before the handle resolved — clean up now.
+          void w.close();
+          return;
+        }
+        wasmWatcher = w as WasmWorkspaceWatcherHandle;
+      },
+      (err: unknown) => {
+        console.warn("[opake-sdk] watchWorkspaces registration failed:", err);
+      },
+    );
+
+    return {
+      close: () => {
+        if (closed) return;
+        closed = true;
+        if (wasmWatcher) {
+          void wasmWatcher.close();
+          wasmWatcher = null;
+        }
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------

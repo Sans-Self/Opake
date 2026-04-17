@@ -1,6 +1,10 @@
 {
   "private": true,
-  "workspaces": ["apps/web", "packages/*", "tests"],
+  "workspaces": [
+    "apps/web",
+    "packages/*",
+    "tests"
+  ],
   "scripts": {
     "lint": "bun run --filter '@opake/sdk' --filter '@opake/daemon' --filter '@opake/react' --filter opake-web lint",
     "format": "bun run --filter '@opake/sdk' --filter '@opake/daemon' --filter '@opake/react' --filter opake-web format",
@@ -18,5 +22,8 @@
     "prettier": "^3.8.1",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1"
+  },
+  "volta": {
+    "node": "24.15.0"
   }
 }

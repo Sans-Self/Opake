@@ -75,6 +75,24 @@ export const listWorkspacesResultSchema = z
   })
   .transform((r) => r.keyrings);
 
+/**
+ * Snapshot of the workspace list emitted by `watchWorkspaces`. Fires
+ * once on install with `loaded = false` (empty entries while the
+ * keeper bootstraps) and again on every SSE keyring event that mutates
+ * the list.
+ */
+export const workspaceSnapshotSchema = z
+  .object({
+    entries: z.array(workspaceEntrySchema),
+    loaded: z.boolean(),
+  })
+  .transform((r) => ({
+    entries: r.entries,
+    loaded: r.loaded,
+  }));
+
+export type WorkspaceSnapshot = z.output<typeof workspaceSnapshotSchema>;
+
 // ---------------------------------------------------------------------------
 // Workspace sync
 // ---------------------------------------------------------------------------

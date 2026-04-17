@@ -29,7 +29,9 @@ use crate::error::Error;
 pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 
 // Re-export all record types at the `records::` level.
-pub use account_config::{AccountConfigRecord, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY};
+pub use account_config::{
+    AccountConfigRecord, AccountConfigUpdates, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY,
+};
 pub use defs::{
     DirectKeyWrapping, EncryptedMetadata, EncryptionEnvelope, KeyWrapping, KeyringKeyWrapping,
     KeyringMember, KeyringRef, Role, WrappedKey,

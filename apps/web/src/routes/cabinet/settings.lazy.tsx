@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { UserIcon, FloppyDiskIcon, GearIcon } from "@phosphor-icons/react";
-import type { AccountConfig } from "@opake/sdk";
+import { FloppyDiskIcon } from "@phosphor-icons/react";
+import type { AccountConfigPatch } from "@opake/sdk";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { getOpake, useAuthStore } from "@/stores/auth";
 import { truncateDid } from "@/lib/format";
@@ -13,7 +13,7 @@ function SettingsPage() {
   const handle = session.status === "active" ? session.handle : null;
   const pdsUrl = session.status === "active" ? session.pdsUrl : null;
 
-  const [config, setConfig] = useState<AccountConfig | null>(null);
+  const [config, setConfig] = useState<import("@opake/sdk").AccountConfig | null>(null);
   const [appviewUrl, setAppviewUrl] = useState("");
   const [savedAppviewUrl, setSavedAppviewUrl] = useState("");
   const [saving, setSaving] = useState(false);
@@ -47,12 +47,32 @@ function SettingsPage() {
   const handleAppviewSave = useCallback(() => {
     if (!did) return;
     const trimmed = appviewUrl.trim();
+
+    // Validate URL before saving — a malicious URL would receive Ed25519
+    // auth signatures that could be replayed within the 60s window.
+    if (trimmed.length > 0) {
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== "https:") {
+          toastError("AppView URL must use HTTPS");
+          return;
+        }
+      } catch {
+        toastError("Invalid URL");
+        return;
+      }
+    }
+
     setSaving(true);
     void (async () => {
       try {
-        const updated = await getOpake().updateAccountConfig({
-          appviewUrl: trimmed.length > 0 ? trimmed : undefined,
-        });
+        const patch: AccountConfigPatch = {
+          // Empty field → explicit null (clear the stored override).
+          // Non-empty → set the new URL. Never undefined, which would
+          // leave the current value untouched instead of clearing it.
+          appviewUrl: trimmed.length > 0 ? trimmed : null,
+        };
+        const updated = await getOpake().updateAccountConfig(patch);
         setConfig(updated);
         setSavedAppviewUrl(updated.appviewUrl ?? "");
         toastSuccess("AppView URL saved");
@@ -80,62 +100,62 @@ function SettingsPage() {
 
   return (
     <PanelShell depth={0} breadcrumbs={breadcrumbs} footer="">
-      <div className="mx-auto max-w-2xl space-y-8 p-6">
-        <h1 className="flex items-center gap-2 text-2xl font-bold">
-          <GearIcon size={24} /> Settings
-        </h1>
+      <div className="mx-auto max-w-lg space-y-8 px-6 py-6">
+        <h1 className="text-base-content text-lg font-semibold">Settings</h1>
 
         {/* Account info */}
-        <section className="card bg-base-200 space-y-2 p-4">
-          <h2 className="flex items-center gap-2 font-semibold">
-            <UserIcon size={18} /> Account
-          </h2>
-          <div className="space-y-1 text-sm">
-            <div>
-              <span className="text-base-content/60">Handle:</span>{" "}
-              <span className="font-mono">{handle}</span>
-            </div>
-            <div>
-              <span className="text-base-content/60">DID:</span>{" "}
-              <span className="font-mono text-xs">{truncateDid(did)}</span>
-            </div>
-            <div>
-              <span className="text-base-content/60">PDS:</span>{" "}
-              <span className="font-mono text-xs">{pdsUrl}</span>
+        <section>
+          <h2 className="text-base-content mb-3 text-sm font-semibold">Account</h2>
+          <div className="space-y-3">
+            <div className="space-y-1 text-sm">
+              <div>
+                <span className="text-base-content/60">Handle:</span>{" "}
+                <span className="font-mono">{handle}</span>
+              </div>
+              <div>
+                <span className="text-base-content/60">DID:</span>{" "}
+                <span className="font-mono text-xs">{truncateDid(did)}</span>
+              </div>
+              <div>
+                <span className="text-base-content/60">PDS:</span>{" "}
+                <span className="font-mono text-xs">{pdsUrl}</span>
+              </div>
             </div>
           </div>
         </section>
 
         {/* AppView URL */}
-        <section className="card bg-base-200 space-y-3 p-4">
-          <h2 className="font-semibold">AppView URL</h2>
-          <p className="text-base-content/60 text-sm">
-            The AppView indexes workspace membership and incoming shares. Leave blank to use the
-            default.
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="url"
-              className="input input-bordered input-sm flex-1"
-              placeholder="https://appview.opake.app"
-              value={appviewUrl}
-              onChange={(e) => setAppviewUrl(e.target.value)}
-              disabled={saving}
-            />
-            <button
-              type="button"
-              className="btn btn-sm btn-primary gap-1.5"
-              disabled={!appviewDirty || saving}
-              onClick={handleAppviewSave}
-            >
-              <FloppyDiskIcon size={16} /> Save
-            </button>
-          </div>
-          {config && (
-            <p className="text-base-content/40 text-xs">
-              Last saved: {new Date(config.modifiedAt).toLocaleString()}
+        <section>
+          <h2 className="text-base-content mb-3 text-sm font-semibold">AppView URL</h2>
+          <div className="space-y-3">
+            <p className="text-base-content/60 text-sm">
+              The AppView indexes workspace membership and incoming shares. Leave blank to use the
+              default.
             </p>
-          )}
+            <div className="flex gap-2">
+              <input
+                type="url"
+                className="input input-bordered input-sm flex-1"
+                placeholder="https://appview.opake.app"
+                value={appviewUrl}
+                onChange={(e) => setAppviewUrl(e.target.value)}
+                disabled={saving}
+              />
+              <button
+                type="button"
+                className="btn btn-sm btn-primary gap-1.5"
+                disabled={!appviewDirty || saving}
+                onClick={handleAppviewSave}
+              >
+                <FloppyDiskIcon size={16} /> Save
+              </button>
+            </div>
+            {config && (
+              <p className="text-base-content/40 text-xs">
+                Last saved: {new Date(config.modifiedAt).toLocaleString()}
+              </p>
+            )}
+          </div>
         </section>
       </div>
     </PanelShell>

@@ -12,10 +12,33 @@
 export interface AccountConfig {
   readonly opakeVersion: number;
   readonly telemetryEnabled: boolean;
-  /** Override the default appview. Leave undefined to use the built-in default. */
+  /** Override the default appview. Absent means the built-in default is active. */
   readonly appviewUrl?: string;
   /** ISO-8601 timestamp of last write. */
   readonly modifiedAt: string;
+}
+
+/**
+ * Patch payload for `updateAccountConfig`.
+ *
+ * Tri-state semantics per field:
+ * - Key absent / `undefined`: field is unchanged on the PDS.
+ * - Explicit `null` (for `appviewUrl`): field is cleared on the PDS.
+ * - Concrete value: field is updated to that value.
+ *
+ * This avoids the footgun in `Partial<AccountConfig>` where
+ * `{ appviewUrl: undefined }` is indistinguishable from an absent key
+ * at runtime, so passing `undefined` would silently clear the stored URL.
+ */
+export interface AccountConfigPatch {
+  /** Set or leave `telemetryEnabled` unchanged. */
+  readonly telemetryEnabled?: boolean;
+  /**
+   * `string` — set a new appview URL.
+   * `null`   — explicitly clear the stored override (use the built-in default).
+   * absent   — leave the current value untouched.
+   */
+  readonly appviewUrl?: string | null;
 }
 
 /** Result of a mutation that may be applied directly or proposed for owner approval. */

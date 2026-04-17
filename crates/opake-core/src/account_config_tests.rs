@@ -1,6 +1,8 @@
 use super::*;
 use crate::client::HttpResponse;
+use crate::crypto::OsRng;
 use crate::records::SCHEMA_VERSION;
+use crate::storage::{Identity, NoopStorage};
 use crate::test_utils::MockTransport;
 
 fn success(body: &str) -> HttpResponse {
@@ -24,6 +26,24 @@ fn account_config_json(telemetry: bool) -> String {
     .to_string()
 }
 
+fn account_config_json_ext(telemetry: bool, appview: Option<&str>, modified_at: &str) -> String {
+    let record = AccountConfigRecord {
+        telemetry_enabled: telemetry,
+        appview_url: appview.map(str::to_string),
+        ..AccountConfigRecord::new(modified_at)
+    };
+    serde_json::json!({
+        "uri": "at://did:plc:test/app.opake.accountConfig/self",
+        "cid": "bafyrecord",
+        "value": record,
+    })
+    .to_string()
+}
+
+fn put_record_response() -> HttpResponse {
+    success(r#"{"uri":"at://did:plc:test/app.opake.accountConfig/self","cid":"bafynew"}"#)
+}
+
 fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
     let session = crate::client::Session::Legacy(crate::client::LegacySession {
         did: "did:plc:test".into(),
@@ -32,6 +52,22 @@ fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         refresh_jwt: "test-refresh".into(),
     });
     XrpcClient::with_session(mock, "https://pds.test".into(), session)
+}
+
+/// Build a minimal `Opake<MockTransport, OsRng, NoopStorage>` suitable for
+/// testing methods that go through the XRPC client.
+fn make_test_opake(mock: MockTransport) -> crate::opake::Opake<MockTransport, OsRng, NoopStorage> {
+    let client = mock_client(mock);
+    let identity = Identity::generate("did:plc:test", &mut OsRng);
+    crate::opake::Opake::new(
+        client,
+        "did:plc:test".into(),
+        Some(identity),
+        OsRng,
+        NoopStorage,
+        || "2026-01-01T00:00:00Z".to_string(),
+        || 1_700_000_000_000_000,
+    )
 }
 
 #[tokio::test]
@@ -130,4 +166,112 @@ fn record_uses_camel_case_keys() {
     // snake_case variants must NOT appear
     assert!(json.get("telemetry_enabled").is_none());
     assert!(json.get("modified_at").is_none());
+}
+
+#[test]
+fn updates_absent_field_leaves_value_untouched() {
+    use crate::records::AccountConfigUpdates;
+
+    let updates: AccountConfigUpdates = serde_json::from_str("{}").unwrap();
+    assert!(updates.telemetry_enabled.is_none());
+    assert!(updates.appview_url.is_none());
+}
+
+#[test]
+fn updates_explicit_null_clears_appview_url() {
+    use crate::records::AccountConfigUpdates;
+
+    let updates: AccountConfigUpdates = serde_json::from_str(r#"{"appviewUrl": null}"#).unwrap();
+    assert_eq!(updates.appview_url, Some(None));
+}
+
+#[test]
+fn updates_value_sets_appview_url() {
+    use crate::records::AccountConfigUpdates;
+
+    let updates: AccountConfigUpdates =
+        serde_json::from_str(r#"{"appviewUrl": "https://appview.test"}"#).unwrap();
+    assert_eq!(
+        updates.appview_url,
+        Some(Some("https://appview.test".into()))
+    );
+}
+
+#[test]
+fn updates_accepts_telemetry_toggle() {
+    use crate::records::AccountConfigUpdates;
+
+    let updates: AccountConfigUpdates =
+        serde_json::from_str(r#"{"telemetryEnabled": true}"#).unwrap();
+    assert_eq!(updates.telemetry_enabled, Some(true));
+}
+
+// ---------------------------------------------------------------------------
+// update_account_config round-trip (#6)
+// ---------------------------------------------------------------------------
+
+/// Updating one field must leave all other fields at their stored values.
+/// Specifically: omitting `appview_url` in the updates payload must NOT
+/// clear the existing URL on the PDS.
+#[tokio::test]
+async fn update_account_config_preserves_untouched_fields() {
+    use crate::records::AccountConfigUpdates;
+
+    let mock = MockTransport::new();
+    // Seeded record: telemetry off, custom appview URL
+    mock.enqueue(success(&account_config_json_ext(
+        false,
+        Some("https://custom.appview/"),
+        "2025-01-01T00:00:00Z",
+    )));
+    mock.enqueue(put_record_response());
+
+    let mut opake = make_test_opake(mock);
+    let updates = AccountConfigUpdates {
+        telemetry_enabled: Some(true),
+        appview_url: None, // leave alone
+    };
+    let result = opake.update_account_config(updates).await.unwrap();
+
+    assert!(
+        result.telemetry_enabled,
+        "telemetry should be updated to true"
+    );
+    assert_eq!(
+        result.appview_url.as_deref(),
+        Some("https://custom.appview/"),
+        "appview_url must be preserved when absent from updates"
+    );
+    assert_eq!(
+        result.modified_at, "2026-01-01T00:00:00Z",
+        "modified_at must be refreshed to the mocked now()"
+    );
+}
+
+/// Passing `appview_url: Some(None)` in the updates (explicit JSON null)
+/// must overwrite the stored URL with `None`.
+#[tokio::test]
+async fn update_account_config_explicit_null_clears_appview_url() {
+    use crate::records::AccountConfigUpdates;
+
+    let mock = MockTransport::new();
+    // Seeded record: has a custom appview URL
+    mock.enqueue(success(&account_config_json_ext(
+        false,
+        Some("https://custom.appview/"),
+        "2025-01-01T00:00:00Z",
+    )));
+    mock.enqueue(put_record_response());
+
+    let mut opake = make_test_opake(mock);
+    let updates = AccountConfigUpdates {
+        telemetry_enabled: None,
+        appview_url: Some(None), // explicit clear
+    };
+    let result = opake.update_account_config(updates).await.unwrap();
+
+    assert!(
+        result.appview_url.is_none(),
+        "explicit null must clear the stored appview_url"
+    );
 }

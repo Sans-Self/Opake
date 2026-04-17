@@ -24,6 +24,7 @@ use std::rc::Rc;
 
 use futures_util::lock::Mutex;
 use opake_core::tree_keeper::TreeKeeper;
+use opake_core::workspace_keeper::WorkspaceKeeper;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -45,6 +46,12 @@ pub struct WasmOpakeHandle {
     /// Mutex (separate from the Opake mutex) so SSE event application and
     /// file operations don't block each other.
     pub(crate) tree_keeper: Rc<Mutex<TreeKeeper>>,
+    /// Live workspace-list state. Bootstrapped from `listWorkspaces` and
+    /// patched incrementally from SSE `keyring:upsert` / `keyring:delete`
+    /// events. JS subscribes via `watchWorkspaces`. Separate mutex from
+    /// `tree_keeper` so directory watcher fires and workspace list fires
+    /// don't block each other.
+    pub(crate) workspace_keeper: Rc<Mutex<WorkspaceKeeper>>,
     /// `true` while an SSE consumer task is alive. Doubles as both the
     /// idempotency gate on `startSseConsumer` and the cancellation
     /// signal read by the consumer loop — `stopSseConsumer` clears it,
@@ -68,6 +75,7 @@ impl WasmOpakeHandle {
         Ok(Self {
             inner: Rc::new(Mutex::new(Some(opake))),
             tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
+            workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
             sse_started: Rc::new(std::cell::Cell::new(false)),
         })
     }
@@ -168,6 +176,27 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
 
+        // Optimistic insert — the sidebar shows the new workspace immediately
+        // rather than waiting 1–4s for the SSE echo to arrive. The echo
+        // produces an equal entry and the keeper's dedup short-circuits.
+        let optimistic = opake_core::workspace_keeper::WorkspaceEntry {
+            uri: keyring_uri.clone(),
+            owner_did: opake.did().to_string(),
+            rotation: 1,
+            member_count: 1,
+            created_at: Some(opake.now()),
+            name: Some(name.to_string()),
+            description: description.clone(),
+            icon: None,
+            my_role: Some("manager".to_string()),
+        };
+        drop(opake);
+
+        {
+            let mut keeper = self.workspace_keeper.lock().await;
+            keeper.upsert(optimistic);
+        }
+
         #[derive(Serialize)]
         struct R {
             keyring_uri: String,
@@ -183,14 +212,17 @@ impl WasmOpakeHandle {
     }
 
     /// List all keyrings the user is a member of, with decrypted metadata.
+    ///
+    /// Side effect: bootstraps the shared `WorkspaceKeeper` with the
+    /// result. Any `watchWorkspaces` callers (current or future) receive
+    /// a fresh snapshot with `loaded = true` as part of this call. Once
+    /// bootstrapped, incremental SSE events keep the keeper in sync
+    /// without further `listWorkspaces` round-trips.
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(
         &self,
         default_appview_url: Option<String>,
     ) -> Result<JsValue, JsError> {
-        use opake_core::crypto::{self, KeyringMetadata};
-        use opake_core::records::{EncryptedMetadata, KeyringMember};
-
         let mut opake = self.opake().await?;
         let identity = opake.require_identity().map_err(wasm_err)?;
         let private_key = identity.private_key_bytes().map_err(wasm_err)?;
@@ -200,76 +232,55 @@ impl WasmOpakeHandle {
             .discover_member_keyrings(default_appview_url.as_deref())
             .await
             .map_err(wasm_err)?;
+        drop(opake);
 
-        #[derive(Serialize)]
-        struct WorkspaceEntry {
-            uri: String,
-            owner_did: String,
-            rotation: u64,
-            member_count: usize,
-            created_at: Option<String>,
-            name: Option<String>,
-            description: Option<String>,
-            icon: Option<String>,
-            members: Vec<serde_json::Value>,
+        // Build entries via the shared `workspace_keeper::try_build_entry`
+        // helper so this path and the SSE event path produce identical
+        // WorkspaceEntry values — any shape divergence between them
+        // would cause spurious watcher re-fires after SSE echoes.
+        let entries: Vec<opake_core::workspace_keeper::WorkspaceEntry> = keyrings
+            .iter()
+            .filter_map(|kr| {
+                opake_core::workspace_keeper::try_build_entry_from_appview_keyring(
+                    kr,
+                    &did,
+                    &private_key,
+                )
+            })
+            .collect();
+
+        // Bootstrap the keeper before returning — subscribers see the
+        // loaded state before any caller that awaits this method's
+        // return value resumes.
+        {
+            let mut keeper = self.workspace_keeper.lock().await;
+            keeper.bootstrap(entries.clone());
         }
 
-        let mut entries = Vec::new();
-        for kr in keyrings {
-            let members_parsed: Vec<KeyringMember> = kr
-                .members
-                .iter()
-                .filter_map(|v| serde_json::from_value(v.clone()).ok())
-                .collect();
-
-            let (name, description, icon) =
-                match WasmOpake::unwrap_workspace_key(&members_parsed, &did, &private_key) {
-                    Ok(group_key) => {
-                        let meta_result = kr.encrypted_metadata.as_ref().and_then(|em| {
-                            let em: EncryptedMetadata = serde_json::from_value(em.clone()).ok()?;
-                            let meta: KeyringMetadata =
-                                crypto::decrypt_metadata(&group_key, &em).ok()?;
-                            Some(meta)
-                        });
-                        match meta_result {
-                            Some(meta) => (Some(meta.name), meta.description, meta.icon),
-                            None => (None, None, None),
-                        }
-                    }
-                    Err(_) => (None, None, None),
-                };
-
-            entries.push(WorkspaceEntry {
-                uri: kr.uri,
-                owner_did: kr.owner_did,
-                rotation: kr.rotation,
-                member_count: kr.members.len(),
-                created_at: kr.created_at,
-                name,
-                description,
-                icon,
-                members: kr.members,
-            });
-        }
-
+        // Wire-format for backward compatibility with the existing Zod
+        // schema — `{ keyrings: [...] }` with snake_case fields.
         to_js(&serde_json::json!({ "keyrings": entries }))
     }
 
+    /// Add a member to a workspace. Resolves the keyring + group key
+    /// internally so the key never crosses the WASM/JS boundary.
     #[wasm_bindgen(js_name = addWorkspaceMember)]
     pub async fn add_workspace_member(
         &self,
         keyring_uri: &str,
-        key: &[u8],
         member_did: &str,
         member_public_key: &[u8],
         role: &str,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let gk = crate::content_key_from_slice(key)?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let pubkey = pub_key_from_slice(member_public_key)?;
         let role = parse_role(role)?;
         let outcome = opake
-            .add_workspace_member(keyring_uri, &gk, member_did, &pubkey, role)
+            .add_workspace_member(keyring_uri, &ws.key, member_did, &pubkey, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
@@ -284,63 +295,66 @@ impl WasmOpakeHandle {
         opake.leave_workspace(keyring_uri).await.map_err(wasm_err)
     }
 
-    /// Remove a member from a workspace.
-    /// Owner: rotates key, returns `{ key, rotation, proposed: false }`.
-    /// Non-owner: proposes, returns `{ proposed: true }`.
+    /// Remove a member from a workspace. Resolves the keyring + group key
+    /// internally so the key never crosses the WASM/JS boundary.
+    ///
+    /// Owner: rotates the group key in-place and re-wraps to remaining
+    /// members — the new key stays inside WASM. Non-owner: writes a
+    /// keyringUpdate proposal. In both cases the returned DTO carries
+    /// only `{ proposed, rotation }`; the rotated key bytes are dropped
+    /// (they'd be a boundary violation) and the next operation re-resolves
+    /// via `resolve_workspace_by_uri`.
     #[wasm_bindgen(js_name = removeWorkspaceMember)]
     pub async fn remove_workspace_member(
         &self,
         keyring_uri: &str,
-        key: &[u8],
         member_did: &str,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let gk = crate::content_key_from_slice(key)?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let (key_result, outcome) = opake
-            .remove_workspace_member(keyring_uri, &gk, member_did)
+            .remove_workspace_member(keyring_uri, &ws.key, member_did)
             .await
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
         struct R {
-            #[serde(
-                with = "crate::wasm_util::serde_bytes",
-                skip_serializing_if = "Vec::is_empty"
-            )]
-            key: Vec<u8>,
             #[serde(skip_serializing_if = "Option::is_none")]
             rotation: Option<u64>,
             proposed: bool,
         }
-        let (key_bytes, rotation) = match key_result {
-            Some((k, r)) => (k.0.to_vec(), Some(r)),
-            None => (Vec::new(), None),
-        };
         serde_wasm_bindgen::to_value(&R {
-            key: key_bytes,
-            rotation,
+            rotation: key_result.map(|(_, r)| r),
             proposed: outcome.is_proposed(),
         })
         .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Update workspace metadata (name, description).
+    /// Update workspace metadata (name, description, icon). Resolves the
+    /// keyring + group key internally so the key never crosses the WASM/JS
+    /// boundary.
+    ///
     /// Owner: applies directly. Non-owner: creates a keyringUpdate proposal.
     #[wasm_bindgen(js_name = updateWorkspaceMetadata)]
     pub async fn update_workspace_metadata(
         &self,
         keyring_uri: &str,
-        key: &[u8],
         name: Option<String>,
         description: Option<String>,
         icon: Option<String>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let gk = crate::content_key_from_slice(key)?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let outcome = opake
             .update_workspace_metadata(
                 keyring_uri,
-                &gk,
+                &ws.key,
                 name.as_deref(),
                 description.as_deref(),
                 icon.as_deref(),
@@ -456,7 +470,7 @@ impl WasmOpakeHandle {
 
     #[wasm_bindgen(js_name = downloadFromGrant)]
     pub async fn download_from_grant(&self, grant_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
+        let opake = self.opake().await?;
         let (filename, plaintext) = opake
             .download_from_grant(grant_uri)
             .await
@@ -561,6 +575,26 @@ impl WasmOpakeHandle {
         }))
     }
 
+    /// Override the cached appview URL at runtime.
+    ///
+    /// Overrides the compile-time `DEFAULT_APPVIEW_URL` seeded during
+    /// `for_account`. Callers use this at boot to inject a host-specific
+    /// runtime default (e.g. web's `VITE_APPVIEW_URL`, which can't be
+    /// baked in because one WASM binary serves multiple deployments).
+    ///
+    /// Subsequent writes to `accountConfig` on the PDS still override
+    /// this value via `set_account_config` — so a user-configured
+    /// appview (written via settings) wins over the host default.
+    #[wasm_bindgen(js_name = setAppviewUrl)]
+    pub async fn set_appview_url(&self, url: String) -> Result<(), JsError> {
+        let mut guard = self.inner.lock().await;
+        let opake = guard
+            .as_mut()
+            .ok_or_else(|| JsError::new("Opake context already consumed"))?;
+        opake.set_appview_url(url);
+        Ok(())
+    }
+
     /// Verify the session is usable by touching the account config record.
     ///
     /// Reads the config, stamps `modifiedAt`, and writes it back. Throws on
@@ -591,6 +625,24 @@ impl WasmOpakeHandle {
             serde_wasm_bindgen::from_value(config_js).map_err(|e| JsError::new(&e.to_string()))?;
         let mut opake = self.opake().await?;
         opake.set_account_config(&config).await.map_err(wasm_err)
+    }
+
+    /// Read-merge-write the account config atomically.
+    ///
+    /// Accepts a partial updates object — fields omitted (`undefined`)
+    /// are left untouched, fields set to `null` are cleared, and fields
+    /// with a value replace the current one. Returns the freshly-written
+    /// record.
+    #[wasm_bindgen(js_name = updateAccountConfig)]
+    pub async fn update_account_config(&self, updates_js: JsValue) -> Result<JsValue, JsError> {
+        let updates: opake_core::records::AccountConfigUpdates =
+            serde_wasm_bindgen::from_value(updates_js).map_err(|e| JsError::new(&e.to_string()))?;
+        let mut opake = self.opake().await?;
+        let record = opake
+            .update_account_config(updates)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&record)
     }
 
     /// Publish the caller's public key record on the PDS.
@@ -650,35 +702,6 @@ impl WasmOpakeHandle {
         to_js(&grants)
     }
 
-    /// Resolve a workspace from a foreign PDS by keyring URI.
-    #[wasm_bindgen(js_name = resolveForeignWorkspace)]
-    pub async fn resolve_foreign_workspace(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let workspace = opake
-            .resolve_foreign_workspace(keyring_uri)
-            .await
-            .map_err(wasm_err)?;
-
-        #[derive(Serialize)]
-        struct R {
-            uri: String,
-            name: String,
-            owner_did: String,
-            rotation: u64,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            group_key: Vec<u8>,
-        }
-
-        let result = R {
-            uri: workspace.uri.clone(),
-            name: workspace.name.clone(),
-            owner_did: workspace.owner_did.clone(),
-            rotation: workspace.rotation,
-            group_key: workspace.key.0.to_vec(),
-        };
-        to_js(&result)
-    }
-
     /// List pending pair requests on this account.
     #[wasm_bindgen(js_name = listPairRequests)]
     pub async fn list_pair_requests(&self) -> Result<JsValue, JsError> {
@@ -732,7 +755,7 @@ impl WasmOpakeHandle {
     /// Resolve another user's identity (DID, handle, public key).
     #[wasm_bindgen(js_name = resolveIdentity)]
     pub async fn resolve_identity(&self, handle_or_did: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
+        let opake = self.opake().await?;
         let resolved = opake
             .resolve_identity(handle_or_did)
             .await
@@ -760,7 +783,7 @@ impl WasmOpakeHandle {
     /// Resolve grant metadata without downloading the blob.
     #[wasm_bindgen(js_name = resolveGrantMetadata)]
     pub async fn resolve_grant_metadata(&self, grant_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
+        let opake = self.opake().await?;
         let (name, metadata) = opake
             .resolve_grant_metadata(grant_uri)
             .await
@@ -773,25 +796,6 @@ impl WasmOpakeHandle {
         }
 
         to_js(&R { name, metadata })
-    }
-
-    /// Unwrap a workspace group key using the caller's identity (no raw key params).
-    ///
-    /// Reads the private key from the Opake's identity — the key never
-    /// crosses the WASM/JS boundary.
-    #[wasm_bindgen(js_name = unwrapGroupKey)]
-    pub async fn unwrap_group_key(&self, members_js: JsValue) -> Result<Vec<u8>, JsError> {
-        let guard = self.inner.lock().await;
-        let opake = guard
-            .as_ref()
-            .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-        let identity = opake.require_identity().map_err(wasm_err)?;
-        let private_key = identity.private_key_bytes().map_err(wasm_err)?;
-        let members: Vec<opake_core::records::KeyringMember> =
-            serde_wasm_bindgen::from_value(members_js).map_err(|e| JsError::new(&e.to_string()))?;
-        let key = WasmOpake::unwrap_workspace_key(&members, opake.did(), &private_key)
-            .map_err(wasm_err)?;
-        Ok(key.0.to_vec())
     }
 
     /// Proactively refresh the OAuth token if it's close to expiry.

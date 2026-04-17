@@ -1,15 +1,19 @@
-// WASM bindings for the SSE consumer and tree watchers.
+// WASM bindings for the SSE consumer, tree watchers, and workspace-list
+// watchers.
 //
 // Exposes:
 //   - WasmOpakeHandle::startSseConsumer(appviewUrl)
 //   - WasmOpakeHandle::stopSseConsumer()
+//   - WasmOpakeHandle::watchWorkspaces(callback)
 //   - WasmFileManagerHandle::watchDirectory(uri, callback)
 //   - WasmDirectoryWatcher::close()
+//   - WasmWorkspaceWatcher::close()
 //
 // The consumer loop runs via wasm_bindgen_futures::spawn_local and pulls
-// events from the browser's EventSource (WasmSseTransport). Each event is
-// dispatched to the shared TreeKeeper, which patches the affected tree in
-// place and fires watcher callbacks with a fresh snapshot.
+// events from the browser's EventSource (WasmSseTransport). Record
+// events are dispatched to both the TreeKeeper (directory tree state)
+// and the WorkspaceKeeper (workspace-list state). Proposals flow through
+// the debounced sync scheduler as before.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -20,8 +24,13 @@ use futures_util::lock::Mutex;
 use opake_core::client::request_sse_token;
 use opake_core::directories::DirectoryTree;
 use opake_core::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
+use opake_core::sse::events::SseEvent;
 use opake_core::sse::wasm_connection::WasmSseTransport;
 use opake_core::tree_keeper::{TreeKeeper, WatcherCallback, WatcherHandle};
+use opake_core::workspace_keeper::{
+    self as wk, WorkspaceKeeper, WorkspaceSnapshot, WorkspaceWatcherCallback,
+    WorkspaceWatcherHandle,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -51,6 +60,71 @@ impl WasmDirectoryWatcher {
         self.closed.set(true);
         let mut keeper = self.tree_keeper.lock().await;
         keeper.unwatch(self.handle);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WasmWorkspaceWatcher — returned by watchWorkspaces, exposes close()
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_name = WorkspaceWatcher)]
+pub struct WasmWorkspaceWatcher {
+    workspace_keeper: Rc<Mutex<WorkspaceKeeper>>,
+    handle: WorkspaceWatcherHandle,
+    closed: Rc<std::cell::Cell<bool>>,
+}
+
+#[wasm_bindgen(js_class = WorkspaceWatcher)]
+impl WasmWorkspaceWatcher {
+    /// Stop receiving notifications. Idempotent.
+    pub async fn close(&self) {
+        if self.closed.get() {
+            return;
+        }
+        self.closed.set(true);
+        let mut keeper = self.workspace_keeper.lock().await;
+        keeper.unwatch(self.handle);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WasmOpakeHandle::watchWorkspaces
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_class = OpakeContext)]
+impl WasmOpakeHandle {
+    /// Subscribe to live changes in the workspace list.
+    ///
+    /// Fires the callback once immediately with the current snapshot
+    /// (which has `loaded = false` and an empty entry list if the
+    /// keeper hasn't been bootstrapped yet), and again on every change.
+    ///
+    /// The callback receives a `WorkspaceSnapshot` with shape
+    /// `{ entries: WorkspaceEntry[], loaded: bool }`.
+    ///
+    /// Returns a `WorkspaceWatcher` handle. Call `.close()` to
+    /// unsubscribe (typically from a React useEffect cleanup).
+    ///
+    /// The keeper is populated by:
+    ///   - `listWorkspaces()` (bootstrap — replaces the entry set)
+    ///   - SSE `keyring:upsert` / `keyring:delete` events (incremental)
+    ///
+    /// If the keeper hasn't been bootstrapped, the initial snapshot has
+    /// `loaded == false` — subscribers should treat this as "loading"
+    /// state and show a placeholder until the next fire brings `loaded == true`.
+    #[wasm_bindgen(js_name = watchWorkspaces)]
+    pub async fn watch_workspaces(
+        &self,
+        callback: js_sys::Function,
+    ) -> Result<WasmWorkspaceWatcher, JsError> {
+        let cb = js_workspace_watcher_callback(callback);
+        let mut keeper = self.workspace_keeper.lock().await;
+        let handle = keeper.install_watcher(cb);
+        Ok(WasmWorkspaceWatcher {
+            workspace_keeper: Rc::clone(&self.workspace_keeper),
+            handle,
+            closed: Rc::new(std::cell::Cell::new(false)),
+        })
     }
 }
 
@@ -160,7 +234,7 @@ impl WasmFileManagerHandle {
                 let identity = opake
                     .identity()
                     .ok_or_else(|| JsError::new("no identity"))?;
-                let private_key = identity.private_key_bytes().map_err(wasm_err)?;
+                let private_key = *identity.private_key_bytes().map_err(wasm_err)?;
                 drop(guard);
 
                 let mut keeper = self.tree_keeper.lock().await;
@@ -222,6 +296,7 @@ impl WasmOpakeHandle {
 
         let opake_rc = Rc::clone(&self.inner);
         let tree_keeper_rc = Rc::clone(&self.tree_keeper);
+        let workspace_keeper_rc = Rc::clone(&self.workspace_keeper);
         let started_flag = Rc::clone(&self.sse_started);
 
         let token_fetcher = make_token_fetcher(Rc::clone(&opake_rc), resolved_url.clone());
@@ -278,17 +353,11 @@ impl WasmOpakeHandle {
                     }
                 }
 
-                // Notify JS of keyring-record-level changes so stores
-                // tracking workspace metadata (name, icon, members)
-                // can re-fetch against the now-indexed appview. Fires
-                // only for direct record events — proposals flow
-                // through the owner's apply step, which emits a
-                // subsequent KeyringUpsert.
-                if is_keyring_record_event(&event) {
-                    if let Some(uri) = event.keyring_uri() {
-                        dispatch_workspace_updated(uri);
-                    }
-                }
+                // Workspace list updates: apply directly to the keeper
+                // so subscribers see changes without an appview round-
+                // trip. Idempotent upserts (same rotation + same data)
+                // don't re-fire watchers — see `WorkspaceKeeper::upsert`.
+                apply_keyring_to_workspace_keeper(&opake_rc, &workspace_keeper_rc, &event).await;
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -300,23 +369,28 @@ impl WasmOpakeHandle {
         Ok(())
     }
 
-    /// Stop the SSE consumer and wipe decrypted tree state from memory.
+    /// Stop the SSE consumer and wipe decrypted tree + workspace state.
     ///
     /// Synchronous from JS: React `useEffect` cleanup is sync, so the
-    /// TreeKeeper drain (which needs an async lock) is fire-and-forget
-    /// on the event loop. Setting `sse_started = false` is enough on
-    /// its own to terminate the consumer loop on its next event —
-    /// `uninstall_all` is what zeroes any cached `ContentKey`s.
+    /// keeper drains (which need async locks) are fire-and-forget on
+    /// the event loop. Setting `sse_started = false` is enough on its
+    /// own to terminate the consumer loop on its next event —
+    /// `uninstall_all` is what zeroes any cached `ContentKey`s and the
+    /// workspace list.
     #[wasm_bindgen(js_name = stopSseConsumer)]
     pub fn stop_sse_consumer(&self) {
         self.sse_started.set(false);
         PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| state.borrow_mut().clear());
 
         let tree_keeper = Rc::clone(&self.tree_keeper);
+        let workspace_keeper = Rc::clone(&self.workspace_keeper);
         wasm_bindgen_futures::spawn_local(async move {
-            let mut keeper = tree_keeper.lock().await;
-            keeper.uninstall_all();
-            log::debug!("[sse] tree_keeper drained on stopSseConsumer");
+            let mut tk = tree_keeper.lock().await;
+            tk.uninstall_all();
+            drop(tk);
+            let mut wk = workspace_keeper.lock().await;
+            wk.uninstall_all();
+            log::debug!("[sse] tree_keeper + workspace_keeper drained on stopSseConsumer");
         });
     }
 }
@@ -449,41 +523,81 @@ async fn wasm_sleep(duration: Duration) {
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
-/// True for keyring-record-level events — i.e. direct writes/deletes of
-/// the keyring record, not proposal variants. These are the signals the
-/// workspace list wants (name/icon/member changes are visible on the
-/// keyring record itself).
-fn is_keyring_record_event(event: &opake_core::sse::events::SseEvent) -> bool {
-    use opake_core::sse::events::SseEvent;
-    matches!(
-        event,
-        SseEvent::KeyringUpsert(_) | SseEvent::KeyringDelete(_)
-    )
+/// Apply a keyring record event to the `WorkspaceKeeper`.
+///
+/// `KeyringUpsert`: build an entry from the record using the caller's
+/// identity. `Some` → upsert; `None` (DID absent from member list,
+/// i.e. we were rotated out) → delete. `KeyringDelete`: delete by URI.
+/// Other events are no-ops.
+///
+/// Acquires the opake lock **first** (for identity), then drops it
+/// before acquiring the workspace_keeper lock. Both callers — this
+/// function and `listWorkspaces` — release opake before taking keeper,
+/// so there is no concurrent double-holding and no deadlock risk.
+/// The real reason for the release order: the identity private key
+/// used to build the entry doesn't need to be held across the keeper
+/// apply, and holding both mutexes longer than necessary reduces SSE
+/// throughput. A narrow race window exists where a concurrent
+/// `listWorkspaces` bootstrap can land between our opake release and
+/// keeper acquire; this is benign — the next SSE event or the keeper's
+/// idempotent upsert self-corrects.
+async fn apply_keyring_to_workspace_keeper(
+    opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
+    workspace_keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
+    event: &SseEvent,
+) {
+    match event {
+        SseEvent::KeyringUpsert(record) => {
+            // Build the entry under the opake lock only.
+            let maybe_entry = {
+                let guard = opake_rc.lock().await;
+                let Some(opake) = guard.as_ref() else {
+                    log::warn!("[sse] workspace upsert: opake unavailable");
+                    return;
+                };
+                let did = opake.did().to_string();
+                let Some(identity) = opake.identity() else {
+                    log::warn!("[sse] workspace upsert: no identity");
+                    return;
+                };
+                let private_key = match identity.private_key_bytes() {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        log::warn!("[sse] workspace upsert: private_key_bytes failed: {e}");
+                        return;
+                    }
+                };
+                wk::try_build_entry_from_sse_record(record, &did, &private_key)
+            };
+            let mut keeper = workspace_keeper_rc.lock().await;
+            keeper.apply_keyring_record(&record.uri, maybe_entry);
+        }
+        SseEvent::KeyringDelete(payload) => {
+            if let Some(uri) = payload.best_uri() {
+                let mut keeper = workspace_keeper_rc.lock().await;
+                keeper.delete(uri);
+            }
+        }
+        _ => {}
+    }
 }
 
-/// Dispatch `opake:workspace-updated` as a window CustomEvent so JS
-/// stores can reload the affected workspace. The detail payload is the
-/// keyring URI as a string. Soft-fails on any web-sys error — this
-/// notification is best-effort and losing one means users wait until
-/// the next full reload, which is acceptable.
-fn dispatch_workspace_updated(keyring_uri: &str) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let detail = JsValue::from_str(keyring_uri);
-    let init = web_sys::CustomEventInit::new();
-    init.set_detail(&detail);
-    let event =
-        match web_sys::CustomEvent::new_with_event_init_dict("opake:workspace-updated", &init) {
-            Ok(e) => e,
+/// Wrap a JS function as a [`WorkspaceWatcherCallback`] that serializes
+/// the snapshot to a JS object on each call.
+fn js_workspace_watcher_callback(callback: js_sys::Function) -> WorkspaceWatcherCallback {
+    Box::new(move |snapshot: &WorkspaceSnapshot| {
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        let snapshot_js = match snapshot.serialize(&serializer) {
+            Ok(v) => v,
             Err(e) => {
-                log::warn!("[sse] failed to construct CustomEvent: {e:?}");
+                log::warn!("[sse] workspace snapshot serialize failed: {e}");
                 return;
             }
         };
-    if let Err(e) = window.dispatch_event(&event) {
-        log::warn!("[sse] failed to dispatch workspace-updated: {e:?}");
-    }
+        if let Err(e) = callback.call1(&JsValue::NULL, &snapshot_js) {
+            log::warn!("[sse] workspace watcher callback threw: {e:?}");
+        }
+    })
 }
 
 /// Wrap a JS function as a `WatcherCallback` that builds a snapshot on

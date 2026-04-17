@@ -17,6 +17,12 @@ crates/
       daemon.rs        Background task registry (shared definitions for CLI + web). Daemon builds Opake per account per task iteration, auto-persists via signoff
       error.rs         Typed error hierarchy (thiserror)
       test_utils.rs    MockTransport + response queue (behind test-utils feature)
+      tree_keeper/
+        mod.rs         TreeKeeper — per-DID in-memory directory tree state. Bootstrapped from SSE initial snapshot, patched incrementally by document/directory events. `watchDirectory` installs typed snapshot callbacks. Separate Mutex from WorkspaceKeeper.
+        tests.rs       Unit tests
+      workspace_keeper/
+        mod.rs         WorkspaceKeeper — in-memory workspace list state. Bootstrapped by `listWorkspaces`, patched by `keyring:upsert` / `keyring:delete` SSE events. `watchWorkspaces` installs snapshot callbacks. Parallel design to TreeKeeper.
+        tests.rs       Unit tests
       manager/
         mod.rs         FileManager<'a, T, R, S> struct (borrows &mut Opake + &FileContext), create_record passthrough
         types.rs       UploadRequest, UploadResult, DownloadResult, MutationOutcome, FileContext

@@ -9,7 +9,7 @@ fn from_identity_decodes_keys() {
 
     assert_eq!(cabinet.did, "did:plc:test");
     assert_eq!(cabinet.public_key, identity.public_key_bytes().unwrap());
-    assert_eq!(cabinet.private_key, identity.private_key_bytes().unwrap());
+    assert_eq!(cabinet.private_key, *identity.private_key_bytes().unwrap());
 }
 
 #[test]

@@ -57,9 +57,10 @@ function WorkspaceSettingsPage() {
   );
   const keyringUri = workspace?.uri ?? null;
 
-  // Members + key material — fetched on-demand for this page
+  // Members — fetched on-demand for this page. The workspace group key
+  // never enters JS state; every mutation re-resolves it inside WASM via
+  // the keyring URI.
   const [rawMembers, setRawMembers] = useState<readonly WorkspaceMember[]>([]);
-  const [groupKey, setGroupKey] = useState<Uint8Array | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const members: readonly KeyringMemberEntry[] = useMemo(
     () => rawMembers.map(toMemberEntry),
@@ -96,34 +97,19 @@ function WorkspaceSettingsPage() {
   // Loaders
   // -----------------------------------------------------------------
 
-  const reloadMembersAndKey = useCallback(async (uri: string) => {
-    const opake = getOpake();
-    const ms = await opake.listWorkspaceMembers(uri);
+  const reloadMembers = useCallback(async (uri: string) => {
+    const ms = await getOpake().listWorkspaceMembers(uri);
     setRawMembers(ms);
-    // Re-unwrap — owner rotations change the key, additions don't
-    const key = await opake.unwrapGroupKey(ms);
-    setGroupKey(key);
   }, []);
 
-  // Refresh after a member mutation. Pulls the fresh member list + key
-  // from the PDS (no appview lag on that path), then optimistically
-  // patches the sidebar's member count. We deliberately skip calling
-  // `loadWorkspaces()` because it would re-fetch via appview and clobber
-  // any optimistic metadata patch from a prior save. The visibility
-  // listener reconciles the full workspace record eventually.
+  // Refresh the page-local member list after a mutation. The sidebar's
+  // workspace record updates on its own via the SSE echo →
+  // WorkspaceKeeper path, so we don't patch the store here.
   const refreshAfterMemberChange = useCallback(
-    async (uri: string, memberCountDelta: number) => {
-      await reloadMembersAndKey(uri);
-      useWorkspaceStore.setState((draft) => {
-        if (!(uri in draft.workspaces)) return;
-        const w = draft.workspaces[uri];
-        draft.workspaces[uri] = {
-          ...w,
-          memberCount: Math.max(0, w.memberCount + memberCountDelta),
-        };
-      });
+    async (uri: string) => {
+      await reloadMembers(uri);
     },
-    [reloadMembersAndKey],
+    [reloadMembers],
   );
 
   // Initial load
@@ -133,7 +119,7 @@ function WorkspaceSettingsPage() {
     const done = loading("workspace-settings-load");
     (async () => {
       try {
-        await reloadMembersAndKey(uri);
+        await reloadMembers(uri);
         setLoadError(null);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Failed to load members");
@@ -143,27 +129,28 @@ function WorkspaceSettingsPage() {
     })().catch((err: unknown) => {
       console.error("[workspace-settings] load failed:", err);
     });
-  }, [keyringUri, reloadMembersAndKey]);
+  }, [keyringUri, reloadMembers]);
 
-  // Profile resolution
+  // Profile resolution — depends only on `members`, not `profiles`.
+  // `resolveMemberProfile` memoizes per-DID for the page lifetime, so
+  // re-fetches on member list changes are free for already-resolved DIDs.
+  // The functional setter avoids a `profiles` dep (which would cause
+  // N+1 re-runs as each resolution triggers a new reference).
   useEffect(() => {
     if (members.length === 0) return;
-    const unresolved = members.map((m) => m.did).filter((did) => !(did in profiles));
-    if (unresolved.length === 0) return;
-    void Promise.all(
-      unresolved.map(async (did) => {
-        const profile = await resolveMemberProfile(did);
-        setProfiles((prev) => ({ ...prev, [did]: profile }));
-      }),
-    );
-  }, [members, profiles]);
+    members.forEach((m) => {
+      void resolveMemberProfile(m.did).then((resolved) => {
+        setProfiles((prev) => (prev[m.did] === resolved ? prev : { ...prev, [m.did]: resolved }));
+      });
+    });
+  }, [members]);
 
   // -----------------------------------------------------------------
   // Handlers
   // -----------------------------------------------------------------
 
   const handleSaveMetadata = useCallback(() => {
-    if (!keyringUri || !groupKey || !name.trim()) return;
+    if (!keyringUri || !name.trim()) return;
     const uri = keyringUri;
     const done = loading("save-workspace-metadata");
     (async () => {
@@ -171,28 +158,16 @@ function WorkspaceSettingsPage() {
         const nextName = nameOverride != null ? name.trim() : undefined;
         const nextDesc = descriptionOverride != null ? description.trim() : undefined;
         const nextIcon = iconOverride ?? undefined;
-        await getOpake().updateWorkspaceMetadata(uri, groupKey, {
+        await getOpake().updateWorkspaceMetadata(uri, {
           name: nextName,
           description: nextDesc,
           icon: nextIcon,
         });
         toastSuccess("Workspace updated");
 
-        // Optimistic patch: the appview has a 4s cursor lag, so
-        // `loadWorkspaces` would return stale data and blank the form.
-        // Update the store locally with the known-saved values; the
-        // visibility listener (or a future SSE keyring callback) will
-        // eventually reconcile against the real record.
-        useWorkspaceStore.setState((draft) => {
-          if (!(uri in draft.workspaces)) return;
-          const w = draft.workspaces[uri];
-          draft.workspaces[uri] = {
-            ...w,
-            name: nextName ?? w.name,
-            description: nextDesc ?? w.description,
-            icon: nextIcon ?? w.icon,
-          };
-        });
+        // The SSE echo for this keyring write will fire KeyringUpsert,
+        // which the WorkspaceKeeper applies → watcher → store update.
+        // No manual store patch needed.
         setNameOverride(null);
         setDescriptionOverride(null);
         setIconOverride(null);
@@ -204,7 +179,7 @@ function WorkspaceSettingsPage() {
     })().catch((err: unknown) => {
       console.error("[workspace-settings] save failed:", err);
     });
-  }, [keyringUri, groupKey, name, description, nameOverride, descriptionOverride, iconOverride]);
+  }, [keyringUri, name, description, nameOverride, descriptionOverride, iconOverride]);
 
   const handleIconSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -236,7 +211,7 @@ function WorkspaceSettingsPage() {
 
   const handleRemove = useCallback(
     (memberDid: string) => {
-      if (!keyringUri || !groupKey) return;
+      if (!keyringUri) return;
       if (confirmingRemove !== memberDid) {
         setConfirmingRemove(memberDid);
         return;
@@ -247,9 +222,9 @@ function WorkspaceSettingsPage() {
       const done = loading("remove-workspace-member");
       (async () => {
         try {
-          const result = await getOpake().removeWorkspaceMember(uri, groupKey, memberDid);
+          const result = await getOpake().removeWorkspaceMember(uri, memberDid);
           toastSuccess(result.proposed ? "Removal proposed" : "Member removed, key rotated");
-          await refreshAfterMemberChange(uri, -1);
+          await refreshAfterMemberChange(uri);
         } catch (err) {
           toastError(err instanceof Error ? err.message : "Failed to remove member");
         } finally {
@@ -259,7 +234,7 @@ function WorkspaceSettingsPage() {
         console.error("[workspace-settings] remove failed:", err);
       });
     },
-    [keyringUri, groupKey, confirmingRemove, refreshAfterMemberChange],
+    [keyringUri, confirmingRemove, refreshAfterMemberChange],
   );
 
   const handleLeave = useCallback(() => {
@@ -274,7 +249,8 @@ function WorkspaceSettingsPage() {
       try {
         await getOpake().leaveWorkspace(uri);
         toastSuccess("Left workspace");
-        await useWorkspaceStore.getState().loadWorkspaces();
+        // SSE echo (keyring:upsert without our DID, or keyring:delete
+        // for an owner-side purge) removes the entry from the keeper.
         void navigate({ to: "/cabinet/files" });
       } catch (err) {
         toastError(err instanceof Error ? err.message : "Failed to leave workspace");
@@ -288,31 +264,26 @@ function WorkspaceSettingsPage() {
 
   const handleDeleteWorkspace = useCallback(() => {
     if (!keyringUri) return;
-    // TODO: workspace deletion not yet implemented in core. Needs purge of
-    // docs + directories + keyring record as a single transaction. For now
-    // the confirmation just navigates away — no destructive action taken.
-    toastError("Delete workspace not yet implemented");
-    void navigate({ to: "/cabinet/files" });
-  }, [keyringUri, navigate]);
+    // Workspace deletion not yet implemented in core — needs purge of
+    // docs + directories + keyring record as a single transaction.
+    // Reset the confirmation UI without navigating (navigating after a
+    // typed confirmation phrase makes it look like the delete succeeded).
+    toastError("Workspace deletion is not yet available");
+    setShowDeleteConfirm(false);
+  }, [keyringUri]);
 
   const handleAddMember = useCallback(
     (handle: string, memberRole: WorkspaceRole) => {
-      if (!keyringUri || !groupKey) return;
+      if (!keyringUri) return;
       const uri = keyringUri;
       const done = loading("add-workspace-member");
       (async () => {
         try {
           const opake = getOpake();
           const identity = await opake.resolveIdentity(handle);
-          await opake.addWorkspaceMember(
-            uri,
-            groupKey,
-            identity.did,
-            identity.publicKey,
-            memberRole,
-          );
+          await opake.addWorkspaceMember(uri, identity.did, identity.publicKey, memberRole);
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
-          await refreshAfterMemberChange(uri, 1);
+          await refreshAfterMemberChange(uri);
         } catch (err) {
           toastError(err instanceof Error ? err.message : "Failed to add member");
         } finally {
@@ -322,7 +293,7 @@ function WorkspaceSettingsPage() {
         console.error("[workspace-settings] add failed:", err);
       });
     },
-    [keyringUri, groupKey, refreshAfterMemberChange],
+    [keyringUri, refreshAfterMemberChange],
   );
 
   const handleRoleChange = useCallback(
@@ -334,7 +305,7 @@ function WorkspaceSettingsPage() {
         try {
           await getOpake().updateMemberRole(uri, memberDid, newRole);
           toastSuccess("Role updated");
-          await refreshAfterMemberChange(uri, 0);
+          await refreshAfterMemberChange(uri);
         } catch (err) {
           toastError(err instanceof Error ? err.message : "Failed to update role");
         } finally {
@@ -408,7 +379,7 @@ function WorkspaceSettingsPage() {
                   />
                 ) : (
                   <div className="bg-accent text-primary flex size-14 items-center justify-center rounded-xl text-xl font-semibold">
-                    {name[0].toUpperCase()}
+                    {(name.charAt(0) || "?").toUpperCase()}
                   </div>
                 )}
                 {canManage && (
@@ -461,7 +432,7 @@ function WorkspaceSettingsPage() {
             {metaDirty && (
               <button
                 onClick={handleSaveMetadata}
-                disabled={!name.trim() || !groupKey}
+                disabled={!name.trim()}
                 className="btn btn-primary btn-sm rounded-lg text-xs"
               >
                 Save changes
@@ -474,7 +445,7 @@ function WorkspaceSettingsPage() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-base-content text-sm font-semibold">Members ({members.length})</h2>
-            {isManager && (
+            {canManage && (
               <button
                 onClick={() => addMemberDialogRef.current?.show()}
                 className="btn btn-ghost btn-xs gap-1 rounded-lg"
@@ -492,7 +463,7 @@ function WorkspaceSettingsPage() {
                 member={member}
                 profile={member.did in profiles ? (profiles[member.did] ?? null) : null}
                 isMe={member.did === myDid}
-                isManager={isManager}
+                canManage={canManage}
                 confirmingRemove={confirmingRemove === member.did}
                 onRemove={() => handleRemove(member.did)}
                 onRoleChange={(newRole) => handleRoleChange(member.did, newRole)}
@@ -561,7 +532,7 @@ function MemberRow({
   member,
   profile,
   isMe,
-  isManager,
+  canManage,
   confirmingRemove,
   onRemove,
   onRoleChange,
@@ -569,15 +540,15 @@ function MemberRow({
   readonly member: KeyringMemberEntry;
   readonly profile: MemberProfile | null;
   readonly isMe: boolean;
-  readonly isManager: boolean;
+  readonly canManage: boolean;
   readonly confirmingRemove: boolean;
   readonly onRemove: () => void;
   readonly onRoleChange: (role: WorkspaceRole) => void;
 }) {
   const RoleIcon = ROLE_ICON[member.role];
   const displayName = profile?.handle ?? member.did;
-  const canRemove = isManager && !isMe;
-  const canChangeRole = isManager && !isMe;
+  const canRemove = canManage && !isMe;
+  const canChangeRole = canManage && !isMe;
 
   return (
     <li className="flex items-center gap-3 rounded-lg px-3 py-2.5">
@@ -585,7 +556,7 @@ function MemberRow({
         <img src={profile.avatarUrl} alt="" className="size-8 shrink-0 rounded-full object-cover" />
       ) : (
         <div className="bg-accent text-primary text-micro flex size-8 shrink-0 items-center justify-center rounded-full font-semibold">
-          {displayName[0].toUpperCase()}
+          {(displayName.charAt(0) || "?").toUpperCase()}
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">

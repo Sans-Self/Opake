@@ -17,19 +17,28 @@ function CabinetLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const dialogRef = useRef<CreateWorkspaceDialogHandle>(null);
 
-  // Load workspaces on mount (deduped by module-level promise)
+  // Subscribe to the WASM WorkspaceKeeper on mount. The store installs
+  // a watcher and (if not already loaded) kicks off the bootstrap
+  // fetch that populates it. SSE events keep the store live thereafter.
+  // On unmount, detach the watcher so a remount reinstalls a fresh one
+  // (the previous keeper was wiped by stopSseConsumer). State is kept
+  // so the sidebar doesn't flash empty during the unmount/remount cycle.
   useEffect(() => {
-    void useWorkspaceStore.getState().loadWorkspaces();
+    useWorkspaceStore.getState().subscribe();
+    return () => {
+      useWorkspaceStore.getState().detachWatcher();
+    };
   }, []);
 
   // Start the WASM SSE consumer; stop it on teardown so
   // `TreeKeeper::uninstall_all` runs and the previous user's
   // `ContentKey`s / decrypted names don't linger across login.
+  //
+  // The appview URL is resolved inside WASM from the stored config —
+  // seeded at boot via `setDefaultAppviewUrl`. No env read here.
   useEffect(() => {
-    const appviewUrl = import.meta.env.VITE_APPVIEW_URL as string | undefined;
-    if (!appviewUrl) return;
     const opake = getOpake();
-    void opake.startSseConsumer(appviewUrl).catch((err: unknown) => {
+    void opake.startSseConsumer().catch((err: unknown) => {
       console.warn("[opake] startSseConsumer failed:", err);
     });
     return () => {

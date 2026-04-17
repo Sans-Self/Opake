@@ -45,6 +45,7 @@ pub mod storage;
 pub mod tid;
 pub mod tree_keeper;
 pub mod workspace;
+pub mod workspace_keeper;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

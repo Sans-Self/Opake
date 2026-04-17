@@ -1,6 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useOpake } from "../provider";
-import { opakeKeys } from "../keys";
 
 interface CreateWorkspaceInput {
   readonly name: string;
@@ -10,7 +9,8 @@ interface CreateWorkspaceInput {
 /**
  * Create a new workspace.
  *
- * Invalidates the workspace list query on success.
+ * The new entry appears in `useWorkspaces()` automatically via the SSE
+ * `keyring:upsert` echo — no cache invalidation needed.
  *
  * @example
  * ```tsx
@@ -20,14 +20,9 @@ interface CreateWorkspaceInput {
  */
 export function useCreateWorkspace() {
   const opake = useOpake();
-  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (input: CreateWorkspaceInput) =>
       opake.createWorkspace(input.name, input.description),
-
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: opakeKeys.workspaces() });
-    },
   });
 }

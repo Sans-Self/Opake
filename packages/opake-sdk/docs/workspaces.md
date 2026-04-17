@@ -26,6 +26,29 @@ for (const ws of workspaces) {
 }
 ```
 
+## Live updates
+
+`listWorkspaces` bootstraps the in-memory `WorkspaceKeeper`. Once bootstrapped,
+subscribe to live changes with `watchWorkspaces`:
+
+```typescript
+// Returns a handle — call .close() to unsubscribe.
+const watcher = opake.watchWorkspaces((snapshot) => {
+  // snapshot.entries  — current workspace list (decrypted names + roles)
+  // snapshot.loaded   — false on the first fire before bootstrap completes
+  console.log("workspaces:", snapshot.entries);
+});
+
+// Later, on cleanup:
+await watcher.close();
+```
+
+The callback fires once immediately with the current snapshot, then again
+on every `keyring:upsert` / `keyring:delete` SSE event. This requires an
+active SSE consumer — call `opake.startSseConsumer()` once after login.
+New workspaces created via `createWorkspace` appear optimistically in the
+snapshot before the SSE echo arrives.
+
 ## File Operations
 
 Get a FileManager from a workspace URI, then use it exactly like a cabinet:
@@ -98,15 +121,18 @@ been applied.
 Member operations are on the `Opake` instance directly, not on the
 FileManager:
 
+The workspace group key never leaves WASM — every mutation resolves the
+keyring from its URI and unwraps internally.
+
 ```typescript
 // Add a member
 const recipient = await opake.resolveIdentity("bob.bsky.social");
-await opake.addWorkspaceMember(keyringUri, key, recipient.did, recipient.publicKey, "editor");
+await opake.addWorkspaceMember(keyringUri, recipient.did, recipient.publicKey, "editor");
 
 // Remove a member (triggers key rotation for owners)
-const result = await opake.removeWorkspaceMember(keyringUri, key, memberDid);
-if (result.key) {
-  // Owner: key was rotated — store the new key and rotation
+const result = await opake.removeWorkspaceMember(keyringUri, memberDid);
+if (result.rotation !== undefined) {
+  // Owner: key was rotated inside WASM; `rotation` is the new counter
   console.log("New rotation:", result.rotation);
 }
 
@@ -114,7 +140,7 @@ if (result.key) {
 await opake.updateMemberRole(keyringUri, memberDid, "viewer");
 
 // Update workspace name/description
-await opake.updateWorkspaceMetadata(keyringUri, key, {
+await opake.updateWorkspaceMetadata(keyringUri, {
   name: "Renamed Project",
   description: "Updated description",
 });

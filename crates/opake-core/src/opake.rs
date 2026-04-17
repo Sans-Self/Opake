@@ -1394,13 +1394,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- AppView helpers --
 
-    /// Set the AppView URL if not already configured (e.g. from a build-time default).
-    pub fn set_default_appview_url(&mut self, url: &str) {
-        if self.appview_url.is_none() {
-            self.appview_url = Some(url.to_string());
-        }
-    }
-
     /// Override the AppView URL unconditionally (runtime env var override).
     pub fn set_appview_url(&mut self, url: String) {
         self.appview_url = Some(url);
@@ -1582,13 +1575,42 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         config: &crate::records::AccountConfigRecord,
     ) -> Result<String, Error> {
-        // Update cached appview URL when config explicitly sets one.
-        // Don't overwrite the compile-time default with None.
-        if config.appview_url.is_some() {
-            self.appview_url = config.appview_url.clone();
-        }
+        // Propagate whatever the user last committed to their PDS — including
+        // explicit clears (None). The compile-time default is seeded separately
+        // via `set_appview_url` and lives below this in priority order.
+        self.appview_url = config.appview_url.clone();
         let result = crate::account_config::publish_account_config(&mut self.client, config).await;
         self.signoff(result).await
+    }
+
+    /// Read-merge-write the account config atomically.
+    ///
+    /// Fetches the current record (or synthesizes a default stamped with
+    /// the current `SCHEMA_VERSION`), applies the given partial updates,
+    /// refreshes `modified_at`, and writes back. Concurrent callers
+    /// serialize under the `&mut self` borrow — no silent clobbers.
+    ///
+    /// Cuts the WASM boundary crossings in half vs. read-merge-write from
+    /// JS (one call instead of two) and keeps the default-record shape
+    /// owned by core.
+    pub async fn update_account_config(
+        &mut self,
+        updates: crate::records::AccountConfigUpdates,
+    ) -> Result<crate::records::AccountConfigRecord, Error> {
+        let now = self.now();
+        let current = self.get_account_config().await?;
+        let mut next = current.unwrap_or_else(|| crate::records::AccountConfigRecord::new(&now));
+
+        if let Some(v) = updates.telemetry_enabled {
+            next.telemetry_enabled = v;
+        }
+        if let Some(v) = updates.appview_url {
+            next.appview_url = v;
+        }
+        next.modified_at = now;
+
+        self.set_account_config(&next).await?;
+        Ok(next)
     }
 
     // -- Cross-PDS document download --

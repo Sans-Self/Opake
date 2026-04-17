@@ -7,8 +7,9 @@ export const opakeKeys = {
   /** All opake queries — invalidate everything. */
   all: () => ["opake"] as const,
 
-  /** Workspace list (all workspaces the user is a member of). */
-  workspaces: () => ["opake", "workspaces"] as const,
+  // `workspaces` key removed — the workspace list is now driven by the
+  // WASM WorkspaceKeeper + `opake.watchWorkspaces` subscription, not
+  // by a React Query cache. See `useWorkspaces`.
 
   /** Cabinet directory tree. */
   cabinetTree: () => ["opake", "cabinet", "tree"] as const,

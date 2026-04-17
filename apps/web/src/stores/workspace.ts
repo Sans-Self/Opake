@@ -1,53 +1,36 @@
-// Workspace store — lists and creates workspaces via @opake/sdk.
+// Workspace store — subscribes to the WASM-side WorkspaceKeeper for
+// live updates and exposes a record-shaped view for the sidebar + settings.
 //
-// Module-level promise dedup prevents StrictMode double-effect from
-// sending concurrent `&mut self` borrows into WASM (RefCell panic).
+// The keeper is the source of truth: it's bootstrapped once on first
+// subscription (via `listWorkspaces`) and patched incrementally from
+// SSE `keyring:upsert` / `keyring:delete` events inside WASM. The
+// store just mirrors whatever the watcher hands it.
 //
-// Real-time refresh: the WASM SSE consumer dispatches an
-// `opake:workspace-updated` CustomEvent on the `window` whenever the
-// appview broadcasts a keyring record change (this device's writes,
-// peer writes, other-device writes). We listen and re-fetch. A
-// visibility listener catches edge cases where SSE is disconnected or
-// the page was hidden across events.
+// There is no optimistic-update cooldown, no visibility-listener
+// fallback, and no CustomEvent bridge. Those were workarounds for the
+// old "re-fetch listWorkspaces on every SSE hint" pattern, which paid
+// 1–4s of appview cursor lag per update.
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { WorkspaceEntry } from "@opake/sdk";
+import type { WorkspaceEntry, WorkspaceWatcher } from "@opake/sdk";
 import { getOpake } from "@/stores/auth";
 import { loading } from "@/stores/app";
 
 // ---------------------------------------------------------------------------
-// Module-level dedup guards (same pattern as auth store's bootPromise)
+// Module-level subscription state
 // ---------------------------------------------------------------------------
 
+// One watcher at a time. Keyed off the opake instance that created it —
+// on account switch, we close the old watcher before opening a new one.
 // eslint-disable-next-line functional/no-let
-let loadPromise: Promise<void> | null = null;
+let activeWatcher: WorkspaceWatcher | null = null;
 
-/**
- * Shallow change detection over the workspace record. Rotation bumps on
- * every keyring mutation so it's a reliable signal — combined with name,
- * description, and member count, it catches everything a user cares about
- * without a full deep-equal.
- */
-function workspacesChanged(
-  prev: Readonly<Record<string, WorkspaceEntry>>,
-  next: Readonly<Record<string, WorkspaceEntry>>,
-): boolean {
-  const prevKeys = Object.keys(prev);
-  const nextKeys = Object.keys(next);
-  if (prevKeys.length !== nextKeys.length) return true;
-  return nextKeys.some((key) => {
-    const a = prev[key] as WorkspaceEntry | undefined;
-    const b = next[key] as WorkspaceEntry | undefined;
-    if (!a || !b) return true;
-    return (
-      a.rotation !== b.rotation ||
-      a.memberCount !== b.memberCount ||
-      a.name !== b.name ||
-      a.description !== b.description
-    );
-  });
-}
+// Tracks whether `listWorkspaces` has been called during this subscription.
+// The keeper bootstraps as a side effect of that call, so the first
+// subscriber kicks it off — subsequent subscribers pick up the same keeper.
+// eslint-disable-next-line functional/no-let
+let bootstrapPromise: Promise<void> | null = null;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,8 +43,29 @@ interface WorkspaceState {
 }
 
 interface WorkspaceActions {
-  loadWorkspaces(): Promise<void>;
+  /**
+   * Install the WorkspaceKeeper watcher and trigger the initial
+   * bootstrap fetch if it hasn't happened yet. Idempotent — calling
+   * twice returns the same watcher lifecycle.
+   *
+   * Typically invoked from the auth store once the session becomes
+   * active, and closed via `reset()` on logout.
+   */
+  subscribe(): void;
   createWorkspace(name: string, description?: string): Promise<string>;
+  /**
+   * Close the watcher and clear module-level handles, but keep the
+   * workspace list in state. Called when the SSE consumer stops (e.g.
+   * on route unmount) so a later `subscribe()` picks up a fresh watcher
+   * without flashing the UI to empty. State is cleared separately via
+   * `reset()` on session transition.
+   */
+  detachWatcher(): void;
+  /**
+   * Tear down the watcher and clear store state. Called on logout /
+   * account switch so the next session doesn't see the previous
+   * account's workspaces.
+   */
   reset(): void;
 }
 
@@ -77,62 +81,78 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
     loaded: false,
     error: null,
 
-    async loadWorkspaces() {
-      if (loadPromise) {
-        await loadPromise;
-        return;
-      }
+    subscribe() {
+      if (activeWatcher) return;
 
-      loadPromise = (async () => {
-        const done = loading("workspaces");
+      // Install the watcher first — fires immediately with the current
+      // (possibly empty, `loaded = false`) snapshot so the UI can show
+      // a loading state while bootstrap is in flight.
+      activeWatcher = getOpake().watchWorkspaces((snapshot) => {
+        const record = Object.fromEntries(snapshot.entries.map((e) => [e.uri, e]));
+        set((draft) => {
+          draft.workspaces = record;
+          draft.loaded = snapshot.loaded;
+          draft.error = null;
+        });
+      });
+
+      // Kick off bootstrap if it hasn't happened during this
+      // subscription. The keeper populates itself as a side effect of
+      // `listWorkspaces`, and the watcher above sees the resulting
+      // snapshot. Failures surface as store-level errors but don't
+      // tear down the watcher — subsequent SSE events can still
+      // populate it. The appview URL is resolved inside WASM from the
+      // stored config — seeded at boot via `setDefaultAppviewUrl`.
+      if (bootstrapPromise) return;
+      const done = loading("workspaces-bootstrap");
+      bootstrapPromise = (async () => {
         try {
-          const appviewUrl = import.meta.env.VITE_APPVIEW_URL as string | undefined;
-          const entries = await getOpake().listWorkspaces(appviewUrl);
-          const record = Object.fromEntries(entries.map((e) => [e.uri, e]));
-
-          set((draft) => {
-            // Skip the write if the record is shallow-equal to the current
-            // state — avoids spurious Zustand notifications on no-op reloads
-            // (common under SSE event bursts).
-            if (!workspacesChanged(draft.workspaces, record)) {
-              draft.loaded = true;
-              draft.error = null;
-              return;
-            }
-            draft.workspaces = record;
-            draft.loaded = true;
-            draft.error = null;
-          });
+          await getOpake().listWorkspaces();
         } catch (err) {
           set((draft) => {
             draft.error = err instanceof Error ? err.message : "Failed to load workspaces";
+            // Still mark loaded — the UI needs to render _something_,
+            // and subsequent SSE events can fill in real data.
             draft.loaded = true;
           });
         } finally {
-          loadPromise = null;
+          bootstrapPromise = null;
           done();
         }
       })();
-
-      await loadPromise;
     },
 
     async createWorkspace(name, description) {
-      // No dedup — each call creates a different workspace.
-      // Dialog disables its button during the async call.
+      // The keeper watcher picks up the new workspace via the SSE echo
+      // that follows the PDS write, so no explicit refresh is needed.
+      // Dialog disables its button during the call.
       const done = loading("create-workspace");
       try {
         const result = await getOpake().createWorkspace(name, description ?? "");
-        loadPromise = null;
-        await useWorkspaceStore.getState().loadWorkspaces();
         return result.keyringUri;
       } finally {
         done();
       }
     },
 
+    detachWatcher() {
+      // Idempotent — safe even if the WASM side was already wiped by
+      // stopSseConsumer.
+      if (activeWatcher) {
+        activeWatcher.close();
+        activeWatcher = null;
+      }
+      bootstrapPromise = null;
+      // State is intentionally NOT cleared here — the workspace list stays
+      // visible while the route remounts so there's no flash-to-empty.
+    },
+
     reset() {
-      loadPromise = null;
+      if (activeWatcher) {
+        activeWatcher.close();
+        activeWatcher = null;
+      }
+      bootstrapPromise = null;
       set((draft) => {
         draft.workspaces = {};
         draft.loaded = false;
@@ -141,27 +161,3 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
     },
   })),
 );
-
-// SSE-driven refresh: the WASM consumer fires this CustomEvent on any
-// keyring-record-level change. Only relevant after the initial load
-// (so we don't fetch before login). `loadWorkspaces` dedups concurrent
-// calls, so event bursts coalesce naturally.
-if (typeof window !== "undefined") {
-  window.addEventListener("opake:workspace-updated", () => {
-    const state = useWorkspaceStore.getState();
-    if (!state.loaded) return;
-    void state.loadWorkspaces();
-  });
-}
-
-// Visibility fallback: covers the case where SSE was disconnected
-// while the page was hidden (browser backgrounding, sleep, etc).
-// Same dedup semantics as the SSE path.
-if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") return;
-    const state = useWorkspaceStore.getState();
-    if (!state.loaded) return;
-    void state.loadWorkspaces();
-  });
-}
