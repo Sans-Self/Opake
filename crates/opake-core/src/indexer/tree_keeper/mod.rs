@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use crate::crypto::{ContentKey, X25519PrivateKey};
 use crate::directories::{DecryptionCtx, DirectoryTree, TreeChange};
 use crate::error::Error;
-use crate::sse::events::{SseDirectoryRecord, SseEvent};
+use crate::indexer::sse::events::{SseDirectoryRecord, SseEvent};
 
 /// Callback fired when a watched directory's tree state changes.
 ///

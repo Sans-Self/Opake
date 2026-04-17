@@ -29,9 +29,9 @@
 //! workspace stays visible and self-corrects on the next event.
 //! See [`apply_keyring_record`] for the canonical dispatch logic.
 //!
-//! [`TreeKeeper`]: crate::tree_keeper::TreeKeeper
-//! [`SseEvent::KeyringUpsert`]: crate::sse::events::SseEvent::KeyringUpsert
-//! [`SseEvent::KeyringDelete`]: crate::sse::events::SseEvent::KeyringDelete
+//! [`TreeKeeper`]: crate::indexer::tree_keeper::TreeKeeper
+//! [`SseEvent::KeyringUpsert`]: crate::indexer::sse::events::SseEvent::KeyringUpsert
+//! [`SseEvent::KeyringDelete`]: crate::indexer::sse::events::SseEvent::KeyringDelete
 
 use std::collections::HashMap;
 
@@ -335,9 +335,9 @@ pub fn try_build_entry(
 
 /// Convenience wrapper: build an entry from an [`IndexerKeyring`].
 ///
-/// [`IndexerKeyring`]: crate::client::IndexerKeyring
+/// [`IndexerKeyring`]: crate::indexer::IndexerKeyring
 pub fn try_build_entry_from_indexer_keyring(
-    keyring: &crate::client::IndexerKeyring,
+    keyring: &crate::indexer::IndexerKeyring,
     my_did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<WorkspaceEntry> {
@@ -359,9 +359,9 @@ pub fn try_build_entry_from_indexer_keyring(
 /// well-formed broadcaster always emits it, but the field is `Option`
 /// in the wire type so we handle the gap defensively).
 ///
-/// [`SseKeyringRecord`]: crate::sse::events::SseKeyringRecord
+/// [`SseKeyringRecord`]: crate::indexer::sse::events::SseKeyringRecord
 pub fn try_build_entry_from_sse_record(
-    record: &crate::sse::events::SseKeyringRecord,
+    record: &crate::indexer::sse::events::SseKeyringRecord,
     my_did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<WorkspaceEntry> {

@@ -11,7 +11,7 @@
 // Reconnect events.
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
+use crate::indexer::sse::events::SseEvent;
 use std::future::Future;
 
 /// Opens SSE connections against the indexer's `/api/events` endpoint.

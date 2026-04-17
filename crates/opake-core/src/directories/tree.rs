@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use log::trace;
 
 use crate::atproto;
-use crate::client::TreeDirectory;
 use crate::crypto::{self, ContentKey, DirectoryMetadata, X25519PrivateKey};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
+use crate::indexer::sse::events::SseDirectoryRecord;
+use crate::indexer::TreeDirectory;
 use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
-use crate::sse::events::SseDirectoryRecord;
 use crate::storage::CachedRecord;
 
 use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_NAME, ROOT_DIRECTORY_RKEY};

@@ -23,9 +23,9 @@
 use std::rc::Rc;
 
 use futures_util::lock::Mutex;
-use opake_core::inbox_keeper::{self as ik, InboxKeeper};
-use opake_core::tree_keeper::TreeKeeper;
-use opake_core::workspace_keeper::WorkspaceKeeper;
+use opake_core::indexer::inbox_keeper::{self as ik, InboxKeeper};
+use opake_core::indexer::tree_keeper::TreeKeeper;
+use opake_core::indexer::workspace_keeper::WorkspaceKeeper;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -185,7 +185,7 @@ impl WasmOpakeHandle {
         // Optimistic insert — the sidebar shows the new workspace immediately
         // rather than waiting 1–4s for the SSE echo to arrive. The echo
         // produces an equal entry and the keeper's dedup short-circuits.
-        let optimistic = opake_core::workspace_keeper::WorkspaceEntry {
+        let optimistic = opake_core::indexer::workspace_keeper::WorkspaceEntry {
             uri: keyring_uri.clone(),
             owner_did: opake.did().to_string(),
             rotation: 1,
@@ -244,10 +244,10 @@ impl WasmOpakeHandle {
         // helper so this path and the SSE event path produce identical
         // WorkspaceEntry values — any shape divergence between them
         // would cause spurious watcher re-fires after SSE echoes.
-        let entries: Vec<opake_core::workspace_keeper::WorkspaceEntry> = keyrings
+        let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = keyrings
             .iter()
             .filter_map(|kr| {
-                opake_core::workspace_keeper::try_build_entry_from_indexer_keyring(
+                opake_core::indexer::workspace_keeper::try_build_entry_from_indexer_keyring(
                     kr,
                     &did,
                     &private_key,
@@ -747,7 +747,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         drop(opake);
 
-        let entries: Vec<opake_core::inbox_keeper::InboxEntry> =
+        let entries: Vec<opake_core::indexer::inbox_keeper::InboxEntry> =
             grants.iter().map(ik::entry_from_indexer_grant).collect();
 
         {

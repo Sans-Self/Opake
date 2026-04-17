@@ -149,7 +149,7 @@ fn uninstall_all_drains_and_resets() {
 
 #[test]
 fn try_build_entry_filters_non_recipient() {
-    let record = crate::sse::events::SseGrantRecord {
+    let record = crate::indexer::sse::events::SseGrantRecord {
         uri: "at://a/app.opake.grant/g1".to_string(),
         owner_did: "did:plc:alice".to_string(),
         recipient_did: Some("did:plc:bob".to_string()),
@@ -165,7 +165,7 @@ fn try_build_entry_filters_non_recipient() {
 
 #[test]
 fn try_build_entry_defaults_created_at_when_absent() {
-    let record = crate::sse::events::SseGrantRecord {
+    let record = crate::indexer::sse::events::SseGrantRecord {
         uri: "at://a/app.opake.grant/g1".to_string(),
         owner_did: "did:plc:alice".to_string(),
         recipient_did: None,

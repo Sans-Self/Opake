@@ -4,7 +4,7 @@ use std::rc::Rc;
 use super::*;
 use crate::crypto::ContentKey;
 use crate::directories::tests::{dummy_directory_with_entries, test_keypair, TEST_DID};
-use crate::sse::events::{SseDeletePayload, SseDirectoryRecord, SseEvent};
+use crate::indexer::sse::events::{SseDeletePayload, SseDirectoryRecord, SseEvent};
 
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
@@ -305,7 +305,7 @@ fn uninstall_all_drains_every_scope() {
 }
 
 fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
-    use crate::sse::events::SseDocumentRecord;
+    use crate::indexer::sse::events::SseDocumentRecord;
     SseEvent::DocumentUpsert(SseDocumentRecord {
         document_uri: uri.into(),
         owner_did: TEST_DID.into(),
@@ -320,7 +320,7 @@ fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
 }
 
 fn sse_doc_delete(uri: &str) -> SseEvent {
-    use crate::sse::events::SseDeletePayload;
+    use crate::indexer::sse::events::SseDeletePayload;
     SseEvent::DocumentDelete(SseDeletePayload {
         uri: None,
         directory_uri: None,

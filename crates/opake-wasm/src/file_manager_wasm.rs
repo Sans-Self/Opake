@@ -15,8 +15,8 @@
 use std::rc::Rc;
 
 use futures_util::lock::Mutex;
+use opake_core::indexer::tree_keeper::TreeKeeper;
 use opake_core::manager::{FileContext, UploadRequest};
-use opake_core::tree_keeper::TreeKeeper;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

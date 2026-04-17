@@ -19,9 +19,9 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
-use crate::sse::reconnect::BackoffPolicy;
-use crate::sse::transport::{SseConnection, SseTransport};
+use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::reconnect::BackoffPolicy;
+use crate::indexer::sse::transport::{SseConnection, SseTransport};
 
 /// A future-returning token fetcher. Called before every connect attempt.
 /// Own-your-captures: the closure holds clones of whatever state it needs
@@ -187,8 +187,8 @@ impl<T: SseTransport> SseConsumer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sse::events::{SseDeletePayload, SseEvent};
-    use crate::sse::mock::MockSseTransport;
+    use crate::indexer::sse::events::{SseDeletePayload, SseEvent};
+    use crate::indexer::sse::mock::MockSseTransport;
     use std::cell::RefCell;
     use std::rc::Rc;
 

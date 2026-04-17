@@ -9,8 +9,8 @@
 // touching opake-core internals.
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
-use crate::sse::transport::{SseConnection, SseTransport};
+use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::transport::{SseConnection, SseTransport};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -128,7 +128,7 @@ impl SseConnection for MockSseConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sse::events::SseDeletePayload;
+    use crate::indexer::sse::events::SseDeletePayload;
 
     fn delete_event(uri: &str) -> SseEvent {
         SseEvent::KeyringDelete(SseDeletePayload {

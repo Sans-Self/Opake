@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Args;
-use opake_core::client::{InboxGrant, Session};
+use opake_core::client::Session;
+use opake_core::indexer::InboxGrant;
 
 use crate::commands::Execute;
 use crate::session::CommandContext;

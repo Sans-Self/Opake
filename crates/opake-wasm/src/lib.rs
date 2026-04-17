@@ -448,7 +448,7 @@ pub fn sign_indexer_request_js(
     let key: [u8; 32] = signing_key
         .try_into()
         .map_err(|_| JsError::new("signing key must be exactly 32 bytes"))?;
-    Ok(opake_core::client::sign_indexer_request(
+    Ok(opake_core::indexer::sign_indexer_request(
         method,
         path,
         did,

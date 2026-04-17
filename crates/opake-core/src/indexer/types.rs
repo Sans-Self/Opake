@@ -210,7 +210,7 @@ impl TreeDelta {
     /// next sync passes this value back as `since`, and the server handles
     /// the ISO8601 format. The millis value is just a local staleness marker.
     pub fn fetched_at_millis(&self) -> u64 {
-        super::time::unix_now_millis()
+        crate::client::time::unix_now_millis()
     }
 
     /// The server timestamp to pass as `since` on the next sync request.

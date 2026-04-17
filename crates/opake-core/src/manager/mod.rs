@@ -26,8 +26,8 @@ pub use types::{
 };
 
 use crate::client::Transport;
-use crate::client::{DocumentProposal, KeyringProposal, TreeProposal};
 use crate::crypto::{CryptoRng, RngCore};
+use crate::indexer::{DocumentProposal, KeyringProposal, TreeProposal};
 use crate::opake::Opake;
 use crate::storage::Storage;
 

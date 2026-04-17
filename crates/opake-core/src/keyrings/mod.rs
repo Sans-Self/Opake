@@ -62,7 +62,7 @@ pub fn decrypt_keyring_name_from_record(
 /// Returns `None` if the DID isn't a member, deserialization fails,
 /// unwrapping fails, or metadata decryption fails.
 pub fn decrypt_indexer_keyring_name(
-    keyring: &crate::client::IndexerKeyring,
+    keyring: &crate::indexer::IndexerKeyring,
     did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<String> {
@@ -87,11 +87,11 @@ pub fn decrypt_indexer_keyring_name(
 #[cfg(test)]
 mod indexer_keyring_tests {
     use super::*;
-    use crate::client::IndexerKeyring;
     use crate::crypto::{
         generate_content_key, wrap_key, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret,
         X25519PrivateKey, X25519PublicKey,
     };
+    use crate::indexer::IndexerKeyring;
     use crate::records::KeyringMember;
 
     fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {

@@ -4,11 +4,11 @@ use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::Transport;
-use crate::client::TreeDelta;
 use crate::crypto::{self, CryptoRng, RngCore};
 use crate::directories::{DirectoryTree, EntryKind, ResolvedPath};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
+use crate::indexer::TreeDelta;
 use crate::records::{Document, Encryption};
 use crate::storage::{CachedCollection, CachedRecord, Storage};
 
@@ -390,10 +390,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     async fn try_sync_deltas(
         &self,
         cached: CachedCollection,
-    ) -> Result<(Vec<CachedRecord>, Vec<crate::client::TreeProposal>), Error> {
-        let indexer_url = match &self.opake.indexer_url {
-            Some(url) => url.clone(),
-            None => return Ok((cached.records, Vec::new())),
+    ) -> Result<(Vec<CachedRecord>, Vec<crate::indexer::TreeProposal>), Error> {
+        let indexer_url = match self.opake.resolve_indexer_url(None) {
+            Ok(url) => url,
+            Err(_) => return Ok((cached.records, Vec::new())),
         };
         let signing_key = match self.opake.require_identity() {
             Ok(id) => match id.signing_key_bytes() {
@@ -413,7 +413,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let delta_result = match self.context {
             FileContext::Cabinet(_) => match since {
                 Some(s) => {
-                    crate::client::fetch_cabinet_sync(
+                    crate::indexer::fetch_cabinet_sync(
                         self.opake.client.transport(),
                         &indexer_url,
                         &self.opake.did,
@@ -423,7 +423,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .await
                 }
                 None => {
-                    crate::client::fetch_cabinet_snapshot(
+                    crate::indexer::fetch_cabinet_snapshot(
                         self.opake.client.transport(),
                         &indexer_url,
                         &self.opake.did,
@@ -434,7 +434,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             },
             FileContext::Workspace(ws) => match since {
                 Some(s) => {
-                    crate::client::fetch_workspace_sync(
+                    crate::indexer::fetch_workspace_sync(
                         self.opake.client.transport(),
                         &indexer_url,
                         &self.opake.did,
@@ -445,7 +445,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .await
                 }
                 None => {
-                    crate::client::fetch_workspace_snapshot(
+                    crate::indexer::fetch_workspace_snapshot(
                         self.opake.client.transport(),
                         &indexer_url,
                         &self.opake.did,
@@ -542,14 +542,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Fetches a full snapshot from the Indexer, caches it locally,
     /// and returns a tree built from the cached records.
     async fn bootstrap_tree(&mut self) -> Result<DirectoryTree, Error> {
-        let indexer_url = self
-            .opake
-            .indexer_url
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Storage("Indexer URL required — configure one or self-host".into())
-            })?
-            .clone();
+        let indexer_url = self.opake.resolve_indexer_url(None).map_err(|_| {
+            Error::Storage("Indexer URL required — configure one or self-host".into())
+        })?;
 
         let identity = self.opake.require_identity()?;
         let signing_key = identity
@@ -558,7 +553,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let snapshot = match self.context {
             FileContext::Cabinet(_) => {
-                crate::client::fetch_cabinet_snapshot(
+                crate::indexer::fetch_cabinet_snapshot(
                     self.opake.client.transport(),
                     &indexer_url,
                     &self.opake.did,
@@ -567,7 +562,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 .await?
             }
             FileContext::Workspace(ws) => {
-                crate::client::fetch_workspace_snapshot(
+                crate::indexer::fetch_workspace_snapshot(
                     self.opake.client.transport(),
                     &indexer_url,
                     &self.opake.did,

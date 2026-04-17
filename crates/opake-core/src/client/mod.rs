@@ -2,9 +2,6 @@ mod did;
 #[cfg(feature = "dns")]
 mod dns;
 pub mod dpop;
-mod indexer;
-mod indexer_auth;
-mod indexer_types;
 mod list;
 pub mod oauth_discovery;
 pub mod oauth_token;
@@ -20,9 +17,6 @@ mod xrpc;
 pub use did::*;
 #[cfg(feature = "dns")]
 pub use dns::resolve_handle_dns;
-pub use indexer::*;
-pub use indexer_auth::*;
-pub use indexer_types::*;
 pub use list::*;
 #[cfg(feature = "reqwest-transport")]
 pub use reqwest_transport::ReqwestTransport;

@@ -8,11 +8,11 @@ use clap::{Args, Subcommand};
 use log::{info, warn};
 use opake_core::client::ReqwestTransport;
 use opake_core::crypto::{OsRng, RngCore};
-use opake_core::daemon::{self, TASKS};
+use opake_core::indexer::daemon::{self, TASKS};
+use opake_core::indexer::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
+use opake_core::indexer::sse::events::SseEvent;
+use opake_core::indexer::sse::reqwest_connection::ReqwestSseTransport;
 use opake_core::opake::Opake;
-use opake_core::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
-use opake_core::sse::events::SseEvent;
-use opake_core::sse::reqwest_connection::ReqwestSseTransport;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::LocalSet;
 
@@ -424,7 +424,7 @@ async fn build_opake(
 // ---------------------------------------------------------------------------
 
 async fn list_tasks(storage: &FileStorage) -> Result<()> {
-    use opake_core::daemon::{DaemonTaskKind, TaskStatus};
+    use opake_core::indexer::daemon::{DaemonTaskKind, TaskStatus};
 
     let tasks = storage.load_tasks();
 

@@ -3,12 +3,12 @@
 // Uses the Transport trait for WASM compatibility. Signs each request
 // with the caller's Ed25519 key via sign_indexer_request.
 
-use crate::client::indexer_auth::sign_indexer_request;
-use crate::client::indexer_types::{
+use crate::client::{HttpMethod, HttpRequest, Transport};
+use crate::error::Error;
+use crate::indexer::auth::sign_indexer_request;
+use crate::indexer::types::{
     InboxGrant, InboxResponse, KeyringsResponse, TreeDelta, WorkspaceDocument, WorkspaceResponse,
 };
-use crate::client::transport::{HttpMethod, HttpRequest, Transport};
-use crate::error::Error;
 
 /// Check an indexer JSON response for errors.
 fn check_indexer_response(status: u16, body: &[u8]) -> Result<(), Error> {
@@ -39,7 +39,7 @@ pub async fn fetch_inbox(
     cursor: Option<&str>,
 ) -> Result<InboxResponse, Error> {
     let path = "/api/inbox";
-    let timestamp = super::time::unix_now() as u64;
+    let timestamp = crate::client::time::unix_now() as u64;
     let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
 
     let mut params = Vec::new();
@@ -118,7 +118,7 @@ pub async fn fetch_workspace_documents(
     let mut cursor: Option<String> = None;
 
     loop {
-        let timestamp = super::time::unix_now() as u64;
+        let timestamp = crate::client::time::unix_now() as u64;
         let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
 
         let mut query = format!("keyringUri={keyring_uri}");
@@ -167,7 +167,7 @@ pub async fn fetch_member_keyrings(
     let mut cursor: Option<String> = None;
 
     loop {
-        let timestamp = super::time::unix_now() as u64;
+        let timestamp = crate::client::time::unix_now() as u64;
         let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
 
         let url = match &cursor {
@@ -217,7 +217,7 @@ async fn indexer_get(
     signing_key: &[u8; 32],
     query: &str,
 ) -> Result<Vec<u8>, Error> {
-    let timestamp = super::time::unix_now() as u64;
+    let timestamp = crate::client::time::unix_now() as u64;
     let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
     let url = if query.is_empty() {
         format!("{indexer_url}{path}")
@@ -342,7 +342,7 @@ pub async fn request_sse_token(
     signing_key: &[u8; 32],
 ) -> Result<String, Error> {
     let path = "/api/events/token";
-    let timestamp = super::time::unix_now() as u64;
+    let timestamp = crate::client::time::unix_now() as u64;
     let auth = sign_indexer_request("POST", path, did, signing_key, timestamp);
 
     let request = HttpRequest {
@@ -372,7 +372,7 @@ pub async fn request_sse_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::transport::HttpResponse;
+    use crate::client::HttpResponse;
     use crate::test_utils::MockTransport;
 
     fn inbox_json(grants: &[&str], cursor: Option<&str>) -> Vec<u8> {

@@ -135,7 +135,7 @@ impl FileStorage {
     // -- Task helpers (standalone, not on the Storage trait) --------------------
 
     #[allow(dead_code)] // wired in daemon migration (Phase 1)
-    pub fn save_task(&self, task: &opake_core::daemon::DaemonTask) -> anyhow::Result<()> {
+    pub fn save_task(&self, task: &opake_core::indexer::daemon::DaemonTask) -> anyhow::Result<()> {
         let tasks_path = self.base_dir.join("tasks.json");
         let mut tasks = self.load_tasks_inner();
         tasks.retain(|t| t.id != task.id);
@@ -145,7 +145,7 @@ impl FileStorage {
         Ok(())
     }
 
-    pub fn load_tasks(&self) -> Vec<opake_core::daemon::DaemonTask> {
+    pub fn load_tasks(&self) -> Vec<opake_core::indexer::daemon::DaemonTask> {
         self.load_tasks_inner()
     }
 
@@ -159,7 +159,7 @@ impl FileStorage {
         Ok(())
     }
 
-    fn load_tasks_inner(&self) -> Vec<opake_core::daemon::DaemonTask> {
+    fn load_tasks_inner(&self) -> Vec<opake_core::indexer::daemon::DaemonTask> {
         let tasks_path = self.base_dir.join("tasks.json");
         match fs::read_to_string(&tasks_path) {
             Ok(json) => serde_json::from_str(&json).unwrap_or_default(),

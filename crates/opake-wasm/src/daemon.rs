@@ -10,7 +10,7 @@ use opake_core::pairing::DEFAULT_PAIR_REQUEST_TTL_SECONDS;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use opake_core::daemon;
+use opake_core::indexer::daemon;
 
 use crate::wasm_util;
 

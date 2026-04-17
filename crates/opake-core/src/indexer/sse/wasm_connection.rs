@@ -25,8 +25,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Event, EventSource, MessageEvent};
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
-use crate::sse::transport::{SseConnection, SseTransport};
+use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::transport::{SseConnection, SseTransport};
 
 /// Every named event the broadcaster can emit. Registered as individual
 /// listeners because `onmessage` only fires for untyped (`event: message`)

@@ -21,7 +21,7 @@
 //! cross-PDS fetch via [`Opake::resolve_grant_metadata`], but that's
 //! the consumer's job, not the keeper's.
 //!
-//! [`WorkspaceKeeper`]: crate::workspace_keeper::WorkspaceKeeper
+//! [`WorkspaceKeeper`]: crate::indexer::workspace_keeper::WorkspaceKeeper
 //! [`Opake::resolve_grant_metadata`]: crate::opake::Opake::resolve_grant_metadata
 
 use std::collections::HashMap;
@@ -201,7 +201,7 @@ impl Default for InboxKeeper {
 /// where the caller is NOT the recipient (the broadcaster already
 /// routes by DID topic, but defense-in-depth is cheap here).
 pub fn try_build_entry_from_sse_record(
-    record: &crate::sse::events::SseGrantRecord,
+    record: &crate::indexer::sse::events::SseGrantRecord,
     recipient_did: &str,
 ) -> Option<InboxEntry> {
     // If the grant event carries an explicit recipient, verify it matches.
@@ -222,8 +222,8 @@ pub fn try_build_entry_from_sse_record(
 
 /// Convenience wrapper: build an entry from an indexer [`InboxGrant`].
 ///
-/// [`InboxGrant`]: crate::client::InboxGrant
-pub fn entry_from_indexer_grant(grant: &crate::client::InboxGrant) -> InboxEntry {
+/// [`InboxGrant`]: crate::indexer::InboxGrant
+pub fn entry_from_indexer_grant(grant: &crate::indexer::InboxGrant) -> InboxEntry {
     InboxEntry {
         uri: grant.uri.clone(),
         owner_did: grant.owner_did.clone(),

@@ -19,7 +19,7 @@
 // over bytes from `reqwest::Response::bytes_stream()`.
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
+use crate::indexer::sse::events::SseEvent;
 
 /// Accumulates SSE field lines into complete events. Call [`feed_line`]
 /// for each `\n`-stripped line; it returns `Some(event)` when a blank line

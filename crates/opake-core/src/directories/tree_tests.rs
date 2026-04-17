@@ -597,7 +597,7 @@ fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
 // Incremental mutation via apply_directory_delta (SSE path)
 // ---------------------------------------------------------------------------
 
-use crate::sse::events::SseDirectoryRecord;
+use crate::indexer::sse::events::SseDirectoryRecord;
 
 /// Convert a test `Directory` into the SSE payload shape. Mirrors how the
 /// indexer broadcaster formats directory records — `key_wrapping` and

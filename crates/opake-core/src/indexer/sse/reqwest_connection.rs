@@ -2,7 +2,7 @@
 //
 // Reqwest's streaming API gives us `impl Stream<Item = Result<Bytes>>`.
 // Each chunk may split mid-line, so we feed it into an
-// [`SseLineAccumulator`](crate::sse::parser::SseLineAccumulator) which
+// [`SseLineAccumulator`](crate::indexer::sse::parser::SseLineAccumulator) which
 // buffers partial lines and emits complete events as they parse.
 //
 // Unlike the WASM side (browser EventSource auto-reconnects, we just
@@ -16,9 +16,9 @@ use futures_util::stream::{Stream, StreamExt};
 use reqwest::Client;
 
 use crate::error::Error;
-use crate::sse::events::SseEvent;
-use crate::sse::parser::SseLineAccumulator;
-use crate::sse::transport::{SseConnection, SseTransport};
+use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::parser::SseLineAccumulator;
+use crate::indexer::sse::transport::{SseConnection, SseTransport};
 
 type BytesStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>;
 

@@ -21,16 +21,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use futures_util::lock::Mutex;
-use opake_core::client::request_sse_token;
 use opake_core::directories::DirectoryTree;
-use opake_core::inbox_keeper::{
+use opake_core::indexer::inbox_keeper::{
     self as ik, InboxKeeper, InboxSnapshot, InboxWatcherCallback, InboxWatcherHandle,
 };
-use opake_core::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
-use opake_core::sse::events::SseEvent;
-use opake_core::sse::wasm_connection::WasmSseTransport;
-use opake_core::tree_keeper::{TreeKeeper, WatcherCallback, WatcherHandle};
-use opake_core::workspace_keeper::{
+use opake_core::indexer::request_sse_token;
+use opake_core::indexer::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
+use opake_core::indexer::sse::events::SseEvent;
+use opake_core::indexer::sse::wasm_connection::WasmSseTransport;
+use opake_core::indexer::tree_keeper::{TreeKeeper, WatcherCallback, WatcherHandle};
+use opake_core::indexer::workspace_keeper::{
     self as wk, WorkspaceKeeper, WorkspaceSnapshot, WorkspaceWatcherCallback,
     WorkspaceWatcherHandle,
 };

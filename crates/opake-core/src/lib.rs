@@ -25,11 +25,10 @@ pub mod atproto;
 pub mod cabinet;
 pub mod client;
 pub mod crypto;
-pub mod daemon;
 pub mod directories;
 pub mod documents;
 pub mod error;
-pub mod inbox_keeper;
+pub mod indexer;
 pub mod keyrings;
 pub mod manager;
 pub mod metadata;
@@ -41,12 +40,9 @@ pub mod reencryption;
 pub mod resolve;
 pub mod scope;
 pub mod sharing;
-pub mod sse;
 pub mod storage;
 pub mod tid;
-pub mod tree_keeper;
 pub mod workspace;
-pub mod workspace_keeper;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
