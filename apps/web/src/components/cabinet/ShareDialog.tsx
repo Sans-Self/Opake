@@ -50,7 +50,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   const handleShare = useCallback(async () => {
     if (!documentUri || session.status !== "active" || !recipientHandle.trim()) return;
 
-    const handle = recipientHandle.trim();
+    const recipient = recipientHandle.trim();
 
     setStatus("resolving");
     setErrorMessage("");
@@ -58,22 +58,22 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
     try {
       // Resolve recipient — may throw RecipientNotReadyError
       try {
-        const recipient = await resolveRecipient(handle);
+        const resolved = await resolveRecipient(recipient);
 
-        if (recipient.did === session.did) {
+        if (resolved.did === session.did) {
           throw new Error("You can't share a file with yourself");
         }
 
         setStatus("sharing");
 
         // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        await getActiveFileManager().share(documentUri, recipient.did, recipient.publicKey, "read");
+        await getActiveFileManager().share(documentUri, resolved.did, resolved.publicKey, "read");
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
-          await getActiveFileManager().createPendingShare(documentUri, handle, "read", null);
+          await getActiveFileManager().createPendingShare(documentUri, recipient, "read", null);
           setStatus("done");
           toastSuccess(
-            `${handle} hasn't set up Opake yet. Share queued — completes automatically once they log in (expires in 7 days).`,
+            `${recipient} hasn't set up Opake yet. Share queued — completes automatically once they log in (expires in 7 days).`,
           );
           dismiss();
           return;
@@ -91,7 +91,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       }));
 
       setStatus("done");
-      toastSuccess(`Shared "${documentName}" with ${handle}`);
+      toastSuccess(`Shared "${documentName}" with ${recipient}`);
       dismiss();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to share";

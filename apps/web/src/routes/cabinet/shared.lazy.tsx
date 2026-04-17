@@ -6,6 +6,7 @@ import { PanelShell } from "@/components/cabinet/PanelShell";
 import { getOpake } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { triggerBrowserDownload } from "@/lib/download";
+import { useInbox } from "@/hooks/use-inbox";
 
 const METADATA_BATCH_SIZE = 5;
 
@@ -18,7 +19,7 @@ interface ResolvedEntry {
 }
 
 function SharedWithMePage() {
-  const [grants, setGrants] = useState<readonly InboxGrant[] | null>(null);
+  const { grants, isLoading } = useInbox();
   const [metadataByUri, setMetadataByUri] = useState<
     Readonly<Partial<Record<string, ResolvedGrantMetadata>>>
   >({});
@@ -31,18 +32,6 @@ function SharedWithMePage() {
   // render when only `metadataByUri` updates.
   const resolutionKickedRef = useRef(new Set<string>());
 
-  useEffect(() => {
-    const watcher = getOpake().watchInbox((snap) => {
-      setGrants(snap.loaded ? snap.entries : null);
-    });
-    void getOpake()
-      .listInbox()
-      .catch((err: unknown) => {
-        console.warn("[shared] listInbox failed:", err);
-      });
-    return () => watcher.close();
-  }, []);
-
   // Resolve metadata + owner handles for new grants in bounded batches.
   // Batches run serially (first 5, then next 5, etc.) to avoid opening 50
   // cross-PDS fetches simultaneously on a heavy inbox.
@@ -50,8 +39,13 @@ function SharedWithMePage() {
   // Failures are NOT permanently kicked — the retry button clears failedByUri
   // for a URI and removes it from resolutionKickedRef so the effect picks it up
   // again on the next render.
+  //
+  // Each effect invocation gets its own `cancelled` flag (same pattern as
+  // settings.lazy.tsx). The cleanup marks it true so stale async batches from
+  // a previous invocation drop their setState calls instead of racing with the
+  // fresh run.
   useEffect(() => {
-    if (!grants) return;
+    if (isLoading) return;
 
     const pending = grants.filter(
       (g) => !resolutionKickedRef.current.has(g.uri) && metadataByUri[g.uri] === undefined,
@@ -68,8 +62,17 @@ function SharedWithMePage() {
       (_, i) => pending.slice(i * METADATA_BATCH_SIZE, (i + 1) * METADATA_BATCH_SIZE),
     );
 
+    // Local cancellation flag: true once this effect instance is superseded or
+    // the component unmounts. Declared inside the effect so the cleanup below
+    // can set it without triggering functional/immutable-data on an outer ref.
+    const cancelled = { current: false };
+    // Wrapped in a thunk so TypeScript doesn't narrow `cancelled.current` to
+    // `false` after the first check and flag subsequent checks as always-falsy.
+    const isCancelled = (): boolean => cancelled.current;
+
     void batches.reduce(async (prev, batch) => {
       await prev;
+      if (isCancelled()) return;
 
       const metaResults = await Promise.allSettled(
         batch.map((g) => getOpake().resolveGrantMetadata(g.uri)),
@@ -78,6 +81,8 @@ function SharedWithMePage() {
       const ownerResults = await Promise.allSettled(
         ownerDids.map((did) => getOpake().resolveIdentity(did)),
       );
+
+      if (isCancelled()) return;
 
       setHandleByDid((prev) => ({
         ...prev,
@@ -119,7 +124,11 @@ function SharedWithMePage() {
         ...Object.fromEntries(failureEntries),
       }));
     }, Promise.resolve());
-  }, [grants, metadataByUri, failedByUri, handleByDid]);
+
+    return () => {
+      cancelled.current = true;
+    };
+  }, [grants, isLoading, metadataByUri, failedByUri, handleByDid]);
 
   const retryResolution = useCallback((uri: string) => {
     resolutionKickedRef.current.delete(uri);
@@ -129,7 +138,7 @@ function SharedWithMePage() {
   }, []);
 
   const entries: readonly ResolvedEntry[] = useMemo(() => {
-    if (!grants) return [];
+    if (isLoading) return [];
     return grants.map((grant) => {
       const metadata = metadataByUri[grant.uri] ?? null;
       const ownerHandle = handleByDid[grant.ownerDid] ?? null;
@@ -138,7 +147,7 @@ function SharedWithMePage() {
       if (err) return { grant, metadata: null, ownerHandle, status: "error" as const, error: err };
       return { grant, metadata: null, ownerHandle, status: "resolving" as const };
     });
-  }, [grants, metadataByUri, failedByUri, handleByDid]);
+  }, [grants, isLoading, metadataByUri, failedByUri, handleByDid]);
 
   const handleDownload = useCallback(async (grantUri: string) => {
     setDownloading(grantUri);
@@ -163,8 +172,6 @@ function SharedWithMePage() {
       </ul>
     </div>
   );
-
-  const isLoading = grants === null;
 
   return (
     <PanelShell depth={1} breadcrumbs={breadcrumbs} footer="Incoming shares">

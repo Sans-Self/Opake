@@ -5,7 +5,7 @@
 // retries periodically. On success, a grant is created and the pending
 // record is deleted.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::{info, trace, warn};
 
@@ -150,6 +150,12 @@ pub async fn retry_pending_shares(
     // crypto unwrap when multiple pending shares reference the same document.
     let mut content_key_cache: HashMap<String, ContentKey> = HashMap::new();
 
+    // Track document URIs where the content-key fetch failed with a permanent
+    // error (document deleted, record corrupted, or decryption failure).
+    // Unlike transient errors, these won't heal on retry — skip subsequent
+    // pending shares that reference the same broken document in this pass.
+    let mut permanent_document_errors: HashSet<String> = HashSet::new();
+
     for entry in &entries {
         let at_uri = match atproto::parse_at_uri(&entry.uri) {
             Ok(u) => u,
@@ -222,7 +228,14 @@ pub async fn retry_pending_shares(
             entry.uri, entry.recipient
         );
 
-        // Fetch content key (cached per document)
+        // Fetch content key (cached per document).
+        // Skip immediately for documents that already failed with a permanent
+        // error earlier in this pass — no point hammering the PDS again.
+        if permanent_document_errors.contains(&entry.document) {
+            result.failed += 1;
+            continue;
+        }
+
         let content_key = match content_key_cache.get(&entry.document) {
             Some(key) => key.clone(),
             None => {
@@ -239,10 +252,26 @@ pub async fn retry_pending_shares(
                         key
                     }
                     Err(e) => {
-                        warn!(
-                            "pending share {}: failed to fetch content key for {}: {e}",
-                            entry.uri, entry.document
+                        // Permanent failures: document was deleted, the record is
+                        // corrupt, or the content-key ciphertext won't unwrap.
+                        // Mark the document URI so sibling pending shares for the
+                        // same document skip the round-trip.
+                        let permanent = matches!(
+                            e,
+                            Error::NotFound(_)
+                                | Error::InvalidRecord(_)
+                                | Error::Decryption(_)
+                                | Error::Serialization(_)
                         );
+                        warn!(
+                            "pending share {}: failed to fetch content key for {} ({}): {e}",
+                            entry.uri,
+                            entry.document,
+                            if permanent { "permanent" } else { "transient" },
+                        );
+                        if permanent {
+                            permanent_document_errors.insert(entry.document.clone());
+                        }
                         result.failed += 1;
                         continue;
                     }

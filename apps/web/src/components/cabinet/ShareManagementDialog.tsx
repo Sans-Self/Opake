@@ -5,6 +5,33 @@ import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 import { getActiveFileManager } from "@/stores/documents/store";
 import { toastError, toastSuccess } from "@/stores/toast";
 
+// Module-level cache so repeated dialog opens don't each issue a full
+// `listShares` round-trip. Invalidated after any revoke so the next open
+// reflects the authoritative server state.
+interface SharesCache {
+  readonly all: readonly GrantEntry[];
+  readonly ts: number;
+}
+const SHARES_CACHE_TTL_MS = 30_000;
+// Wrapped in a const object because functional/no-let prohibits module-level `let`.
+const _sharesCache = { value: null as SharesCache | null };
+
+async function fetchAllShares(): Promise<readonly GrantEntry[]> {
+  const now = Date.now();
+  if (_sharesCache.value && now - _sharesCache.value.ts < SHARES_CACHE_TTL_MS) {
+    return _sharesCache.value.all;
+  }
+  const all = await getActiveFileManager().listShares();
+  // eslint-disable-next-line functional/immutable-data -- module-level cache for repeated dialog opens
+  _sharesCache.value = { all, ts: Date.now() };
+  return all;
+}
+
+function invalidateSharesCache(): void {
+  // eslint-disable-next-line functional/immutable-data -- module-level cache cleanup
+  _sharesCache.value = null;
+}
+
 export interface ShareManagementDialogHandle {
   readonly show: (documentUri: string, documentName: string) => void;
 }
@@ -30,7 +57,7 @@ export const ShareManagementDialog = forwardRef<ShareManagementDialogHandle, obj
     const loadShares = useCallback(async (uri: string) => {
       setLoading(true);
       try {
-        const all = await getActiveFileManager().listShares();
+        const all = await fetchAllShares();
         setShares(all.filter((g) => g.document === uri));
       } catch (err) {
         toastError(`Failed to load shares: ${err instanceof Error ? err.message : String(err)}`);
@@ -51,6 +78,8 @@ export const ShareManagementDialog = forwardRef<ShareManagementDialogHandle, obj
         // reconcile via the InboxKeeper on peer devices, but the current
         // user's dialog needs the entry gone now.
         setShares((prev) => prev.filter((g) => g.uri !== grantUri));
+        // Invalidate so the next dialog open re-fetches the authoritative list.
+        invalidateSharesCache();
         toastSuccess("Access revoked");
       } catch (err) {
         toastError(`Failed to revoke: ${err instanceof Error ? err.message : String(err)}`);
