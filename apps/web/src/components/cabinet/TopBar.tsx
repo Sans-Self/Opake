@@ -29,7 +29,6 @@ export function TopBar({ onMenuToggle, menuOpen = false }: TopBarProps) {
     handleClear: handleSearchClear,
   } = useSearchInput();
   const session = useAuthStore((s) => s.session);
-  // eslint-disable-next-line @typescript-eslint/unbound-method -- Zustand actions don't use `this`
   const logout = useAuthStore((s) => s.logout);
 
   const active = session.status === "active" ? session : null;

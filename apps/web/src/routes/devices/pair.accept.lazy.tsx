@@ -91,7 +91,7 @@ function PairAcceptPage() {
         removeLoading("pair-accept");
       }
     },
-    [addLoading, navigate, removeLoading],
+    [addLoading, isLoading, navigate, removeLoading],
   );
 
   return (

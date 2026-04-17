@@ -73,7 +73,7 @@ export function Callout({ type, children }: CalloutProps) {
 
 /* ─── Platform toggle (Web App / CLI tabs) ─────────────────────────────────── */
 
-const PlatformContext = createContext<string>("Web App");
+const PlatformContext = createContext("Web App");
 
 interface PlatformToggleProps {
   readonly children: ReactNode;

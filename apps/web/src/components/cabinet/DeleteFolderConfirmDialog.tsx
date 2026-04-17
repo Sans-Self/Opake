@@ -10,17 +10,12 @@ interface DeleteFolderConfirmDialogProps {
   readonly onConfirm: (uri: string) => void;
 }
 
-interface DescendantCounts {
-  readonly documents: number;
-  readonly directories: number;
-}
-
 export const DeleteFolderConfirmDialog = forwardRef<
   DeleteFolderDialogHandle,
   DeleteFolderConfirmDialogProps
 >(function DeleteFolderConfirmDialog({ onConfirm }, ref) {
   const innerRef = useRef<ConfirmDialogHandle>(null);
-  const [counts, setCounts] = useState<DescendantCounts>({ documents: 0, directories: 0 });
+  const [counts, setCounts] = useState({ documents: 0, directories: 0 });
 
   useImperativeHandle(ref, () => ({
     show: (uri: string, name: string, documents: number, directories: number) => {

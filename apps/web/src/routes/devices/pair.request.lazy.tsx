@@ -17,7 +17,7 @@ const POLL_INTERVAL_MS = 3000;
 // Module-level promise dedup: WASM async methods hold RefCell<&mut self>,
 // so concurrent calls on the same context panic. StrictMode double-mounts
 // would fire two createPairRequest calls — this ensures only one runs.
-let activePairInit: Promise<PairRequestResult> | null = null;
+const pairInitState = { current: null as Promise<PairRequestResult> | null };
 
 // ---------------------------------------------------------------------------
 // Page — new device requesting identity from an existing device
@@ -56,8 +56,8 @@ function PairRequestPage() {
       addLoading("pair-request-init");
       try {
         // Deduplicate: StrictMode double-mount shares one WASM call.
-        activePairInit ??= createPairRequest();
-        const pairResult = await activePairInit;
+        pairInitState.current ??= createPairRequest();
+        const pairResult = await pairInitState.current;
         ephemeralPrivKeyRef.current = pairResult.ephemeralPrivateKey;
 
         if (cancelledRef.current) return;
@@ -114,7 +114,7 @@ function PairRequestPage() {
           message: err instanceof Error ? err.message : String(err),
         });
       } finally {
-        activePairInit = null;
+        pairInitState.current = null;
         removeLoading("pair-request-init");
       }
     }
