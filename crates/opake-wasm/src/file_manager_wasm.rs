@@ -385,6 +385,21 @@ impl WasmFileManagerHandle {
         to_js(&shares)
     }
 
+    #[wasm_bindgen(js_name = createPendingShare)]
+    pub async fn create_pending_share(
+        &self,
+        document_uri: &str,
+        recipient: &str,
+        permissions: &str,
+        note: Option<String>,
+    ) -> Result<String, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
+        let mut mgr = opake.file_manager(ctx);
+        mgr.create_pending_share(document_uri, recipient, permissions, note.as_deref())
+            .await
+            .map_err(wasm_err)
+    }
+
     #[wasm_bindgen(js_name = deleteRecursive)]
     pub async fn delete_recursive(&self, uri: &str) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;

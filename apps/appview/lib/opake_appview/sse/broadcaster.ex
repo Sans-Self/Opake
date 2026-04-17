@@ -65,7 +65,7 @@ defmodule OpakeAppview.SSE.Broadcaster do
       end
 
     if owner = get(attrs, :owner_did), do: broadcast(Topics.personal(owner), "grant:#{action}", payload)
-    if action == :upsert, do: maybe_broadcast_recipient(attrs, payload)
+    maybe_broadcast_recipient(attrs, payload, action)
   rescue
     e -> Logger.warning("[Broadcaster] grant broadcast failed: #{inspect(e)}")
   end
@@ -144,8 +144,10 @@ defmodule OpakeAppview.SSE.Broadcaster do
     Phoenix.PubSub.broadcast(@pubsub, topic, {:sse_event, event_type, payload})
   end
 
-  defp maybe_broadcast_recipient(attrs, payload) do
-    if recipient = get(attrs, :recipient_did), do: broadcast(Topics.personal(recipient), "grant:upsert", payload)
+  defp maybe_broadcast_recipient(attrs, payload, action) do
+    if recipient = get(attrs, :recipient_did) do
+      broadcast(Topics.personal(recipient), "grant:#{action}", payload)
+    end
   end
 
   defp get(attrs, key), do: attrs[key]

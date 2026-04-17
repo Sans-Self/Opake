@@ -23,6 +23,9 @@ use std::time::Duration;
 use futures_util::lock::Mutex;
 use opake_core::client::request_sse_token;
 use opake_core::directories::DirectoryTree;
+use opake_core::inbox_keeper::{
+    self as ik, InboxKeeper, InboxSnapshot, InboxWatcherCallback, InboxWatcherHandle,
+};
 use opake_core::sse::consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
 use opake_core::sse::events::SseEvent;
 use opake_core::sse::wasm_connection::WasmSseTransport;
@@ -88,6 +91,30 @@ impl WasmWorkspaceWatcher {
 }
 
 // ---------------------------------------------------------------------------
+// WasmInboxWatcher — returned by watchInbox, exposes close()
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_name = InboxWatcher)]
+pub struct WasmInboxWatcher {
+    inbox_keeper: Rc<Mutex<InboxKeeper>>,
+    handle: InboxWatcherHandle,
+    closed: Rc<std::cell::Cell<bool>>,
+}
+
+#[wasm_bindgen(js_class = InboxWatcher)]
+impl WasmInboxWatcher {
+    /// Stop receiving notifications. Idempotent.
+    pub async fn close(&self) {
+        if self.closed.get() {
+            return;
+        }
+        self.closed.set(true);
+        let mut keeper = self.inbox_keeper.lock().await;
+        keeper.unwatch(self.handle);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WasmOpakeHandle::watchWorkspaces
 // ---------------------------------------------------------------------------
 
@@ -122,6 +149,30 @@ impl WasmOpakeHandle {
         let handle = keeper.install_watcher(cb);
         Ok(WasmWorkspaceWatcher {
             workspace_keeper: Rc::clone(&self.workspace_keeper),
+            handle,
+            closed: Rc::new(std::cell::Cell::new(false)),
+        })
+    }
+
+    /// Subscribe to live changes in the inbox (incoming grants).
+    ///
+    /// Fires the callback once immediately with the current snapshot
+    /// (which has `loaded = false` and empty entries if the keeper
+    /// hasn't been bootstrapped yet), and again on every change.
+    ///
+    /// The keeper is populated by:
+    ///   - `listInbox()` (bootstrap — replaces the entry set)
+    ///   - SSE `grant:upsert` / `grant:delete` events (incremental)
+    #[wasm_bindgen(js_name = watchInbox)]
+    pub async fn watch_inbox(
+        &self,
+        callback: js_sys::Function,
+    ) -> Result<WasmInboxWatcher, JsError> {
+        let cb = js_inbox_watcher_callback(callback);
+        let mut keeper = self.inbox_keeper.lock().await;
+        let handle = keeper.install_watcher(cb);
+        Ok(WasmInboxWatcher {
+            inbox_keeper: Rc::clone(&self.inbox_keeper),
             handle,
             closed: Rc::new(std::cell::Cell::new(false)),
         })
@@ -297,6 +348,7 @@ impl WasmOpakeHandle {
         let opake_rc = Rc::clone(&self.inner);
         let tree_keeper_rc = Rc::clone(&self.tree_keeper);
         let workspace_keeper_rc = Rc::clone(&self.workspace_keeper);
+        let inbox_keeper_rc = Rc::clone(&self.inbox_keeper);
         let started_flag = Rc::clone(&self.sse_started);
 
         let token_fetcher = make_token_fetcher(Rc::clone(&opake_rc), resolved_url.clone());
@@ -358,6 +410,10 @@ impl WasmOpakeHandle {
                 // trip. Idempotent upserts (same rotation + same data)
                 // don't re-fire watchers — see `WorkspaceKeeper::upsert`.
                 apply_keyring_to_workspace_keeper(&opake_rc, &workspace_keeper_rc, &event).await;
+
+                // Grant events: apply to the inbox keeper so the
+                // "Shared with me" view updates live.
+                apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &event).await;
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -384,13 +440,19 @@ impl WasmOpakeHandle {
 
         let tree_keeper = Rc::clone(&self.tree_keeper);
         let workspace_keeper = Rc::clone(&self.workspace_keeper);
+        let inbox_keeper = Rc::clone(&self.inbox_keeper);
         wasm_bindgen_futures::spawn_local(async move {
             let mut tk = tree_keeper.lock().await;
             tk.uninstall_all();
             drop(tk);
             let mut wk = workspace_keeper.lock().await;
             wk.uninstall_all();
-            log::debug!("[sse] tree_keeper + workspace_keeper drained on stopSseConsumer");
+            drop(wk);
+            let mut ik = inbox_keeper.lock().await;
+            ik.uninstall_all();
+            log::debug!(
+                "[sse] tree_keeper + workspace_keeper + inbox_keeper drained on stopSseConsumer"
+            );
         });
     }
 }
@@ -580,6 +642,63 @@ async fn apply_keyring_to_workspace_keeper(
         }
         _ => {}
     }
+}
+
+/// Apply a grant record event to the `InboxKeeper`.
+///
+/// `GrantUpsert`: build an entry filtered by the caller's DID.
+/// `GrantDelete`: delete by URI. Other events are no-ops.
+async fn apply_grant_to_inbox_keeper(
+    opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
+    inbox_keeper_rc: &Rc<Mutex<InboxKeeper>>,
+    event: &SseEvent,
+) {
+    match event {
+        SseEvent::GrantUpsert(record) => {
+            // Fetch the DID under the opake lock, then drop it before
+            // acquiring the keeper lock (matches the workspace keeper
+            // pattern — keeps the opake mutex free for SSE throughput).
+            let my_did = {
+                let guard = opake_rc.lock().await;
+                let Some(opake) = guard.as_ref() else {
+                    log::warn!("[sse] inbox upsert: opake unavailable");
+                    return;
+                };
+                opake.did().to_string()
+            };
+            let Some(entry) = ik::try_build_entry_from_sse_record(record, &my_did) else {
+                // Not for us — silently drop.
+                return;
+            };
+            let mut keeper = inbox_keeper_rc.lock().await;
+            keeper.upsert(entry);
+        }
+        SseEvent::GrantDelete(payload) => {
+            if let Some(uri) = payload.best_uri() {
+                let mut keeper = inbox_keeper_rc.lock().await;
+                keeper.delete(uri);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Wrap a JS function as an [`InboxWatcherCallback`] that serializes
+/// the snapshot to a JS object on each call.
+fn js_inbox_watcher_callback(callback: js_sys::Function) -> InboxWatcherCallback {
+    Box::new(move |snapshot: &InboxSnapshot| {
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        let snapshot_js = match snapshot.serialize(&serializer) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("[sse] inbox snapshot serialize failed: {e}");
+                return;
+            }
+        };
+        if let Err(e) = callback.call1(&JsValue::NULL, &snapshot_js) {
+            log::warn!("[sse] inbox watcher callback threw: {e:?}");
+        }
+    })
 }
 
 /// Wrap a JS function as a [`WorkspaceWatcherCallback`] that serializes

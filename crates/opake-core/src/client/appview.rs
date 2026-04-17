@@ -418,7 +418,7 @@ mod tests {
         assert!(resp.cursor.is_none());
 
         let req = &mock.requests()[0];
-        assert!(req.url.contains("/api/inbox?did=did:plc:me"));
+        assert_eq!(req.url, "https://appview.test/api/inbox");
         assert!(req
             .headers
             .iter()

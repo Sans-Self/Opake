@@ -11,6 +11,7 @@ import type {
   DocumentMetadata,
   DownloadResult,
   DeleteRecursiveResult,
+  GrantEntry,
 } from "./types";
 import { parseWasmError, wrapWasmErrors } from "./errors";
 import { registerCleanup, unregisterCleanup } from "./finalizer";
@@ -19,6 +20,7 @@ import {
   deleteRecursiveResultSchema,
   directoryTreeSnapshotSchema,
   documentMetadataSchema,
+  grantEntriesSchema,
   treeWithMetadataSchema,
 } from "./schemas";
 
@@ -59,6 +61,12 @@ type WasmFileManager = {
   ): Promise<unknown>;
   revokeShare(grantUri: string): Promise<void>;
   listShares(): Promise<unknown>;
+  createPendingShare(
+    documentUri: string,
+    recipient: string,
+    permissions: string,
+    note: string | null,
+  ): Promise<string>;
   syncAndApplyProposals(): Promise<number>;
   isOwner(): boolean;
   watchDirectory(
@@ -507,6 +515,45 @@ export class FileManager {
   @wrapWasmErrors
   revokeShare(grantUri: string): Promise<void> {
     return this.requireHandle().revokeShare(grantUri);
+  }
+
+  /**
+   * List every grant on the caller's PDS (cabinet only).
+   *
+   * Returns all outgoing shares regardless of which document they target —
+   * callers filter by `grant.document` for per-document views. Metadata
+   * stays encrypted on the wire; callers that need filenames do a
+   * separate `getDocumentMetadata` lookup.
+   */
+  @wrapWasmErrors
+  listShares(): Promise<readonly GrantEntry[]> {
+    return this.requireHandle()
+      .listShares()
+      .then((raw) => grantEntriesSchema.parse(raw)) as Promise<readonly GrantEntry[]>;
+  }
+
+  /**
+   * Queue a pending share for a recipient who hasn't set up Opake yet.
+   *
+   * Writes an `app.opake.pendingShare` record to the caller's PDS. The
+   * daemon retries periodically — when the recipient publishes their
+   * public key, the pending share is replaced with a real grant and the
+   * record is deleted. Pending shares expire after 7 days.
+   *
+   * @param documentUri - URI of the document to share.
+   * @param recipient - Recipient's handle or DID as entered by the user.
+   * @param permissions - Access role (typically `"read"`).
+   * @param note - Optional message carried through to the resulting grant.
+   * @returns The URI of the created pending share record.
+   */
+  @wrapWasmErrors
+  createPendingShare(
+    documentUri: string,
+    recipient: string,
+    permissions: string,
+    note: string | null,
+  ): Promise<string> {
+    return this.requireHandle().createPendingShare(documentUri, recipient, permissions, note);
   }
 
   // ---------------------------------------------------------------------------

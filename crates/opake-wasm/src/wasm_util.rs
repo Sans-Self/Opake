@@ -69,6 +69,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Xrpc { .. } => "Xrpc",
         Error::Appview { .. } => "Appview",
         Error::NotFound(_) => "NotFound",
+        Error::RecipientNotReady(_) => "RecipientNotReady",
         Error::AmbiguousName { .. } => "AmbiguousName",
         Error::AlreadyExists(_) => "AlreadyExists",
         Error::InvalidRecord(_) => "InvalidRecord",

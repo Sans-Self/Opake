@@ -176,6 +176,56 @@ export interface PendingPairRequest {
 export type PairResponseRecord = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
+// Sharing
+// ---------------------------------------------------------------------------
+
+/** A grant record on the sharer's PDS (outgoing share). */
+export interface GrantEntry {
+  readonly uri: string;
+  readonly document: string;
+  readonly recipient: string;
+  readonly createdAt: string;
+  readonly expiresAt: string | null;
+}
+
+/** An incoming grant as indexed by the AppView (shared-with-me). */
+export interface InboxGrant {
+  readonly uri: string;
+  readonly ownerDid: string;
+  readonly documentUri: string;
+  readonly createdAt: string;
+}
+
+/** Snapshot emitted by `watchInbox` — mirrors the keeper's internal shape. */
+export interface InboxSnapshot {
+  readonly entries: readonly InboxGrant[];
+  readonly loaded: boolean;
+}
+
+/**
+ * Handle returned by `Opake.watchInbox`. Call `.close()` to unsubscribe —
+ * typically from a React useEffect cleanup.
+ */
+export interface InboxWatcher {
+  /** Stop receiving notifications. Idempotent. */
+  close(): void;
+}
+
+/** Decrypted grant metadata — name + raw `DocumentMetadata`. */
+export interface ResolvedGrantMetadata {
+  readonly name: string;
+  readonly metadata: DocumentMetadata;
+}
+
+/** A queued outgoing share waiting for the recipient to publish a public key. */
+export interface PendingShareEntry {
+  readonly uri: string;
+  readonly document: string;
+  readonly recipient: string;
+  readonly createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Invitations
 // ---------------------------------------------------------------------------
 

@@ -6,6 +6,7 @@ import {
   NotePencilIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
+  SlidersHorizontalIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import { DropdownMenu } from "@/components/DropdownMenu";
@@ -20,6 +21,7 @@ interface FileActionMenuProps {
   readonly onRename?: () => void;
   readonly onMove?: () => void;
   readonly onShare?: () => void;
+  readonly onManageSharing?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -54,6 +56,15 @@ function buildFileItems(props: FileActionMenuProps): readonly MenuItem[] {
     ...(props.onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: props.onPreview }] : []),
     { icon: PencilSimpleIcon, label: "Edit details", onClick: props.onEditMetadata },
     { icon: ShareNetworkIcon, label: "Share\u2026", onClick: props.onShare },
+    ...(props.onManageSharing
+      ? [
+          {
+            icon: SlidersHorizontalIcon,
+            label: "Manage sharing\u2026",
+            onClick: props.onManageSharing,
+          },
+        ]
+      : []),
     { icon: ArrowBendUpRightIcon, label: "Move to\u2026", onClick: props.onMove },
     { icon: DownloadSimpleIcon, label: "Download", onClick: props.onDownload },
     { icon: TrashIcon, label: "Delete", onClick: props.onDelete },

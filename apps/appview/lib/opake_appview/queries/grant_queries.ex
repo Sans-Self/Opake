@@ -27,6 +27,16 @@ defmodule OpakeAppview.Queries.GrantQueries do
     |> Repo.delete_all()
   end
 
+  @doc """
+  Returns `{owner_did, recipient_did}` for a grant URI, or `nil` if not found.
+  Used by the broadcaster to fan out delete events before the row is removed.
+  """
+  @spec grant_parties(String.t()) :: {String.t(), String.t()} | nil
+  def grant_parties(uri) do
+    from(g in Grant, where: g.uri == ^uri, select: {g.owner_did, g.recipient_did})
+    |> Repo.one()
+  end
+
   @spec list_inbox(String.t(), keyword()) :: {[Grant.t()], String.t() | nil}
   def list_inbox(recipient_did, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)

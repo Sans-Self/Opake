@@ -52,3 +52,30 @@ After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry`
 `stopSseConsumer` → `WorkspaceKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). `detachWatcher` (store-level) closes the JS watcher handle and clears the bootstrap promise without touching store state, so a remount reinstalls a fresh watcher without a flash-to-empty.
 
 See `WorkspaceKeeper` in `crates/opake-core/src/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
+
+## Inbox live updates
+
+The inbox (incoming shares) is kept current without polling via the SSE consumer and `InboxKeeper`.
+
+**Cold start (bootstrap)**
+
+1. `listInbox` calls the appview's `/api/inbox` endpoint → returns paginated `InboxGrant` records for the authenticated DID.
+2. `InboxKeeper::bootstrap` replaces the entry set and flips `loaded = true`. All registered `watchInbox` callbacks receive an updated snapshot immediately.
+
+**Incremental updates (SSE)**
+
+SSE `grant:upsert` events route to `apply_grant_to_inbox_keeper`:
+
+1. The appview broadcasts `grant:upsert` to the **recipient's** personal topic (in addition to the owner's).
+2. `InboxKeeper::upsert` adds or updates the entry. Deduplication: if the new entry equals the existing one, no callbacks fire.
+
+SSE `grant:delete` events:
+
+1. The appview fetches `owner_did` + `recipient_did` from the DB **before** deleting the row (the firehose delete payload carries only the URI). Both personal topics receive `grant:delete`.
+2. `InboxKeeper::delete(uri)` removes the entry and fires callbacks.
+
+**Watcher teardown**
+
+`stopSseConsumer` → `InboxKeeper::uninstall_all` (clears entries, watchers, resets `loaded`).
+
+See `InboxKeeper` in `crates/opake-core/src/inbox_keeper/` and `apply_grant_to_inbox_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.

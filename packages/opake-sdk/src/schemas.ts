@@ -208,6 +208,108 @@ export const treeWithMetadataSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Sharing
+// ---------------------------------------------------------------------------
+
+/**
+ * A grant record on the sharer's PDS. The WASM `list_shares` binding
+ * emits snake_case fields straight from `GrantEntry` in core — we map
+ * to camelCase here and surface only the fields JS consumers need (the
+ * `encrypted_metadata` envelope stays in Rust).
+ */
+export const grantEntrySchema = z
+  .object({
+    uri: z.string(),
+    document: z.string(),
+    recipient: z.string(),
+    created_at: z.string(),
+    expires_at: z.string().nullable().optional(),
+  })
+  .transform((r) => ({
+    uri: r.uri,
+    document: r.document,
+    recipient: r.recipient,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at ?? null,
+  }));
+
+export type GrantEntry = z.output<typeof grantEntrySchema>;
+
+export const grantEntriesSchema = z.array(grantEntrySchema);
+
+/**
+ * An incoming grant indexed by the AppView. Fields are snake_case on
+ * the wire (serde) and get camelCased here.
+ */
+export const inboxGrantSchema = z
+  .object({
+    uri: z.string(),
+    owner_did: z.string(),
+    document_uri: z.string(),
+    created_at: z.string(),
+  })
+  .transform((r) => ({
+    uri: r.uri,
+    ownerDid: r.owner_did,
+    documentUri: r.document_uri,
+    createdAt: r.created_at,
+  }));
+
+export type InboxGrant = z.output<typeof inboxGrantSchema>;
+
+export const inboxGrantsSchema = z.array(inboxGrantSchema);
+
+/** Snapshot fired by `watchInbox`. */
+export const inboxSnapshotSchema = z
+  .object({
+    entries: z.array(inboxGrantSchema),
+    loaded: z.boolean(),
+  })
+  .transform((r) => ({
+    entries: r.entries,
+    loaded: r.loaded,
+  }));
+
+export type InboxSnapshot = z.output<typeof inboxSnapshotSchema>;
+
+/**
+ * Decrypted grant metadata — filename + the underlying `DocumentMetadata`.
+ * The WASM binding emits `{ name, metadata: DocumentMetadata }` with
+ * core's snake_case serde format — the nested metadata piggybacks on
+ * `documentMetadataSchema`.
+ */
+export const resolvedGrantMetadataSchema = z
+  .object({
+    name: z.string(),
+    metadata: documentMetadataSchema,
+  })
+  .transform((r) => ({
+    name: r.name,
+    metadata: r.metadata,
+  }));
+
+export type ResolvedGrantMetadata = z.output<typeof resolvedGrantMetadataSchema>;
+
+/** Pending share entry as emitted by `list_pending_shares`. */
+export const pendingShareEntrySchema = z
+  .object({
+    uri: z.string(),
+    document: z.string(),
+    recipient: z.string(),
+    created_at: z.string(),
+  })
+  .transform((r) => ({
+    uri: r.uri,
+    document: r.document,
+    recipient: r.recipient,
+    createdAt: r.created_at,
+  }));
+
+export type PendingShareEntry = z.output<typeof pendingShareEntrySchema>;
+
+export const pendingShareEntriesSchema = z.array(pendingShareEntrySchema);
+
+// ---------------------------------------------------------------------------
 // Pairing
 // ---------------------------------------------------------------------------
 

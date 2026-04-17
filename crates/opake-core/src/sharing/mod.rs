@@ -14,8 +14,8 @@ pub use create::{create_grant, GrantParams};
 pub use heal::{heal_stale_grants, HealResult};
 pub use list::{list_grants, GrantEntry};
 pub use pending::{
-    cancel_pending_share, list_pending_shares, retry_pending_shares, PendingShareEntry,
-    RetryParams, RetryResult, DEFAULT_PENDING_SHARE_TTL_SECONDS,
+    cancel_pending_share, create_pending_share, list_pending_shares, retry_pending_shares,
+    PendingShareEntry, RetryParams, RetryResult, DEFAULT_PENDING_SHARE_TTL_SECONDS,
 };
 pub use revoke::revoke_grant;
 

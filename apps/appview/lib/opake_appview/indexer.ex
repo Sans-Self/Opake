@@ -140,9 +140,18 @@ defmodule OpakeAppview.Indexer do
 
   defp dispatch({:delete_grant, %{uri: uri}}, _time_us, _now) do
     Logger.info("[Indexer] grant delete: #{uri}")
+    # Fetch parties before deleting — the firehose delete payload carries only
+    # the URI. We need owner_did + recipient_did to fan out SSE deletes to both
+    # personal topics. If the row is already gone (idempotent replay), parties
+    # is nil and the broadcaster falls back to owner-only via the uri attrs.
+    parties = GrantQueries.grant_parties(uri)
     GrantQueries.delete_grant(uri)
     emit_event_telemetry("app.opake.grant", :delete, :ok)
-    Broadcaster.broadcast_grant(%{uri: uri}, :delete)
+    attrs = case parties do
+      {owner_did, recipient_did} -> %{uri: uri, owner_did: owner_did, recipient_did: recipient_did}
+      nil -> %{uri: uri}
+    end
+    Broadcaster.broadcast_grant(attrs, :delete)
   end
 
   defp dispatch({:upsert_keyring, attrs}, _time_us, _now) do

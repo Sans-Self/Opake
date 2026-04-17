@@ -18,6 +18,7 @@ interface FileGridCardProps {
   readonly onRename?: () => void;
   readonly onMove?: () => void;
   readonly onShare?: () => void;
+  readonly onManageSharing?: () => void;
   readonly onDownload?: () => void;
   readonly onDelete?: () => void;
   readonly onDeleteFolder?: () => void;
@@ -37,6 +38,7 @@ export function FileGridCard({
   onRename,
   onMove,
   onShare,
+  onManageSharing,
   onDownload,
   onDelete,
   onDeleteFolder,
@@ -93,6 +95,7 @@ export function FileGridCard({
               onRename={onRename}
               onMove={onMove}
               onShare={onShare}
+              onManageSharing={onManageSharing}
               onDownload={onDownload}
               onDelete={onDelete}
               onDeleteFolder={onDeleteFolder}

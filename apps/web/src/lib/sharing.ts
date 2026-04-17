@@ -5,13 +5,18 @@
 // via a pending-share queue instead of blocking with a raw error.
 
 import { getOpake } from "@/stores/auth";
-import type { ResolvedIdentity } from "@opake/sdk";
+import { OpakeError, type ResolvedIdentity } from "@opake/sdk";
 
 /**
  * Thrown when a recipient has a valid handle/DID but hasn't published
  * an X25519 public key yet (no identity record on their PDS). The
  * caller should enqueue a pending share in this case rather than
  * failing the whole flow.
+ *
+ * Distinct from a generic `OpakeError { kind: "NotFound" }` which
+ * covers handle/DID resolution failures (i.e. the handle doesn't exist
+ * at all — likely a typo). Core emits `RecipientNotReady` only after
+ * successfully resolving the DID document but finding no publicKey record.
  */
 export class RecipientNotReadyError extends Error {
   constructor(message: string) {
@@ -23,27 +28,17 @@ export class RecipientNotReadyError extends Error {
 /**
  * Resolve a recipient handle or DID to their identity (DID + public key).
  *
- * @throws RecipientNotReadyError if the recipient has no published identity.
- * @throws Error (generic) on network or resolution failure.
+ * @throws RecipientNotReadyError if the recipient exists but hasn't set up Opake.
+ * @throws OpakeError { kind: "NotFound" } if the handle/DID doesn't exist.
+ * @throws Error on network or other failure.
  */
 export async function resolveRecipient(handle: string): Promise<ResolvedIdentity> {
-  const identity = await getOpake()
+  return getOpake()
     .resolveIdentity(handle)
     .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      // The SDK throws a generic error when the identity record is absent —
-      // sniff the message to decide whether to raise the "not ready" error.
-      if (/publicKey|public key|not found|no identity/i.test(message)) {
-        throw new RecipientNotReadyError(message);
+      if (err instanceof OpakeError && err.kind === "RecipientNotReady") {
+        throw new RecipientNotReadyError(err.message);
       }
       throw err;
     });
-
-  if (identity.publicKey.length === 0) {
-    throw new RecipientNotReadyError(
-      `${handle} has an account but hasn't published a public key yet.`,
-    );
-  }
-
-  return identity;
 }

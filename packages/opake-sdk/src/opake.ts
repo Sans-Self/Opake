@@ -13,8 +13,14 @@ import type { Storage } from "./storage";
 import type {
   AccountConfig,
   AccountConfigPatch,
+  DownloadResult,
+  InboxGrant,
+  InboxSnapshot,
+  InboxWatcher,
   MutationResult,
   OpakeInitOptions,
+  PendingShareEntry,
+  ResolvedGrantMetadata,
   ResolvedIdentity,
   ResolvedWorkspace,
   WorkspaceEntry,
@@ -26,7 +32,12 @@ import { OpakeError, parseWasmError, wrapWasmErrors } from "./errors";
 import {
   resolvedIdentitySchema,
   createWorkspaceResultSchema,
+  downloadResultSchema,
+  inboxGrantsSchema,
+  inboxSnapshotSchema,
   listWorkspacesResultSchema,
+  pendingShareEntriesSchema,
+  resolvedGrantMetadataSchema,
   syncSingleResultSchema,
   workspaceSnapshotSchema,
   type WorkspaceSnapshot,
@@ -52,6 +63,12 @@ type WasmOpakeContext = import("../wasm/opake.js").OpakeContext;
 
 /** Internal shape of the WASM `WorkspaceWatcher` object. */
 type WasmWorkspaceWatcherHandle = {
+  close(): Promise<void>;
+  free(): void;
+};
+
+/** Internal shape of the WASM `InboxWatcher` object. */
+type WasmInboxWatcherHandle = {
   close(): Promise<void>;
   free(): void;
 };
@@ -883,6 +900,146 @@ export class Opake {
     failed: number;
   }> {
     return this.requireContext().retryPendingSharesViaOpake();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sharing — inbox + pending shares + cross-PDS grant download
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch every incoming grant from the AppView.
+   *
+   * Also bootstraps the in-memory `InboxKeeper` — any current or future
+   * `watchInbox` callers receive a fresh snapshot with `loaded = true`.
+   * Once bootstrapped, SSE `grant:upsert` / `grant:delete` events keep
+   * the keeper in sync without further `listInbox` round-trips.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  listInbox(): Promise<readonly InboxGrant[]> {
+    return this.requireContext()
+      .listInbox(null)
+      .then((raw) => inboxGrantsSchema.parse(raw)) as Promise<readonly InboxGrant[]>;
+  }
+
+  /**
+   * Download and decrypt a shared document using a grant URI.
+   *
+   * Cross-PDS — uses the recipient's identity key to unwrap the content
+   * key embedded in the grant, then fetches and decrypts the blob from
+   * the grant owner's PDS. All network I/O is unauthenticated (public
+   * PDS endpoints).
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  downloadFromGrant(grantUri: string): Promise<DownloadResult> {
+    return this.requireContext().downloadFromGrant(grantUri).then(downloadResultSchema.parse);
+  }
+
+  /**
+   * Resolve a grant's document metadata (filename + encrypted fields)
+   * without downloading the blob.
+   *
+   * Cross-PDS — fetches grant + document records from the owner's PDS,
+   * unwraps the content key, decrypts metadata. Useful for rendering
+   * a "shared with me" list without paying the download cost for
+   * every entry.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  resolveGrantMetadata(grantUri: string): Promise<ResolvedGrantMetadata> {
+    return this.requireContext()
+      .resolveGrantMetadata(grantUri)
+      .then(resolvedGrantMetadataSchema.parse);
+  }
+
+  /**
+   * List every pending (queued) outgoing share on the caller's PDS.
+   *
+   * A pending share exists when a recipient hadn't set up Opake yet at
+   * the time of sharing. The daemon retries until the recipient
+   * publishes a public key or the share expires (7 days).
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  listPendingShares(): Promise<readonly PendingShareEntry[]> {
+    return this.requireContext()
+      .listPendingShares()
+      .then((raw) => pendingShareEntriesSchema.parse(raw)) as Promise<readonly PendingShareEntry[]>;
+  }
+
+  /** Cancel (delete) a pending share by its AT-URI. */
+  @wrapWasmErrors
+  @withTokenGuard
+  cancelPendingShare(uri: string): Promise<void> {
+    return this.requireContext().cancelPendingShare(uri);
+  }
+
+  /**
+   * Subscribe to live changes in the inbox (incoming grants).
+   *
+   * Fires the handler once immediately with the current snapshot
+   * (`loaded: false` + empty `entries` if the keeper hasn't been
+   * bootstrapped yet), and again on every `grant:upsert` / `grant:delete`
+   * SSE event. The initial `listInbox` call populates the keeper.
+   *
+   * Mirrors `watchWorkspaces`: returns a synchronous handle; registration
+   * is kicked off eagerly and `close()` chains onto the pending Promise.
+   *
+   * @example
+   * ```tsx
+   * useEffect(() => {
+   *   const watcher = opake.watchInbox((snapshot) => {
+   *     setInbox(snapshot.entries);
+   *     setLoaded(snapshot.loaded);
+   *   });
+   *   return () => watcher.close();
+   * }, [opake]);
+   * ```
+   */
+  watchInbox(handler: (snapshot: InboxSnapshot) => void): InboxWatcher {
+    const adapter = (raw: unknown) => {
+      let snapshot: InboxSnapshot;
+      try {
+        snapshot = inboxSnapshotSchema.parse(raw);
+      } catch (err) {
+        console.warn("[opake-sdk] watchInbox snapshot parse failed:", err);
+        return;
+      }
+      try {
+        handler(snapshot);
+      } catch (err) {
+        console.warn("[opake-sdk] watchInbox handler threw:", err);
+      }
+    };
+
+    const pending = this.requireContext().watchInbox(adapter);
+    let closed = false;
+    let wasmWatcher: WasmInboxWatcherHandle | null = null;
+
+    pending.then(
+      (w) => {
+        if (closed) {
+          void w.close();
+          return;
+        }
+        wasmWatcher = w as WasmInboxWatcherHandle;
+      },
+      (err: unknown) => {
+        console.warn("[opake-sdk] watchInbox registration failed:", err);
+      },
+    );
+
+    return {
+      close: () => {
+        if (closed) return;
+        closed = true;
+        if (wasmWatcher) {
+          void wasmWatcher.close();
+          wasmWatcher = null;
+        }
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------

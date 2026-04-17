@@ -1,13 +1,11 @@
 use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::crypto::{self, GrantMetadata, OsRng};
 use opake_core::error::Error;
-use opake_core::records::{PendingShare, PENDING_SHARE_COLLECTION};
 use opake_core::resolve;
 
 use crate::commands::Execute;
-use crate::session::{self, CommandContext};
+use crate::session::CommandContext;
 use opake_core::client::ReqwestTransport;
 
 #[derive(Args)]
@@ -57,22 +55,7 @@ impl Execute for NewShareCommand {
             }
             Err(Error::NotFound(_)) => {
                 // Recipient hasn't set up Opake — queue pending share.
-                // This path uses fetch_content_key from FileManager, then
-                // falls back to raw client for the pending share record.
-                let content_key = mgr.fetch_content_key(&uri).await?;
-
-                let metadata = GrantMetadata {
-                    permissions: Some("read".to_string()),
-                    note: self.note.clone(),
-                };
-                let encrypted_metadata =
-                    crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng)?;
-
-                let now = session::chrono_now();
-                let pending =
-                    PendingShare::new(uri, self.recipient.clone(), encrypted_metadata, now);
-
-                mgr.create_record(PENDING_SHARE_COLLECTION, &pending)
+                mgr.create_pending_share(&uri, &self.recipient, "read", self.note.as_deref())
                     .await?;
 
                 println!(

@@ -341,6 +341,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
             onMoveEntry={handleMoveEntry}
             onRenameDirectory={handleRenameDirectory}
             rootLabel={rootLabel}
+            allowSharing={context.kind === "cabinet"}
           />
         )}
       </PanelShell>

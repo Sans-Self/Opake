@@ -7,6 +7,9 @@ export { FileManager, type DirectoryWatcher } from "./file-manager";
 // Schema-driven derived types
 export { type WorkspaceSnapshot } from "./schemas";
 
+// Sharing watcher (live inbox subscription — mirror of WorkspaceWatcher)
+export { type InboxWatcher } from "./types";
+
 // Errors
 export { OpakeError, type OpakeErrorKind } from "./errors";
 
@@ -58,6 +61,11 @@ export {
   type PairResponseRecord,
   type InvitationEntry,
   type TaskDef,
+  type GrantEntry,
+  type InboxGrant,
+  type InboxSnapshot,
+  type ResolvedGrantMetadata,
+  type PendingShareEntry,
 } from "./types";
 
 // Real-time event streaming is WASM-owned:

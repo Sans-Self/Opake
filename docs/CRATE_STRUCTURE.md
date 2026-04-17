@@ -23,6 +23,9 @@ crates/
       workspace_keeper/
         mod.rs         WorkspaceKeeper — in-memory workspace list state. Bootstrapped by `listWorkspaces`, patched by `keyring:upsert` / `keyring:delete` SSE events. `watchWorkspaces` installs snapshot callbacks. Parallel design to TreeKeeper.
         tests.rs       Unit tests
+      inbox_keeper/
+        mod.rs         InboxKeeper — in-memory incoming-share list state. Bootstrapped by `listInbox`, patched by `grant:upsert` / `grant:delete` SSE events (appview fans both to owner and recipient). `watchInbox` installs snapshot callbacks. Parallel design to WorkspaceKeeper; no crypto — entries are already-resolved appview records.
+        tests.rs       Unit tests
       manager/
         mod.rs         FileManager<'a, T, R, S> struct (borrows &mut Opake + &FileContext), create_record passthrough
         types.rs       UploadRequest, UploadResult, DownloadResult, MutationOutcome, FileContext

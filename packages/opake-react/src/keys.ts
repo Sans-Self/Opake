@@ -28,4 +28,13 @@ export const opakeKeys = {
 
   /** Inbox (shared items received). */
   inbox: () => ["opake", "inbox"] as const,
+
+  /** All share queries across every document — used for cross-cutting invalidation. */
+  sharesAll: () => ["opake", "shares"] as const,
+
+  /** Outgoing shares for a specific document. */
+  shares: (documentUri: string) => ["opake", "shares", documentUri] as const,
+
+  /** Queued pending shares (not yet completed by the daemon). */
+  pendingShares: () => ["opake", "pending-shares"] as const,
 } as const;

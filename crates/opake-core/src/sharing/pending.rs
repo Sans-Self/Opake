@@ -19,6 +19,40 @@ use crate::resolve::{self, ResolvedIdentity};
 
 use super::create::{create_grant, GrantParams};
 
+/// Enqueue a pending share for a recipient that hasn't set up Opake yet.
+///
+/// Encrypts the original grant metadata (permissions + note) under the
+/// document's content key so the daemon can reconstruct the full grant
+/// when the recipient publishes their public key. Returns the AT-URI of
+/// the created pendingShare record.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_pending_share(
+    client: &mut XrpcClient<impl Transport>,
+    content_key: &ContentKey,
+    document_uri: &str,
+    recipient: &str,
+    permissions: &str,
+    note: Option<&str>,
+    now: &str,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<String, Error> {
+    let metadata = GrantMetadata {
+        permissions: Some(permissions.to_string()),
+        note: note.map(str::to_string),
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, rng)?;
+    let record = PendingShare::new(
+        document_uri.to_string(),
+        recipient.to_string(),
+        encrypted_metadata,
+        now.to_string(),
+    );
+    let record_ref = client
+        .create_record(PENDING_SHARE_COLLECTION, &record)
+        .await?;
+    Ok(record_ref.uri)
+}
+
 /// Default TTL for pending shares: 7 days.
 pub const DEFAULT_PENDING_SHARE_TTL_SECONDS: i64 = 7 * 24 * 3600;
 
@@ -160,7 +194,10 @@ pub async fn retry_pending_shares(
                         identity_cache.insert(entry.recipient.clone(), Some(id.clone()));
                         id
                     }
-                    Err(Error::NotFound(_)) => {
+                    // Recipient exists but hasn't published their Opake key yet.
+                    // This is exactly the condition that triggered the pending share —
+                    // keep it queued so the next retry can try again.
+                    Err(Error::NotFound(_)) | Err(Error::RecipientNotReady(_)) => {
                         identity_cache.insert(entry.recipient.clone(), None);
                         result.still_pending += 1;
                         continue;
@@ -170,7 +207,8 @@ pub async fn retry_pending_shares(
                             "pending share {}: can't resolve {}: {e}",
                             entry.uri, entry.recipient
                         );
-                        // Don't cache transient errors
+                        // Transient errors (network, 5xx, etc.) are not cached so the
+                        // next retry will attempt resolution again.
                         result.failed += 1;
                         continue;
                     }
@@ -197,7 +235,7 @@ pub async fn retry_pending_shares(
                 .await
                 {
                     Ok(key) => {
-                        content_key_cache.insert(entry.document.clone(), ContentKey(key.0));
+                        content_key_cache.insert(entry.document.clone(), key.clone());
                         key
                     }
                     Err(e) => {

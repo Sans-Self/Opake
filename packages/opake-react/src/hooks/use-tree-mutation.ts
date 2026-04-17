@@ -53,10 +53,9 @@ export function useTreeMutation<TInput, TResult>(
 
     onMutate: options.optimisticUpdate
       ? async (input) => {
-          // Narrow the optimisticUpdate callback once so the closure
-          // below isn't fighting the "options might have changed"
-          // widening. This also avoids the non-null assertion.
-          const apply = options.optimisticUpdate;
+          // Narrow once: we're inside the `options.optimisticUpdate` truthy
+          // branch but TS can't flow that into an async callback body.
+          const apply = options.optimisticUpdate!;
           await queryClient.cancelQueries({ queryKey: key });
           const previous = queryClient.getQueryData<DirectoryTreeSnapshot>(key);
 

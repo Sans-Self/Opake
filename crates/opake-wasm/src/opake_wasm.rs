@@ -23,6 +23,7 @@
 use std::rc::Rc;
 
 use futures_util::lock::Mutex;
+use opake_core::inbox_keeper::{self as ik, InboxKeeper};
 use opake_core::tree_keeper::TreeKeeper;
 use opake_core::workspace_keeper::WorkspaceKeeper;
 use serde::Serialize;
@@ -52,6 +53,10 @@ pub struct WasmOpakeHandle {
     /// `tree_keeper` so directory watcher fires and workspace list fires
     /// don't block each other.
     pub(crate) workspace_keeper: Rc<Mutex<WorkspaceKeeper>>,
+    /// Live inbox state. Bootstrapped from `listInbox` and patched
+    /// incrementally from SSE `grant:upsert` / `grant:delete` events.
+    /// JS subscribes via `watchInbox`.
+    pub(crate) inbox_keeper: Rc<Mutex<InboxKeeper>>,
     /// `true` while an SSE consumer task is alive. Doubles as both the
     /// idempotency gate on `startSseConsumer` and the cancellation
     /// signal read by the consumer loop — `stopSseConsumer` clears it,
@@ -76,6 +81,7 @@ impl WasmOpakeHandle {
             inner: Rc::new(Mutex::new(Some(opake))),
             tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
             workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
+            inbox_keeper: Rc::new(Mutex::new(InboxKeeper::new())),
             sse_started: Rc::new(std::cell::Cell::new(false)),
         })
     }
@@ -557,6 +563,39 @@ impl WasmOpakeHandle {
         to_js(&result)
     }
 
+    /// List pending (queued) outgoing shares on the caller's PDS.
+    #[wasm_bindgen(js_name = listPendingShares)]
+    pub async fn list_pending_shares(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let entries = opake.list_pending_shares().await.map_err(wasm_err)?;
+
+        #[derive(Serialize)]
+        struct Entry {
+            uri: String,
+            document: String,
+            recipient: String,
+            created_at: String,
+        }
+
+        let out: Vec<Entry> = entries
+            .into_iter()
+            .map(|e| Entry {
+                uri: e.uri,
+                document: e.document,
+                recipient: e.recipient,
+                created_at: e.created_at,
+            })
+            .collect();
+        to_js(&out)
+    }
+
+    /// Cancel a pending share by AT-URI.
+    #[wasm_bindgen(js_name = cancelPendingShare)]
+    pub async fn cancel_pending_share(&self, uri: &str) -> Result<(), JsError> {
+        let mut opake = self.opake().await?;
+        opake.cancel_pending_share(uri).await.map_err(wasm_err)
+    }
+
     /// Retry all pending shares (resolve recipients, create grants).
     #[wasm_bindgen(js_name = retryPendingSharesViaOpake)]
     pub async fn retry_pending_shares_via_opake(&self) -> Result<JsValue, JsError> {
@@ -692,6 +731,13 @@ impl WasmOpakeHandle {
     }
 
     /// Fetch all incoming grants from the AppView.
+    ///
+    /// Side effect: bootstraps the shared `InboxKeeper` with the result.
+    /// Any `watchInbox` callers (current or future) receive a fresh
+    /// snapshot with `loaded = true` as part of this call. Once
+    /// bootstrapped, incremental SSE `grant:upsert` / `grant:delete`
+    /// events keep the keeper in sync without further `listInbox`
+    /// round-trips.
     #[wasm_bindgen(js_name = listInbox)]
     pub async fn list_inbox(&self, appview_url: Option<String>) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
@@ -699,6 +745,16 @@ impl WasmOpakeHandle {
             .list_inbox(appview_url.as_deref())
             .await
             .map_err(wasm_err)?;
+        drop(opake);
+
+        let entries: Vec<opake_core::inbox_keeper::InboxEntry> =
+            grants.iter().map(ik::entry_from_appview_grant).collect();
+
+        {
+            let mut keeper = self.inbox_keeper.lock().await;
+            keeper.bootstrap(entries);
+        }
+
         to_js(&grants)
     }
 

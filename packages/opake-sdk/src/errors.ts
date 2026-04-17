@@ -7,6 +7,7 @@
 /** Error kinds matching opake-core's Error enum variants. */
 export type OpakeErrorKind =
   | "NotFound"
+  | "RecipientNotReady"
   | "Auth"
   | "Encryption"
   | "Decryption"
@@ -19,6 +20,7 @@ export type OpakeErrorKind =
   | "AmbiguousName"
   | "Serialization"
   | "Mnemonic"
+  | "Sse"
   | "Unknown";
 
 /**
@@ -47,6 +49,7 @@ export class OpakeError extends Error {
 
 const KNOWN_KINDS = new Set<string>([
   "NotFound",
+  "RecipientNotReady",
   "Auth",
   "Encryption",
   "Decryption",
@@ -59,6 +62,7 @@ const KNOWN_KINDS = new Set<string>([
   "AmbiguousName",
   "Serialization",
   "Mnemonic",
+  "Sse",
 ]);
 
 /**

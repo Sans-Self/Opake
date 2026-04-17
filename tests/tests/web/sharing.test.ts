@@ -40,11 +40,11 @@ test.describe("shared page empty state", () => {
 
     await page.goto(`${webUrl}/cabinet/shared`);
 
-    await expect(page.getByText("No shared files yet")).toBeVisible({
+    await expect(page.getByText("Nothing shared with you yet")).toBeVisible({
       timeout: 10_000,
     });
     await expect(
-      page.getByText("Share files from the file action menu"),
+      page.getByText("Files others share with your handle show up here."),
     ).toBeVisible();
 
     const banner = page.getByRole("alert");

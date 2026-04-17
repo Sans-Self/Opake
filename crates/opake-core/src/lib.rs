@@ -29,6 +29,7 @@ pub mod daemon;
 pub mod directories;
 pub mod documents;
 pub mod error;
+pub mod inbox_keeper;
 pub mod keyrings;
 pub mod manager;
 pub mod metadata;

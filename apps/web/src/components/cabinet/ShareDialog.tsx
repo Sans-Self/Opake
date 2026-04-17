@@ -70,10 +70,10 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         await getActiveFileManager().share(documentUri, recipient.did, recipient.publicKey, "read");
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
-          // REMOVE: pending share needs core domain method (Opake::create_pending_share)
+          await getActiveFileManager().createPendingShare(documentUri, handle, "read", null);
           setStatus("done");
           toastSuccess(
-            `${handle} hasn't set up Opake yet. Share queued — it will complete automatically once they log in on any device.`,
+            `${handle} hasn't set up Opake yet. Share queued — completes automatically once they log in (expires in 7 days).`,
           );
           dismiss();
           return;

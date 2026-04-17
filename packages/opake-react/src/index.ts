@@ -31,6 +31,12 @@ export {
 } from "./hooks/use-directory-mutations";
 export { useCreateWorkspace } from "./hooks/use-create-workspace";
 
+// Sharing hooks
+export { useInbox } from "./hooks/use-inbox";
+export { useShares } from "./hooks/use-shares";
+export { useShareFile, useRevokeShare } from "./hooks/use-share-mutations";
+export { usePendingShares, useCancelPendingShare } from "./hooks/use-pending-shares";
+
 // Daemon integration
 export { useDaemon } from "./hooks/use-daemon";
 

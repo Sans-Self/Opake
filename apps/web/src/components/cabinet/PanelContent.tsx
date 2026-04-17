@@ -1,4 +1,5 @@
 import { Suspense, useRef } from "react";
+import type { DirectoryTreeSnapshot } from "@opake/sdk";
 import { FolderIcon } from "@phosphor-icons/react";
 import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
@@ -18,7 +19,38 @@ import {
 import { MoveDialog, type MoveDialogHandle } from "./MoveDialog";
 import { RenameDialog, type RenameDialogHandle } from "./RenameDialog";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
+import { ShareManagementDialog, type ShareManagementDialogHandle } from "./ShareManagementDialog";
 import { isPreviewable, isEditable, type FileItem } from "./types";
+
+/** Recursively count document and directory descendants in a tree snapshot. */
+function countDescendants(
+  snapshot: DirectoryTreeSnapshot,
+  uri: string,
+): { documents: number; directories: number } {
+  const dir = snapshot.directories[uri];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+  if (!dir) return { documents: 0, directories: 0 };
+  return dir.entries.reduce(
+    (acc, entry) => {
+      if (entry.type === "directory") {
+        const sub = countDescendants(snapshot, entry.uri);
+        return {
+          documents: acc.documents + sub.documents,
+          directories: acc.directories + 1 + sub.directories,
+        };
+      }
+      return { documents: acc.documents + 1, directories: acc.directories };
+    },
+    { documents: 0, directories: 0 },
+  );
+}
+
+/** Collect all descendant URIs (entries of subdirectories) recursively. */
+function collectDescendantUris(snapshot: DirectoryTreeSnapshot | null, uri: string): string[] {
+  const dir = snapshot?.directories[uri];
+  if (!dir) return [];
+  return dir.entries.flatMap((e) => [e.uri, ...collectDescendantUris(snapshot, e.uri)]);
+}
 import { useTreeSnapshot } from "./TreeSnapshotContext";
 
 interface PanelContentProps {
@@ -35,6 +67,8 @@ interface PanelContentProps {
   readonly onMoveEntry?: (entryUri: string, targetDirectoryUri: string | null) => void;
   readonly onRenameDirectory?: (directoryUri: string, newName: string) => void;
   readonly rootLabel: string;
+  /** Sharing is only supported from the cabinet — hide share actions in workspace context. */
+  readonly allowSharing?: boolean;
 }
 
 export function PanelContent({
@@ -51,6 +85,7 @@ export function PanelContent({
   onMoveEntry,
   onRenameDirectory,
   rootLabel,
+  allowSharing = true,
 }: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
@@ -58,47 +93,21 @@ export function PanelContent({
   const moveDialogRef = useRef<MoveDialogHandle>(null);
   const renameDialogRef = useRef<RenameDialogHandle>(null);
   const shareDialogRef = useRef<ShareDialogHandle>(null);
+  const manageSharingDialogRef = useRef<ShareManagementDialogHandle>(null);
   const treeSnapshot = useTreeSnapshot();
 
   const handleDeleteFolderClick = (item: FileItem) => {
-    const snapshot = treeSnapshot;
-    if (!snapshot) return;
-    // Count descendants from the snapshot
-    const countDescendants = (uri: string): { documents: number; directories: number } => {
-      const dir = snapshot.directories[uri];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-      if (!dir) return { documents: 0, directories: 0 };
-      return dir.entries.reduce(
-        (acc, entry) => {
-          if (entry.type === "directory") {
-            const sub = countDescendants(entry.uri);
-            return {
-              documents: acc.documents + sub.documents,
-              directories: acc.directories + 1 + sub.directories,
-            };
-          }
-          return { documents: acc.documents + 1, directories: acc.directories };
-        },
-        { documents: 0, directories: 0 },
-      );
-    };
-    const counts = countDescendants(item.uri);
+    if (!treeSnapshot) return;
+    const counts = countDescendants(treeSnapshot, item.uri);
     deleteFolderDialogRef.current?.show(item.uri, item.name, counts.documents, counts.directories);
   };
 
   const handleMoveClick = (item: FileItem) => {
-    const snapshot = treeSnapshot;
-    const currentParent = snapshot ? findParentUri(snapshot, item.uri) : null;
-
-    const collectDescendantUris = (uri: string): string[] => {
-      const dir = snapshot?.directories[uri];
-      if (!dir) return [];
-      return dir.entries.flatMap((e) => [e.uri, ...collectDescendantUris(e.uri)]);
-    };
-
+    const currentParent = treeSnapshot ? findParentUri(treeSnapshot, item.uri) : null;
     const disabled: ReadonlySet<string> =
-      item.kind === "folder" ? new Set([item.uri, ...collectDescendantUris(item.uri)]) : new Set();
-
+      item.kind === "folder"
+        ? new Set([item.uri, ...collectDescendantUris(treeSnapshot, item.uri)])
+        : new Set();
     moveDialogRef.current?.show(item.uri, item.name, item.kind, currentParent, disabled);
   };
 
@@ -133,6 +142,7 @@ export function PanelContent({
     onEdit && isEditable(item) ? () => onEdit(item) : undefined;
 
   const FileListComponent = viewMode === "list" ? FileListRow : FileGridCard;
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- many conditional props for a multi-action file panel
   const fileList = items.map((item) => (
     <FileListComponent
       key={item.id}
@@ -147,7 +157,16 @@ export function PanelContent({
         onRenameDirectory ? () => renameDialogRef.current?.show(item.uri, item.name) : undefined
       }
       onMove={onMoveEntry ? () => handleMoveClick(item) : undefined}
-      onShare={() => shareDialogRef.current?.show(item.uri, item.name)}
+      onShare={
+        allowSharing && item.kind === "file"
+          ? () => shareDialogRef.current?.show(item.uri, item.name)
+          : undefined
+      }
+      onManageSharing={
+        allowSharing && item.kind === "file"
+          ? () => manageSharingDialogRef.current?.show(item.uri, item.name)
+          : undefined
+      }
       onDownload={() => onDownload(item.uri)}
       onDelete={() => deleteDialogRef.current?.show(item.uri, item.name)}
       onDeleteFolder={onDeleteFolder ? () => handleDeleteFolderClick(item) : undefined}
@@ -178,6 +197,7 @@ export function PanelContent({
       {onMoveEntry && <MoveDialog ref={moveDialogRef} onMove={onMoveEntry} rootLabel={rootLabel} />}
       {onRenameDirectory && <RenameDialog ref={renameDialogRef} onSave={onRenameDirectory} />}
       <ShareDialog ref={shareDialogRef} />
+      <ShareManagementDialog ref={manageSharingDialogRef} />
     </div>
   );
 }
