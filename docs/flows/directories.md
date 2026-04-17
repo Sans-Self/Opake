@@ -153,16 +153,16 @@ sequenceDiagram
 sequenceDiagram
     participant Member
     participant MemberPDS as Member's PDS
-    participant AppView
+    participant Indexer
     participant OwnerDaemon as Owner's Daemon
     participant OwnerPDS as Owner's PDS
 
     Member->>MemberPDS: createRecord(directoryUpdate, { actionType, keyring, ... })
-    MemberPDS->>AppView: firehose event
-    AppView->>AppView: index in directory_updates
+    MemberPDS->>Indexer: firehose event
+    Indexer->>Indexer: index in directory_updates
 
-    OwnerDaemon->>AppView: GET /api/workspace/directory-updates
-    AppView-->>OwnerDaemon: pending directoryUpdate records
+    OwnerDaemon->>Indexer: GET /api/workspace/directory-updates
+    Indexer-->>OwnerDaemon: pending directoryUpdate records
     OwnerDaemon->>OwnerPDS: apply changes (applyWrites for moves)
 ```
 

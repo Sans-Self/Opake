@@ -15,9 +15,9 @@ RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../apps/web/src/
 
 FROM web-deps AS web-builder
 
-ARG VITE_APPVIEW_URL=https://appview.opake.app
+ARG VITE_INDEXER_URL=https://indexer.opake.app
 ARG VITE_SITE_URL=https://opake.app
-ENV VITE_APPVIEW_URL=$VITE_APPVIEW_URL
+ENV VITE_INDEXER_URL=$VITE_INDEXER_URL
 ENV VITE_SITE_URL=$VITE_SITE_URL
 
 COPY apps/web/ ./

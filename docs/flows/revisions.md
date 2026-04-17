@@ -1,6 +1,6 @@
 # Document Updates (Collaborative Editing)
 
-Collaborative editing via `app.opake.documentUpdate` records. Each editor uploads updates to their own PDS — data stays under their control, and the AppView surfaces pending updates to the document owner. Same pattern as Bluesky replies: your content lives on your PDS, the AppView presents the thread.
+Collaborative editing via `app.opake.documentUpdate` records. Each editor uploads updates to their own PDS — data stays under their control, and the Indexer surfaces pending updates to the document owner. Same pattern as Bluesky replies: your content lives on your PDS, the Indexer presents the thread.
 
 ## Propose Update (Workspace Editor)
 
@@ -91,13 +91,13 @@ When a member is removed from a workspace, their documents need to be migrated. 
 sequenceDiagram
     participant Manager
     participant CLI as Manager's CLI
-    participant AppView
+    participant Indexer
     participant RemovedPDS as Removed Member's PDS
     participant Crypto
     participant ManagerPDS as Manager's PDS
 
-    Manager->>AppView: GET /api/workspace?keyring={uri}
-    AppView-->>Manager: documents including removed member's
+    Manager->>Indexer: GET /api/workspace?keyring={uri}
+    Indexer-->>Manager: documents including removed member's
 
     loop For each orphaned document
         Manager->>RemovedPDS: getRecord + getBlob
@@ -120,23 +120,23 @@ sequenceDiagram
 
 Adoption must happen while the removed member's PDS is still serving data. The daemon should adopt eagerly on removal, not lazily.
 
-## Discovery via AppView
+## Discovery via Indexer
 
-The AppView watches firehose events for `documentUpdate` records and indexes them by target document.
+The Indexer watches firehose events for `documentUpdate` records and indexes them by target document.
 
 ```mermaid
 sequenceDiagram
-    participant AppView
+    participant Indexer
     participant EditorPDS as Editor's PDS
     participant OwnerPDS as Owner's PDS
 
-    EditorPDS->>AppView: Firehose event: new documentUpdate record
-    AppView->>AppView: Validate editor role, index by document URI
+    EditorPDS->>Indexer: Firehose event: new documentUpdate record
+    Indexer->>Indexer: Validate editor role, index by document URI
 
-    Note over AppView: Later, owner queries pending updates
+    Note over Indexer: Later, owner queries pending updates
 
-    OwnerPDS->>AppView: GET /api/workspace/updates?document=at://owner/.../document/tid
-    AppView-->>OwnerPDS: [{ update_uri, author_did, supersedes_uri, created_at }, ...]
+    OwnerPDS->>Indexer: GET /api/workspace/updates?document=at://owner/.../document/tid
+    Indexer-->>OwnerPDS: [{ update_uri, author_did, supersedes_uri, created_at }, ...]
 ```
 
-Without the AppView, discovery falls back to polling each workspace member's PDS for `app.opake.documentUpdate` records whose `document` field matches. Slow but functional.
+Without the Indexer, discovery falls back to polling each workspace member's PDS for `app.opake.documentUpdate` records whose `document` field matches. Slow but functional.

@@ -108,7 +108,7 @@ if (tree.rootUri) {
 ```
 
 `loadTree()` is read-only — it loads from the local cache and syncs deltas
-from the AppView, but does not apply proposals or write to the PDS.
+from the Indexer, but does not apply proposals or write to the PDS.
 
 For the full sync cycle (apply proposals, resolve metadata), use
 `syncAndLoadTree()`:

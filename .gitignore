@@ -1,7 +1,7 @@
 .DS_Store
 /target
-apps/appview/_build/
-apps/appview/deps/
+apps/indexer/_build/
+apps/indexer/deps/
 node_modules/
 bun.lock
 apps/web/dist/

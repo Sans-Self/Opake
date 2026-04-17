@@ -43,7 +43,7 @@ describe("parseWasmError", () => {
       "InvalidRecord",
       "Storage",
       "Xrpc",
-      "Appview",
+      "Indexer",
       "AlreadyExists",
       "AmbiguousName",
       "Serialization",

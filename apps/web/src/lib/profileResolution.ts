@@ -1,12 +1,12 @@
 // Best-effort resolution of a DID → display profile (handle + avatar).
 //
-// Uses Bluesky's public appview so we don't pay DPoP setup just to render
+// Uses Bluesky's public indexer so we don't pay DPoP setup just to render
 // a member list. If the account isn't on bsky, or the fetch fails for
 // any reason, we degrade gracefully to a null profile and callers fall
 // back to the raw DID as display text.
 //
 // Results are memoized per DID for the lifetime of the page — the bsky
-// appview is already cached at the CDN, but coalescing local duplicates
+// indexer is already cached at the CDN, but coalescing local duplicates
 // avoids N parallel fetches when a workspace has many members.
 
 const PUBLIC_API = "https://public.api.bsky.app";

@@ -54,7 +54,7 @@ apps/
                   - FileStorage (impl Storage over filesystem, TOML + JSON)
                   - user interaction (prompts, formatting)
 
-  appview/        Elixir/Phoenix indexer + REST API for grant/keyring discovery
+  indexer/        Elixir/Phoenix indexer + REST API for grant/keyring discovery
                   - Jetstream firehose consumer (WebSockex)
                   - PostgreSQL storage (Ecto)
                   - Phoenix API with DID-scoped Ed25519 auth (Erlang :crypto)
@@ -96,7 +96,7 @@ cargo test -p opake-core            # core only
 cargo test -p opake-cli             # CLI only
 cargo test -- --test-output         # show println output
 
-cd apps/appview && mix test          # appview tests (Elixir/ExUnit)
+cd apps/indexer && mix test          # indexer tests (Elixir/ExUnit)
 cd apps/web && bun run test          # web frontend tests (Vitest + fake-indexeddb)
 ```
 

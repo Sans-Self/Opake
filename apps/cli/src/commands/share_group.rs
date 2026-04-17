@@ -27,7 +27,7 @@ enum ShareAction {
     New(share::NewShareCommand),
     /// List grants you've shared with others
     List(shared::SharedCommand),
-    /// List grants shared with you (via appview)
+    /// List grants shared with you (via indexer)
     Inbox(inbox::InboxCommand),
     /// Revoke a share grant
     ///

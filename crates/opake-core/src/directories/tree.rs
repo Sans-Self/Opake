@@ -197,7 +197,7 @@ impl DirectoryTree {
 
     /// Load the directory hierarchy from the PDS (test use only).
     ///
-    /// Production code uses AppView snapshots via `from_cached_records()`.
+    /// Production code uses Indexer snapshots via `from_cached_records()`.
     #[cfg(test)]
     pub(crate) async fn load(
         client: &mut crate::client::XrpcClient<impl crate::client::Transport>,
@@ -906,7 +906,7 @@ impl DirectoryTree {
         }
     }
 
-    /// Apply a delta from the AppView to cached records, returning a new set.
+    /// Apply a delta from the Indexer to cached records, returning a new set.
     ///
     /// Deleted directories are filtered out. New/updated directories replace
     /// existing records by URI. Pure function — no mutation.

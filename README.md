@@ -56,7 +56,7 @@ No modifications to the PDS. All crypto happens on your machine.
 
 - `opake-core/` — Platform-agnostic library (Rust/WASM).
 - `opake-cli/` — CLI implementation.
-- `appview/` — Elixir/Phoenix indexer for grant discovery.
+- `indexer/` — Elixir/Phoenix indexer for grant discovery.
 - `web/` — React SPA (Vite + TanStack).
 - `lexicons/` — AT Protocol schemas (`app.opake.*`).
 
@@ -65,7 +65,7 @@ No modifications to the PDS. All crypto happens on your machine.
 ```sh
 cargo test           # Rust tests
 bun run wasm:build   # Build WASM for web
-mix setup            # Setup AppView
+mix setup            # Setup Indexer
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit conventions.

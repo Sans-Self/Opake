@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A proposed update to a document owned by another workspace member. Written by an editor to their own PDS. The document owner's client picks up pending updates via the AppView, applies them, and the editor deletes the update record after confirmation.",
+      "description": "A proposed update to a document owned by another workspace member. Written by an editor to their own PDS. The document owner's client picks up pending updates via the indexer, applies them, and the editor deletes the update record after confirmation.",
       "key": "tid",
       "record": {
         "type": "object",

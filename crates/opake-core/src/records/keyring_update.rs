@@ -4,7 +4,7 @@ use super::{default_version, AtBytes, EncryptedMetadata, SCHEMA_VERSION};
 
 pub const KEYRING_UPDATE_COLLECTION: &str = "app.opake.keyringUpdate";
 
-/// Action type strings for matching AppView proposal responses.
+/// Action type strings for matching Indexer proposal responses.
 pub const ACTION_RENAME: &str = "rename";
 pub const ACTION_UPDATE_DESCRIPTION: &str = "updateDescription";
 pub const ACTION_ADD_MEMBER: &str = "addMember";
@@ -15,7 +15,7 @@ pub const ACTION_LEAVE: &str = "leave";
 /// A proposed change to a workspace keyring, with schema version envelope.
 ///
 /// Written by a member to their own PDS. The owner's daemon picks up
-/// pending updates via the AppView and applies them. `#[serde(flatten)]`
+/// pending updates via the Indexer and applies them. `#[serde(flatten)]`
 /// inlines the variant fields alongside `opakeVersion` on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,7 +70,7 @@ pub enum KeyringUpdate {
         role: String,
         created_at: String,
     },
-    /// Leave the workspace. AppView handles visibility immediately;
+    /// Leave the workspace. Indexer handles visibility immediately;
     /// the owner's daemon processes key rotation asynchronously.
     #[serde(rename = "leave")]
     Leave { keyring: String, created_at: String },

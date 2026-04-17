@@ -30,7 +30,7 @@ export interface DaemonHandle {
  * background tasks. Schedules all tasks from the core registry at their
  * configured intervals.
  *
- * For live tree updates, pair this with `opake.startSseConsumer(appviewUrl)`
+ * For live tree updates, pair this with `opake.startSseConsumer(indexerUrl)`
  * and `fileManager.watchDirectory(uri, handler)` — the WASM-side consumer
  * handles SSE events directly and patches trees in place.
  *

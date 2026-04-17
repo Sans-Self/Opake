@@ -100,20 +100,20 @@ web-typecheck:
     cd apps/web && bun run tsc --noEmit
 
 # ---------------------------------------------------------------------------
-# Elixir appview
+# Elixir indexer
 # ---------------------------------------------------------------------------
 
-# Start appview dev server
-appview:
-    cd apps/appview && mix phx.server
+# Start indexer dev server
+indexer:
+    cd apps/indexer && mix phx.server
 
-# Run appview tests
-appview-test:
-    cd apps/appview && mix test
+# Run indexer tests
+indexer-test:
+    cd apps/indexer && mix test
 
-# Build appview release
-appview-release:
-    cd apps/appview && MIX_ENV=prod mix release
+# Build indexer release
+indexer-release:
+    cd apps/indexer && MIX_ENV=prod mix release
 
 # ---------------------------------------------------------------------------
 # E2E tests
@@ -123,7 +123,7 @@ appview-release:
 e2e-cli:
     cd tests && bun test tests/cli/
 
-# Run web e2e tests (requires running web + appview)
+# Run web e2e tests (requires running web + indexer)
 e2e-web:
     cd tests && bun test tests/web/
 
@@ -135,10 +135,10 @@ e2e: e2e-cli e2e-web
 # ---------------------------------------------------------------------------
 
 # Run all checks (CI equivalent)
-validate: fmt clippy rust-test sdk web-lint web-typecheck web-build appview-test
+validate: fmt clippy rust-test sdk web-lint web-typecheck web-build indexer-test
 
-# Run all tests (Rust + SDK + web + appview)
-test: rust-test sdk-test web-test appview-test
+# Run all tests (Rust + SDK + web + indexer)
+test: rust-test sdk-test web-test indexer-test
 
 # Run all lints (Rust + web)
 lint: fmt clippy web-lint web-typecheck
@@ -147,19 +147,19 @@ lint: fmt clippy web-lint web-typecheck
 # Container images
 # ---------------------------------------------------------------------------
 
-# Build container images (appview + web)
+# Build container images (indexer + web)
 images:
-    docker build -f Containerfile.appview \
-        -t {{ registry }}/opake/appview:{{ tag }} \
-        -t {{ registry }}/opake/appview:latest .
+    docker build -f Containerfile.indexer \
+        -t {{ registry }}/opake/indexer:{{ tag }} \
+        -t {{ registry }}/opake/indexer:latest .
     docker build -f Containerfile.web \
         -t {{ registry }}/opake/web:{{ tag }} \
         -t {{ registry }}/opake/web:latest .
 
 # Push container images to registry
 push-images: images
-    docker push {{ registry }}/opake/appview:{{ tag }}
-    docker push {{ registry }}/opake/appview:latest
+    docker push {{ registry }}/opake/indexer:{{ tag }}
+    docker push {{ registry }}/opake/indexer:latest
     docker push {{ registry }}/opake/web:{{ tag }}
     docker push {{ registry }}/opake/web:latest
 

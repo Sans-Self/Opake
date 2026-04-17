@@ -1,6 +1,6 @@
 //! Server-Sent Events consumer infrastructure.
 //!
-//! This module provides the building blocks for consuming the appview's
+//! This module provides the building blocks for consuming the indexer's
 //! `/api/events` SSE stream from both WASM (browser `EventSource`) and
 //! native (tokio + `reqwest::Response::bytes_stream()`) targets. The
 //! design mirrors the existing [`crate::client::Transport`] trait style:

@@ -113,10 +113,10 @@ async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session
 async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     let mut opake = ctx.opake().await?;
 
-    // Single source: the appview indexes every keyring the caller is a
+    // Single source: the indexer sees every keyring the caller is a
     // member of — owned workspaces included, since the owner is always a
     // member of their own. Staleness window exists after `workspace
-    // create` until Jetstream delivers the commit to the appview indexer.
+    // create` until Jetstream delivers the commit to the indexer's firehose consumer.
     let keyrings = opake.discover_member_keyrings(None).await?;
 
     if keyrings.is_empty() {
@@ -128,7 +128,7 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     let did = opake.did();
 
     for kr in &keyrings {
-        let name = keyrings::decrypt_appview_keyring_name(kr, did, &private_key)
+        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &private_key)
             .unwrap_or_else(|| "<encrypted>".into());
         let role_tag = if kr.owner_did == did {
             ""

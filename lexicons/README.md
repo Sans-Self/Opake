@@ -109,7 +109,7 @@ Any keyring member unwraps GK with their private key, then uses GK to unwrap eac
 sequenceDiagram
     participant Editor
     participant EditorPDS as Editor's PDS
-    participant AppView
+    participant Indexer
     participant Owner
     participant OwnerPDS as Owner's PDS
 
@@ -119,12 +119,12 @@ sequenceDiagram
     Editor->>EditorPDS: uploadBlob(new ciphertext)
     Editor->>EditorPDS: createRecord(documentUpdate)
 
-    EditorPDS->>AppView: firehose event
-    AppView->>AppView: validate editor role, index update
+    EditorPDS->>Indexer: firehose event
+    Indexer->>Indexer: validate editor role, index update
 
     Note over Owner,OwnerPDS: 2. Owner applies the update
-    Owner->>AppView: GET /api/workspace/updates
-    AppView-->>Owner: pending documentUpdate records
+    Owner->>Indexer: GET /api/workspace/updates
+    Indexer-->>Owner: pending documentUpdate records
     Owner->>EditorPDS: getBlob(update cid)
     Owner->>OwnerPDS: uploadBlob + putRecord(document)
 
@@ -140,12 +140,12 @@ The owner's client is the only one that writes to the canonical document record.
 sequenceDiagram
     participant Member
     participant MemberPDS as Member's PDS
-    participant AppView
+    participant Indexer
 
     Member->>MemberPDS: createRecord(keyringLeave, { keyring })
-    MemberPDS->>AppView: firehose event
-    AppView->>AppView: remove member from workspace index
-    Note right of AppView: Workspace disappears from<br/>member's sidebar
+    MemberPDS->>Indexer: firehose event
+    Indexer->>Indexer: remove member from workspace index
+    Note right of Indexer: Workspace disappears from<br/>member's sidebar
 ```
 
 The member's wrapped key still exists on the keyring record — they *could* still decrypt. This is a visibility opt-out, not a key revocation. The owner can follow up with a proper removal (key rotation) if needed.

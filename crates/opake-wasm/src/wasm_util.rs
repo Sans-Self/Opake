@@ -67,7 +67,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::KeyWrap(_) => "KeyWrap",
         Error::Auth(_) => "Auth",
         Error::Xrpc { .. } => "Xrpc",
-        Error::Appview { .. } => "Appview",
+        Error::Indexer { .. } => "Indexer",
         Error::NotFound(_) => "NotFound",
         Error::RecipientNotReady(_) => "RecipientNotReady",
         Error::AmbiguousName { .. } => "AmbiguousName",
@@ -105,9 +105,9 @@ pub type WasmOpake = Opake<WasmTransport, OsRng, JsStorage>;
 
 /// Construct an Opake context from a JsStorageAdapter via `for_account`.
 ///
-/// AppView URL is resolved by `for_account`: account config on PDS
-/// overrides the compile-time `DEFAULT_APPVIEW_URL` (set via
-/// `OPAKE_APPVIEW_URL` env var at build time).
+/// Indexer URL is resolved by `for_account`: account config on PDS
+/// overrides the compile-time `DEFAULT_INDEXER_URL` (set via
+/// `OPAKE_INDEXER_URL` env var at build time).
 pub async fn make_opake_from_storage(
     did: Option<&str>,
     storage: crate::js_storage::JsStorageAdapter,

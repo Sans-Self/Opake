@@ -92,7 +92,7 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
 
             // Spawn one long-lived SSE consumer per configured account.
             // Each consumer does an initial catch-up sync on connect,
-            // then streams events from the appview and applies proposals
+            // then streams events from the indexer and applies proposals
             // as they arrive. Record events (DirectoryUpsert,
             // DocumentUpsert, etc.) are dropped — the CLI has no
             // TreeKeeper or UI that needs live tree state.
@@ -263,10 +263,10 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
         }
     };
 
-    let appview_url = match opake.resolve_appview_url(None) {
+    let indexer_url = match opake.resolve_indexer_url(None) {
         Ok(url) => url,
         Err(e) => {
-            warn!("sync: no appview URL for {did}: {e}");
+            warn!("sync: no indexer URL for {did}: {e}");
             return;
         }
     };
@@ -303,7 +303,7 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
     });
 
     let transport = ReqwestSseTransport::with_default_client();
-    let mut consumer = SseConsumer::new(transport, appview_url, token_fetcher, sleep_fn, jitter_fn);
+    let mut consumer = SseConsumer::new(transport, indexer_url, token_fetcher, sleep_fn, jitter_fn);
 
     info!("sync: consumer started for {did}");
 
@@ -408,8 +408,8 @@ async fn build_opake(
     )
     .await?;
 
-    if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
-        opake.set_appview_url(url);
+    if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
+        opake.set_indexer_url(url);
     }
 
     Ok(opake)

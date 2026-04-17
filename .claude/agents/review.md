@@ -35,7 +35,7 @@ opake-wasm    — composes core into browser-callable exports. Bridges JS-Rust.
 opake-sdk     — thin TS wrappers. No business logic. initWasm -> adapter -> wasm.call().
 apps/web      — React UI. Calls SDK, never WASM directly.
 apps/cli      — Rust binary. Calls core directly.
-apps/appview  — Elixir. Indexes PDS firehose, serves workspace queries.
+apps/indexer  — Elixir. Indexes PDS firehose, serves workspace queries.
 ```
 
 **The rule:** if both CLI and web need it, it lives in core. If it's JS-specific glue, it lives in the SDK. If it reimplements core logic in TS, it's wrong — export through WASM.
@@ -76,7 +76,7 @@ If you see a new struct holding key material without `RedactedDebug`, that's a h
 2. `OPAKE_COLLECTIONS` in `crate::scope` (compile-time test enforces this)
 3. Lexicon JSON in `lexicons/`
 4. Permission set `app.opake.authFullAccess.json`
-5. If appview-indexed: `@wanted_collections` in `consumer.ex` + parser + dispatch
+5. If indexer-indexed: `@wanted_collections` in `consumer.ex` + parser + dispatch
 
 A test enforces #1-#2 sync. The rest are manual. Flag any PR that adds a collection and misses any of these.
 
@@ -165,7 +165,7 @@ holds.
 - MockTransport: FIFO response queue.
 - Contract tests, not implementation tests.
 - Bug regressions: named after the bug.
-- Appview: DataCase (queries, async: true), ConnCase (controllers, async: false).
+- Indexer: DataCase (queries, async: true), ConnCase (controllers, async: false).
 
 ## How to Review
 

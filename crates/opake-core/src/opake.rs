@@ -39,17 +39,17 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) storage: S,
     pub(crate) now_fn: fn() -> String,
     pub(crate) now_micros_fn: fn() -> u64,
-    /// Cached appview URL from account config (fetched once at construction).
-    pub(crate) appview_url: Option<String>,
+    /// Cached indexer URL from account config (fetched once at construction).
+    pub(crate) indexer_url: Option<String>,
 }
 
-/// AppView URL baked into the binary at compile time.
+/// Indexer URL baked into the binary at compile time.
 ///
-/// Set via `OPAKE_APPVIEW_URL` env var at build time. Falls back to
+/// Set via `OPAKE_INDEXER_URL` env var at build time. Falls back to
 /// the production URL if unset. Dev builds pick it up from `.envrc`.
-pub const DEFAULT_APPVIEW_URL: &str = match option_env!("OPAKE_APPVIEW_URL") {
+pub const DEFAULT_INDEXER_URL: &str = match option_env!("OPAKE_INDEXER_URL") {
     Some(url) => url,
-    None => "https://appview.opake.app",
+    None => "https://indexer.opake.app",
 };
 
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
@@ -70,7 +70,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             storage,
             now_fn: now,
             now_micros_fn: now_micros,
-            appview_url: None,
+            indexer_url: None,
         }
     }
 
@@ -82,10 +82,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// and identity (encryption keys, if present). If the identity exists
     /// but lacks signing keys, migrates it automatically.
     ///
-    /// AppView URL resolution (highest priority wins):
-    /// 1. Runtime env override — CLI checks `OPAKE_APPVIEW_URL` after construction
+    /// Indexer URL resolution (highest priority wins):
+    /// 1. Runtime env override — CLI checks `OPAKE_INDEXER_URL` after construction
     /// 2. Account config on PDS — fetched best-effort, user-configurable in settings
-    /// 3. `DEFAULT_APPVIEW_URL` — baked in at compile time from `OPAKE_APPVIEW_URL` env var
+    /// 3. `DEFAULT_INDEXER_URL` — baked in at compile time from `OPAKE_INDEXER_URL` env var
     ///
     /// Pass `None` for the default account, or `Some(did)` for a specific one.
     pub async fn for_account(
@@ -124,7 +124,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
         let mut opake = Self::new(client, target_did, identity, rng, storage, now, now_micros);
-        opake.appview_url = Some(DEFAULT_APPVIEW_URL.to_string());
+        opake.indexer_url = Some(DEFAULT_INDEXER_URL.to_string());
         Ok(opake)
     }
 
@@ -203,9 +203,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Workspace resolution --
 
-    /// Resolve a workspace by name via the appview member-keyrings index.
+    /// Resolve a workspace by name via the indexer member-keyrings index.
     ///
-    /// The appview indexes every keyring from the firehose and serves them
+    /// The indexer indexes every keyring from the firehose and serves them
     /// via `/api/keyrings` filtered to ones where the caller is a member —
     /// which includes workspaces the caller owns (they're always a member
     /// of their own). That makes it the single source of truth for
@@ -213,11 +213,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ///
     /// Once a unique URI is picked, [`resolve_workspace_by_uri`] fetches
     /// the canonical record from the owner's PDS and unwraps the group
-    /// key there — so the appview is only trusted for the name → URI map,
+    /// key there — so the indexer is only trusted for the name → URI map,
     /// not for the group key material.
     ///
     /// Limitation: workspace creation writes to the caller's PDS, which
-    /// the appview indexes with some lag (seconds) through the firehose.
+    /// the indexer indexes with some lag (seconds) through the firehose.
     /// A `workspace ls` immediately after `workspace create` may miss the
     /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
@@ -228,7 +228,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let matches: Vec<String> = keyrings
             .iter()
             .filter(|kr| {
-                keyrings::decrypt_appview_keyring_name(kr, &self.did, &private_key).as_deref()
+                keyrings::decrypt_indexer_keyring_name(kr, &self.did, &private_key).as_deref()
                     == Some(name)
             })
             .map(|kr| kr.uri.clone())
@@ -445,9 +445,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Sync all workspaces: apply proposals (owned) + cleanup stale records (member).
     ///
-    /// Discovers all workspaces via the AppView (includes both owned and member
+    /// Discovers all workspaces via the Indexer (includes both owned and member
     /// workspaces). For each:
-    /// - Syncs the tree from AppView
+    /// - Syncs the tree from Indexer
     /// - Cleans up the caller's own applied proposal records from their PDS
     /// - Applies pending proposals if the caller is the owner
     ///
@@ -459,20 +459,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Sync all workspaces with per-workspace result visibility.
     ///
-    /// Discovers workspaces via AppView, syncs each one, returns a result per
+    /// Discovers workspaces via Indexer, syncs each one, returns a result per
     /// workspace. Per-workspace errors are captured (not propagated) so one
     /// failing workspace doesn't block the rest.
     pub async fn sync_owned_workspaces_detailed(
         &mut self,
     ) -> Result<Vec<crate::daemon::WorkspaceSyncResult>, Error> {
         log::trace!("sync: discovering workspaces for {}", self.did);
-        let appview_keyrings = self.discover_member_keyrings(None).await?;
-        log::trace!("sync: found {} workspaces", appview_keyrings.len());
+        let indexer_keyrings = self.discover_member_keyrings(None).await?;
+        log::trace!("sync: found {} workspaces", indexer_keyrings.len());
         let identity = self.require_identity()?;
         let private_key = identity.private_key_bytes()?;
 
-        let mut results = Vec::with_capacity(appview_keyrings.len());
-        for kr in &appview_keyrings {
+        let mut results = Vec::with_capacity(indexer_keyrings.len());
+        for kr in &indexer_keyrings {
             results.push(self.sync_single_workspace(kr, &private_key).await);
         }
 
@@ -482,15 +482,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Sync a single workspace identified by its keyring URI.
     ///
-    /// Fetches all member keyrings from the appview (same as the full sync),
+    /// Fetches all member keyrings from the indexer (same as the full sync),
     /// finds the target, and syncs only that one. Returns `None` if the
     /// keyring URI wasn't found in the member list.
     pub async fn sync_workspace_by_uri(
         &mut self,
         keyring_uri: &str,
     ) -> Result<Option<crate::daemon::WorkspaceSyncResult>, Error> {
-        let appview_keyrings = self.discover_member_keyrings(None).await?;
-        let target = appview_keyrings.iter().find(|kr| kr.uri == keyring_uri);
+        let indexer_keyrings = self.discover_member_keyrings(None).await?;
+        let target = indexer_keyrings.iter().find(|kr| kr.uri == keyring_uri);
         let Some(kr) = target else { return Ok(None) };
 
         let identity = self.require_identity()?;
@@ -506,7 +506,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// propagating — the caller can continue with remaining workspaces.
     async fn sync_single_workspace(
         &mut self,
-        kr: &crate::client::AppviewKeyring,
+        kr: &crate::client::IndexerKeyring,
         private_key: &crate::crypto::X25519PrivateKey,
     ) -> crate::daemon::WorkspaceSyncResult {
         use crate::daemon::WorkspaceSyncResult;
@@ -938,7 +938,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Runs for all members (not just the owner). Compares each of the caller's
     /// own proposals against the current keyring member list. If the proposal's
     /// effect is reflected in the keyring state, deletes the proposal record
-    /// from the caller's PDS so the AppView drops it from its index.
+    /// from the caller's PDS so the Indexer drops it from its index.
     ///
     /// Metadata proposals (rename, updateDescription) are skipped — verifying
     /// encrypted content isn't practical here. They're idempotent, so the owner
@@ -1068,7 +1068,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Leave a workspace. Writes a keyringUpdate with actionType "leave".
     ///
-    /// The AppView handles visibility immediately (stops listing the workspace).
+    /// The Indexer handles visibility immediately (stops listing the workspace).
     /// The owner's daemon processes key rotation asynchronously.
     pub async fn leave_workspace(&mut self, keyring_uri: &str) -> Result<String, Error> {
         let now = self.now();
@@ -1392,63 +1392,63 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         crate::crypto::unwrap_key(&member.wrapped_key, private_key)
     }
 
-    // -- AppView helpers --
+    // -- Indexer helpers --
 
-    /// Override the AppView URL unconditionally (runtime env var override).
-    pub fn set_appview_url(&mut self, url: String) {
-        self.appview_url = Some(url);
+    /// Override the Indexer URL unconditionally (runtime env var override).
+    pub fn set_indexer_url(&mut self, url: String) {
+        self.indexer_url = Some(url);
     }
 
-    /// Resolve the appview URL: cached config → caller default → error.
-    /// Resolve the appview URL to use for a request.
+    /// Resolve the indexer URL: cached config → caller default → error.
+    /// Resolve the indexer URL to use for a request.
     ///
     /// Returns the URL stored on this Opake instance (loaded from config
     /// during `init`), falling back to the provided `default` if no URL
     /// is stored. Returns `NotFound` if neither source has a URL.
     ///
-    /// This is the shared helper behind every appview-touching method
+    /// This is the shared helper behind every indexer-touching method
     /// (`request_sse_token`, `list_inbox`, `discover_member_keyrings`,
     /// etc.) and also used by WASM bindings that need to auto-resolve
     /// the URL before starting long-lived tasks like the SSE consumer.
-    pub fn resolve_appview_url(&self, default: Option<&str>) -> Result<String, Error> {
-        self.appview_url
+    pub fn resolve_indexer_url(&self, default: Option<&str>) -> Result<String, Error> {
+        self.indexer_url
             .clone()
             .or_else(|| default.map(|s| s.to_string()))
             .ok_or_else(|| {
                 Error::NotFound(
-                    "no appview URL — set VITE_APPVIEW_URL or configure in settings".into(),
+                    "no indexer URL — set VITE_INDEXER_URL or configure in settings".into(),
                 )
             })
     }
 
     // -- SSE token (for EventSource auth) --
 
-    /// Request a short-lived SSE token from the AppView.
+    /// Request a short-lived SSE token from the Indexer.
     ///
     /// The token is passed as a query parameter to the SSE endpoint,
     /// sidestepping EventSource's inability to send custom headers.
     pub async fn request_sse_token(
         &mut self,
-        default_appview_url: Option<&str>,
+        default_indexer_url: Option<&str>,
     ) -> Result<String, Error> {
         let identity = self.require_identity()?;
         let signing_key = identity
             .signing_key_bytes()?
             .ok_or_else(|| Error::Auth("no signing key for SSE token request".into()))?;
 
-        let url = self.resolve_appview_url(default_appview_url)?;
+        let url = self.resolve_indexer_url(default_indexer_url)?;
         crate::client::request_sse_token(self.client.transport(), &url, &self.did, &signing_key)
             .await
     }
 
-    // -- Inbox (incoming grants via AppView) --
+    // -- Inbox (incoming grants via Indexer) --
 
-    /// Fetch all incoming grants from the AppView.
+    /// Fetch all incoming grants from the Indexer.
     ///
-    /// Returns an empty list if no appview URL is configured or no signing key exists.
+    /// Returns an empty list if no indexer URL is configured or no signing key exists.
     pub async fn list_inbox(
         &mut self,
-        default_appview_url: Option<&str>,
+        default_indexer_url: Option<&str>,
     ) -> Result<Vec<crate::client::InboxGrant>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
@@ -1459,18 +1459,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_appview_url(default_appview_url)?;
+        let url = self.resolve_indexer_url(default_indexer_url)?;
 
         crate::client::fetch_inbox_all(self.client.transport(), &url, &self.did, &signing_key).await
     }
 
-    /// Fetch workspace documents from the AppView.
+    /// Fetch workspace documents from the Indexer.
     ///
-    /// Returns an empty list if no appview URL is configured or no signing key exists.
+    /// Returns an empty list if no indexer URL is configured or no signing key exists.
     pub async fn list_workspace_documents(
         &mut self,
         keyring_uri: &str,
-        default_appview_url: Option<&str>,
+        default_indexer_url: Option<&str>,
     ) -> Result<Vec<crate::client::WorkspaceDocument>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
@@ -1481,7 +1481,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_appview_url(default_appview_url)?;
+        let url = self.resolve_indexer_url(default_indexer_url)?;
 
         crate::client::fetch_workspace_documents(
             self.client.transport(),
@@ -1495,11 +1495,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Fetch all keyrings the user is a member of, with full record data.
     ///
-    /// Returns an empty list if no appview URL is configured or no signing key exists.
+    /// Returns an empty list if no indexer URL is configured or no signing key exists.
     pub async fn discover_member_keyrings(
         &mut self,
-        default_appview_url: Option<&str>,
-    ) -> Result<Vec<crate::client::AppviewKeyring>, Error> {
+        default_indexer_url: Option<&str>,
+    ) -> Result<Vec<crate::client::IndexerKeyring>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
             None => return Ok(vec![]),
@@ -1509,7 +1509,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_appview_url(default_appview_url)?;
+        let url = self.resolve_indexer_url(default_indexer_url)?;
 
         crate::client::fetch_member_keyrings(self.client.transport(), &url, &self.did, &signing_key)
             .await
@@ -1577,8 +1577,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<String, Error> {
         // Propagate whatever the user last committed to their PDS — including
         // explicit clears (None). The compile-time default is seeded separately
-        // via `set_appview_url` and lives below this in priority order.
-        self.appview_url = config.appview_url.clone();
+        // via `set_indexer_url` and lives below this in priority order.
+        self.indexer_url = config.indexer_url.clone();
         let result = crate::account_config::publish_account_config(&mut self.client, config).await;
         self.signoff(result).await
     }
@@ -1604,8 +1604,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         if let Some(v) = updates.telemetry_enabled {
             next.telemetry_enabled = v;
         }
-        if let Some(v) = updates.appview_url {
-            next.appview_url = v;
+        if let Some(v) = updates.indexer_url {
+            next.indexer_url = v;
         }
         next.modified_at = now;
 

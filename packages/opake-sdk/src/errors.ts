@@ -15,7 +15,7 @@ export type OpakeErrorKind =
   | "InvalidRecord"
   | "Storage"
   | "Xrpc"
-  | "Appview"
+  | "Indexer"
   | "AlreadyExists"
   | "AmbiguousName"
   | "Serialization"
@@ -57,7 +57,7 @@ const KNOWN_KINDS = new Set<string>([
   "InvalidRecord",
   "Storage",
   "Xrpc",
-  "Appview",
+  "Indexer",
   "AlreadyExists",
   "AmbiguousName",
   "Serialization",

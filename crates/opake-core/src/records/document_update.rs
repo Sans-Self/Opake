@@ -4,7 +4,7 @@ use super::{default_version, BlobRef, EncryptedMetadata, SCHEMA_VERSION};
 
 pub const DOCUMENT_UPDATE_COLLECTION: &str = "app.opake.documentUpdate";
 
-/// Action type strings for matching AppView proposal responses.
+/// Action type strings for matching Indexer proposal responses.
 #[allow(dead_code)]
 pub const ACTION_UPDATE_CONTENT: &str = "updateContent";
 #[allow(dead_code)]

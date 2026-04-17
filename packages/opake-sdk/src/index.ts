@@ -69,7 +69,7 @@ export {
 } from "./types";
 
 // Real-time event streaming is WASM-owned:
-//   - Start the consumer: `opake.startSseConsumer(appviewUrl?)`
+//   - Start the consumer: `opake.startSseConsumer(indexerUrl?)`
 //   - Directory tree updates: `fileManager.watchDirectory(uri, handler)` → `DirectoryWatcher`
 //   - Workspace list updates: `opake.watchWorkspaces(handler)` → `WorkspaceWatcher`
 // Both watcher handles are exported above.

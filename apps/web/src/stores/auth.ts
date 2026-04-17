@@ -61,22 +61,22 @@ const loadSdk = () => import("@opake/sdk");
 const loadStorage = () => import("@opake/sdk/storage/indexeddb");
 
 /**
- * Seed the appview URL into a freshly-initialized Opake instance.
+ * Seed the indexer URL into a freshly-initialized Opake instance.
  *
- * The WASM binary ships with a compile-time `DEFAULT_APPVIEW_URL`
- * baked in via `OPAKE_APPVIEW_URL`, but one binary serves multiple
+ * The WASM binary ships with a compile-time `DEFAULT_INDEXER_URL`
+ * baked in via `OPAKE_INDEXER_URL`, but one binary serves multiple
  * web deployments — staging, prod, local dev — so the runtime
- * `VITE_APPVIEW_URL` has to win. Later writes to `accountConfig` on
+ * `VITE_INDEXER_URL` has to win. Later writes to `accountConfig` on
  * the PDS override this value via `set_account_config` inside core,
- * so a user-configured appview still beats the host default.
+ * so a user-configured indexer still beats the host default.
  */
-async function seedAppviewUrl(opake: import("@opake/sdk").Opake): Promise<void> {
-  const envUrl = import.meta.env.VITE_APPVIEW_URL as string | undefined;
+async function seedIndexerUrl(opake: import("@opake/sdk").Opake): Promise<void> {
+  const envUrl = import.meta.env.VITE_INDEXER_URL as string | undefined;
   if (!envUrl) return;
   try {
-    await opake.setAppviewUrl(envUrl);
+    await opake.setIndexerUrl(envUrl);
   } catch (err) {
-    console.warn("[auth] setAppviewUrl failed:", err);
+    console.warn("[auth] setIndexerUrl failed:", err);
   }
 }
 
@@ -218,7 +218,7 @@ async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promis
   await s.saveIdentity(did, identity);
 
   const opake = await Opake.init({ storage: s, did });
-  await seedAppviewUrl(opake);
+  await seedIndexerUrl(opake);
   opakeInstance?.destroy();
   opakeInstance = opake;
 }
@@ -274,7 +274,7 @@ export const useAuthStore = create<AuthStore>()(
             });
             return;
           }
-          await seedAppviewUrl(opake);
+          await seedIndexerUrl(opake);
           opakeInstance = opake;
 
           // Probe: verify the session is actually usable. Opake.init()
@@ -386,7 +386,7 @@ export const useAuthStore = create<AuthStore>()(
         });
 
         const opake = await Opake.init({ storage: s });
-        await seedAppviewUrl(opake);
+        await seedIndexerUrl(opake);
         opakeInstance = opake;
 
         set((draft) => {
@@ -481,7 +481,7 @@ export const useAuthStore = create<AuthStore>()(
         await s.saveIdentity(did, identity);
 
         const opake = await Opake.init({ storage: s, did });
-        await seedAppviewUrl(opake);
+        await seedIndexerUrl(opake);
         opakeInstance?.destroy();
         opakeInstance = opake;
 

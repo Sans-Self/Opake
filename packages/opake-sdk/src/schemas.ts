@@ -238,7 +238,7 @@ export type GrantEntry = z.output<typeof grantEntrySchema>;
 export const grantEntriesSchema = z.array(grantEntrySchema);
 
 /**
- * An incoming grant indexed by the AppView. Fields are snake_case on
+ * An incoming grant indexed by the Indexer. Fields are snake_case on
  * the wire (serde) and get camelCased here.
  */
 export const inboxGrantSchema = z

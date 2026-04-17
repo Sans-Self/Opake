@@ -9,7 +9,7 @@
 // There is no optimistic-update cooldown, no visibility-listener
 // fallback, and no CustomEvent bridge. Those were workarounds for the
 // old "re-fetch listWorkspaces on every SSE hint" pattern, which paid
-// 1–4s of appview cursor lag per update.
+// 1–4s of indexer cursor lag per update.
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -101,8 +101,8 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       // `listWorkspaces`, and the watcher above sees the resulting
       // snapshot. Failures surface as store-level errors but don't
       // tear down the watcher — subsequent SSE events can still
-      // populate it. The appview URL is resolved inside WASM from the
-      // stored config — seeded at boot via `setDefaultAppviewUrl`.
+      // populate it. The indexer URL is resolved inside WASM from the
+      // stored config — seeded at boot via `setDefaultIndexerUrl`.
       if (bootstrapPromise) return;
       const done = loading("workspaces-bootstrap");
       bootstrapPromise = (async () => {

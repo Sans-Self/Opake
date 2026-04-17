@@ -25,7 +25,7 @@ use crate::sse::transport::{SseConnection, SseTransport};
 
 /// A future-returning token fetcher. Called before every connect attempt.
 /// Own-your-captures: the closure holds clones of whatever state it needs
-/// (transport, DID, signing key, appview URL).
+/// (transport, DID, signing key, indexer URL).
 pub type TokenFetcher = Box<dyn FnMut() -> Pin<Box<dyn Future<Output = Result<String, Error>>>>>;
 
 /// A future-returning sleep function. Abstracts over tokio::time::sleep
@@ -40,7 +40,7 @@ pub type JitterRng = Box<dyn FnMut() -> f64>;
 /// Configuration and state for the outer reconnect loop.
 pub struct SseConsumer<T: SseTransport> {
     transport: T,
-    appview_url: String,
+    indexer_url: String,
     fetch_token: TokenFetcher,
     sleep: SleepFn,
     jitter: JitterRng,
@@ -62,14 +62,14 @@ pub struct SseConsumer<T: SseTransport> {
 impl<T: SseTransport> SseConsumer<T> {
     pub fn new(
         transport: T,
-        appview_url: impl Into<String>,
+        indexer_url: impl Into<String>,
         fetch_token: TokenFetcher,
         sleep: SleepFn,
         jitter: JitterRng,
     ) -> Self {
         Self {
             transport,
-            appview_url: appview_url.into(),
+            indexer_url: indexer_url.into(),
             fetch_token,
             sleep,
             jitter,
@@ -143,7 +143,7 @@ impl<T: SseTransport> SseConsumer<T> {
                 }
             };
 
-            match self.transport.connect(&self.appview_url, token).await {
+            match self.transport.connect(&self.indexer_url, token).await {
                 Ok(conn) => {
                     self.connection = Some(conn);
                     // If we were previously delivering events, queue a

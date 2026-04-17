@@ -14,17 +14,17 @@ pub struct AccountConfigRecord {
     pub opake_version: u32,
     pub telemetry_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub appview_url: Option<String>,
+    pub indexer_url: Option<String>,
     pub modified_at: String,
 }
 
 impl AccountConfigRecord {
-    /// Default preferences: telemetry disabled, no appview URL.
+    /// Default preferences: telemetry disabled, no indexer URL.
     pub fn new(modified_at: &str) -> Self {
         Self {
             opake_version: SCHEMA_VERSION,
             telemetry_enabled: false,
-            appview_url: None,
+            indexer_url: None,
             modified_at: modified_at.into(),
         }
     }
@@ -33,7 +33,7 @@ impl AccountConfigRecord {
 /// Partial update payload for `AccountConfigRecord`.
 ///
 /// Field semantics: `Some(v)` replaces the current value, `None` leaves it
-/// untouched. `appview_url` uses a nested `Option` so callers can clear it
+/// untouched. `indexer_url` uses a nested `Option` so callers can clear it
 /// by passing `Some(None)` — serialized as an explicit JSON `null`, which
 /// is distinct from an absent/`undefined` field (the latter leaves the
 /// current value intact).
@@ -47,7 +47,7 @@ pub struct AccountConfigUpdates {
         skip_serializing_if = "Option::is_none",
         with = "double_option"
     )]
-    pub appview_url: Option<Option<String>>,
+    pub indexer_url: Option<Option<String>>,
 }
 
 /// Distinguish absent (`None`) from explicit null (`Some(None)`) for

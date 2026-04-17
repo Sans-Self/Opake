@@ -22,13 +22,13 @@ describe("opake config", () => {
     expect(show.stdout).toContain("enabled");
   });
 
-  it("sets appview-url", async () => {
-    const set = await fx.opake(["config", "set", "appview-url", "https://appview.test"]);
+  it("sets indexer-url", async () => {
+    const set = await fx.opake(["config", "set", "indexer-url", "https://indexer.test"]);
     expect(set.code).toBe(0);
-    expect(set.stdout).toContain("appview.test");
+    expect(set.stdout).toContain("indexer.test");
 
     const show = await fx.opake(["config"]);
-    expect(show.stdout).toContain("appview.test");
+    expect(show.stdout).toContain("indexer.test");
   });
 
   it("rejects unknown config key", async () => {
@@ -38,9 +38,9 @@ describe("opake config", () => {
     expect(result.stderr).toContain("telemetry-enabled");
   });
 
-  it("clears appview-url with empty string", async () => {
-    await fx.opake(["config", "set", "appview-url", "https://will-be-cleared.test"]);
-    const clear = await fx.opake(["config", "set", "appview-url", ""]);
+  it("clears indexer-url with empty string", async () => {
+    await fx.opake(["config", "set", "indexer-url", "https://will-be-cleared.test"]);
+    const clear = await fx.opake(["config", "set", "indexer-url", ""]);
     expect(clear.code).toBe(0);
     expect(clear.stdout).toContain("(not set)");
   });

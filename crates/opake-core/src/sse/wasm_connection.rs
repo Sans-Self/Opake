@@ -62,10 +62,10 @@ impl WasmSseTransport {
 impl SseTransport for WasmSseTransport {
     type Connection = WasmSseConnection;
 
-    async fn connect(&self, appview_url: &str, token: String) -> Result<Self::Connection, Error> {
+    async fn connect(&self, indexer_url: &str, token: String) -> Result<Self::Connection, Error> {
         let url = format!(
             "{}/api/events?token={}",
-            appview_url.trim_end_matches('/'),
+            indexer_url.trim_end_matches('/'),
             urlencoding::encode(&token)
         );
 
@@ -130,7 +130,7 @@ impl SseTransport for WasmSseTransport {
     }
 }
 
-/// A live SSE connection to the appview.
+/// A live SSE connection to the indexer.
 ///
 /// The underlying `EventSource` is closed when this value is dropped.
 pub struct WasmSseConnection {

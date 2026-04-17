@@ -7,7 +7,7 @@ The SDK needs persistent storage for three things:
 3. **Session** — OAuth tokens, DPoP keys, token endpoints
 
 Plus an optional **cache layer** for directory trees and document records
-(avoids full AppView re-syncs on every load).
+(avoids full Indexer re-syncs on every load).
 
 ## Built-in Implementations
 
@@ -86,7 +86,7 @@ class FileSystemStorage implements Storage {
 ### Cache Methods
 
 Cache methods are optional in the sense that returning `null` / no-op is
-valid — the SDK will just re-fetch from the AppView on every tree load.
+valid — the SDK will just re-fetch from the Indexer on every tree load.
 But implementing them significantly improves performance:
 
 | Method | Purpose |

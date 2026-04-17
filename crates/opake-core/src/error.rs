@@ -17,8 +17,8 @@ pub enum Error {
     #[error("XRPC error ({status}): {message}")]
     Xrpc { status: u16, message: String },
 
-    #[error("appview error ({status}): {message}")]
-    Appview { status: u16, message: String },
+    #[error("indexer error ({status}): {message}")]
+    Indexer { status: u16, message: String },
 
     #[error("record not found: {0}")]
     NotFound(String),

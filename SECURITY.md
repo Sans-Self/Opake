@@ -10,7 +10,7 @@ If you find a vulnerability, we want to know about it before anyone else does.
 
 - A description of the vulnerability
 - Steps to reproduce (or a proof of concept)
-- The component affected (core, CLI, web, appview, WASM, lexicons)
+- The component affected (core, CLI, web, indexer, WASM, lexicons)
 - Your assessment of severity, if you have one
 
 ## Scope
@@ -21,7 +21,7 @@ If you find a vulnerability, we want to know about it before anyone else does.
 - **opake-cli** — command handling, file storage, credential management
 - **opake-wasm** — WASM bindings and the web worker bridge
 - **web/** — the React SPA (auth flows, state management, UI rendering of sensitive data)
-- **appview/** — the Elixir indexer (API auth, grant/keyring discovery, rate limiting)
+- **indexer/** — the Elixir indexer (API auth, grant/keyring discovery, rate limiting)
 - **lexicons** — schema definitions under `app.opake.*`
 
 ### Out of scope
@@ -36,7 +36,7 @@ If you find a vulnerability, we want to know about it before anyone else does.
 - Key material exposure — content keys, identity keys, or seed phrases leaked to logs, network, disk, or memory beyond their intended scope
 - Auth bypass — accessing documents, grants, or keyrings without proper authorization
 - Grant escalation — obtaining access beyond what a grant permits
-- Injection / XSS — in the web app or appview API
+- Injection / XSS — in the web app or indexer API
 - Cryptographic weakness — flaws in the encryption scheme, key derivation, or key wrapping that reduce the effective security level
 
 ## Encryption model (summary)

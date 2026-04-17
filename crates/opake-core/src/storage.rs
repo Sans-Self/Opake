@@ -48,7 +48,7 @@ pub type Ed25519VerifyKey = [u8; 32];
 
 /// Persistent CLI configuration — tracks all logged-in accounts.
 ///
-/// Device-local only. Cross-device preferences (appview URL, telemetry)
+/// Device-local only. Cross-device preferences (indexer URL, telemetry)
 /// live in `AccountConfigRecord` on the PDS.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -172,7 +172,7 @@ impl Identity {
     /// Construct from raw key bytes (e.g. from WASM where keys arrive as Uint8Array).
     ///
     /// Creates an identity without signing keys — those are only needed for
-    /// AppView auth, not file operations.
+    /// Indexer auth, not file operations.
     pub fn from_raw_keys(did: &str, public_key: &[u8; 32], private_key: &[u8; 32]) -> Self {
         Self {
             did: did.to_string(),

@@ -12,7 +12,7 @@ import type { DirectoryTreeSnapshot, DirectoryWatcher, FileManager, Opake } from
 export interface MockOpake {
   cabinet: Mock<() => Promise<MockFileManager>>;
   workspace: Mock<(keyringUri: string) => Promise<MockFileManager>>;
-  startSseConsumer: Mock<(appviewUrl?: string) => Promise<void>>;
+  startSseConsumer: Mock<(indexerUrl?: string) => Promise<void>>;
   stopSseConsumer: Mock<() => void>;
   /** Inspect the last FileManager handed out (for cabinet). */
   lastCabinetFm: MockFileManager | null;

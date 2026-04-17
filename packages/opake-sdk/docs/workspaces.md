@@ -113,7 +113,7 @@ console.log(`Applied ${applied} proposals`);
 ### For Members
 
 Your proposals are cleaned up automatically once the owner applies them.
-Call `loadTree()` to see the current state — the AppView tracks what's
+Call `loadTree()` to see the current state — the Indexer tracks what's
 been applied.
 
 ## Member Management

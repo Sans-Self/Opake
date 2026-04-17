@@ -600,7 +600,7 @@ fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
 use crate::sse::events::SseDirectoryRecord;
 
 /// Convert a test `Directory` into the SSE payload shape. Mirrors how the
-/// appview broadcaster formats directory records — `key_wrapping` and
+/// indexer broadcaster formats directory records — `key_wrapping` and
 /// `encrypted_metadata` go through as opaque JSON values.
 fn sse_record(uri: &str, dir: &Directory, keyring_uri: Option<&str>) -> SseDirectoryRecord {
     SseDirectoryRecord {

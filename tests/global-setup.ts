@@ -63,7 +63,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       ...process.env,
       VITE_RESOLVE_API: pds.url,
       VITE_PLC_DIRECTORY_URL: pds.url,
-      VITE_APPVIEW_URL: "",
+      VITE_INDEXER_URL: "",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

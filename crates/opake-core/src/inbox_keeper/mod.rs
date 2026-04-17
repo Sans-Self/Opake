@@ -16,7 +16,7 @@
 //! ## Why no crypto
 //!
 //! Unlike the workspace keeper, inbox entries are already-resolved
-//! appview records — a `grant:upsert` event carries the URI, owner,
+//! indexer records — a `grant:upsert` event carries the URI, owner,
 //! and document URI in plaintext. Metadata decryption still requires a
 //! cross-PDS fetch via [`Opake::resolve_grant_metadata`], but that's
 //! the consumer's job, not the keeper's.
@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InboxWatcherHandle(u64);
 
-/// An incoming grant as seen by the recipient — mirrors the appview's
+/// An incoming grant as seen by the recipient — mirrors the indexer's
 /// `InboxGrant` DTO but lives in this crate so the keeper stays
 /// self-contained.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +119,7 @@ impl InboxKeeper {
     // -- Mutation API --
 
     /// Replace the entire entry set. Called after a full-list fetch
-    /// from the appview.
+    /// from the indexer.
     pub fn bootstrap(&mut self, entries: Vec<InboxEntry>) {
         self.entries = entries.into_iter().map(|e| (e.uri.clone(), e)).collect();
         self.loaded = true;
@@ -220,10 +220,10 @@ pub fn try_build_entry_from_sse_record(
     })
 }
 
-/// Convenience wrapper: build an entry from an appview [`InboxGrant`].
+/// Convenience wrapper: build an entry from an indexer [`InboxGrant`].
 ///
 /// [`InboxGrant`]: crate::client::InboxGrant
-pub fn entry_from_appview_grant(grant: &crate::client::InboxGrant) -> InboxEntry {
+pub fn entry_from_indexer_grant(grant: &crate::client::InboxGrant) -> InboxEntry {
     InboxEntry {
         uri: grant.uri.clone(),
         owner_did: grant.owner_did.clone(),

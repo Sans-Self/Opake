@@ -8,8 +8,8 @@
 //   - A refcounted FileManager cache via `useFileManagerCache()` (internal)
 //
 // On mount, the provider calls `opake.startSseConsumer()` unless
-// `disableSseAutoStart` is set. This uses the appview URL already
-// stored on the Opake instance (from config). No `appviewUrl` prop
+// `disableSseAutoStart` is set. This uses the indexer URL already
+// stored on the Opake instance (from config). No `indexerUrl` prop
 // required — matches how `requestSseToken`, `listWorkspaces`, etc.
 // resolve the URL internally.
 //
@@ -64,7 +64,7 @@ interface OpakeProviderProps {
   readonly opake: Opake;
   /**
    * Disable automatic SSE consumer start. Default false: the provider
-   * calls `opake.startSseConsumer()` on mount, which uses the appview
+   * calls `opake.startSseConsumer()` on mount, which uses the indexer
    * URL already stored on the Opake instance from `Opake.init()`. Set
    * true for tests, or for consumers that want explicit control via
    * `useSseConsumer` or a manual `opake.startSseConsumer()` call.

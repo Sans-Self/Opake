@@ -41,7 +41,7 @@ try {
 | `InvalidRecord` | PDS record doesn't match expected schema | Schema version mismatch or corrupted record |
 | `Storage` | Storage backend failed (IndexedDB error, etc.) | Check storage implementation |
 | `Xrpc` | PDS XRPC call failed | Check PDS connectivity, inspect `.message` for HTTP status |
-| `Appview` | AppView API call failed | Check AppView connectivity |
+| `Indexer` | Indexer API call failed | Check Indexer connectivity |
 | `AlreadyExists` | Tried to create something that already exists | Check before creating, or handle idempotently |
 | `AmbiguousName` | Multiple documents match a name query | Use AT URIs instead of names |
 | `Serialization` | JSON serialization/deserialization failed | Usually a bug — report it |

@@ -15,7 +15,7 @@ use crate::session::CommandContext;
 Examples:
   opake config
   opake config set telemetry-enabled true
-  opake config set appview-url https://appview.opake.app")]
+  opake config set indexer-url https://indexer.opake.app")]
 pub struct ConfigCommand {
     #[command(subcommand)]
     action: Option<ConfigAction>,
@@ -35,7 +35,7 @@ struct SetArgs {
     value: String,
 }
 
-const VALID_KEYS: &[&str] = &["appview-url", "telemetry-enabled"];
+const VALID_KEYS: &[&str] = &["indexer-url", "telemetry-enabled"];
 
 fn parse_bool(value: &str) -> Result<bool> {
     match value {
@@ -62,9 +62,9 @@ impl Execute for ConfigCommand {
                     .unwrap_or_else(|| AccountConfigRecord::new(&now));
 
                 match args.key.as_str() {
-                    "appview-url" => {
+                    "indexer-url" => {
                         let url = args.value.trim().to_string();
-                        config.appview_url = if url.is_empty() { None } else { Some(url) };
+                        config.indexer_url = if url.is_empty() { None } else { Some(url) };
                     }
                     "telemetry-enabled" => {
                         config.telemetry_enabled = parse_bool(&args.value)?;
@@ -97,14 +97,14 @@ fn print_config(config: Option<&AccountConfigRecord>) {
             };
             println!("telemetry    {telemetry}");
             println!(
-                "appview      {}",
-                config.appview_url.as_deref().unwrap_or("(not set)")
+                "indexer      {}",
+                config.indexer_url.as_deref().unwrap_or("(not set)")
             );
             println!("modified     {}", config.modified_at);
         }
         None => {
             println!("telemetry    disabled  (default)");
-            println!("appview      (not set)");
+            println!("indexer      (not set)");
             println!("modified     never");
         }
     }

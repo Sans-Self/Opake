@@ -14,7 +14,7 @@ use crate::error::Error;
 use crate::sse::events::SseEvent;
 use std::future::Future;
 
-/// Opens SSE connections against the appview's `/api/events` endpoint.
+/// Opens SSE connections against the indexer's `/api/events` endpoint.
 ///
 /// Each call to [`connect`](Self::connect) establishes a fresh connection
 /// using a one-shot token from `request_sse_token`. Reconnection is the
@@ -24,10 +24,10 @@ pub trait SseTransport {
 
     /// Open a new SSE connection. The token is passed as a query parameter
     /// (EventSource can't carry custom headers) and is single-use on the
-    /// appview side, so every call must use a fresh token.
+    /// indexer side, so every call must use a fresh token.
     fn connect(
         &self,
-        appview_url: &str,
+        indexer_url: &str,
         token: String,
     ) -> impl Future<Output = Result<Self::Connection, Error>>;
 }

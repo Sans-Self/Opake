@@ -18,8 +18,8 @@ graph TB
         Crypto["Client-side crypto<br/>(AES-256-GCM, X25519)"]
     end
 
-    subgraph Server ["AppView (self-hosted)"]
-        AppView["opake-appview<br/>(Elixir/Phoenix)"]
+    subgraph Server ["Indexer (self-hosted)"]
+        Indexer["opake-indexer<br/>(Elixir/Phoenix)"]
         Postgres["PostgreSQL"]
     end
 
@@ -36,11 +36,11 @@ graph TB
     Core -->|XRPC / HTTPS| OwnPDS
     Core -->|unauthenticated| OtherPDS
     Core -->|DID resolution| PLC
-    CLI -->|inbox query| AppView
-    Web -->|inbox query| AppView
+    CLI -->|inbox query| Indexer
+    Web -->|inbox query| Indexer
 
-    AppView -->|subscribe| Jetstream
-    AppView --> Postgres
+    Indexer -->|subscribe| Jetstream
+    Indexer --> Postgres
     Jetstream -.->|events from| OwnPDS
     Jetstream -.->|events from| OtherPDS
 
@@ -51,7 +51,9 @@ graph TB
     style Network fill:#16213e,color:#eee
 ```
 
-Both the CLI and the web frontend talk directly to PDS instances over XRPC. No PDS modifications needed. All encryption and decryption happens client-side — on your machine (CLI) or in the browser (Web via WASM). The AppView is an optional component that indexes grants and keyrings from the firehose for discovery.
+Both the CLI and the web frontend talk directly to PDS instances over XRPC. No PDS modifications needed. All encryption and decryption happens client-side — on your machine (CLI) or in the browser (Web via WASM). The Indexer is an optional component that indexes grants and keyrings from the firehose for discovery.
+
+The Indexer fills the atproto "appview" protocol role — it reads the firehose and serves indexed records through a REST API. We call it the indexer because all payloads are ciphertext; it serves no rendered views.
 
 ## Encryption Model
 
@@ -90,7 +92,7 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.publicKey/self` singleton records on each user's PDS containing:
 
 - **X25519 encryption public key** — used for key wrapping (sharing)
-- **Ed25519 signing public key** — used for AppView authentication
+- **Ed25519 signing public key** — used for Indexer authentication
 
 Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. Both keys are published automatically on every `opake login` via an idempotent `putRecord`.
 
@@ -158,7 +160,7 @@ erDiagram
 
     IDENTITY {
         bytes x25519_private "decrypts wrapped keys"
-        bytes ed25519_signing "AppView auth"
+        bytes ed25519_signing "Indexer auth"
         string seed_phrase "24-word BIP-39 (not stored)"
     }
 
@@ -218,4 +220,4 @@ Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` 
 - **[CRATE_STRUCTURE.md](CRATE_STRUCTURE.md)** — Detailed file tree for all crates and the web frontend
 - **[STORAGE.md](STORAGE.md)** — Storage abstraction, local record cache, file permissions
 - **[AUTH.md](AUTH.md)** — OAuth/DPoP authentication, multi-account support, device pairing
-- **[appview.md](appview.md)** — AppView indexer: tables, endpoints, deployment
+- **[indexer.md](indexer.md)** — Indexer: tables, endpoints, deployment

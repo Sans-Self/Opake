@@ -227,7 +227,7 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(
         &self,
-        default_appview_url: Option<String>,
+        default_indexer_url: Option<String>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let identity = opake.require_identity().map_err(wasm_err)?;
@@ -235,7 +235,7 @@ impl WasmOpakeHandle {
         let did = opake.did().to_string();
 
         let keyrings = opake
-            .discover_member_keyrings(default_appview_url.as_deref())
+            .discover_member_keyrings(default_indexer_url.as_deref())
             .await
             .map_err(wasm_err)?;
         drop(opake);
@@ -247,7 +247,7 @@ impl WasmOpakeHandle {
         let entries: Vec<opake_core::workspace_keeper::WorkspaceEntry> = keyrings
             .iter()
             .filter_map(|kr| {
-                opake_core::workspace_keeper::try_build_entry_from_appview_keyring(
+                opake_core::workspace_keeper::try_build_entry_from_indexer_keyring(
                     kr,
                     &did,
                     &private_key,
@@ -614,23 +614,23 @@ impl WasmOpakeHandle {
         }))
     }
 
-    /// Override the cached appview URL at runtime.
+    /// Override the cached indexer URL at runtime.
     ///
-    /// Overrides the compile-time `DEFAULT_APPVIEW_URL` seeded during
+    /// Overrides the compile-time `DEFAULT_INDEXER_URL` seeded during
     /// `for_account`. Callers use this at boot to inject a host-specific
-    /// runtime default (e.g. web's `VITE_APPVIEW_URL`, which can't be
+    /// runtime default (e.g. web's `VITE_INDEXER_URL`, which can't be
     /// baked in because one WASM binary serves multiple deployments).
     ///
     /// Subsequent writes to `accountConfig` on the PDS still override
     /// this value via `set_account_config` — so a user-configured
-    /// appview (written via settings) wins over the host default.
-    #[wasm_bindgen(js_name = setAppviewUrl)]
-    pub async fn set_appview_url(&self, url: String) -> Result<(), JsError> {
+    /// indexer (written via settings) wins over the host default.
+    #[wasm_bindgen(js_name = setIndexerUrl)]
+    pub async fn set_indexer_url(&self, url: String) -> Result<(), JsError> {
         let mut guard = self.inner.lock().await;
         let opake = guard
             .as_mut()
             .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-        opake.set_appview_url(url);
+        opake.set_indexer_url(url);
         Ok(())
     }
 
@@ -691,16 +691,16 @@ impl WasmOpakeHandle {
         opake.publish_public_key().await.map_err(wasm_err)
     }
 
-    /// Fetch workspace documents from the AppView.
+    /// Fetch workspace documents from the Indexer.
     #[wasm_bindgen(js_name = listWorkspaceDocuments)]
     pub async fn list_workspace_documents(
         &self,
         keyring_uri: &str,
-        default_appview_url: Option<String>,
+        default_indexer_url: Option<String>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let docs = opake
-            .list_workspace_documents(keyring_uri, default_appview_url.as_deref())
+            .list_workspace_documents(keyring_uri, default_indexer_url.as_deref())
             .await
             .map_err(wasm_err)?;
         to_js(&docs)
@@ -710,27 +710,27 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = discoverMemberKeyrings)]
     pub async fn discover_member_keyrings(
         &self,
-        default_appview_url: Option<String>,
+        default_indexer_url: Option<String>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let keyrings = opake
-            .discover_member_keyrings(default_appview_url.as_deref())
+            .discover_member_keyrings(default_indexer_url.as_deref())
             .await
             .map_err(wasm_err)?;
         to_js(&keyrings)
     }
 
-    /// Request a short-lived SSE token from the AppView.
+    /// Request a short-lived SSE token from the Indexer.
     #[wasm_bindgen(js_name = requestSseToken)]
-    pub async fn request_sse_token(&self, appview_url: Option<String>) -> Result<String, JsError> {
+    pub async fn request_sse_token(&self, indexer_url: Option<String>) -> Result<String, JsError> {
         let mut opake = self.opake().await?;
         opake
-            .request_sse_token(appview_url.as_deref())
+            .request_sse_token(indexer_url.as_deref())
             .await
             .map_err(wasm_err)
     }
 
-    /// Fetch all incoming grants from the AppView.
+    /// Fetch all incoming grants from the Indexer.
     ///
     /// Side effect: bootstraps the shared `InboxKeeper` with the result.
     /// Any `watchInbox` callers (current or future) receive a fresh
@@ -739,16 +739,16 @@ impl WasmOpakeHandle {
     /// events keep the keeper in sync without further `listInbox`
     /// round-trips.
     #[wasm_bindgen(js_name = listInbox)]
-    pub async fn list_inbox(&self, appview_url: Option<String>) -> Result<JsValue, JsError> {
+    pub async fn list_inbox(&self, indexer_url: Option<String>) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let grants = opake
-            .list_inbox(appview_url.as_deref())
+            .list_inbox(indexer_url.as_deref())
             .await
             .map_err(wasm_err)?;
         drop(opake);
 
         let entries: Vec<opake_core::inbox_keeper::InboxEntry> =
-            grants.iter().map(ik::entry_from_appview_grant).collect();
+            grants.iter().map(ik::entry_from_indexer_grant).collect();
 
         {
             let mut keeper = self.inbox_keeper.lock().await;

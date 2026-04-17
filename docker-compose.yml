@@ -14,15 +14,15 @@ services:
       timeout: 5s
       retries: 5
 
-  appview:
+  indexer:
     build:
-      context: apps/appview
-      dockerfile: ../Containerfile.appview
+      context: apps/indexer
+      dockerfile: ../Containerfile.indexer
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: ecto://postgres:postgres@db/opake_appview_prod
+      DATABASE_URL: ecto://postgres:postgres@db/opake_indexer_prod
       SECRET_KEY_BASE: dev-only-please-change-in-production-64-chars-aaaaaaaaaaaaaaaa
       PHX_HOST: localhost
       PHX_SERVER: "true"

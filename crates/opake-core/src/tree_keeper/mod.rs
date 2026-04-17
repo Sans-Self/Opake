@@ -17,7 +17,7 @@
 //! [`install_workspace_tree`] during the normal "load this view" flow
 //! (typically after the existing `FileManager::load_tree` call). The
 //! reconnect contract then covers any gap: on reconnect, all installed
-//! contexts should be full-synced from the appview, and the SSE stream
+//! contexts should be full-synced from the indexer, and the SSE stream
 //! resumes from current state.
 //!
 //! [`install_cabinet_tree`]: TreeKeeper::install_cabinet_tree

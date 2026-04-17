@@ -408,24 +408,24 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /**
-   * Override the cached appview URL at runtime.
+   * Override the cached indexer URL at runtime.
    *
    * `Opake.init` seeds the instance with the compile-time
-   * `DEFAULT_APPVIEW_URL` baked into the WASM binary. Call this at boot
+   * `DEFAULT_INDEXER_URL` baked into the WASM binary. Call this at boot
    * to inject a host-specific runtime default (e.g. the web app's
-   * `VITE_APPVIEW_URL`, which can't be baked in because one WASM binary
+   * `VITE_INDEXER_URL`, which can't be baked in because one WASM binary
    * is shipped to multiple deployments).
    *
-   * After this call, methods that resolve the appview URL internally
+   * After this call, methods that resolve the indexer URL internally
    * (`listWorkspaces`, `startSseConsumer`, etc.) pick up the new value
    * automatically — JS callers don't pass the URL at the call site.
    *
    * Writes to `accountConfig` on the PDS still override this value, so
-   * a user-configured appview (from settings) wins over the host default.
+   * a user-configured indexer (from settings) wins over the host default.
    */
   @wrapWasmErrors
-  async setAppviewUrl(url: string): Promise<void> {
-    await this.requireContext().setAppviewUrl(url);
+  async setIndexerUrl(url: string): Promise<void> {
+    await this.requireContext().setIndexerUrl(url);
   }
 
   /**
@@ -585,8 +585,8 @@ export class Opake {
    * Also bootstraps the in-memory `WorkspaceKeeper` — `watchWorkspaces`
    * callers see a fresh snapshot with `loaded = true` as a side effect.
    *
-   * The appview URL is resolved internally from the stored config
-   * (set during `init` and overridable via `setAppviewUrl` or
+   * The indexer URL is resolved internally from the stored config
+   * (set during `init` and overridable via `setIndexerUrl` or
    * by writing an `accountConfig` record). Callers do not pass it.
    *
    * @returns Array of workspace entries with decrypted names and roles.
@@ -743,7 +743,7 @@ export class Opake {
    *
    * Tri-state semantics (see `AccountConfigPatch`):
    * - absent key / `undefined` → field unchanged on the PDS.
-   * - `null` (`appviewUrl` only) → field cleared on the PDS.
+   * - `null` (`indexerUrl` only) → field cleared on the PDS.
    * - concrete value → field updated to that value.
    *
    * @returns The freshly-written record.
@@ -759,9 +759,9 @@ export class Opake {
     if (updates.telemetryEnabled !== undefined) {
       patch.telemetryEnabled = updates.telemetryEnabled;
     }
-    if (updates.appviewUrl !== undefined) {
+    if (updates.indexerUrl !== undefined) {
       // string or explicit null — both forwarded; Rust interprets null as clear.
-      patch.appviewUrl = updates.appviewUrl;
+      patch.indexerUrl = updates.indexerUrl;
     }
     const record = await ctx.updateAccountConfig(patch);
     return record as AccountConfig;
@@ -774,7 +774,7 @@ export class Opake {
   /**
    * Start the WASM-level SSE consumer.
    *
-   * Spawns a background task inside WASM that connects to the appview's
+   * Spawns a background task inside WASM that connects to the indexer's
    * `/api/events` endpoint, pulls events, and applies them to any
    * installed directory trees via the Rust-side `TreeKeeper`. Once
    * started, `FileManager.watchDirectory` handlers fire automatically
@@ -784,13 +784,13 @@ export class Opake {
    * snapshots cross into JS. Idempotent: safe to call multiple times
    * (StrictMode double-mount is handled internally).
    *
-   * `appviewUrl` is optional: if omitted, the URL is resolved from the
+   * `indexerUrl` is optional: if omitted, the URL is resolved from the
    * Opake instance's stored config (loaded during `init`). Pass an
    * explicit value as a fallback for instances without stored config.
    */
   @wrapWasmErrors
-  startSseConsumer(appviewUrl?: string): Promise<void> {
-    return this.requireContext().startSseConsumer(appviewUrl ?? null);
+  startSseConsumer(indexerUrl?: string): Promise<void> {
+    return this.requireContext().startSseConsumer(indexerUrl ?? null);
   }
 
   /**
@@ -907,7 +907,7 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /**
-   * Fetch every incoming grant from the AppView.
+   * Fetch every incoming grant from the Indexer.
    *
    * Also bootstraps the in-memory `InboxKeeper` — any current or future
    * `watchInbox` callers receive a fresh snapshot with `loaded = true`.

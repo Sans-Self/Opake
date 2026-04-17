@@ -51,7 +51,7 @@ interface UseDirectoryResult {
  * context; otherwise pass a specific directory at-uri.
  *
  * The returned snapshot reflects the latest state received from the
- * WASM TreeKeeper, which applies SSE events from the appview as they
+ * WASM TreeKeeper, which applies SSE events from the indexer as they
  * arrive. No manual refetch or cache invalidation needed — remote
  * changes appear automatically within a firehose round-trip
  * (typically <1s).

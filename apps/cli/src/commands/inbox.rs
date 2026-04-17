@@ -6,15 +6,15 @@ use crate::commands::Execute;
 use crate::session::CommandContext;
 
 #[derive(Args)]
-/// List grants shared with you (via appview)
+/// List grants shared with you (via indexer)
 pub struct InboxCommand {
     /// Show long format with document URIs and notes
     #[arg(short, long)]
     long: bool,
 
-    /// AppView URL (overrides OPAKE_APPVIEW_URL and config)
+    /// Indexer URL (overrides OPAKE_INDEXER_URL and config)
     #[arg(long, value_name = "URL")]
-    appview: Option<String>,
+    indexer: Option<String>,
 }
 
 fn format_short(grants: &[InboxGrant]) -> String {
@@ -43,10 +43,10 @@ impl Execute for InboxCommand {
         let mut opake = ctx.opake().await?;
 
         // CLI: flag → env var → account config (core handles the last one).
-        let env_url = std::env::var("OPAKE_APPVIEW_URL").ok();
-        let appview_url = self.appview.as_deref().or(env_url.as_deref());
+        let env_url = std::env::var("OPAKE_INDEXER_URL").ok();
+        let indexer_url = self.indexer.as_deref().or(env_url.as_deref());
 
-        let grants = opake.list_inbox(appview_url).await?;
+        let grants = opake.list_inbox(indexer_url).await?;
 
         if grants.is_empty() {
             println!("no incoming grants");

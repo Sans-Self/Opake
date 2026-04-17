@@ -2,7 +2,7 @@
 // watchers.
 //
 // Exposes:
-//   - WasmOpakeHandle::startSseConsumer(appviewUrl)
+//   - WasmOpakeHandle::startSseConsumer(indexerUrl)
 //   - WasmOpakeHandle::stopSseConsumer()
 //   - WasmOpakeHandle::watchWorkspaces(callback)
 //   - WasmFileManagerHandle::watchDirectory(uri, callback)
@@ -313,19 +313,19 @@ enum TreeInstall {
 #[wasm_bindgen(js_class = OpakeContext)]
 impl WasmOpakeHandle {
     /// Start the SSE event consumer. Spawns a background task that
-    /// connects to the appview's `/api/events` endpoint, pulls events,
+    /// connects to the indexer's `/api/events` endpoint, pulls events,
     /// and dispatches them to the shared TreeKeeper.
     ///
-    /// `appview_url` is optional: if omitted, the URL is resolved from
+    /// `indexer_url` is optional: if omitted, the URL is resolved from
     /// the Opake instance's stored config (loaded during `init`). Pass
     /// an explicit value as a fallback for Opake instances whose config
-    /// doesn't include an appview URL.
+    /// doesn't include an indexer URL.
     ///
     /// Idempotent: subsequent calls are no-ops while an existing
     /// consumer is running. React StrictMode's double-mount is thus
     /// harmless — only one consumer task exists per OpakeContext.
     #[wasm_bindgen(js_name = startSseConsumer)]
-    pub async fn start_sse_consumer(&self, appview_url: Option<String>) -> Result<(), JsError> {
+    pub async fn start_sse_consumer(&self, indexer_url: Option<String>) -> Result<(), JsError> {
         // Resolve the URL BEFORE flipping the started flag — if no URL
         // is available anywhere, we want to fail loudly without leaving
         // the flag in a broken state.
@@ -335,7 +335,7 @@ impl WasmOpakeHandle {
                 .as_ref()
                 .ok_or_else(|| JsError::new("Opake context already consumed"))?;
             opake
-                .resolve_appview_url(appview_url.as_deref())
+                .resolve_indexer_url(indexer_url.as_deref())
                 .map_err(wasm_err)?
         };
 
@@ -388,7 +388,7 @@ impl WasmOpakeHandle {
                     } else {
                         // Unroutable proposal — in practice a
                         // `documentUpdate` (the lexicon has no
-                        // `keyring` field). The appview routes it
+                        // `keyring` field). The indexer routes it
                         // to the author's personal topic, so the
                         // workspace owner never sees it and the web
                         // client has no polling fallback to fill
@@ -406,7 +406,7 @@ impl WasmOpakeHandle {
                 }
 
                 // Workspace list updates: apply directly to the keeper
-                // so subscribers see changes without an appview round-
+                // so subscribers see changes without an indexer round-
                 // trip. Idempotent upserts (same rotation + same data)
                 // don't re-fire watchers — see `WorkspaceKeeper::upsert`.
                 apply_keyring_to_workspace_keeper(&opake_rc, &workspace_keeper_rc, &event).await;
@@ -463,10 +463,10 @@ impl WasmOpakeHandle {
 
 /// Build a token fetcher closure that uses the shared Opake to request
 /// a fresh SSE token on every connect attempt.
-fn make_token_fetcher(opake_rc: Rc<Mutex<Option<WasmOpake>>>, appview_url: String) -> TokenFetcher {
+fn make_token_fetcher(opake_rc: Rc<Mutex<Option<WasmOpake>>>, indexer_url: String) -> TokenFetcher {
     Box::new(move || {
         let opake_rc = Rc::clone(&opake_rc);
-        let appview_url = appview_url.clone();
+        let indexer_url = indexer_url.clone();
         Box::pin(async move {
             let guard = opake_rc.lock().await;
             let opake = guard
@@ -476,7 +476,7 @@ fn make_token_fetcher(opake_rc: Rc<Mutex<Option<WasmOpake>>>, appview_url: Strin
             let identity = opake
                 .identity()
                 .ok_or_else(|| opake_core::error::Error::Sse("no identity".into()))?;
-            // Ed25519 signing key — used for appview auth signatures.
+            // Ed25519 signing key — used for indexer auth signatures.
             let signing_key = identity
                 .signing_key_bytes()
                 .map_err(|e| opake_core::error::Error::Sse(format!("{e}")))?
@@ -484,7 +484,7 @@ fn make_token_fetcher(opake_rc: Rc<Mutex<Option<WasmOpake>>>, appview_url: Strin
                     opake_core::error::Error::Sse("identity has no signing key".into())
                 })?;
             let transport = opake_core::client::WasmTransport::new();
-            request_sse_token(&transport, &appview_url, &did, &signing_key).await
+            request_sse_token(&transport, &indexer_url, &did, &signing_key).await
         })
     })
 }

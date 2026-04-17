@@ -108,7 +108,7 @@ Note: `entries` can contain cross-PDS AT-URIs — workspace documents live on ea
 
 ## 2b. Directory update (member proposing structural change)
 
-Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the AppView and applies them.
+Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the Indexer and applies them.
 
 ```json
 {
@@ -185,7 +185,7 @@ array only contains Alice's wrapped key — only she can decrypt.
 ```
 
 **How Bob decrypts:**
-1. His client/AppView discovers this grant (firehose, query, or notification)
+1. His client/Indexer discovers this grant (firehose, query, or notification)
 2. Fetches the document record via the `document` AT URI
 3. Uses his private key to decrypt `wrappedKey.ciphertext` → gets AES-256 content key
 4. Fetches the blob via `com.atproto.sync.getBlob`
@@ -284,7 +284,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 - Wrap GK to Dave's pubkey with `"role": "editor"`
 - Update the keyring record to add Dave to `members`
 - Dave can now decrypt *all* documents under this keyring. No per-document changes needed.
-- The AppView enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
+- The Indexer enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
 
 **Removing a member:**
 - Archive the current rotation's remaining member entries into `keyHistory`
@@ -391,7 +391,7 @@ An editor proposes an update to a document owned by another workspace member. Th
 ```
 
 **How the owner applies it:**
-1. AppView surfaces pending updates via `GET /api/workspace/updates`
+1. Indexer surfaces pending updates via `GET /api/workspace/updates`
 2. Owner's client fetches the update blob from the editor's PDS
 3. Owner re-uploads the blob to their own PDS and updates their document record
 4. Editor's client deletes the `documentUpdate` record after confirmation
@@ -420,7 +420,7 @@ For document adoption (when a member is removed), the `supersedes` field points 
 
 ## 10. Leaving a workspace
 
-A member opts out of a workspace by writing a `keyringLeave` record to their own PDS. The AppView stops listing them as a member.
+A member opts out of a workspace by writing a `keyringLeave` record to their own PDS. The Indexer stops listing them as a member.
 
 ```json
 {
@@ -450,7 +450,7 @@ Instead of adding recipients directly to the document record (like adding to the
 `keys` array), grants are separate records because:
 - The document owner might not want to update the document record every time they share
 - Grants can be deleted independently (for revocation)
-- An AppView can efficiently query "what's shared with me?" across all documents
+- An Indexer can efficiently query "what's shared with me?" across all documents
 - It matches the atproto pattern of small, independent records
 
 ### Why the two-layer key for keyrings?

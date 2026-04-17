@@ -43,8 +43,8 @@ impl CommandContext {
         .await?;
 
         // Runtime env override (dev/CI convenience — skip recompile).
-        if let Ok(url) = std::env::var("OPAKE_APPVIEW_URL") {
-            opake.set_appview_url(url);
+        if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
+            opake.set_indexer_url(url);
         }
 
         Ok(opake)

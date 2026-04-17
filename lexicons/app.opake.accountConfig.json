@@ -19,10 +19,10 @@
             "type": "boolean",
             "description": "Whether usage analytics are enabled."
           },
-          "appviewUrl": {
+          "indexerUrl": {
             "type": "string",
             "format": "uri",
-            "description": "AppView endpoint URL for indexing and search."
+            "description": "Indexer endpoint URL for discovery, inbox, and live event streaming."
           },
           "modifiedAt": {
             "type": "string",

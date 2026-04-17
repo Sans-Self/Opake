@@ -24,7 +24,7 @@ crates/
         mod.rs         WorkspaceKeeper — in-memory workspace list state. Bootstrapped by `listWorkspaces`, patched by `keyring:upsert` / `keyring:delete` SSE events. `watchWorkspaces` installs snapshot callbacks. Parallel design to TreeKeeper.
         tests.rs       Unit tests
       inbox_keeper/
-        mod.rs         InboxKeeper — in-memory incoming-share list state. Bootstrapped by `listInbox`, patched by `grant:upsert` / `grant:delete` SSE events (appview fans both to owner and recipient). `watchInbox` installs snapshot callbacks. Parallel design to WorkspaceKeeper; no crypto — entries are already-resolved appview records.
+        mod.rs         InboxKeeper — in-memory incoming-share list state. Bootstrapped by `listInbox`, patched by `grant:upsert` / `grant:delete` SSE events (indexer fans both to owner and recipient). `watchInbox` installs snapshot callbacks. Parallel design to WorkspaceKeeper; no crypto — entries are already-resolved indexer records.
         tests.rs       Unit tests
       manager/
         mod.rs         FileManager<'a, T, R, S> struct (borrows &mut Opake + &FileContext), create_record passthrough
@@ -159,7 +159,7 @@ apps/
         share_group.rs Share subcommand group (new, revoke, list, inbox)
         revoke.rs      Grant deletion
         shared.rs      List created grants
-        inbox.rs       List received grants (via AppView)
+        inbox.rs       List received grants (via Indexer)
         workspace.rs   Workspace CRUD (create, ls, add-member, leave). remove-member via WorkspaceAdmin. Renamed from keyring.rs
         pair.rs        Device pairing (request, approve)
         accounts.rs    List accounts
@@ -216,9 +216,9 @@ apps/
           identity.ts    Keypairs, seed phrases, DPoP, DID resolution
           workspace.ts   Workspace operations
 
-  appview/             Elixir/Phoenix indexer + REST API (replaces Rust appview)
+  indexer/             Elixir/Phoenix indexer + REST API (replaces Rust indexer)
     lib/
-      opake_appview/
+      opake_indexer/
         application.ex       OTP supervision tree (Repo, KeyCache, Endpoint, Consumer)
         indexer.ex            Event dispatch, cursor saving, connection state (ETS)
         release.ex            Release tasks (create_db, migrate, rollback, status)
@@ -244,7 +244,7 @@ apps/
           keyring_member.ex   Keyring member (composite PK)
           workspace_document.ex  Workspace document schema
           document_update.ex  Document update schema
-      opake_appview_web/
+      opake_indexer_web/
         router.ex             /api/health (public), /api/inbox + /api/keyrings + /api/workspace + /api/workspace/updates (auth'd)
         endpoint.ex           Bandit HTTP, API-only (no sessions/static)
         plugs/rate_limit.ex   Hammer ETS rate limiting per IP

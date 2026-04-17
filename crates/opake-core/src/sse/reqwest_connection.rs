@@ -52,10 +52,10 @@ impl Default for ReqwestSseTransport {
 impl SseTransport for ReqwestSseTransport {
     type Connection = ReqwestSseConnection;
 
-    async fn connect(&self, appview_url: &str, token: String) -> Result<Self::Connection, Error> {
+    async fn connect(&self, indexer_url: &str, token: String) -> Result<Self::Connection, Error> {
         let url = format!(
             "{}/api/events?token={}",
-            appview_url.trim_end_matches('/'),
+            indexer_url.trim_end_matches('/'),
             urlencoding::encode(&token)
         );
 

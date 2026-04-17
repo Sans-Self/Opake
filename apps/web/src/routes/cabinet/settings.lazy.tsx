@@ -14,8 +14,8 @@ function SettingsPage() {
   const pdsUrl = session.status === "active" ? session.pdsUrl : null;
 
   const [config, setConfig] = useState<import("@opake/sdk").AccountConfig | null>(null);
-  const [appviewUrl, setAppviewUrl] = useState("");
-  const [savedAppviewUrl, setSavedAppviewUrl] = useState("");
+  const [indexerUrl, setIndexerUrl] = useState("");
+  const [savedIndexerUrl, setSavedIndexerUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Load the persisted config once per session. The cancelled flag
@@ -29,10 +29,10 @@ function SettingsPage() {
       try {
         const result = await getOpake().getAccountConfig();
         if (cancelled.current) return;
-        const url = result?.appviewUrl ?? "";
+        const url = result?.indexerUrl ?? "";
         setConfig(result);
-        setAppviewUrl(url);
-        setSavedAppviewUrl(url);
+        setIndexerUrl(url);
+        setSavedIndexerUrl(url);
       } catch (err) {
         if (cancelled.current) return;
         console.error("[settings] failed to load account config:", err);
@@ -44,9 +44,9 @@ function SettingsPage() {
     };
   }, [did]);
 
-  const handleAppviewSave = useCallback(() => {
+  const handleIndexerSave = useCallback(() => {
     if (!did) return;
-    const trimmed = appviewUrl.trim();
+    const trimmed = indexerUrl.trim();
 
     // Validate URL before saving — a malicious URL would receive Ed25519
     // auth signatures that could be replayed within the 60s window.
@@ -54,7 +54,7 @@ function SettingsPage() {
       try {
         const parsed = new URL(trimmed);
         if (parsed.protocol !== "https:") {
-          toastError("AppView URL must use HTTPS");
+          toastError("Indexer URL must use HTTPS");
           return;
         }
       } catch {
@@ -70,21 +70,21 @@ function SettingsPage() {
           // Empty field → explicit null (clear the stored override).
           // Non-empty → set the new URL. Never undefined, which would
           // leave the current value untouched instead of clearing it.
-          appviewUrl: trimmed.length > 0 ? trimmed : null,
+          indexerUrl: trimmed.length > 0 ? trimmed : null,
         };
         const updated = await getOpake().updateAccountConfig(patch);
         setConfig(updated);
-        setSavedAppviewUrl(updated.appviewUrl ?? "");
-        toastSuccess("AppView URL saved");
+        setSavedIndexerUrl(updated.indexerUrl ?? "");
+        toastSuccess("Indexer URL saved");
       } catch (err) {
         toastError(err instanceof Error ? err.message : "Failed to save");
       } finally {
         setSaving(false);
       }
     })();
-  }, [appviewUrl, did]);
+  }, [indexerUrl, did]);
 
-  const appviewDirty = appviewUrl !== savedAppviewUrl;
+  const indexerDirty = indexerUrl !== savedIndexerUrl;
 
   const breadcrumbs = <span>Settings</span>;
 
@@ -124,28 +124,28 @@ function SettingsPage() {
           </div>
         </section>
 
-        {/* AppView URL */}
+        {/* Indexer URL */}
         <section>
-          <h2 className="text-base-content mb-3 text-sm font-semibold">AppView URL</h2>
+          <h2 className="text-base-content mb-3 text-sm font-semibold">Indexer URL</h2>
           <div className="space-y-3">
             <p className="text-base-content/60 text-sm">
-              The AppView indexes workspace membership and incoming shares. Leave blank to use the
+              The Indexer indexes workspace membership and incoming shares. Leave blank to use the
               default.
             </p>
             <div className="flex gap-2">
               <input
                 type="url"
                 className="input input-bordered input-sm flex-1"
-                placeholder="https://appview.opake.app"
-                value={appviewUrl}
-                onChange={(e) => setAppviewUrl(e.target.value)}
+                placeholder="https://indexer.opake.app"
+                value={indexerUrl}
+                onChange={(e) => setIndexerUrl(e.target.value)}
                 disabled={saving}
               />
               <button
                 type="button"
                 className="btn btn-sm btn-primary gap-1.5"
-                disabled={!appviewDirty || saving}
-                onClick={handleAppviewSave}
+                disabled={!indexerDirty || saving}
+                onClick={handleIndexerSave}
               >
                 <FloppyDiskIcon size={16} /> Save
               </button>

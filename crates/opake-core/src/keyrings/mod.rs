@@ -29,9 +29,9 @@ pub fn decrypt_keyring_name_from_record(
     Some(metadata.name)
 }
 
-/// Decrypt an appview-sourced keyring's name.
+/// Decrypt an indexer-sourced keyring's name.
 ///
-/// Mirrors [`decrypt_keyring_name`] for the [`AppviewKeyring`] shape, so
+/// Mirrors [`decrypt_keyring_name`] for the [`IndexerKeyring`] shape, so
 /// `workspace ls` can show workspaces the user is a *member* of (where the
 /// keyring record lives on another user's PDS and the caller's own
 /// `listRecords` call doesn't see it).
@@ -42,10 +42,10 @@ pub fn decrypt_keyring_name_from_record(
 ///
 /// # Trust model
 ///
-/// The returned name is only as trustworthy as the appview that served the
+/// The returned name is only as trustworthy as the indexer that served the
 /// record. Workspace membership is publicly forgeable (anyone can wrap a
 /// group key to the caller's published X25519 pubkey), so a compromised
-/// appview that also controls a keyring the caller has been silently
+/// indexer that also controls a keyring the caller has been silently
 /// added to can spoof the name to steer name-based resolution at a later
 /// `resolve_workspace("family-photos")` call. The write would then land as
 /// a proposal encrypted under the attacker-controlled group key.
@@ -54,15 +54,15 @@ pub fn decrypt_keyring_name_from_record(
 /// logic in [`crate::Opake::resolve_workspace`] catches the collision and
 /// raises `AmbiguousName` — the user must disambiguate by URI. For
 /// foreign-only names there is currently **no cryptographic anchor** on
-/// the name ↔ URI binding; the reader trusts the appview for that map.
+/// the name ↔ URI binding; the reader trusts the indexer for that map.
 /// A future end-to-end signature layer (owner signs the keyring record
 /// with their DID's signing key, client verifies via DID doc) would close
 /// this gap without any API change here.
 ///
 /// Returns `None` if the DID isn't a member, deserialization fails,
 /// unwrapping fails, or metadata decryption fails.
-pub fn decrypt_appview_keyring_name(
-    keyring: &crate::client::AppviewKeyring,
+pub fn decrypt_indexer_keyring_name(
+    keyring: &crate::client::IndexerKeyring,
     did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<String> {
@@ -85,9 +85,9 @@ pub fn decrypt_appview_keyring_name(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod appview_keyring_tests {
+mod indexer_keyring_tests {
     use super::*;
-    use crate::client::AppviewKeyring;
+    use crate::client::IndexerKeyring;
     use crate::crypto::{
         generate_content_key, wrap_key, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret,
         X25519PrivateKey, X25519PublicKey,
@@ -100,7 +100,7 @@ mod appview_keyring_tests {
         (public.to_bytes(), secret.to_bytes())
     }
 
-    /// Build an `AppviewKeyring` with real crypto: a group key wrapped to
+    /// Build an `IndexerKeyring` with real crypto: a group key wrapped to
     /// `member_did`'s public key and a `KeyringMetadata { name }` encrypted
     /// under the group key. Returns the keyring plus the caller's private
     /// key so tests can attempt decryption.
@@ -109,7 +109,7 @@ mod appview_keyring_tests {
         owner_did: &str,
         member_did: &str,
         uri: &str,
-    ) -> (AppviewKeyring, X25519PrivateKey) {
+    ) -> (IndexerKeyring, X25519PrivateKey) {
         let (member_pubkey, member_privkey) = test_keypair();
         let group_key = generate_content_key(&mut OsRng);
         let wrapped =
@@ -131,7 +131,7 @@ mod appview_keyring_tests {
             role: crate::records::Role::Editor,
         };
 
-        let keyring = AppviewKeyring {
+        let keyring = IndexerKeyring {
             uri: uri.into(),
             owner_did: owner_did.into(),
             rotation: 0,
@@ -154,7 +154,7 @@ mod appview_keyring_tests {
             "at://did:plc:owner/app.opake.keyring/abc",
         );
 
-        let name = decrypt_appview_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
         assert_eq!(name.as_deref(), Some("family-photos"));
     }
 
@@ -171,7 +171,7 @@ mod appview_keyring_tests {
         // A DID not present in the members list — we use an unrelated keypair
         // so that even if the DID matched, unwrap_key would fail.
         let (_, stranger_privkey) = test_keypair();
-        let name = decrypt_appview_keyring_name(&keyring, "did:plc:stranger", &stranger_privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, "did:plc:stranger", &stranger_privkey);
         assert!(name.is_none());
     }
 
@@ -188,7 +188,7 @@ mod appview_keyring_tests {
         // DID matches a member entry, but we unwrap with the wrong private key
         // — simulates an identity mismatch or corrupted local storage.
         let (_, wrong_privkey) = test_keypair();
-        let name = decrypt_appview_keyring_name(&keyring, member_did, &wrong_privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &wrong_privkey);
         assert!(name.is_none());
     }
 
@@ -203,7 +203,7 @@ mod appview_keyring_tests {
         );
         keyring.encrypted_metadata = None;
 
-        let name = decrypt_appview_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
         assert!(name.is_none());
     }
 
@@ -221,7 +221,7 @@ mod appview_keyring_tests {
         // it silently and no member matches the DID.
         keyring.members = vec![serde_json::json!({"garbage": true})];
 
-        let name = decrypt_appview_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
         assert!(name.is_none());
     }
 }

@@ -592,7 +592,7 @@ export class FileManager {
    * affects the tree. The handler receives `null` when the watched
    * directory is deleted — the watcher auto-closes after that call.
    *
-   * Must be paired with `opake.startSseConsumer(appviewUrl)` to actually
+   * Must be paired with `opake.startSseConsumer(indexerUrl)` to actually
    * receive events. Without the consumer, the watcher only fires once
    * with the initial snapshot.
    *

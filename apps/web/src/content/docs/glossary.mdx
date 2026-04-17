@@ -10,9 +10,9 @@ The decentralized social networking protocol that Opake is built on. It handles 
 
 The symmetric encryption algorithm we use for file contents. It's fast, secure, and industry-standard.
 
-### AppView
+### Indexer
 
-A specialized service that indexes the [Firehose](#firehose) and provides a fast way to discover which files have been shared with you. It never sees your plaintext data.
+A specialized service that indexes the [Firehose](#firehose) and provides a fast way to discover which files have been shared with you. It never sees your plaintext data. Fills the atproto "indexer" protocol role, but we call it the indexer because all payloads are ciphertext and it serves no rendered views.
 
 ### Cabinet
 
@@ -28,7 +28,7 @@ Your permanent, cryptographic ID on the AT Protocol (e.g., `did:plc:123...`). Un
 
 ### Firehose
 
-The real-time stream of all public records being created on the AT Protocol. Our AppView "listens" to the firehose to find new Sharing Grants.
+The real-time stream of all public records being created on the AT Protocol. Our indexer "listens" to the firehose to find new Sharing Grants.
 
 ### Grant
 

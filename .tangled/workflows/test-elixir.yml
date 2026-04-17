@@ -10,16 +10,16 @@ steps:
   - name: "Install deps"
     command: |
       apt-get update -y && apt-get install -y --no-install-recommends build-essential git
-      cd appview
+      cd indexer
       mix local.hex --force && mix local.rebar --force
       mix deps.get
 
   - name: "Compile (warnings as errors)"
     command: |
-      cd appview
+      cd indexer
       MIX_ENV=test mix compile --warnings-as-errors
 
   - name: "Test"
     command: |
-      cd appview
+      cd indexer
       MIX_ENV=test mix test

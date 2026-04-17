@@ -27,7 +27,7 @@ test.describe("settings page", () => {
       timeout: 10_000,
     });
     await expect(page.getByLabel("Enable telemetry")).toBeVisible();
-    await expect(page.getByLabel("AppView URL")).toBeVisible();
+    await expect(page.getByLabel("Indexer URL")).toBeVisible();
   });
 
   test("telemetry toggle changes state", async ({ page, webUrl }) => {
@@ -42,13 +42,13 @@ test.describe("settings page", () => {
     await expect(toggle).toBeChecked({ checked: !initialState });
   });
 
-  test("save button disabled when appview URL unchanged", async ({
+  test("save button disabled when indexer URL unchanged", async ({
     page,
     webUrl,
   }) => {
     await page.goto(`${webUrl}/cabinet/settings`);
 
-    await expect(page.getByLabel("AppView URL")).toBeVisible({
+    await expect(page.getByLabel("Indexer URL")).toBeVisible({
       timeout: 10_000,
     });
 
@@ -56,13 +56,13 @@ test.describe("settings page", () => {
     await expect(saveButton).toBeDisabled();
   });
 
-  test("save button enabled after changing appview URL", async ({
+  test("save button enabled after changing indexer URL", async ({
     page,
     webUrl,
   }) => {
     await page.goto(`${webUrl}/cabinet/settings`);
 
-    const input = page.getByLabel("AppView URL");
+    const input = page.getByLabel("Indexer URL");
     await expect(input).toBeVisible({ timeout: 10_000 });
 
     await input.fill("http://localhost:9999");

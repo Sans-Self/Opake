@@ -41,7 +41,7 @@ The AGPL's copyleft applies to **derivative works**, which in practice means any
 
 ### What does NOT trigger copyleft
 
-- **Communicating with Opake over HTTP or XRPC.** The API boundary is not a linking boundary. A mobile app that talks to the Opake AppView over REST, or a script that calls PDS endpoints, is an independent work — license it however you want.
+- **Communicating with Opake over HTTP or XRPC.** The API boundary is not a linking boundary. A mobile app that talks to the Opake Indexer over REST, or a script that calls PDS endpoints, is an independent work — license it however you want.
 - **Reading or writing `app.opake.*` records on a PDS.** Lexicon schemas are interface definitions. Implementing them independently doesn't create a derivative work.
 - **Running Opake alongside your software** without linking (an "aggregate" in GPL terms). Shipping a Docker Compose stack that includes Opake as a separate container is fine.
 

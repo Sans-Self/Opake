@@ -11,7 +11,7 @@ Quick-reference for every algorithm, constant, and key type in the system. For t
 | AES-256-KW (RFC 3394) | Symmetric key wrapping (content key → group key) | `aes-kw` |
 | HKDF-SHA256 | KDF for key wrapping + identity derivation | `hkdf` + `sha2` |
 | PBKDF2-HMAC-SHA512 | Mnemonic → master seed | `pbkdf2` + `sha2` |
-| Ed25519 | AppView authentication signatures | `ed25519-dalek` |
+| Ed25519 | Indexer authentication signatures | `ed25519-dalek` |
 | BIP-39 | 24-word mnemonic encoding (256-bit entropy) | `bip39` (embedded wordlist) |
 
 `x25519-hkdf-a256kw` is intentionally distinct from JWE's `ECDH-ES+A256KW` — we use HKDF-SHA256, not JWE's Concat KDF.
@@ -198,7 +198,7 @@ Used everywhere: document encryption envelopes, grants, pairing. No role — thi
 }
 ```
 
-Only used in keyring `members` and `keyHistory` arrays. Composes a `WrappedKey` with a workspace role. The role is plaintext because the AppView needs it for authorization — it's not a crypto concept.
+Only used in keyring `members` and `keyHistory` arrays. Composes a `WrappedKey` with a workspace role. The role is plaintext because the Indexer needs it for authorization — it's not a crypto concept.
 
 ### Encryption union on documents
 

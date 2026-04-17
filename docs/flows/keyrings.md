@@ -54,7 +54,7 @@ sequenceDiagram
     CLI->>User: family-photos → at://did/.../keyring-tid
 ```
 
-The group key is never stored in plaintext on the PDS — only the wrapped copies live in the keyring record. The `owner` field identifies the canonical keyring owner for AppView authorization.
+The group key is never stored in plaintext on the PDS — only the wrapped copies live in the keyring record. The `owner` field identifies the canonical keyring owner for Indexer authorization.
 
 ## List Keyrings
 

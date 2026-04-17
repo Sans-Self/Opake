@@ -26,10 +26,10 @@ fn account_config_json(telemetry: bool) -> String {
     .to_string()
 }
 
-fn account_config_json_ext(telemetry: bool, appview: Option<&str>, modified_at: &str) -> String {
+fn account_config_json_ext(telemetry: bool, indexer: Option<&str>, modified_at: &str) -> String {
     let record = AccountConfigRecord {
         telemetry_enabled: telemetry,
-        appview_url: appview.map(str::to_string),
+        indexer_url: indexer.map(str::to_string),
         ..AccountConfigRecord::new(modified_at)
     };
     serde_json::json!({
@@ -174,26 +174,26 @@ fn updates_absent_field_leaves_value_untouched() {
 
     let updates: AccountConfigUpdates = serde_json::from_str("{}").unwrap();
     assert!(updates.telemetry_enabled.is_none());
-    assert!(updates.appview_url.is_none());
+    assert!(updates.indexer_url.is_none());
 }
 
 #[test]
-fn updates_explicit_null_clears_appview_url() {
+fn updates_explicit_null_clears_indexer_url() {
     use crate::records::AccountConfigUpdates;
 
-    let updates: AccountConfigUpdates = serde_json::from_str(r#"{"appviewUrl": null}"#).unwrap();
-    assert_eq!(updates.appview_url, Some(None));
+    let updates: AccountConfigUpdates = serde_json::from_str(r#"{"indexerUrl": null}"#).unwrap();
+    assert_eq!(updates.indexer_url, Some(None));
 }
 
 #[test]
-fn updates_value_sets_appview_url() {
+fn updates_value_sets_indexer_url() {
     use crate::records::AccountConfigUpdates;
 
     let updates: AccountConfigUpdates =
-        serde_json::from_str(r#"{"appviewUrl": "https://appview.test"}"#).unwrap();
+        serde_json::from_str(r#"{"indexerUrl": "https://indexer.test"}"#).unwrap();
     assert_eq!(
-        updates.appview_url,
-        Some(Some("https://appview.test".into()))
+        updates.indexer_url,
+        Some(Some("https://indexer.test".into()))
     );
 }
 
@@ -211,17 +211,17 @@ fn updates_accepts_telemetry_toggle() {
 // ---------------------------------------------------------------------------
 
 /// Updating one field must leave all other fields at their stored values.
-/// Specifically: omitting `appview_url` in the updates payload must NOT
+/// Specifically: omitting `indexer_url` in the updates payload must NOT
 /// clear the existing URL on the PDS.
 #[tokio::test]
 async fn update_account_config_preserves_untouched_fields() {
     use crate::records::AccountConfigUpdates;
 
     let mock = MockTransport::new();
-    // Seeded record: telemetry off, custom appview URL
+    // Seeded record: telemetry off, custom indexer URL
     mock.enqueue(success(&account_config_json_ext(
         false,
-        Some("https://custom.appview/"),
+        Some("https://custom.indexer/"),
         "2025-01-01T00:00:00Z",
     )));
     mock.enqueue(put_record_response());
@@ -229,7 +229,7 @@ async fn update_account_config_preserves_untouched_fields() {
     let mut opake = make_test_opake(mock);
     let updates = AccountConfigUpdates {
         telemetry_enabled: Some(true),
-        appview_url: None, // leave alone
+        indexer_url: None, // leave alone
     };
     let result = opake.update_account_config(updates).await.unwrap();
 
@@ -238,9 +238,9 @@ async fn update_account_config_preserves_untouched_fields() {
         "telemetry should be updated to true"
     );
     assert_eq!(
-        result.appview_url.as_deref(),
-        Some("https://custom.appview/"),
-        "appview_url must be preserved when absent from updates"
+        result.indexer_url.as_deref(),
+        Some("https://custom.indexer/"),
+        "indexer_url must be preserved when absent from updates"
     );
     assert_eq!(
         result.modified_at, "2026-01-01T00:00:00Z",
@@ -248,17 +248,17 @@ async fn update_account_config_preserves_untouched_fields() {
     );
 }
 
-/// Passing `appview_url: Some(None)` in the updates (explicit JSON null)
+/// Passing `indexer_url: Some(None)` in the updates (explicit JSON null)
 /// must overwrite the stored URL with `None`.
 #[tokio::test]
-async fn update_account_config_explicit_null_clears_appview_url() {
+async fn update_account_config_explicit_null_clears_indexer_url() {
     use crate::records::AccountConfigUpdates;
 
     let mock = MockTransport::new();
-    // Seeded record: has a custom appview URL
+    // Seeded record: has a custom indexer URL
     mock.enqueue(success(&account_config_json_ext(
         false,
-        Some("https://custom.appview/"),
+        Some("https://custom.indexer/"),
         "2025-01-01T00:00:00Z",
     )));
     mock.enqueue(put_record_response());
@@ -266,12 +266,12 @@ async fn update_account_config_explicit_null_clears_appview_url() {
     let mut opake = make_test_opake(mock);
     let updates = AccountConfigUpdates {
         telemetry_enabled: None,
-        appview_url: Some(None), // explicit clear
+        indexer_url: Some(None), // explicit clear
     };
     let result = opake.update_account_config(updates).await.unwrap();
 
     assert!(
-        result.appview_url.is_none(),
-        "explicit null must clear the stored appview_url"
+        result.indexer_url.is_none(),
+        "explicit null must clear the stored indexer_url"
     );
 }

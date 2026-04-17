@@ -18,7 +18,7 @@ import { useOpake } from "../provider";
 /**
  * Start the WASM SSE consumer imperatively.
  *
- * Omit `appviewUrl` to use the URL stored on the Opake instance from
+ * Omit `indexerUrl` to use the URL stored on the Opake instance from
  * config (recommended). Pass an explicit value to override for
  * instances without stored config.
  *
@@ -37,17 +37,17 @@ import { useOpake } from "../provider";
  * }
  * ```
  */
-export function useSseConsumer(appviewUrl?: string | null): void {
+export function useSseConsumer(indexerUrl?: string | null): void {
   const opake = useOpake();
 
   useEffect(() => {
     // Skip when explicitly nulled — lets callers opt out conditionally
     // (e.g., `useSseConsumer(isAuthenticated ? undefined : null)`)
     // without breaking the rules of hooks.
-    if (appviewUrl === null) return;
+    if (indexerUrl === null) return;
 
-    void opake.startSseConsumer(appviewUrl).catch((err: unknown) => {
+    void opake.startSseConsumer(indexerUrl).catch((err: unknown) => {
       console.warn("[opake-react] startSseConsumer failed:", err);
     });
-  }, [opake, appviewUrl]);
+  }, [opake, indexerUrl]);
 }

@@ -8,7 +8,7 @@
 // drive proposal application via SSE events (see the WASM consumer in
 // `crates/opake-wasm/src/sse_wasm.rs`), and the native CLI daemon runs
 // its own native SSE consumer. There's no fallback polling in either
-// track — the proposal store in the appview DB is the backstop if a
+// track — the proposal store in the indexer DB is the backstop if a
 // real-time event is missed.
 
 import { OpakeError } from "@opake/sdk";

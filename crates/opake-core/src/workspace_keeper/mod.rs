@@ -7,8 +7,8 @@
 //!
 //! This replaces the older "re-fetch `list_workspaces` on every SSE
 //! keyring event" pattern, which relied on a round-trip through the
-//! appview and paid 1–4s of cursor-lag latency per update. With the
-//! keeper, SSE events patch the list directly — the appview is a
+//! indexer and paid 1–4s of cursor-lag latency per update. With the
+//! keeper, SSE events patch the list directly — the indexer is a
 //! cold-start bootstrap path only.
 //!
 //! ## Cold-start
@@ -150,7 +150,7 @@ impl WorkspaceKeeper {
     // -- Mutation API --
 
     /// Replace the entire entry set. Called after a full-list fetch
-    /// from the appview.
+    /// from the indexer.
     pub fn bootstrap(&mut self, entries: Vec<WorkspaceEntry>) {
         self.entries = entries.into_iter().map(|e| (e.uri.clone(), e)).collect();
         self.loaded = true;
@@ -333,11 +333,11 @@ pub fn try_build_entry(
     })
 }
 
-/// Convenience wrapper: build an entry from an [`AppviewKeyring`].
+/// Convenience wrapper: build an entry from an [`IndexerKeyring`].
 ///
-/// [`AppviewKeyring`]: crate::client::AppviewKeyring
-pub fn try_build_entry_from_appview_keyring(
-    keyring: &crate::client::AppviewKeyring,
+/// [`IndexerKeyring`]: crate::client::IndexerKeyring
+pub fn try_build_entry_from_indexer_keyring(
+    keyring: &crate::client::IndexerKeyring,
     my_did: &str,
     private_key: &X25519PrivateKey,
 ) -> Option<WorkspaceEntry> {

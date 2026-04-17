@@ -34,8 +34,8 @@ function CabinetLayout() {
   // `TreeKeeper::uninstall_all` runs and the previous user's
   // `ContentKey`s / decrypted names don't linger across login.
   //
-  // The appview URL is resolved inside WASM from the stored config —
-  // seeded at boot via `setDefaultAppviewUrl`. No env read here.
+  // The indexer URL is resolved inside WASM from the stored config —
+  // seeded at boot via `setDefaultIndexerUrl`. No env read here.
   useEffect(() => {
     const opake = getOpake();
     void opake.startSseConsumer().catch((err: unknown) => {

@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A proposed structural change to a workspace directory. Written by a member to their own PDS when they can't directly modify the owner's directory records. The owner's daemon picks up pending updates via the AppView and applies them.",
+      "description": "A proposed structural change to a workspace directory. Written by a member to their own PDS when they can't directly modify the owner's directory records. The owner's daemon picks up pending updates via the indexer and applies them.",
       "key": "tid",
       "record": {
         "type": "object",

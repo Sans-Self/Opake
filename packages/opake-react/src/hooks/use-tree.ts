@@ -7,7 +7,7 @@ import { withFileManager } from "./use-tree-mutation";
 /**
  * Load a directory tree (cabinet or workspace) as a one-shot query.
  *
- * Read-only — loads from cache + AppView sync, no PDS writes. Uses
+ * Read-only — loads from cache + Indexer sync, no PDS writes. Uses
  * `keepPreviousData` so navigation between directories doesn't flash
  * a loading state when refetching.
  *

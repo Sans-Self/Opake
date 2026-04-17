@@ -1,5 +1,5 @@
 // SSE event types. Mirrors the payload shapes emitted by
-// `apps/appview/lib/opake_appview/sse/broadcaster.ex` and validated by the
+// `apps/indexer/lib/opake_indexer/sse/broadcaster.ex` and validated by the
 // Zod schemas in the shipped SDK's `packages/opake-sdk/src/event-stream.ts`.
 //
 // Fields are serde-lenient — every field that the broadcaster marks with
@@ -155,7 +155,7 @@ pub struct SseKeyringUpdate {
 /// A document update proposal.
 ///
 /// Note: the `app.opake.documentUpdate` lexicon itself has no
-/// `keyring` field — the appview's indexer injects `keyring_uri` at
+/// `keyring` field — the indexer's firehose consumer injects `keyring_uri` at
 /// dispatch time by joining through the documents table. When the
 /// join succeeds, the broadcaster routes on the workspace topic
 /// (where owners subscribe); when it fails (cabinet documents or a
@@ -282,7 +282,7 @@ impl SseEvent {
                 Self::DocumentUpdateDelete(decode(data, "document_update:delete")?)
             }
             other => {
-                // Silent drop — the appview may add event types we don't
+                // Silent drop — the indexer may add event types we don't
                 // understand yet, and forward-compat beats hard-failure.
                 log::debug!("[sse] ignoring unknown event type: {other}");
                 let _ = parse; // satisfy unused-binding when all variants

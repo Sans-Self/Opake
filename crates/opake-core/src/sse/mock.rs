@@ -93,7 +93,7 @@ impl MockSseTransport {
 impl SseTransport for MockSseTransport {
     type Connection = MockSseConnection;
 
-    async fn connect(&self, _appview_url: &str, _token: String) -> Result<Self::Connection, Error> {
+    async fn connect(&self, _indexer_url: &str, _token: String) -> Result<Self::Connection, Error> {
         if let Some(err) = self.connect_error.borrow_mut().take() {
             return Err(err);
         }

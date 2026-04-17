@@ -58,7 +58,7 @@ impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'a, T, R,
 
     /// Pending directory update proposals from the last tree sync.
     ///
-    /// Only populated for workspace contexts after `load_tree()`. The AppView
+    /// Only populated for workspace contexts after `load_tree()`. The Indexer
     /// verifies that each proposal's author is a current workspace member.
     pub fn proposals(&self) -> &[TreeProposal] {
         &self.last_proposals
