@@ -61,3 +61,8 @@ e2e-tests/playwright-report/
 .claude/settings.local.json
 .claude/hooks/node_modules/
 .claude/worktrees
+
+# nix / direnv
+.direnv/
+/result
+/result-*
