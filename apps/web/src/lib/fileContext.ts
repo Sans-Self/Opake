@@ -99,24 +99,3 @@ export function snapshotToFileItems(
   });
 }
 
-/**
- * Compute a `/cabinet/files/<a>/<b>/<c>` path fragment for the parent of the
- * given document. Returns null when the document lives at the cabinet root
- * (in which case the caller wants the plain `/cabinet/files` path).
- */
-export function cabinetPathForDocument(
-  snapshot: DirectoryTreeSnapshot,
-  documentUri: string,
-  rkeyFromUri: (uri: string) => string,
-  ancestorsOf: (
-    snap: DirectoryTreeSnapshot,
-    dirUri: string,
-  ) => readonly { readonly rkey: string }[],
-  findParentUri: (snap: DirectoryTreeSnapshot, uri: string) => string | null,
-): string | null {
-  const parentUri = findParentUri(snapshot, documentUri);
-  if (!parentUri || parentUri === snapshot.rootUri) return null;
-  const ancestors = ancestorsOf(snapshot, parentUri);
-  const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(parentUri)];
-  return segments.join("/");
-}

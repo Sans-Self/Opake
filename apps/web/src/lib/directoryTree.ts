@@ -46,6 +46,36 @@ export function ancestorsOf(
 }
 
 /**
+ * Build a URL path suffix for a directory URI in the form `"abc/def"`.
+ * Returns null when the directory is the root or missing from the tree —
+ * callers should fall back to the base route (e.g. `/cabinet/files`).
+ */
+export function directoryPathSuffix(
+  snapshot: DirectoryTreeSnapshot,
+  directoryUri: string | null,
+): string | null {
+  if (!directoryUri || directoryUri === snapshot.rootUri) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+  if (!snapshot.directories[directoryUri]) return null;
+  const ancestors = ancestorsOf(snapshot, directoryUri);
+  const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(directoryUri)];
+  return segments.join("/");
+}
+
+/**
+ * Build a URL path suffix for the parent directory of a document. Used by
+ * editor routes to compute a return path that drops the user back in the
+ * directory they came from instead of the root.
+ */
+export function documentDirectoryPathSuffix(
+  snapshot: DirectoryTreeSnapshot,
+  documentUri: string,
+): string | null {
+  const parentUri = findParentUri(snapshot, documentUri);
+  return parentUri ? directoryPathSuffix(snapshot, parentUri) : null;
+}
+
+/**
  * Resolve a chain of rkey path segments to a directory URI by walking
  * the tree from the root. Returns null if any segment doesn't match.
  *

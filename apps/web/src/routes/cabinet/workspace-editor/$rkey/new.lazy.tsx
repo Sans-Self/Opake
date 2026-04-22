@@ -1,13 +1,20 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { useWorkspaces } from "@opake/react";
+import { useDirectory, useWorkspaces } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { rkeyFromUri } from "@/lib/atUri";
+import { directoryPathSuffix } from "@/lib/directoryTree";
 
 function WorkspaceNewEditor() {
   const { rkey } = Route.useParams();
   const { directoryUri } = Route.useSearch();
   const { data: workspaces } = useWorkspaces();
   const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
+
+  const { snapshot } = useDirectory(workspace?.uri ?? null, null);
+  const pathSuffix = directoryUri && snapshot ? directoryPathSuffix(snapshot, directoryUri) : null;
+  const returnPath = pathSuffix
+    ? `/cabinet/workspace/${rkey}/${pathSuffix}`
+    : `/cabinet/workspace/${rkey}`;
 
   if (!workspace) {
     return (
@@ -21,7 +28,7 @@ function WorkspaceNewEditor() {
     <EditorView
       mode="new"
       context={{ kind: "workspace", keyringUri: workspace.uri }}
-      returnPath={`/cabinet/workspace/${rkey}`}
+      returnPath={returnPath}
       directoryUri={directoryUri}
     />
   );
