@@ -3,7 +3,7 @@ import { useTreeMutation } from "./use-tree-mutation";
 
 interface DeleteInput {
   readonly documentUri: string;
-  readonly parentDirectoryUri?: string;
+  readonly parentDirectoryUri: string;
 }
 
 /**
@@ -18,7 +18,6 @@ export function useDelete(keyringUri: string | null) {
     keyringUri,
     mutationFn: (fm, input) => fm.delete(input.documentUri, input.parentDirectoryUri),
     optimisticUpdate: (snapshot, input) => {
-      if (!input.parentDirectoryUri) return snapshot;
       const dir = snapshot.directories[input.parentDirectoryUri];
       if (!dir) return snapshot;
 

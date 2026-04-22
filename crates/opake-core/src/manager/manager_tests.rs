@@ -1,4 +1,6 @@
+use crate::client::RequestBody;
 use crate::manager::types::{FileContext, MutationOutcome};
+use crate::records::Directory;
 
 #[test]
 fn file_context_owner_did_cabinet() {
@@ -34,6 +36,90 @@ fn file_context_owner_did_workspace() {
     assert_eq!(ctx.owner_did(), "did:plc:bob");
     assert!(ctx.is_workspace());
     assert!(!ctx.is_cabinet());
+}
+
+/// Cabinet delete must atomically (a) delete the document record AND
+/// (b) remove the document URI from the parent directory's entries.
+/// Regression: the old code had an escape hatch that skipped (b) when the
+/// caller didn't pass a parent URI, leaving dangling entries in the PDS
+/// directory record (and therefore in any consumer that mirrored it).
+#[tokio::test]
+async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
+    use crate::client::{Session, LegacySession, XrpcClient};
+    use crate::crypto::OsRng;
+    use crate::directories::tests::{
+        dummy_directory_with_entries, get_record_response, put_record_response,
+    };
+    use crate::opake::Opake;
+    use crate::storage::{Identity, NoopStorage};
+    use crate::test_utils::MockTransport;
+
+    const DID: &str = "did:plc:test";
+    const PARENT_URI: &str = "at://did:plc:test/app.opake.directory/self";
+    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+    const OTHER_DOC_URI: &str = "at://did:plc:test/app.opake.document/keep";
+
+    // Seed the mock: getRecord for the parent directory (loaded by
+    // prepare_remove_entry), then applyWrites (the atomic delete + update).
+    let mock = MockTransport::new();
+    mock.enqueue(get_record_response(
+        PARENT_URI,
+        &dummy_directory_with_entries("root", vec![DOC_URI.into(), OTHER_DOC_URI.into()]),
+    ));
+    mock.enqueue(put_record_response(PARENT_URI));
+
+    let session = Session::Legacy(LegacySession {
+        did: DID.into(),
+        handle: "test.handle".into(),
+        access_jwt: "test-jwt".into(),
+        refresh_jwt: "test-refresh".into(),
+    });
+    let client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
+    let identity = Identity::generate(DID, &mut OsRng);
+    let mut opake = Opake::new(
+        client,
+        DID.into(),
+        Some(identity),
+        OsRng,
+        NoopStorage,
+        || "2026-01-01T00:00:00Z".into(),
+        || 1_700_000_000_000_000,
+    );
+
+    let ctx = opake.cabinet_context().unwrap();
+    let mut mgr = opake.file_manager(&ctx);
+    let outcome = mgr.delete(DOC_URI, PARENT_URI).await.unwrap();
+
+    assert!(matches!(outcome, MutationOutcome::Applied));
+
+    let reqs = mock.requests();
+    assert_eq!(reqs.len(), 2, "expected getRecord + applyWrites");
+    assert!(reqs[0].url.contains("getRecord"), "first call is fetch");
+    assert!(reqs[1].url.contains("applyWrites"), "second call is atomic write");
+
+    // Assert the applyWrites body carries BOTH ops in one batch, and the
+    // directory update actually prunes the deleted doc (but keeps siblings).
+    let Some(RequestBody::Json(body)) = &reqs[1].body else {
+        panic!("applyWrites body should be JSON");
+    };
+    let writes = body["writes"].as_array().expect("writes array");
+    assert_eq!(writes.len(), 2, "atomic batch: [delete doc, update dir]");
+
+    let delete_op = &writes[0];
+    assert_eq!(delete_op["$type"], "com.atproto.repo.applyWrites#delete");
+    assert_eq!(delete_op["collection"], "app.opake.document");
+    assert_eq!(delete_op["rkey"], "doc1");
+
+    let update_op = &writes[1];
+    assert_eq!(update_op["$type"], "com.atproto.repo.applyWrites#update");
+    assert_eq!(update_op["collection"], "app.opake.directory");
+    let updated: Directory = serde_json::from_value(update_op["value"].clone()).unwrap();
+    assert_eq!(
+        updated.entries,
+        vec![OTHER_DOC_URI.to_string()],
+        "deleted doc URI must be pruned from parent.entries; siblings preserved",
+    );
+    assert_eq!(updated.modified_at.as_deref(), Some("2026-01-01T00:00:00Z"));
 }
 
 #[test]

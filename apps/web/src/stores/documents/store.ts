@@ -482,7 +482,10 @@ export const useDocumentsStore = create<DocumentsStore>()(
         set((draft) => {
           draft.items = fileItems as typeof draft.items;
           draft.treeSnapshot = snapshot as typeof draft.treeSnapshot;
-          draft.currentDirectoryUri = directoryUri;
+          // Track the resolved URI — root fallback applied — so callers that
+          // read currentDirectoryUri (upload default, breadcrumb, watcher key)
+          // see the actual loaded node rather than the caller's `undefined`.
+          draft.currentDirectoryUri = resolvedUri;
           draft.loaded = true;
           draft.error = null;
         });
@@ -518,8 +521,16 @@ export const useDocumentsStore = create<DocumentsStore>()(
 
     async deleteDocument(documentUri) {
       await runMutation("documents-delete", "File deleted", "Delete failed", async (fm) => {
-        const dir = get().currentDirectoryUri;
-        await fm.delete(documentUri, dir ?? undefined);
+        const snapshot = get().treeSnapshot;
+        const parent = snapshot ? findParentUri(snapshot, documentUri) : null;
+        if (!parent) {
+          // The tree must know where the doc lives — otherwise the atomic
+          // delete+unlink can't run and we'd orphan the entry in PDS state.
+          throw new Error(
+            `Cannot delete ${documentUri}: parent directory not found in tree snapshot`,
+          );
+        }
+        await fm.delete(documentUri, parent);
       });
     },
 

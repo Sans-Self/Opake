@@ -35,7 +35,7 @@ type WasmFileManager = {
     directoryUri: string | null,
   ): Promise<unknown>;
   download(documentUri: string): Promise<unknown>;
-  delete(documentUri: string, parentDirectoryUri: string | null): Promise<unknown>;
+  delete(documentUri: string, parentDirectoryUri: string): Promise<unknown>;
   moveEntry(entryUri: string, sourceDir: string, targetDir: string): Promise<unknown>;
   createDirectory(name: string, parentUri: string | null): Promise<unknown>;
   ensureRoot(): Promise<string>;
@@ -213,15 +213,20 @@ export class FileManager {
    * directory URI is provided, also removes the entry from that directory.
    *
    * @param documentUri - AT URI of the document to delete.
-   * @param parentDirectoryUri - Directory containing the document (for entry cleanup).
+   * @param parentDirectoryUri - Directory containing the document. Required:
+   *   the delete is atomic with removing this entry from the parent. Callers
+   *   must resolve the parent before calling; passing the wrong one is caught
+   *   by `prepare_remove_entry` (NotFound error), passing a valid-but-stale
+   *   one is not.
    *
-   * @throws {OpakeError} kind "NotFound" if the document doesn't exist.
+   * @throws {OpakeError} kind "NotFound" if the document doesn't exist in the
+   *   parent directory.
    */
   @wrapWasmErrors
-  delete(documentUri: string, parentDirectoryUri?: string): Promise<MutationResult> {
+  delete(documentUri: string, parentDirectoryUri: string): Promise<MutationResult> {
     return this.requireHandle().delete(
       documentUri,
-      parentDirectoryUri ?? null,
+      parentDirectoryUri,
     ) as Promise<MutationResult>;
   }
 

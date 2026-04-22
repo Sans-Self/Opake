@@ -12,24 +12,24 @@ use super::FileManager;
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
     /// Delete a document and clean up its directory entry — atomically.
     ///
-    /// When a parent directory is provided, the document deletion and directory
-    /// entry removal happen in a single `applyWrites` call. No dangling
-    /// references on partial failure.
+    /// The caller MUST pass the parent directory URI. The document deletion
+    /// and directory entry removal happen in a single `applyWrites` call, so
+    /// there's no dangling reference on partial failure.
+    ///
+    /// Callers that genuinely don't know the parent (shouldn't happen via the
+    /// UI) must resolve it from the tree first. Silently accepting an unknown
+    /// parent would leave the entry behind in the parent's `entries` array
+    /// and desync every consumer that mirrors that list.
     #[::opake_derive::signoff]
     pub async fn delete(
         &mut self,
         document_uri: &str,
-        parent_directory_uri: Option<&str>,
+        parent_directory_uri: &str,
     ) -> Result<MutationOutcome, Error> {
         let doc_at = atproto::parse_at_uri(document_uri)?;
         let delete_op = ApplyWriteOp::Delete {
             collection: doc_at.collection.clone(),
             rkey: doc_at.rkey.clone(),
-        };
-
-        let Some(parent) = parent_directory_uri else {
-            self.opake.client.apply_writes(&[delete_op]).await?;
-            return Ok(MutationOutcome::Applied);
         };
 
         let now = self.opake.now();
@@ -38,7 +38,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             FileContext::Cabinet(_) => {
                 let dir_op = directories::prepare_remove_entry(
                     &mut self.opake.client,
-                    parent,
+                    parent_directory_uri,
                     document_uri,
                     &now,
                 )
@@ -49,11 +49,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 Ok(MutationOutcome::Applied)
             }
             FileContext::Workspace(ws) => {
-                let dir_owner = atproto::parse_at_uri(parent)?.authority;
+                let dir_owner = atproto::parse_at_uri(parent_directory_uri)?.authority;
                 if dir_owner == self.opake.did {
                     let dir_op = directories::prepare_remove_entry(
                         &mut self.opake.client,
-                        parent,
+                        parent_directory_uri,
                         document_uri,
                         &now,
                     )
@@ -65,7 +65,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 } else {
                     let update = DirectoryUpdateRecord::remove_entry(
                         ws.uri.clone(),
-                        parent.to_string(),
+                        parent_directory_uri.to_string(),
                         document_uri.to_string(),
                         now,
                     );

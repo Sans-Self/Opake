@@ -87,12 +87,12 @@ impl WasmFileManagerHandle {
     pub async fn delete(
         &self,
         document_uri: &str,
-        parent_directory_uri: Option<String>,
+        parent_directory_uri: &str,
     ) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         let result = mgr
-            .delete(document_uri, parent_directory_uri.as_deref())
+            .delete(document_uri, parent_directory_uri)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
