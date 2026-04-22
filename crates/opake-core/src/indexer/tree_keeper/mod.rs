@@ -47,10 +47,12 @@ pub type WatcherCallback = Box<dyn FnMut(Option<&DirectoryTree>)>;
 pub struct WatcherHandle(u64);
 
 /// A persistent tree for one context (cabinet or workspace).
+#[derive(crate::RedactedDebug)]
 struct HeldTree {
     tree: DirectoryTree,
     /// For cabinet trees: the private X25519 key for direct key unwrapping.
     /// For workspace trees: None.
+    #[redact]
     private_key: Option<X25519PrivateKey>,
     /// For workspace trees: single-entry map of keyring URI → group key.
     /// For cabinet trees: empty.

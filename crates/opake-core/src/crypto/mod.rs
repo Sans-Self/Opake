@@ -85,6 +85,15 @@ impl<const N: usize> std::fmt::Debug for Redacted<'_, [u8; N]> {
     }
 }
 
+impl<const N: usize> std::fmt::Debug for Redacted<'_, Option<[u8; N]>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => write!(f, "Some([{N} bytes])"),
+            None => write!(f, "None"),
+        }
+    }
+}
+
 /// A 256-bit AES content encryption key.
 ///
 /// Zeroized on drop — RedactedDebug auto-generates Zeroize + Drop for
