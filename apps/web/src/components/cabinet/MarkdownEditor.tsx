@@ -96,6 +96,17 @@ interface MarkdownEditorProps {
   /** Called when dirty state changes so the parent can track unsaved state. */
   readonly onDirtyChange?: (dirty: boolean) => void;
   readonly saving: boolean;
+  /**
+   * If provided, the title becomes an editable input. Called with the new
+   * filename (including `.md`) on Enter / blur. Omit for read-only display.
+   */
+  readonly onRename?: (newFilename: string) => void;
+}
+
+const MD_EXTENSION = ".md";
+
+function stripMdExtension(name: string): string {
+  return name.endsWith(MD_EXTENSION) ? name.slice(0, -MD_EXTENSION.length) : name;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +329,46 @@ export function MarkdownEditor({
   onClose,
   onDirtyChange,
   saving,
+  onRename,
 }: MarkdownEditorProps) {
   const [dirty, setDirtyRaw] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(stripMdExtension(documentName));
+
+  // Sync the input when the parent reports a new documentName (rename echo
+  // from the peer, rename-from-content on save, etc.) — but only if the user
+  // isn't mid-edit, to avoid clobbering their keystrokes.
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (document.activeElement === titleInputRef.current) return;
+    setTitleDraft(stripMdExtension(documentName));
+  }, [documentName]);
+
+  const commitTitle = useCallback(() => {
+    if (!onRename) return;
+    const trimmed = titleDraft.trim();
+    const current = stripMdExtension(documentName);
+    if (!trimmed) {
+      // Empty input: revert to the current name.
+      setTitleDraft(current);
+      return;
+    }
+    if (trimmed === current) return;
+    onRename(trimmed + MD_EXTENSION);
+  }, [titleDraft, documentName, onRename]);
+
+  const handleTitleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.currentTarget.blur();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setTitleDraft(stripMdExtension(documentName));
+        e.currentTarget.blur();
+      }
+    },
+    [documentName],
+  );
 
   const setDirty = useCallback(
     (value: boolean) => {
@@ -491,14 +540,31 @@ export function MarkdownEditor({
           <ArrowLeftIcon size={16} />
         </button>
 
-        <span className="text-ui text-base-content min-w-0 flex-1 truncate">
-          {documentName}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          {onRename ? (
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Untitled note"
+              spellCheck={false}
+              aria-label="Document title"
+              className="text-ui text-base-content min-w-0 flex-1 truncate border-none bg-transparent px-0 outline-none focus:ring-0"
+            />
+          ) : (
+            <span className="text-ui text-base-content min-w-0 flex-1 truncate">
+              {documentName}
+            </span>
+          )}
           {dirty && (
-            <span className="text-warning ml-1.5 text-xs" aria-label="Unsaved changes">
+            <span className="text-warning shrink-0 text-xs" aria-label="Unsaved changes">
               ●
             </span>
           )}
-        </span>
+        </div>
 
         {/* Preview / Edit toggle */}
         <button
