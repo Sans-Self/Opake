@@ -118,7 +118,12 @@ export function EditorView(props: EditorViewProps) {
   const { loaded, error } = useDocumentContent(fm, documentUri);
 
   // Sync displayName with the loaded document's name in edit mode.
+  // The load is async and external (IndexedDB / PDS round-trip), so
+  // this is the "sync external data into React state" case the rule
+  // explicitly allows; suppress since ESLint can't see through
+  // useDocumentContent's boundary.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external async source, see comment
     if (loaded?.documentName) setDisplayName(loaded.documentName);
   }, [loaded]);
 

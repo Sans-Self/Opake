@@ -229,8 +229,8 @@ async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promis
 
 export const useAuthStore = create<AuthStore>()(
   immer((set) => ({
-    session: { status: "initializing" } as SessionState,
-    identity: { status: "pending" } as IdentityState,
+    session: { status: "initializing" },
+    identity: { status: "pending" },
 
     async boot() {
       // Deduplicate concurrent calls (StrictMode, HMR, multiple route guards)

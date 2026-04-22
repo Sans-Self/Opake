@@ -36,7 +36,7 @@ export function snapshotToFileItems(
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
   if (!dir) return [];
 
-  const items: FileItem[] = dir.entries.map((entry) => {
+  const items: readonly FileItem[] = dir.entries.map((entry) => {
     if (entry.type === "directory") {
       const info = snapshot.directories[entry.uri] as
         | (typeof snapshot.directories)[string]

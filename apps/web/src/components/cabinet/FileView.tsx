@@ -117,15 +117,21 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     resolvedDirectoryUri,
   } = useDirectory(keyringUri, targetDirectoryUri);
 
+  // Derive the resolved directory URI from the snapshot + pathSegments.
+  // This has to be an effect (not a useMemo) because the snapshot comes
+  // from `useDirectory` AND is the input to the next render's
+  // `useDirectory` call — we can't know the target URI until a root-
+  // watch snapshot has arrived. targetDirectoryUri intentionally
+  // omitted from the dep list — including it would oscillate when
+  // resolve returns the current value.
   useEffect(() => {
     if (!snapshot) return;
     const resolved =
       pathSegments.length === 0 ? null : resolveDirectoryFromSplat(snapshot, pathSegments);
     if (resolved !== targetDirectoryUri) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- two-phase directory resolution; see comment above
       setTargetDirectoryUri(resolved);
     }
-    // targetDirectoryUri intentionally omitted — including it would cause an
-    // oscillation when the resolve result equals the current state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, pathSegments.join("/")]);
 
@@ -199,11 +205,11 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
       if (context.kind === "workspace") {
         const wsRkey = rkeyFromUri(context.keyringUri);
         void navigate({
-          to: "/cabinet/workspace-editor/$rkey/$docRkey" as never,
-          params: { rkey: wsRkey, docRkey: rkey } as never,
+          to: "/cabinet/workspace-editor/$rkey/$docRkey",
+          params: { rkey: wsRkey, docRkey: rkey },
         });
       } else {
-        void navigate({ to: "/cabinet/editor/$rkey" as never, params: { rkey } as never });
+        void navigate({ to: "/cabinet/editor/$rkey", params: { rkey } });
       }
     },
     [navigate, context],
@@ -214,14 +220,14 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     if (context.kind === "workspace") {
       const wsRkey = rkeyFromUri(context.keyringUri);
       void navigate({
-        to: "/cabinet/workspace-editor/$rkey/new" as never,
-        params: { rkey: wsRkey } as never,
-        search: search as never,
+        to: "/cabinet/workspace-editor/$rkey/new",
+        params: { rkey: wsRkey },
+        search: search,
       });
     } else {
       void navigate({
-        to: "/cabinet/editor/new" as never,
-        search: search as never,
+        to: "/cabinet/editor/new",
+        search: search,
       });
     }
   }, [navigate, context, currentDirectoryUri]);
