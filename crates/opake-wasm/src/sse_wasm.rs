@@ -400,6 +400,14 @@ impl WasmOpakeHandle {
                     }
                 } else {
                     let mut keeper = tree_keeper_rc.lock().await;
+                    // Re-check the flag after acquiring the lock: if the
+                    // consumer was stopped while we were waiting for it,
+                    // bail instead of re-inhabiting the tree the wipe
+                    // task is about to drain (or just drained).
+                    if !started_flag.get() {
+                        log::debug!("[sse] consumer stopped while awaiting tree_keeper lock");
+                        break;
+                    }
                     if let Err(e) = keeper.apply_event(&event) {
                         log::warn!("[sse] tree_keeper apply failed: {e}");
                     }
@@ -409,11 +417,23 @@ impl WasmOpakeHandle {
                 // so subscribers see changes without an indexer round-
                 // trip. Idempotent upserts (same rotation + same data)
                 // don't re-fire watchers — see `WorkspaceKeeper::upsert`.
-                apply_keyring_to_workspace_keeper(&opake_rc, &workspace_keeper_rc, &event).await;
+                //
+                // Same post-lock flag recheck as the tree apply above:
+                // the helper bails internally if a stop landed while it
+                // was waiting for the workspace_keeper / inbox_keeper
+                // mutex.
+                apply_keyring_to_workspace_keeper(
+                    &opake_rc,
+                    &workspace_keeper_rc,
+                    &started_flag,
+                    &event,
+                )
+                .await;
 
                 // Grant events: apply to the inbox keeper so the
                 // "Shared with me" view updates live.
-                apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &event).await;
+                apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &started_flag, &event)
+                    .await;
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -619,6 +639,7 @@ async fn wasm_sleep(duration: Duration) {
 async fn apply_keyring_to_workspace_keeper(
     opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
     workspace_keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
+    started_flag: &Rc<std::cell::Cell<bool>>,
     event: &SseEvent,
 ) {
     match event {
@@ -645,11 +666,17 @@ async fn apply_keyring_to_workspace_keeper(
                 wk::try_build_entry_from_sse_record(record, &did, &private_key)
             };
             let mut keeper = workspace_keeper_rc.lock().await;
+            if !started_flag.get() {
+                return;
+            }
             keeper.apply_keyring_record(&record.uri, maybe_entry);
         }
         SseEvent::KeyringDelete(payload) => {
             if let Some(uri) = payload.best_uri() {
                 let mut keeper = workspace_keeper_rc.lock().await;
+                if !started_flag.get() {
+                    return;
+                }
                 keeper.delete(uri);
             }
         }
@@ -664,6 +691,7 @@ async fn apply_keyring_to_workspace_keeper(
 async fn apply_grant_to_inbox_keeper(
     opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
     inbox_keeper_rc: &Rc<Mutex<InboxKeeper>>,
+    started_flag: &Rc<std::cell::Cell<bool>>,
     event: &SseEvent,
 ) {
     match event {
@@ -684,11 +712,17 @@ async fn apply_grant_to_inbox_keeper(
                 return;
             };
             let mut keeper = inbox_keeper_rc.lock().await;
+            if !started_flag.get() {
+                return;
+            }
             keeper.upsert(entry);
         }
         SseEvent::GrantDelete(payload) => {
             if let Some(uri) = payload.best_uri() {
                 let mut keeper = inbox_keeper_rc.lock().await;
+                if !started_flag.get() {
+                    return;
+                }
                 keeper.delete(uri);
             }
         }
