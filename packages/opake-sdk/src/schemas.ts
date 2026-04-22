@@ -180,21 +180,24 @@ const directoryInfoSchema = z
   .object({
     name: z.string(),
     entries: z.array(typedEntrySchema),
-    parent_uri: z.string().nullish(),
+    // WASM DTO emits camelCase via `#[serde(rename_all = "camelCase")]`.
+    // `nullish()` here tolerates the `undefined` that serde-wasm-bindgen
+    // produces for a missing Option<String> in JS object mode.
+    parentUri: z.string().nullish(),
   })
   .transform((r) => ({
     name: r.name,
     entries: r.entries,
-    parentUri: r.parent_uri,
+    parentUri: r.parentUri ?? null,
   }));
 
 export const directoryTreeSnapshotSchema = z
   .object({
-    root_uri: z.string().nullish(),
+    rootUri: z.string().nullish(),
     directories: z.record(z.string(), directoryInfoSchema),
   })
   .transform((r) => ({
-    rootUri: r.root_uri ?? null,
+    rootUri: r.rootUri ?? null,
     directories: r.directories,
   }));
 

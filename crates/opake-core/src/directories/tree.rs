@@ -184,15 +184,17 @@ impl DirectoryTree {
     /// Override the root directory URI.
     ///
     /// Used for workspace trees where the root is not `directory/self` but
-    /// a deterministic `directory/ws-{keyring_rkey}`. Returns false if the
-    /// URI isn't in the tree (caller should handle the error).
-    pub fn set_root(&mut self, uri: &str) -> bool {
-        if self.directories.contains_key(uri) {
-            self.root_uri = Some(uri.to_owned());
-            true
-        } else {
-            false
-        }
+    /// a deterministic `directory/ws-{keyring_rkey}`. Stores the URI
+    /// unconditionally — the tree records "this is the expected root"
+    /// even if the corresponding directory record hasn't landed yet
+    /// (cold indexer window, SSE still catching up). When the record
+    /// does arrive via SSE upsert, it slots into `directories` under
+    /// this URI and the tree becomes fully populated. Gating this on
+    /// `contains_key` made the workspace root silently unmarked during
+    /// the load→install→first-SSE-event window, which surfaced as
+    /// `snapshot.rootUri === undefined` in the JS consumer.
+    pub fn set_root(&mut self, uri: &str) {
+        self.root_uri = Some(uri.to_owned());
     }
 
     /// Load the directory hierarchy from the PDS (test use only).
