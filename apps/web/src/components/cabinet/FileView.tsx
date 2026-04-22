@@ -1,7 +1,7 @@
 // Shared file display for both cabinet and workspace contexts.
 // Thin route wrappers pass the context; this component handles everything else.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ListBulletsIcon,
@@ -26,6 +26,8 @@ import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
 import { TreeSnapshotProvider } from "./TreeSnapshotContext";
+import { FilePreview, evictPreviewCache } from "./FilePreview";
+import { PreviewPaneHeader } from "./PreviewPaneHeader";
 import { SegmentedToggle } from "@/components/SegmentedToggle";
 import {
   type FileContext,
@@ -33,13 +35,14 @@ import {
   keyringUriFor,
   snapshotToFileItems,
 } from "@/lib/fileContext";
+import type { DecryptedBlob } from "@/lib/preview";
 import { rkeyFromUri } from "@/lib/atUri";
 import { ancestorsOf, findParentUri, resolveDirectoryFromSplat } from "@/lib/directoryTree";
 import { triggerBrowserDownload } from "@/lib/download";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { loading } from "@/stores/app";
 import { NewFolderDialog, type NewFolderDialogHandle } from "./NewFolderDialog";
-import type { FileItem } from "./types";
+import { isEditable, type FileItem } from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,8 +164,18 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const moveMut = useMove(keyringUri);
 
   // Direct FileManager access for operations without a dedicated hook
-  // (download, updateMetadata).
+  // (download, updateMetadata, preview decryption).
   const { fileManager } = useFileManager(keyringUri);
+
+  // -----------------------------------------------------------------
+  // Preview state
+  // -----------------------------------------------------------------
+
+  // URI of the file currently open in the side-panel preview, or null.
+  // Previews are keyed by URI; switching files evicts the previous cache
+  // entry on close so the decrypted bytes don't linger.
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const previewItem = previewUri ? items.find((i) => i.uri === previewUri) : null;
 
   // -----------------------------------------------------------------
   // Handlers
@@ -230,6 +243,31 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     },
     [fileManager],
   );
+
+  const handlePreview = useCallback((item: FileItem) => {
+    setPreviewUri(item.uri);
+  }, []);
+
+  const handleClosePreview = useCallback(() => {
+    setPreviewUri((prev) => {
+      if (prev) evictPreviewCache(prev);
+      return null;
+    });
+  }, []);
+
+  // Decrypt thunk for the current preview. Stable per (fileManager, previewUri,
+  // metadata snapshot) so FilePreview's Suspense-cached promise stays valid.
+  const decryptPreview = useCallback(async (): Promise<DecryptedBlob> => {
+    if (!fileManager || !previewUri) {
+      throw new Error("preview decrypt called without a file context");
+    }
+    const result = await fileManager.download(previewUri);
+    const meta = metadata?.[previewUri];
+    return {
+      plaintext: result.data,
+      metadata: { name: result.filename, mimeType: meta?.mimeType },
+    };
+  }, [fileManager, previewUri, metadata]);
 
   const handleDelete = useCallback(
     (uri: string) => {
@@ -456,12 +494,48 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   }, []);
 
   // -----------------------------------------------------------------
+  // Side-panel preview
+  // -----------------------------------------------------------------
+
+  const sidePanel =
+    previewUri && previewItem ? (
+      <div className="flex h-full flex-col">
+        <PreviewPaneHeader
+          documentName={previewItem.name}
+          onDownload={() => handleDownload(previewUri)}
+          onEdit={
+            isEditable(previewItem)
+              ? () => {
+                  handleEdit(previewItem);
+                  handleClosePreview();
+                }
+              : undefined
+          }
+          onClose={handleClosePreview}
+        />
+        <Suspense fallback={<PreviewSkeleton />}>
+          <FilePreview
+            cacheKey={previewUri}
+            decrypt={decryptPreview}
+            onDownload={() => handleDownload(previewUri)}
+          />
+        </Suspense>
+      </div>
+    ) : undefined;
+
+  // -----------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------
 
   return (
     <TreeSnapshotProvider value={snapshot}>
-      <PanelShell depth={1} breadcrumbs={breadcrumbs} toolbar={toolbar} footer={footerText}>
+      <PanelShell
+        depth={1}
+        breadcrumbs={breadcrumbs}
+        toolbar={toolbar}
+        footer={footerText}
+        sidePanel={sidePanel}
+      >
         {!isReady && !error ? (
           <FileViewSkeleton />
         ) : error ? (
@@ -473,8 +547,10 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
           <PanelContent
             items={items}
             viewMode={viewMode}
+            activeUri={previewUri ?? undefined}
             onOpen={handleOpen}
             onEdit={handleEdit}
+            onPreview={handlePreview}
             onDownload={handleDownload}
             onDelete={handleDelete}
             onDeleteFolder={handleDeleteFolder}
@@ -499,5 +575,15 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
 
       <NewFolderDialog ref={newFolderDialogRef} onConfirm={handleNewFolderConfirm} />
     </TreeSnapshotProvider>
+  );
+}
+
+function PreviewSkeleton() {
+  return (
+    <div className="flex h-full flex-col gap-3 p-6">
+      <div className="skeleton h-4 w-3/4 rounded" />
+      <div className="skeleton h-4 w-1/2 rounded" />
+      <div className="skeleton h-64 w-full rounded-lg" />
+    </div>
   );
 }

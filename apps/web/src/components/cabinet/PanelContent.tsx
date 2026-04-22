@@ -117,10 +117,14 @@ export function PanelContent({
     moveDialogRef.current?.show(item.uri, item.name, item.kind, currentParent, disabled);
   };
 
+  // Click precedence: folder open > preview > edit > download.
+  // Preview-before-edit so images and markdown both preview on single
+  // click; edit stays reachable via double-click (wired through
+  // `onDoubleClick`) and the file action menu.
   const handleItemClick = (item: FileItem) => {
     if (item.kind === "folder") onOpen(item);
-    else if (onEdit && isEditable(item)) onEdit(item);
     else if (onPreview && isPreviewable(item)) onPreview(item);
+    else if (onEdit && isEditable(item)) onEdit(item);
     else onDownload(item.uri);
   };
 
