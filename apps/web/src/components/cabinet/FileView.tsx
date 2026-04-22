@@ -115,6 +115,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     isReady,
     error,
     resolvedDirectoryUri,
+    retry,
   } = useDirectory(keyringUri, targetDirectoryUri);
 
   // Derive the resolved directory URI from the snapshot + pathSegments.
@@ -506,14 +507,10 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
 
   const footerText = `${items.length} ${items.length === 1 ? "item" : "items"} · End-to-end encrypted`;
 
-  // Retry after a load error — a full reload is the simplest way to
-  // re-run the OpakeProvider's FileManagerCache construction and the
-  // useDirectory loadTree. useDirectory doesn't expose an imperative
-  // retry, and there's no dep change we can force while staying on the
-  // same directoryUri, so going through the navigation layer is cheapest.
-  const handleRetry = useCallback(() => {
-    window.location.reload();
-  }, []);
+  // Retry after a load error — bumps the useDirectory generation so the
+  // effect re-runs loadTree and re-installs the watcher without a full
+  // page reload (which would evict preview + readme caches too).
+  const handleRetry = retry;
 
   // -----------------------------------------------------------------
   // Side-panel preview

@@ -77,6 +77,12 @@ export function useTreeMutation<TInput, TResult>(
 
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key });
+      // Metadata is keyed per-directory and useDirectoryMetadata has a
+      // separate cache that doesn't observe tree mutations. Rather than
+      // thread a directoryUri through every mutation signature, invalidate
+      // all metadata prefixes — non-active directories are inert refetches
+      // and keepPreviousData suppresses loading flicker on the active one.
+      void queryClient.invalidateQueries({ queryKey: ["opake", "metadata"] });
     },
   });
 }

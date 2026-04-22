@@ -24,7 +24,7 @@
 // arrives as the same tree state the mutation already wrote, and the
 // WASM TreeKeeper dedupes at the record layer.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { DirectoryTreeSnapshot, DirectoryWatcher, FileManager } from "@opake/sdk";
 import { useFileManager } from "./use-file-manager";
 
@@ -41,6 +41,13 @@ interface UseDirectoryResult {
    * tree has no root yet (empty cabinet/workspace).
    */
   readonly resolvedDirectoryUri: string | null;
+  /**
+   * Re-run loadTree and re-install the watcher. Intended for error
+   * recovery — call from a retry button rather than as an ambient
+   * refresh trigger. Idempotent: safely callable while the previous
+   * attempt is still pending.
+   */
+  readonly retry: () => void;
 }
 
 /**
@@ -91,6 +98,11 @@ export function useDirectory(
 ): UseDirectoryResult {
   const { fileManager, isReady: fmReady } = useFileManager(keyringUri);
   const [commit, setCommit] = useState<Commit | null>(null);
+  // Retry is a generation counter that invalidates the effect's deps
+  // without touching the component's identity, so a fresh loadTree /
+  // watcher install happens on demand.
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const retry = useCallback(() => setRetryGeneration((g) => g + 1), []);
 
   useEffect(() => {
     if (!fmReady || !fileManager) return;
@@ -165,7 +177,7 @@ export function useDirectory(
       state.cancelled = true;
       state.watcher?.close();
     };
-  }, [fileManager, fmReady, directoryUri]);
+  }, [fileManager, fmReady, directoryUri, retryGeneration]);
 
   // Only honor a commit whose keys match the current render's props.
   const current =
@@ -177,5 +189,6 @@ export function useDirectory(
     isReady: current?.snapshot != null,
     error: current?.error ?? null,
     resolvedDirectoryUri: current?.resolvedDirectoryUri ?? null,
+    retry,
   };
 }

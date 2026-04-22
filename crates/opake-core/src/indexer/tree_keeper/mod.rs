@@ -313,6 +313,13 @@ impl TreeKeeper {
             // — don't affect name plaintext, so no-op. Cabinet keyrings
             // don't apply here; those events carry a workspace keyring
             // URI in `uri`.
+            //
+            // Rotation comparison is strictly monotonic: an equal value
+            // is an SSE echo of the rotation we already applied, a lower
+            // value is an out-of-order replay from after we bootstrapped
+            // past it. Both are no-ops. A lower value with a *different*
+            // content under the same rotation number would be a protocol
+            // violation — log it so it surfaces in traces.
             SseEvent::KeyringUpsert(record) => {
                 let Some(new_rotation) = record.rotation else {
                     return Ok(());
@@ -325,6 +332,13 @@ impl TreeKeeper {
                     held.tree.invalidate_decrypted_names();
                     let scope = TreeScope::Workspace(record.uri.clone());
                     self.notify_scope(&scope);
+                } else if new_rotation < held.rotation {
+                    log::debug!(
+                        "[tree_keeper] ignoring backward keyring rotation on {}: held={}, received={}",
+                        record.uri,
+                        held.rotation,
+                        new_rotation
+                    );
                 }
             }
             // Keyring delete: the workspace tree becomes unreadable
