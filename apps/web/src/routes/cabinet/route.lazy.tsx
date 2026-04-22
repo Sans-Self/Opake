@@ -7,6 +7,8 @@ import {
   CreateWorkspaceDialog,
   type CreateWorkspaceDialogHandle,
 } from "@/components/cabinet/CreateWorkspaceDialog";
+import { clearPreviewCache } from "@/components/cabinet/FilePreview";
+import { evictAllReadmeCaches } from "@/components/cabinet/DirectoryReadme";
 import { getOpake, useAuthStore } from "@/stores/auth";
 import { taskStore } from "@/stores/tasks";
 import { loading } from "@/stores/app";
@@ -26,6 +28,19 @@ function CabinetLayout() {
   // calls startSseConsumer on mount and stopSseConsumer (including
   // `TreeKeeper::uninstall_all`) on unmount so the previous user's
   // `ContentKey`s / decrypted names don't linger across login.
+
+  // JS-side decrypted-plaintext caches (preview + readme Suspense maps)
+  // live at module scope in their respective components so they survive
+  // Suspense unmount/remount cycles. WASM's wipeState clears the keepers
+  // but can't reach these — drain them here when the cabinet layout
+  // tears down (logout, session switch, auth-gate redirect).
+  useEffect(
+    () => () => {
+      clearPreviewCache();
+      evictAllReadmeCaches();
+    },
+    [],
+  );
 
   // Background daemon — timer polling for maintenance tasks only.
   useEffect(() => {

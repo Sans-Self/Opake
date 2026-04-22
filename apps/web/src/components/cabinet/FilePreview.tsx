@@ -55,6 +55,17 @@ export function evictPreviewCache(cacheKey: string): void {
   decryptCache.delete(cacheKey);
 }
 
+/**
+ * Drop every cached preview. Call on logout / account switch — the cache
+ * holds decrypted plaintext keyed by document URI, and one account's
+ * plaintext must not linger on the JS heap while another account is
+ * active in the same tab.
+ */
+export function clearPreviewCache(): void {
+  // eslint-disable-next-line functional/immutable-data -- module-level cache cleanup
+  decryptCache.clear();
+}
+
 async function run(decrypt: () => Promise<DecryptedBlob>): Promise<DecryptResult> {
   try {
     const blob = await decrypt();

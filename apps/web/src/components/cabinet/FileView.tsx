@@ -250,7 +250,14 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   );
 
   const handlePreview = useCallback((item: FileItem) => {
-    setPreviewUri(item.uri);
+    // Evict the previous preview's decrypted plaintext before overwriting
+    // the URI. Without this, opening a sequence of files leaves one cache
+    // entry per file in the module-level Map until the user closes the
+    // pane — decrypted bytes accumulate on the JS heap.
+    setPreviewUri((prev) => {
+      if (prev && prev !== item.uri) evictPreviewCache(prev);
+      return item.uri;
+    });
   }, []);
 
   const handleClosePreview = useCallback(() => {
@@ -259,6 +266,16 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
       return null;
     });
   }, []);
+
+  // Flush the currently-shown preview's cache on unmount so a route
+  // change away from the file browser doesn't leave decrypted bytes
+  // behind under the previous URI.
+  useEffect(
+    () => () => {
+      if (previewUri) evictPreviewCache(previewUri);
+    },
+    [previewUri],
+  );
 
   // Decrypt thunk for the current preview. Stable per (fileManager, previewUri,
   // metadata snapshot) so FilePreview's Suspense-cached promise stays valid.
