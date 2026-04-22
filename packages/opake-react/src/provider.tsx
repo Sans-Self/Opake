@@ -67,7 +67,7 @@ interface OpakeProviderProps {
    * calls `opake.startSseConsumer()` on mount, which uses the indexer
    * URL already stored on the Opake instance from `Opake.init()`. Set
    * true for tests, or for consumers that want explicit control via
-   * `useSseConsumer` or a manual `opake.startSseConsumer()` call.
+   * `useStartSseConsumer` or a manual `opake.startSseConsumer()` call.
    */
   readonly disableSseAutoStart?: boolean;
   /** Optional QueryClient — one is created if not provided. */
@@ -130,10 +130,22 @@ export function OpakeProvider({
     };
   }, [cache]);
 
-  // Auto-start the WASM SSE consumer and stop it on unmount so
-  // `TreeKeeper::uninstall_all` runs — otherwise a previous user's
-  // `ContentKey`s and decrypted directory names linger across an
-  // account switch.
+  // Auto-start the WASM SSE consumer on mount. On unmount, stop the
+  // stream and wipe the in-memory keepers so a previous user's
+  // `ContentKey`s and decrypted directory names don't linger across
+  // an account switch. The stop + wipe pair is intentional: stopping
+  // the stream alone leaves the tree cached (correct for a user who's
+  // briefly offline), while wiping alone would race against in-flight
+  // SSE event application.
+  //
+  // This effect intentionally duplicates part of `useStartSseConsumer`
+  // rather than delegating. The two have different semantics: the
+  // hook is start-only with no cleanup (so it's safe to call from
+  // consumers that come and go), while the provider owns the full
+  // start+stop+wipe lifecycle bound to its own mount. Unifying would
+  // need either an option flag (sprawl) or refcounting across possible
+  // competing callers (lifetime complexity). The ~10-line duplication
+  // wins.
   useEffect(() => {
     if (disableSseAutoStart) return;
     void opake.startSseConsumer().catch((err: unknown) => {
@@ -144,6 +156,11 @@ export function OpakeProvider({
         opake.stopSseConsumer();
       } catch (err) {
         console.warn("[opake-react] stopSseConsumer failed:", err);
+      }
+      try {
+        opake.wipeState();
+      } catch (err) {
+        console.warn("[opake-react] wipeState failed:", err);
       }
     };
   }, [opake, disableSseAutoStart]);

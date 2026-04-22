@@ -9,7 +9,7 @@ export { withFileManager, treeKeyFor, useTreeMutation } from "./hooks/use-tree-m
 // Subscription hooks (SSE-driven, live updates) — preferred for reads
 export { useFileManager } from "./hooks/use-file-manager";
 export { useDirectory } from "./hooks/use-directory";
-export { useSseConsumer } from "./hooks/use-sse-consumer";
+export { useStartSseConsumer } from "./hooks/use-sse-consumer";
 
 // Query hooks (react-query cache) — kept for mutation invalidation
 // paths and workspace list. New consumers should prefer `useDirectory`

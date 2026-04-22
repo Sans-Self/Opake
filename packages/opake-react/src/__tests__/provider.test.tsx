@@ -60,14 +60,17 @@ describe("OpakeProvider", () => {
     await flush();
 
     expect(mock.stopSseConsumer).not.toHaveBeenCalled();
+    expect(mock.wipeState).not.toHaveBeenCalled();
 
     unmount();
     await flush();
 
-    // Cleanup should have run stopSseConsumer exactly once so that the
-    // WASM TreeKeeper zeroes cached ContentKeys / decrypted metadata
-    // before the next Opake instance takes over.
+    // Cleanup should have run stopSseConsumer + wipeState exactly once:
+    // stop the stream so no more events land against freshly-uninstalled
+    // scopes, then wipe so the WASM keepers zero cached ContentKeys /
+    // decrypted metadata before the next Opake instance takes over.
     expect(mock.stopSseConsumer).toHaveBeenCalledTimes(1);
+    expect(mock.wipeState).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT stop the SSE consumer on unmount when auto-start is disabled", async () => {
@@ -84,8 +87,9 @@ describe("OpakeProvider", () => {
     await flush();
 
     // With auto-start off, the effect skipped entirely and there's no
-    // cleanup path — stopSseConsumer should not be called either.
+    // cleanup path — neither stopSseConsumer nor wipeState fires.
     expect(mock.stopSseConsumer).not.toHaveBeenCalled();
+    expect(mock.wipeState).not.toHaveBeenCalled();
   });
 
   it("skips SSE auto-start when disableSseAutoStart is set", async () => {

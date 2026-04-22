@@ -57,7 +57,7 @@ interface UseDirectoryResult {
  * (typically <1s).
  *
  * Requires an `OpakeProvider` ancestor with `disableSseAutoStart`
- * unset (the default), OR an explicit `useSseConsumer()` call
+ * unset (the default), OR an explicit `useStartSseConsumer()` call
  * somewhere higher in the tree. Without an active SSE consumer the
  * hook will still load the initial tree, but won't receive live
  * updates.

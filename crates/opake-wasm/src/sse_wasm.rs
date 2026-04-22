@@ -425,19 +425,32 @@ impl WasmOpakeHandle {
         Ok(())
     }
 
-    /// Stop the SSE consumer and wipe decrypted tree + workspace state.
-    ///
-    /// Synchronous from JS: React `useEffect` cleanup is sync, so the
-    /// keeper drains (which need async locks) are fire-and-forget on
-    /// the event loop. Setting `sse_started = false` is enough on its
-    /// own to terminate the consumer loop on its next event —
-    /// `uninstall_all` is what zeroes any cached `ContentKey`s and the
-    /// workspace list.
+    /// Stop the SSE consumer. Only flips the `sse_started` flag and
+    /// clears the proposal-sync debounce state — the consumer loop
+    /// terminates on its next `next_event().await`. Tree + workspace
+    /// caches are intentionally preserved: stopping the stream doesn't
+    /// mean the user is signing out, only that no new events will be
+    /// applied. Call `wipeState()` separately when crypto material
+    /// should be zeroed (logout, account switch).
     #[wasm_bindgen(js_name = stopSseConsumer)]
     pub fn stop_sse_consumer(&self) {
         self.sse_started.set(false);
         PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| state.borrow_mut().clear());
+    }
 
+    /// Drain every in-memory keeper: directory trees, the workspace
+    /// list, the inbox. Drops cached `ContentKey`s (triggering their
+    /// `ZeroizeOnDrop`) and cached decrypted directory names.
+    ///
+    /// Synchronous from JS so callers in React `useEffect` cleanup can
+    /// invoke it directly. The async keeper locks are awaited on a
+    /// `spawn_local` task — fire-and-forget is safe because no caller
+    /// observes mid-wipe state.
+    ///
+    /// Typical sequence at logout is `stopSseConsumer()` then
+    /// `wipeState()`. OpakeProvider's unmount effect does this pair.
+    #[wasm_bindgen(js_name = wipeState)]
+    pub fn wipe_state(&self) {
         let tree_keeper = Rc::clone(&self.tree_keeper);
         let workspace_keeper = Rc::clone(&self.workspace_keeper);
         let inbox_keeper = Rc::clone(&self.inbox_keeper);
@@ -451,7 +464,7 @@ impl WasmOpakeHandle {
             let mut ik = inbox_keeper.lock().await;
             ik.uninstall_all();
             log::debug!(
-                "[sse] tree_keeper + workspace_keeper + inbox_keeper drained on stopSseConsumer"
+                "[sse] tree_keeper + workspace_keeper + inbox_keeper drained on wipeState"
             );
         });
     }

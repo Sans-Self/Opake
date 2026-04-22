@@ -14,6 +14,7 @@ export interface MockOpake {
   workspace: Mock<(keyringUri: string) => Promise<MockFileManager>>;
   startSseConsumer: Mock<(indexerUrl?: string) => Promise<void>>;
   stopSseConsumer: Mock<() => void>;
+  wipeState: Mock<() => void>;
   /** Inspect the last FileManager handed out (for cabinet). */
   lastCabinetFm: MockFileManager | null;
   /** Inspect last FM per workspace keyring. */
@@ -119,6 +120,7 @@ export function createMockOpake(): MockOpake {
     workspace: vi.fn(),
     startSseConsumer: vi.fn(async () => {}),
     stopSseConsumer: vi.fn(),
+    wipeState: vi.fn(),
     lastCabinetFm: null,
     workspaceFms: new Map(),
   };

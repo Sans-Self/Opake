@@ -795,13 +795,28 @@ export class Opake {
 
   /**
    * Stop the WASM SSE consumer. Clears the internal running flag so a
-   * subsequent `startSseConsumer` call can spawn a fresh consumer.
-   * Also drains the WASM-side WorkspaceKeeper so account switches don't
-   * leak the previous user's workspace list.
+   * subsequent `startSseConsumer` call can spawn a fresh consumer. No
+   * crypto material is wiped — call `wipeState()` for that when the
+   * session is truly ending (logout, account switch).
    */
   stopSseConsumer(): void {
     const ctx = this.ctx;
     if (ctx) ctx.stopSseConsumer();
+  }
+
+  /**
+   * Drain every in-memory keeper (directory trees, workspace list,
+   * inbox). Drops cached ContentKeys (ZeroizeOnDrop fires) and the
+   * decrypted directory-name cache. Call on logout / account switch
+   * so one user's crypto state doesn't leak into the next session.
+   *
+   * Typical teardown order is `stopSseConsumer()` then `wipeState()`
+   * — stop the stream first so no events land against freshly-
+   * uninstalled scopes. OpakeProvider's unmount does this for you.
+   */
+  wipeState(): void {
+    const ctx = this.ctx;
+    if (ctx) ctx.wipeState();
   }
 
   /**

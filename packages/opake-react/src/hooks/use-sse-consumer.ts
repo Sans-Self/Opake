@@ -1,26 +1,34 @@
 "use client";
 
-// useSseConsumer — imperative SSE consumer start.
+// useStartSseConsumer — imperative, start-only SSE consumer hook.
 //
-// Alternative to the Provider's auto-start. Useful when you want to
-// gate the consumer on a runtime condition (authenticated && online,
-// feature flag, etc.) rather than starting unconditionally at
-// provider mount.
+// Contract: when rendered with a defined `indexerUrl`, calls
+// `opake.startSseConsumer()` once. There is deliberately no stop
+// branch — unmount doesn't tear down the consumer. OpakeProvider's
+// built-in auto-start covers the normal "start at mount, stop at
+// unmount" lifecycle; use it for that case.
 //
-// Idempotent: calling this while another start is already in flight
-// is safe — the WASM-side `sse_started` flag prevents double-spawn.
-// So calling it alongside the Provider's auto-start is a no-op on
+// Reach for this hook only when you need a gate: the consumer starts
+// once `indexerUrl` flips from null to a value (e.g., authenticated
+// && online, feature flag on). Passing null skips the start, so
+// `useStartSseConsumer(isAuthed ? undefined : null)` composes
+// cleanly without violating rules-of-hooks.
+//
+// Idempotent: the WASM-side `sse_started` flag prevents double-spawn,
+// so calling this alongside the Provider's auto-start is a no-op on
 // the second call.
 
 import { useEffect } from "react";
 import { useOpake } from "../provider";
 
 /**
- * Start the WASM SSE consumer imperatively.
+ * Start the WASM SSE consumer imperatively. No corresponding stop —
+ * see the module comment for why.
  *
  * Omit `indexerUrl` to use the URL stored on the Opake instance from
  * config (recommended). Pass an explicit value to override for
- * instances without stored config.
+ * instances without stored config. Pass `null` to skip the start
+ * (use when gating on a runtime condition).
  *
  * The Provider auto-starts the consumer unless `disableSseAutoStart`
  * is set, so in most apps you don't need this hook at all. Use it
@@ -32,17 +40,17 @@ import { useOpake } from "../provider";
  * ```tsx
  * function Gate() {
  *   const isAuthenticated = useAuth();
- *   useSseConsumer(isAuthenticated ? undefined : null);
+ *   useStartSseConsumer(isAuthenticated ? undefined : null);
  *   return <Outlet />;
  * }
  * ```
  */
-export function useSseConsumer(indexerUrl?: string | null): void {
+export function useStartSseConsumer(indexerUrl?: string | null): void {
   const opake = useOpake();
 
   useEffect(() => {
     // Skip when explicitly nulled — lets callers opt out conditionally
-    // (e.g., `useSseConsumer(isAuthenticated ? undefined : null)`)
+    // (e.g., `useStartSseConsumer(isAuthenticated ? undefined : null)`)
     // without breaking the rules of hooks.
     if (indexerUrl === null) return;
 
