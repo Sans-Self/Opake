@@ -345,7 +345,9 @@ export function MarkdownEditor({
 
   const commitTitle = useCallback(() => {
     if (!onRename) return;
-    const trimmed = titleDraft.trim();
+    // Strip trailing .md before comparing and before re-appending — a user who
+    // types the full "foo.md" would otherwise produce "foo.md.md".
+    const trimmed = stripMdExtension(titleDraft.trim());
     const current = stripMdExtension(documentName);
     if (!trimmed) {
       // Empty input: revert to the current name.

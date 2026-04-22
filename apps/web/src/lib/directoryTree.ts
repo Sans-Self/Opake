@@ -63,19 +63,6 @@ export function directoryPathSuffix(
 }
 
 /**
- * Build a URL path suffix for the parent directory of a document. Used by
- * editor routes to compute a return path that drops the user back in the
- * directory they came from instead of the root.
- */
-export function documentDirectoryPathSuffix(
-  snapshot: DirectoryTreeSnapshot,
-  documentUri: string,
-): string | null {
-  const parentUri = findParentUri(snapshot, documentUri);
-  return parentUri ? directoryPathSuffix(snapshot, parentUri) : null;
-}
-
-/**
  * Resolve a chain of rkey path segments to a directory URI by walking
  * the tree from the root. Returns null if any segment doesn't match.
  *

@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
-import { useFileManager } from "@opake/react";
+import { useDirectoryMetadata, useFileManager } from "@opake/react";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PanelShell } from "./PanelShell";
 import { toastError, toastSuccess } from "@/stores/toast";
@@ -30,6 +30,11 @@ interface EditorViewEditProps {
   readonly documentUri: string;
   readonly context: FileContext;
   readonly returnPath: string;
+  /**
+   * Parent directory URI, if known. Used to subscribe to metadata updates
+   * so peer renames flow into the title input. Omit to disable the sync.
+   */
+  readonly parentDirectoryUri?: string | null;
 }
 
 interface EditorViewNewProps {
@@ -113,19 +118,31 @@ export function EditorView(props: EditorViewProps) {
 
   const documentUri = mode === "edit" ? props.documentUri : null;
   const directoryUri = mode === "new" ? props.directoryUri : undefined;
+  const parentDirectoryUri = mode === "edit" ? props.parentDirectoryUri ?? null : null;
   const persistedUri = createdUri ?? documentUri;
 
   const { loaded, error } = useDocumentContent(fm, documentUri);
 
-  // Sync displayName with the loaded document's name in edit mode.
-  // The load is async and external (IndexedDB / PDS round-trip), so
-  // this is the "sync external data into React state" case the rule
-  // explicitly allows; suppress since ESLint can't see through
-  // useDocumentContent's boundary.
+  // Subscribe to the parent directory's metadata so peer renames propagate
+  // into the title input. MarkdownEditor won't clobber the user's keystrokes
+  // while they're editing — it checks document.activeElement before syncing.
+  const { data: directoryMetadata } = useDirectoryMetadata(
+    keyringUriFor(context),
+    parentDirectoryUri,
+  );
+  const peerName = documentUri ? directoryMetadata?.[documentUri]?.name : undefined;
+
+  // Sync displayName with the loaded document's name in edit mode. Two async
+  // sources feed in: the initial fm.download() decrypt (loaded.documentName)
+  // and live metadata updates from SSE (peerName via useDirectoryMetadata).
+  // The eslint rule flags this as set-state-in-effect, but both sources are
+  // external to React — the explicit allowance applies.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- external async source, see comment
-    if (loaded?.documentName) setDisplayName(loaded.documentName);
-  }, [loaded]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external async sources, see comment
+    if (peerName) setDisplayName(peerName);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external async sources, see comment
+    else if (loaded?.documentName) setDisplayName(loaded.documentName);
+  }, [loaded, peerName]);
 
   // Block in-app navigation when there are unsaved changes.
   // TanStack Router's useBlocker covers SPA navigations that
@@ -146,6 +163,11 @@ export function EditorView(props: EditorViewProps) {
     setDirty(isDirty);
   }, []);
 
+  // Generation counter so a failing rename doesn't clobber a newer rename
+  // that landed while the failure was in flight. Rollback is skipped if this
+  // call's generation is no longer the most recent.
+  const renameGenRef = useRef(0);
+
   const handleRename = useCallback(
     (newName: string) => {
       // Optimistic update — the input's UI state comes from displayName
@@ -153,12 +175,15 @@ export function EditorView(props: EditorViewProps) {
       // back on error. For "new" mode before the first save, there's
       // nothing to persist yet; the name is applied on upload.
       const previous = displayName;
+      const gen = ++renameGenRef.current;
       setDisplayName(newName);
       if (!fm || !persistedUri) return;
       fm.updateMetadata(persistedUri, { filename: newName })
         .then(() => toastSuccess("Renamed"))
         .catch((err: unknown) => {
-          setDisplayName(previous);
+          if (renameGenRef.current === gen) {
+            setDisplayName(previous);
+          }
           toastError(err instanceof Error ? err.message : "Rename failed");
         });
     },

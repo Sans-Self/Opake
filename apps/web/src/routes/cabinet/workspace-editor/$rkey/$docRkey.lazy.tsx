@@ -3,7 +3,7 @@ import { useDirectory, useWorkspaces } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
 import { documentUri, rkeyFromUri } from "@/lib/atUri";
-import { documentDirectoryPathSuffix } from "@/lib/directoryTree";
+import { directoryPathSuffix, findParentUri } from "@/lib/directoryTree";
 
 function WorkspaceEditor() {
   const { rkey, docRkey } = Route.useParams();
@@ -15,7 +15,8 @@ function WorkspaceEditor() {
   // even when the workspace isn't resolved yet. Guard rendering below.
   const uri = did ? documentUri(did, docRkey) : null;
   const { snapshot } = useDirectory(workspace?.uri ?? null, null);
-  const pathSuffix = uri && snapshot ? documentDirectoryPathSuffix(snapshot, uri) : null;
+  const parentUri = uri && snapshot ? findParentUri(snapshot, uri) : null;
+  const pathSuffix = parentUri && snapshot ? directoryPathSuffix(snapshot, parentUri) : null;
   const returnPath = pathSuffix
     ? `/cabinet/workspace/${rkey}/${pathSuffix}`
     : `/cabinet/workspace/${rkey}`;
@@ -36,6 +37,7 @@ function WorkspaceEditor() {
       documentUri={uri}
       context={{ kind: "workspace", keyringUri: workspace.uri }}
       returnPath={returnPath}
+      parentDirectoryUri={parentUri}
     />
   );
 }
