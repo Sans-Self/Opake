@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLazyFileRoute, Outlet } from "@tanstack/react-router";
+import { OpakeProvider } from "@opake/react";
 import { Sidebar } from "@/components/cabinet/Sidebar";
 import { TopBar } from "@/components/cabinet/TopBar";
 import {
@@ -30,25 +31,10 @@ function CabinetLayout() {
     };
   }, []);
 
-  // Start the WASM SSE consumer; stop it on teardown so
-  // `TreeKeeper::uninstall_all` runs and the previous user's
+  // SSE consumer lifecycle is handled by <OpakeProvider> below, which
+  // calls startSseConsumer on mount and stopSseConsumer (including
+  // `TreeKeeper::uninstall_all`) on unmount so the previous user's
   // `ContentKey`s / decrypted names don't linger across login.
-  //
-  // The indexer URL is resolved inside WASM from the stored config —
-  // seeded at boot via `setDefaultIndexerUrl`. No env read here.
-  useEffect(() => {
-    const opake = getOpake();
-    void opake.startSseConsumer().catch((err: unknown) => {
-      console.warn("[opake] startSseConsumer failed:", err);
-    });
-    return () => {
-      try {
-        opake.stopSseConsumer();
-      } catch (err) {
-        console.warn("[opake] stopSseConsumer failed:", err);
-      }
-    };
-  }, []);
 
   // Background daemon — timer polling for maintenance tasks only.
   useEffect(() => {
@@ -109,49 +95,51 @@ function CabinetLayout() {
   }, []);
 
   return (
-    <div className="bg-base-300 flex h-screen overflow-hidden font-sans">
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex">
-        <Sidebar onCreateWorkspace={() => dialogRef.current?.show()} />
-      </div>
+    <OpakeProvider opake={getOpake()}>
+      <div className="bg-base-300 flex h-screen overflow-hidden font-sans">
+        {/* Desktop sidebar */}
+        <div className="hidden md:flex">
+          <Sidebar onCreateWorkspace={() => dialogRef.current?.show()} />
+        </div>
 
-      {/* Mobile sidebar drawer */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 flex md:hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Navigation"
-        >
-          {/* Backdrop */}
+        {/* Mobile sidebar drawer */}
+        {sidebarOpen && (
           <div
-            className="absolute inset-0 bg-black/40 transition-opacity"
-            onClick={closeSidebar}
-            aria-hidden="true"
-          />
-          {/* Drawer */}
-          <div className="relative z-10">
-            <Sidebar
-              onNavigate={closeSidebar}
-              onCreateWorkspace={() => {
-                closeSidebar();
-                dialogRef.current?.show();
-              }}
+            className="fixed inset-0 z-40 flex md:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+          >
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/40 transition-opacity"
+              onClick={closeSidebar}
+              aria-hidden="true"
             />
+            {/* Drawer */}
+            <div className="relative z-10">
+              <Sidebar
+                onNavigate={closeSidebar}
+                onCreateWorkspace={() => {
+                  closeSidebar();
+                  dialogRef.current?.show();
+                }}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Main content area */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <TopBar onMenuToggle={toggleSidebar} menuOpen={sidebarOpen} />
-        <div className="flex-1 overflow-hidden">
-          <Outlet />
-        </div>
-      </main>
+        {/* Main content area */}
+        <main className="flex flex-1 flex-col overflow-hidden">
+          <TopBar onMenuToggle={toggleSidebar} menuOpen={sidebarOpen} />
+          <div className="flex-1 overflow-hidden">
+            <Outlet />
+          </div>
+        </main>
 
-      <CreateWorkspaceDialog ref={dialogRef} onConfirm={handleCreateWorkspace} />
-    </div>
+        <CreateWorkspaceDialog ref={dialogRef} onConfirm={handleCreateWorkspace} />
+      </div>
+    </OpakeProvider>
   );
 }
 

@@ -2,11 +2,11 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwiseIcon, DownloadSimpleIcon, ShareNetworkIcon } from "@phosphor-icons/react";
 import type { InboxGrant, ResolvedGrantMetadata } from "@opake/sdk";
+import { useInbox } from "@opake/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { getOpake } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { triggerBrowserDownload } from "@/lib/download";
-import { useInbox } from "@/hooks/use-inbox";
 
 const METADATA_BATCH_SIZE = 5;
 
@@ -19,7 +19,7 @@ interface ResolvedEntry {
 }
 
 function SharedWithMePage() {
-  const { grants, isLoading } = useInbox();
+  const { data: grants, isLoading } = useInbox();
   const [metadataByUri, setMetadataByUri] = useState<
     Readonly<Partial<Record<string, ResolvedGrantMetadata>>>
   >({});
