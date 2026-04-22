@@ -26,7 +26,7 @@ import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
 import { TreeSnapshotProvider } from "./TreeSnapshotContext";
-import { FilePreview, evictPreviewCache } from "./FilePreview";
+import { FilePreview, evictPreviewCache, type DecryptedBlob } from "./FilePreview";
 import { PreviewPaneHeader } from "./PreviewPaneHeader";
 import { SegmentedToggle } from "@/components/SegmentedToggle";
 import {
@@ -35,7 +35,6 @@ import {
   keyringUriFor,
   snapshotToFileItems,
 } from "@/lib/fileContext";
-import type { DecryptedBlob } from "@/lib/preview";
 import { rkeyFromUri } from "@/lib/atUri";
 import { ancestorsOf, findParentUri, resolveDirectoryFromSplat } from "@/lib/directoryTree";
 import { triggerBrowserDownload } from "@/lib/download";

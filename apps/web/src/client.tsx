@@ -1,10 +1,10 @@
 // Client entry — TanStack Start hydrates the app from here.
 //
-// Stubbed — rewrite to:
-// 1. Initialize Opake via @opake/sdk
-// 2. Wrap app with OpakeProvider from @opake/react
-// 3. Start daemon via useDaemon hook (in a layout component)
-// 4. Remove BroadcastChannel (daemon hook handles query invalidation)
+// Opake initialization and the OpakeProvider live in the cabinet route
+// layout (apps/web/src/routes/cabinet/route.lazy.tsx), not here —
+// unauthenticated routes (/devices/login, public /docs) don't need a
+// WASM context. `getOpake()` from stores/auth is the singleton bridge.
+
 
 import { StrictMode, startTransition } from "react";
 import { hydrateRoot } from "react-dom/client";

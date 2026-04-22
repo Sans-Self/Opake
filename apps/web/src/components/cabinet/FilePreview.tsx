@@ -7,7 +7,12 @@ import { use } from "react";
 import { DownloadSimpleIcon } from "@phosphor-icons/react";
 import { ImagePreview } from "./ImagePreview";
 import { MarkdownPreview } from "./MarkdownPreview";
-import type { DecryptedBlob } from "@/lib/preview";
+
+/** Shared shape for decrypted preview payloads. */
+export interface DecryptedBlob {
+  readonly plaintext: Uint8Array;
+  readonly metadata: { readonly name: string; readonly mimeType?: string };
+}
 
 interface FilePreviewProps {
   readonly cacheKey: string;
