@@ -2,18 +2,28 @@
 // FileManager lifecycle, optimistic rollback, and query invalidation.
 
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
-import type { DirectoryTreeSnapshot, FileManager, Opake } from "@opake/sdk";
-import { useOpake } from "../provider";
+import type { DirectoryTreeSnapshot, FileManager } from "@opake/sdk";
+import { useFileManagerCache } from "../provider";
+import type { FileManagerCache } from "../file-manager-cache";
 import { opakeKeys } from "../keys";
 
-/** Create a FileManager, run a callback, dispose. */
+/**
+ * Acquire a FileManager from the provider cache, run a callback,
+ * release. Concurrent acquires share a single FileManager instance,
+ * so a burst of mutations no longer re-fetches the workspace keyring
+ * record from the PDS on every call.
+ */
 export async function withFileManager<T>(
-  opake: Opake,
+  cache: FileManagerCache,
   keyringUri: string | null,
   fn: (fm: FileManager) => Promise<T>,
 ): Promise<T> {
-  const fm = keyringUri ? await opake.workspace(keyringUri) : await opake.cabinet();
-  return fn(fm).finally(() => fm.dispose());
+  const fm = await cache.acquire(keyringUri);
+  try {
+    return await fn(fm);
+  } finally {
+    cache.release(keyringUri);
+  }
 }
 
 /** Resolve the React Query cache key for a tree (cabinet or workspace). */
@@ -43,13 +53,13 @@ interface TreeMutationOptions<TInput, TResult> {
 export function useTreeMutation<TInput, TResult>(
   options: TreeMutationOptions<TInput, TResult>,
 ): UseMutationResult<TResult, Error, TInput> {
-  const opake = useOpake();
+  const cache = useFileManagerCache();
   const queryClient = useQueryClient();
   const key = treeKeyFor(options.keyringUri);
 
   return useMutation<TResult, Error, TInput, { previous?: DirectoryTreeSnapshot }>({
     mutationFn: (input) =>
-      withFileManager(opake, options.keyringUri, (fm) => options.mutationFn(fm, input)),
+      withFileManager(cache, options.keyringUri, (fm) => options.mutationFn(fm, input)),
 
     onMutate: options.optimisticUpdate
       ? async (input) => {

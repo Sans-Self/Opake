@@ -1,6 +1,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import type { DirectoryTreeSnapshot } from "@opake/sdk";
-import { useOpake } from "../provider";
+import { useFileManagerCache } from "../provider";
 import { opakeKeys } from "../keys";
 import { withFileManager } from "./use-tree-mutation";
 
@@ -28,11 +28,11 @@ import { withFileManager } from "./use-tree-mutation";
  * ```
  */
 export function useTree(keyringUri: string | null) {
-  const opake = useOpake();
+  const cache = useFileManagerCache();
 
   return useQuery<DirectoryTreeSnapshot>({
     queryKey: keyringUri ? opakeKeys.workspaceTree(keyringUri) : opakeKeys.cabinetTree(),
-    queryFn: () => withFileManager(opake, keyringUri, (fm) => fm.loadTree()),
+    queryFn: () => withFileManager(cache, keyringUri, (fm) => fm.loadTree()),
     placeholderData: keepPreviousData,
   });
 }

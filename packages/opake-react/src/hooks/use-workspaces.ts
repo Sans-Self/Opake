@@ -22,12 +22,7 @@
 import { useEffect, useState } from "react";
 import type { WorkspaceEntry, WorkspaceSnapshot } from "@opake/sdk";
 import { useOpake } from "../provider";
-
-// Module-level dedup guard. Once one mount kicks off `listWorkspaces`,
-// all other concurrent mounts (e.g. StrictMode double-mount, multiple
-// components using this hook) share the same in-flight promise instead
-// of each issuing a separate round-trip.
-let bootstrapPromise: Promise<unknown> | null = null;
+import { bootstrapOnce } from "./bootstrap-once";
 
 interface UseWorkspacesResult {
   /** The current workspace list, or an empty array before bootstrap. */
@@ -68,25 +63,20 @@ export function useWorkspaces(): UseWorkspacesResult {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line functional/no-let -- per-mount latch
     let handledFirstFire = false;
 
     const watcher = opake.watchWorkspaces((snap) => {
       setSnapshot(snap);
 
-      // Only bootstrap once per mount, and only when the keeper isn't
-      // already loaded. The module-level guard ensures N concurrent
-      // hook consumers share one in-flight fetch rather than N.
+      // Bootstrap once per mount when the keeper isn't already loaded.
+      // bootstrapOnce dedupes concurrent consumers of this hook AND
+      // isolates per-Opake instances so account switches don't short-
+      // circuit on a stale in-flight from the previous identity.
       if (!handledFirstFire) {
         handledFirstFire = true;
-        if (!snap.loaded && !bootstrapPromise) {
-          bootstrapPromise = opake
-            .listWorkspaces()
-            .catch((err: unknown) => {
-              console.warn("[opake-react] listWorkspaces bootstrap failed:", err);
-            })
-            .finally(() => {
-              bootstrapPromise = null;
-            });
+        if (!snap.loaded) {
+          bootstrapOnce(opake, "listWorkspaces", () => opake.listWorkspaces());
         }
       }
     });

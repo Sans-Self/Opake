@@ -1,6 +1,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import type { DocumentMetadata } from "@opake/sdk";
-import { useOpake } from "../provider";
+import { useFileManagerCache } from "../provider";
 import { opakeKeys } from "../keys";
 import { withFileManager } from "./use-tree-mutation";
 
@@ -22,13 +22,13 @@ import { withFileManager } from "./use-tree-mutation";
  * ```
  */
 export function useDirectoryMetadata(keyringUri: string | null, directoryUri: string | null) {
-  const opake = useOpake();
+  const cache = useFileManagerCache();
 
   return useQuery<Readonly<Record<string, DocumentMetadata>>>({
     queryKey: opakeKeys.metadata(directoryUri ?? ""),
     queryFn: async () => {
       if (!directoryUri) throw new Error("no directory");
-      return withFileManager(opake, keyringUri, async (fm) => {
+      return withFileManager(cache, keyringUri, async (fm) => {
         const result = await fm.loadTreeWithMetadata(directoryUri);
         return result.metadata;
       });

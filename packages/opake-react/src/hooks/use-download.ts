@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import type { DownloadResult } from "@opake/sdk";
-import { useOpake } from "../provider";
+import { useFileManagerCache } from "../provider";
 import { withFileManager } from "./use-tree-mutation";
 
 /**
@@ -18,10 +18,10 @@ import { withFileManager } from "./use-tree-mutation";
  * ```
  */
 export function useDownload(keyringUri: string | null) {
-  const opake = useOpake();
+  const cache = useFileManagerCache();
 
   return useMutation<DownloadResult, Error, string>({
     mutationFn: (documentUri) =>
-      withFileManager(opake, keyringUri, (fm) => fm.download(documentUri)),
+      withFileManager(cache, keyringUri, (fm) => fm.download(documentUri)),
   });
 }

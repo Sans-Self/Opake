@@ -12,8 +12,7 @@
 import { useEffect, useState } from "react";
 import type { InboxGrant, InboxSnapshot } from "@opake/sdk";
 import { useOpake } from "../provider";
-
-let bootstrapPromise: Promise<unknown> | null = null;
+import { bootstrapOnce } from "./bootstrap-once";
 
 interface UseInboxResult {
   /** The current inbox entries, or an empty array before bootstrap. */
@@ -47,6 +46,7 @@ export function useInbox(): UseInboxResult {
   const [snapshot, setSnapshot] = useState<InboxSnapshot | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line functional/no-let -- per-mount latch
     let handledFirstFire = false;
 
     const watcher = opake.watchInbox((snap) => {
@@ -54,15 +54,8 @@ export function useInbox(): UseInboxResult {
 
       if (!handledFirstFire) {
         handledFirstFire = true;
-        if (!snap.loaded && !bootstrapPromise) {
-          bootstrapPromise = opake
-            .listInbox()
-            .catch((err: unknown) => {
-              console.warn("[opake-react] listInbox bootstrap failed:", err);
-            })
-            .finally(() => {
-              bootstrapPromise = null;
-            });
+        if (!snap.loaded) {
+          bootstrapOnce(opake, "listInbox", () => opake.listInbox());
         }
       }
     });
