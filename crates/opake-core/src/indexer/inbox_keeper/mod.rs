@@ -169,8 +169,8 @@ impl InboxKeeper {
 
     /// Drop every entry, clear every watcher, and reset `loaded`.
     ///
-    /// Called on `stopSseConsumer` so account switches don't leak the
-    /// previous user's inbox into the next session's UI.
+    /// Called on `wipeState` so account switches don't leak the previous
+    /// user's inbox into the next session's UI.
     pub fn uninstall_all(&mut self) {
         self.entries.clear();
         self.watchers.clear();

@@ -164,9 +164,11 @@ impl TreeKeeper {
     /// private key from memory. The decrypted directory name cache on
     /// each `DirectoryTree` is freed along with the tree itself.
     ///
-    /// Called on `stopSseConsumer` so that account switches don't leak
-    /// a previous user's crypto material or metadata into the next
-    /// session's address space.
+    /// Called on `wipeState` so that account switches don't leak a
+    /// previous user's crypto material or metadata into the next
+    /// session's address space. `stopSseConsumer` does not drain the
+    /// keepers — callers that need to pause streaming without forcing
+    /// a re-bootstrap should stop the consumer without wiping.
     pub fn uninstall_all(&mut self) {
         self.cabinet = None;
         self.workspaces.clear();

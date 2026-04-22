@@ -47,9 +47,10 @@ export interface DaemonHandle {
  *   onSessionExpired: () => redirectToLogin(),
  * });
  *
- * // Later:
+ * // Later (shutdown):
  * daemon.stop();
  * opake.stopSseConsumer();
+ * opake.wipeState(); // drops decrypted keepers — only on logout/session switch
  * ```
  */
 export function startDaemon(

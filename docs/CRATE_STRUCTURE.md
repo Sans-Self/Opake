@@ -173,48 +173,59 @@ apps/
 
   web/                 React SPA (Vite + TanStack Start + Tailwind + daisyUI)
     src/
+      client.tsx       SPA entry point
+      router.tsx       TanStack Router config
       lib/
-        encoding.ts      Base64/hex/fingerprint utilities
-        atUri.ts         AT-URI parsing helpers
-        pairing.ts       Device pairing (thin wrappers over @opake/sdk)
+        atUri.ts             AT-URI parsing helpers
+        cn.ts                Tailwind class merge utility
+        directoryTree.ts     Tree traversal (parent lookup, ancestor chain, path suffix)
+        docs-registry.ts     Documentation section metadata
+        download.ts          Browser file-download helpers
+        encoding.ts          Base64/hex/fingerprint utilities
+        fileContext.ts       Discriminated cabinet-vs-workspace file context
+        format.ts            Size/date/text formatters
+        og-meta.ts           Open Graph meta tag helpers
+        pairing.ts           Device pairing (thin wrappers over @opake/sdk)
+        pdsTypes.ts          Re-exports of @opake/sdk DTO types
+        persistent-storage.ts navigator.storage persistence request
+        profileResolution.ts Bluesky profile lookup
+        resizeImage.ts       Image resize for uploads
         seedPhraseParser.ts  Seed phrase text extraction (numbered grids, plain lists)
-        cn.ts            Tailwind class merge utility
-        docs-registry.ts Documentation section metadata
-        og-meta.ts       Open Graph meta tag helpers
+        sharing.ts           Share dialog helpers
+        workspaceSchemas.ts  Workspace form validation
       stores/
         auth.ts          Auth + identity state machine (Zustand + @opake/sdk)
         app.ts           App-wide loading tracker
+        tasks.ts         Daemon task status display
         toast.ts         Toast notifications
       routes/            TanStack Router file-based routing
         __root.tsx       Root layout (HTML shell, error boundary)
         _public.tsx      Public layout (nav, footer — SSR)
         _public/         Public routes (landing, docs, FAQ)
-        cabinet/         Cabinet routes (lazy-loaded, auth-guarded)
+        cabinet/         Cabinet + workspace routes (lazy-loaded, auth-guarded)
         devices/         Device + identity routes (lazy-loaded)
       components/
         cabinet/         File browser, sidebar, editor, workspace UI
+          FileView.tsx         Unified cabinet + workspace file browser
+          EditorView.tsx       Shared markdown editor shell (edit / new modes)
+          MarkdownEditor.tsx   Tiptap-based editor surface
+          MarkdownPreview.tsx  Rendered markdown with mermaid support
+          FilePreview.tsx      Side-panel content preview
+          DirectoryReadme.tsx  README auto-render
+          PanelContent.tsx     File grid/list view
+          PanelShell.tsx       Panel container
+          Sidebar.tsx          Navigation sidebar
+          TopBar.tsx           Header with account switcher
+          Breadcrumbs.tsx      Path breadcrumbs
+          (+ dialogs and smaller widgets: AddMember, CreateWorkspace, Delete, Move,
+             NewFolder, Rename, Share, ShareManagement, Revoke, Invite, Metadata,
+             WorkspaceMembers, WorkspaceSettings, ImageInsert, etc.)
         devices/         Identity setup, seed phrase, pairing, conflict resolution
         content/         MDX rendering, landing page sections
-        PanelContent.tsx     File grid/list view
-        PanelShell.tsx       Panel container
-        Sidebar.tsx          Navigation sidebar
-        TopBar.tsx           Header with account switcher
-        FileGridCard.tsx     Grid card with file icon + metadata
-        FileListRow.tsx      List row variant
-        FilePreview.tsx      File content preview
-        MarkdownEditor.tsx   In-browser markdown editing
-        SearchResults.tsx    Search results panel
-        types.ts             Discriminated union types for cabinet state
-        (+ dialogs: AddMember, CreateWorkspace, Delete, Move, NewFolder, Rename, Share, WorkspaceMembers, WorkspaceSettings, etc.)
-      wasm/opake-wasm/   WASM build of opake-core (via wasm-pack)
-      workers/
-        opake.worker.ts  Single worker composing all API modules (Comlink)
-        daemon.ts        Background daemon (session refresh, cleanup tasks)
-        context.ts       Worker context management
-        api/
-          cabinet.ts     Cabinet file operations
-          identity.ts    Keypairs, seed phrases, DPoP, DID resolution
-          workspace.ts   Workspace operations
+
+    WASM lives in `packages/opake-sdk/wasm/` — built by `just wasm` and imported
+    via `@opake/sdk`. No web-local worker layer: all file/identity operations go
+    through `@opake/sdk` and `@opake/react` hooks on the main thread.
 
   indexer/             Elixir/Phoenix indexer + REST API (replaces Rust indexer)
     lib/

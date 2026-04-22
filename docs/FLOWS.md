@@ -49,7 +49,7 @@ After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry`
 
 **Watcher teardown**
 
-`stopSseConsumer` → `WorkspaceKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). `detachWatcher` (store-level) closes the JS watcher handle and clears the bootstrap promise without touching store state, so a remount reinstalls a fresh watcher without a flash-to-empty.
+`wipeState` → `WorkspaceKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). `stopSseConsumer` only flips the consumer's cancellation flag; the keeper drain lives on `wipeState` so callers that need to stop streaming without losing decrypted state (e.g. temporary network pause) can do so without forcing a fresh re-bootstrap.
 
 See `WorkspaceKeeper` in `crates/opake-core/src/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
 
@@ -76,6 +76,6 @@ SSE `grant:delete` events:
 
 **Watcher teardown**
 
-`stopSseConsumer` → `InboxKeeper::uninstall_all` (clears entries, watchers, resets `loaded`).
+`wipeState` → `InboxKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). See the `WorkspaceKeeper` section above for the reason `stopSseConsumer` doesn't drain the keepers itself.
 
 See `InboxKeeper` in `crates/opake-core/src/inbox_keeper/` and `apply_grant_to_inbox_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.

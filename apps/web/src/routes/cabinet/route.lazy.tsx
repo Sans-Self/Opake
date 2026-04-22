@@ -25,9 +25,9 @@ function CabinetLayout() {
   // no per-route wiring needed.
 
   // SSE consumer lifecycle is handled by <OpakeProvider> below, which
-  // calls startSseConsumer on mount and stopSseConsumer (including
-  // `TreeKeeper::uninstall_all`) on unmount so the previous user's
-  // `ContentKey`s / decrypted names don't linger across login.
+  // calls startSseConsumer on mount and (on unmount) stopSseConsumer
+  // followed by wipeState — the latter drains the keepers so the previous
+  // user's `ContentKey`s / decrypted names don't linger across login.
 
   // JS-side decrypted-plaintext caches (preview + readme Suspense maps)
   // live at module scope in their respective components so they survive

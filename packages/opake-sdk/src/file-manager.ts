@@ -209,8 +209,8 @@ export class FileManager {
   /**
    * Delete a document.
    *
-   * Removes the document record and its blob from the PDS. If a parent
-   * directory URI is provided, also removes the entry from that directory.
+   * Removes the document record and its blob from the PDS and atomically
+   * removes the entry from its parent directory.
    *
    * @param documentUri - AT URI of the document to delete.
    * @param parentDirectoryUri - Directory containing the document. Required:
