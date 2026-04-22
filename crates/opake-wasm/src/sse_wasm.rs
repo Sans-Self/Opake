@@ -269,7 +269,7 @@ impl WasmFileManagerHandle {
             let scope = match context {
                 opake_core::manager::FileContext::Cabinet(_) => TreeInstall::Cabinet,
                 opake_core::manager::FileContext::Workspace(ws) => {
-                    TreeInstall::Workspace(ws.uri.clone(), ws.key.clone())
+                    TreeInstall::Workspace(ws.uri.clone(), ws.key.clone(), ws.rotation)
                 }
             };
             (tree, scope)
@@ -291,9 +291,9 @@ impl WasmFileManagerHandle {
                 let mut keeper = self.tree_keeper.lock().await;
                 keeper.install_cabinet_tree(tree, private_key);
             }
-            TreeInstall::Workspace(uri, key) => {
+            TreeInstall::Workspace(uri, key, rotation) => {
                 let mut keeper = self.tree_keeper.lock().await;
-                keeper.install_workspace_tree(uri, tree, key);
+                keeper.install_workspace_tree(uri, tree, key, rotation);
             }
         }
 
@@ -303,7 +303,7 @@ impl WasmFileManagerHandle {
 
 enum TreeInstall {
     Cabinet,
-    Workspace(String, opake_core::crypto::ContentKey),
+    Workspace(String, opake_core::crypto::ContentKey, u64),
 }
 
 // ---------------------------------------------------------------------------

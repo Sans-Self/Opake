@@ -55,6 +55,11 @@ struct HeldTree {
     /// For workspace trees: single-entry map of keyring URI → group key.
     /// For cabinet trees: empty.
     group_keys: HashMap<String, ContentKey>,
+    /// For workspace trees: last-seen rotation counter from the keyring
+    /// record. Cabinet trees don't rotate — keep as 0. Used to detect key
+    /// rotations via SSE `KeyringUpsert` so the cached decrypted names
+    /// can be invalidated before the stale plaintext leaks into the UI.
+    rotation: u64,
 }
 
 /// Which context a watcher is attached to.
@@ -109,17 +114,20 @@ impl TreeKeeper {
             tree,
             private_key: Some(private_key),
             group_keys: HashMap::new(),
+            rotation: 0,
         });
     }
 
     /// Install a workspace tree. Replaces any previously-installed tree
     /// for the same keyring URI. `group_key` is the unwrapped content
-    /// key for the workspace's keyring.
+    /// key for the workspace's keyring; `rotation` seeds the counter
+    /// used to detect subsequent key rotations via SSE events.
     pub fn install_workspace_tree(
         &mut self,
         keyring_uri: String,
         tree: DirectoryTree,
         group_key: ContentKey,
+        rotation: u64,
     ) {
         let mut group_keys = HashMap::new();
         group_keys.insert(keyring_uri.clone(), group_key);
@@ -129,6 +137,7 @@ impl TreeKeeper {
                 tree,
                 private_key: None,
                 group_keys,
+                rotation,
             },
         );
     }
@@ -291,9 +300,36 @@ impl TreeKeeper {
             SseEvent::DocumentDelete(_) => {
                 self.notify_all_watchers();
             }
-            // Keyring events: TODO — detect rotation bump and call
-            // invalidate_decrypted_names on the affected workspace tree.
-            SseEvent::KeyringUpsert(_) | SseEvent::KeyringDelete(_) => {}
+            // Keyring upsert: if the rotation counter bumped on an
+            // installed workspace, the cached decrypted directory names
+            // were produced with the prior content key and are now stale.
+            // Wipe them and fire watchers so consumers re-decrypt via
+            // the FileManager (which holds the freshly-rotated group
+            // key). Non-rotation upserts — member adds, metadata edits
+            // — don't affect name plaintext, so no-op. Cabinet keyrings
+            // don't apply here; those events carry a workspace keyring
+            // URI in `uri`.
+            SseEvent::KeyringUpsert(record) => {
+                let Some(new_rotation) = record.rotation else {
+                    return Ok(());
+                };
+                let Some(held) = self.workspaces.get_mut(&record.uri) else {
+                    return Ok(());
+                };
+                if new_rotation > held.rotation {
+                    held.rotation = new_rotation;
+                    held.tree.invalidate_decrypted_names();
+                    let scope = TreeScope::Workspace(record.uri.clone());
+                    self.notify_scope(&scope);
+                }
+            }
+            // Keyring delete: the workspace tree becomes unreadable
+            // anyway once the consumer removes it from the workspace
+            // list. TreeKeeper can keep the (now-orphaned) tree around
+            // until `uninstall_workspace` is called explicitly — cheap,
+            // avoids a race where events land between delete and
+            // uninstall.
+            SseEvent::KeyringDelete(_) => {}
             // Grant events: don't affect the tree. Consumers can react
             // separately for sharing UI updates.
             SseEvent::GrantUpsert(_) | SseEvent::GrantDelete(_) => {}
@@ -342,6 +378,7 @@ impl TreeKeeper {
             tree,
             private_key,
             group_keys,
+            ..
         } = held;
         let ctx = DecryptionCtx {
             did,
@@ -375,6 +412,7 @@ impl TreeKeeper {
                 tree,
                 private_key,
                 group_keys,
+                ..
             } = held;
             let ctx = DecryptionCtx {
                 did,
@@ -399,6 +437,7 @@ impl TreeKeeper {
                     tree,
                     private_key,
                     group_keys,
+                    ..
                 } = held;
                 let ctx = DecryptionCtx {
                     did,

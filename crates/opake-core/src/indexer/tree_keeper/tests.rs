@@ -262,11 +262,13 @@ fn uninstall_all_drains_every_scope() {
         ws_a.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         group_key_a,
+        0,
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         group_key_b,
+        0,
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -358,11 +360,13 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
         ws_a.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([0u8; 32]),
+        0,
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([1u8; 32]),
+        0,
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -449,4 +453,108 @@ fn multiple_watchers_same_directory_all_fire() {
     assert_eq!(a.count(), a0 + 1);
     assert_eq!(b.count(), b0 + 1);
     assert_eq!(c.count(), c0 + 1);
+}
+
+#[test]
+fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
+    // A KeyringUpsert with a higher rotation than the installed workspace
+    // means the group key just rotated — the names cached on the tree
+    // were produced with the prior key. Invalidate them so consumers
+    // re-decrypt via the fresh group key the FileManager already holds.
+    use crate::indexer::sse::events::SseKeyringRecord;
+
+    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
+    const WS_ROOT_URI: &str = "at://did:plc:test/app.opake.directory/ws-abc";
+
+    let mut keeper = cabinet_keeper();
+    // Seed a workspace tree that already has a decrypted directory name.
+    let mut tree = DirectoryTree::from_records(std::iter::empty());
+    let dir = dummy_directory_with_entries("Root", vec![]);
+    tree.apply_directory_delta(
+        &SseDirectoryRecord {
+            directory_uri: WS_ROOT_URI.into(),
+            owner_did: TEST_DID.into(),
+            entries: dir.entries.clone(),
+            encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
+            key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
+            keyring_uri: Some(WS_URI.into()),
+            deleted_at: None,
+            indexed_at: None,
+        },
+        &DecryptionCtx {
+            did: TEST_DID,
+            private_key: None,
+            group_keys: &std::collections::HashMap::new(),
+        },
+    )
+    .ok();
+    // Before invalidation the directory has SOME name recorded (non-root
+    // falls back to "?" when decryption fails, which is still non-empty).
+    let before = tree.directory_name(WS_ROOT_URI).map(str::to_owned);
+    assert!(before.is_some());
+
+    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1);
+
+    let sink = RecordingSink::new();
+    keeper.watch_workspace(WS_URI.into(), WS_ROOT_URI.into(), sink.callback());
+    let fire_count_before = sink.count();
+
+    // Fire a rotation bump.
+    keeper
+        .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
+            uri: WS_URI.into(),
+            owner_did: TEST_DID.into(),
+            rotation: Some(2),
+            member_entries: vec![],
+            encrypted_metadata: None,
+            created_at: None,
+            indexed_at: None,
+        }))
+        .unwrap();
+
+    // Watcher fired once, cached name wiped to empty.
+    assert_eq!(sink.count(), fire_count_before + 1);
+    let after = keeper
+        .workspace_tree(WS_URI)
+        .and_then(|t| t.directory_name(WS_ROOT_URI).map(str::to_owned));
+    assert_eq!(after.as_deref(), Some(""), "names should be cleared");
+}
+
+#[test]
+fn keyring_upsert_without_rotation_bump_is_noop() {
+    // Member adds and metadata edits arrive as KeyringUpsert with the
+    // same rotation. They don't invalidate the tree.
+    use crate::indexer::sse::events::SseKeyringRecord;
+
+    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
+
+    let mut keeper = cabinet_keeper();
+    keeper.install_workspace_tree(
+        WS_URI.into(),
+        DirectoryTree::from_records(std::iter::empty()),
+        ContentKey([7u8; 32]),
+        5,
+    );
+
+    let sink = RecordingSink::new();
+    keeper.watch_workspace(
+        WS_URI.into(),
+        "at://did:plc:test/app.opake.directory/ws-abc".into(),
+        sink.callback(),
+    );
+    let before = sink.count();
+
+    keeper
+        .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
+            uri: WS_URI.into(),
+            owner_did: TEST_DID.into(),
+            rotation: Some(5), // unchanged
+            member_entries: vec![],
+            encrypted_metadata: None,
+            created_at: None,
+            indexed_at: None,
+        }))
+        .unwrap();
+
+    assert_eq!(sink.count(), before, "no watcher fire expected");
 }
