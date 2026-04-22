@@ -1,7 +1,7 @@
 // Shared file display for both cabinet and workspace contexts.
 // Thin route wrappers pass the context; this component handles everything else.
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ListBulletsIcon,
@@ -11,20 +11,33 @@ import {
   NotePencilIcon,
   GearIcon,
 } from "@phosphor-icons/react";
+import {
+  useCreateDirectory,
+  useDelete,
+  useDeleteDirectory,
+  useDirectory,
+  useDirectoryMetadata,
+  useFileManager,
+  useMove,
+  useRenameDirectory,
+  useUpload,
+} from "@opake/react";
 import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
 import { TreeSnapshotProvider } from "./TreeSnapshotContext";
 import { SegmentedToggle } from "@/components/SegmentedToggle";
 import {
-  useDocumentsStore,
   type FileContext,
   type MetadataChanges,
-} from "@/stores/documents/store";
+  keyringUriFor,
+  snapshotToFileItems,
+} from "@/lib/fileContext";
 import { rkeyFromUri } from "@/lib/atUri";
-import { ancestorsOf } from "@/lib/directoryTree";
+import { ancestorsOf, findParentUri, resolveDirectoryFromSplat } from "@/lib/directoryTree";
 import { triggerBrowserDownload } from "@/lib/download";
-import { toastError } from "@/stores/toast";
+import { toastError, toastSuccess } from "@/stores/toast";
+import { loading } from "@/stores/app";
 import { NewFolderDialog, type NewFolderDialogHandle } from "./NewFolderDialog";
 import type { FileItem } from "./types";
 
@@ -63,19 +76,13 @@ function FileViewSkeleton() {
 // Error banner
 // ---------------------------------------------------------------------------
 
-function ErrorBanner({ message }: { readonly message: string }) {
+function ErrorBanner({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-16">
       <div className="bg-error/10 text-error rounded-lg px-4 py-3 text-sm font-medium">
         {message}
       </div>
-      <button
-        onClick={() => {
-          const s = useDocumentsStore.getState();
-          void s.loadDirectory(s.currentDirectoryUri);
-        }}
-        className="btn btn-ghost btn-sm"
-      >
+      <button onClick={onRetry} className="btn btn-ghost btn-sm">
         Try again
       </button>
     </div>
@@ -91,51 +98,77 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newFolderDialogRef = useRef<NewFolderDialogHandle>(null);
 
-  // Items is now a stable array ref in the store (not derived via Object.values)
-  const items = useDocumentsStore((s) => s.items);
-  const viewMode = useDocumentsStore((s) => s.viewMode);
-  const setViewMode = useDocumentsStore((s) => s.setViewMode);
-  const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
-  const currentDirectoryUri = useDocumentsStore((s) => s.currentDirectoryUri);
-  const loaded = useDocumentsStore((s) => s.loaded);
-  const error = useDocumentsStore((s) => s.error);
+  const keyringUri = keyringUriFor(context);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
-  // Stable key for effect deps
-  const contextKey = context.kind === "workspace" ? `workspace:${context.keyringUri}` : "cabinet";
-  const pathKey = pathSegments.join("/");
+  // Two-phase directory resolution: start by watching the root (directoryUri
+  // = null → useDirectory picks the root via loadTree), then once we have a
+  // snapshot, resolve the pathSegments to a concrete URI and swap the watcher
+  // onto it. A second hook call would double-watch; one effect + state swap
+  // keeps it to a single FileManager acquire.
+  const [targetDirectoryUri, setTargetDirectoryUri] = useState<string | null>(null);
 
-  // Open context + load directory
+  const {
+    snapshot,
+    isReady,
+    error,
+    resolvedDirectoryUri,
+  } = useDirectory(keyringUri, targetDirectoryUri);
+
   useEffect(() => {
-    const store = useDocumentsStore.getState();
-    void store.open(context).then(() => {
-      // Guard: context may have switched between open() and this callback
-      if (!useDocumentsStore.getState().loaded && useDocumentsStore.getState().error) return;
-      // Pass pathSegments so loadDirectory can resolve rkeys against a fresh
-      // tree snapshot — avoids the stale/null snapshot on first navigation.
-      void store.loadDirectory(null, pathSegments.length > 0 ? pathSegments : undefined);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- contextKey and pathKey are stable string representations
-  }, [contextKey, pathKey]);
+    if (!snapshot) return;
+    const resolved =
+      pathSegments.length === 0 ? null : resolveDirectoryFromSplat(snapshot, pathSegments);
+    if (resolved !== targetDirectoryUri) {
+      setTargetDirectoryUri(resolved);
+    }
+    // targetDirectoryUri intentionally omitted — including it would cause an
+    // oscillation when the resolve result equals the current state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, pathSegments.join("/")]);
 
-  // Memoize ancestors to avoid unstable selector references
+  const currentDirectoryUri = resolvedDirectoryUri;
+  const { data: metadata } = useDirectoryMetadata(keyringUri, currentDirectoryUri);
+
+  const items = useMemo(() => {
+    if (!snapshot || !currentDirectoryUri) return [];
+    return snapshotToFileItems(currentDirectoryUri, snapshot, metadata ?? {});
+  }, [snapshot, currentDirectoryUri, metadata]);
+
   const ancestors = useMemo(
-    () => (treeSnapshot ? ancestorsOf(treeSnapshot, currentDirectoryUri) : []),
-    [treeSnapshot, currentDirectoryUri],
+    () => (snapshot ? ancestorsOf(snapshot, currentDirectoryUri) : []),
+    [snapshot, currentDirectoryUri],
   );
 
-  // Active crumb: only render when we're inside a subdirectory. The root
-  // crumb ("Your Cabinet" / workspace name) is already the root — rendering
-  // the root directory's decrypted name on top of that produces a ghost
-  // "/" segment (e.g. `Your Cabinet / /`).
+  // Active crumb: only render when inside a subdirectory. The root crumb
+  // ("Your Cabinet" / workspace name) is already the root — rendering the
+  // decrypted root name on top of it produces a ghost "/" segment.
   const currentDirName =
-    currentDirectoryUri && treeSnapshot && currentDirectoryUri !== treeSnapshot.rootUri
+    currentDirectoryUri && snapshot && currentDirectoryUri !== snapshot.rootUri
       ? // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-        (treeSnapshot.directories[currentDirectoryUri]?.name ?? null)
+        (snapshot.directories[currentDirectoryUri]?.name ?? null)
       : null;
+
+  // -----------------------------------------------------------------
+  // Mutations
+  // -----------------------------------------------------------------
+
+  const uploadMut = useUpload(keyringUri);
+  const deleteMut = useDelete(keyringUri);
+  const deleteDirMut = useDeleteDirectory(keyringUri);
+  const createDirMut = useCreateDirectory(keyringUri);
+  const renameDirMut = useRenameDirectory(keyringUri);
+  const moveMut = useMove(keyringUri);
+
+  // Direct FileManager access for operations without a dedicated hook
+  // (download, updateMetadata).
+  const { fileManager } = useFileManager(keyringUri);
 
   // -----------------------------------------------------------------
   // Handlers
   // -----------------------------------------------------------------
+
+  const pathKey = pathSegments.join("/");
 
   const handleOpen = useCallback(
     (item: FileItem) => {
@@ -181,62 +214,154 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     }
   }, [navigate, context, currentDirectoryUri]);
 
-  const handleDownload = useCallback((uri: string) => {
-    void useDocumentsStore
-      .getState()
-      .downloadFile(uri)
-      .then((result) => {
-        triggerBrowserDownload(result.data, result.filename, "application/octet-stream");
-      })
-      .catch((err: unknown) => {
-        toastError(err instanceof Error ? err.message : "Download failed");
-      });
-  }, []);
+  const handleDownload = useCallback(
+    (uri: string) => {
+      if (!fileManager) return;
+      const done = loading(`download:${uri}`);
+      void fileManager
+        .download(uri)
+        .then((result) => {
+          triggerBrowserDownload(result.data, result.filename, "application/octet-stream");
+        })
+        .catch((err: unknown) => {
+          toastError(err instanceof Error ? err.message : "Download failed");
+        })
+        .finally(() => done());
+    },
+    [fileManager],
+  );
 
-  // Errors are surfaced by the store's runMutation toast — no .catch() needed here.
-  const handleDelete = useCallback((uri: string) => {
-    void useDocumentsStore.getState().deleteDocument(uri);
-  }, []);
+  const handleDelete = useCallback(
+    (uri: string) => {
+      if (!snapshot) {
+        toastError("Tree not loaded yet");
+        return;
+      }
+      const parent = findParentUri(snapshot, uri);
+      if (!parent) {
+        toastError(`Cannot delete ${uri}: parent directory not found in tree snapshot`);
+        return;
+      }
+      deleteMut.mutate(
+        { documentUri: uri, parentDirectoryUri: parent },
+        {
+          onSuccess: () => toastSuccess("File deleted"),
+          onError: (err) => toastError(err instanceof Error ? err.message : "Delete failed"),
+        },
+      );
+    },
+    [snapshot, deleteMut],
+  );
 
-  const handleDeleteFolder = useCallback((uri: string) => {
-    void useDocumentsStore.getState().deleteFolder(uri);
-  }, []);
+  const handleDeleteFolder = useCallback(
+    (uri: string) => {
+      deleteDirMut.mutate(
+        { directoryUri: uri },
+        {
+          onSuccess: () => toastSuccess("Folder deleted"),
+          onError: (err) => toastError(err instanceof Error ? err.message : "Delete failed"),
+        },
+      );
+    },
+    [deleteDirMut],
+  );
 
-  const handleUpdateMetadata = useCallback((uri: string, changes: MetadataChanges) => {
-    void useDocumentsStore.getState().updateMetadata(uri, changes);
-  }, []);
+  const handleUpdateMetadata = useCallback(
+    (uri: string, changes: MetadataChanges) => {
+      if (!fileManager) return;
+      const done = loading("documents-metadata");
+      void fileManager
+        .updateMetadata(uri, {
+          filename: changes.name,
+          tags: changes.tags ? [...changes.tags] : undefined,
+          description: changes.description,
+        })
+        .then(() => toastSuccess("Metadata updated"))
+        .catch((err: unknown) => {
+          toastError(err instanceof Error ? err.message : "Update failed");
+        })
+        .finally(() => done());
+    },
+    [fileManager],
+  );
 
-  const handleMoveEntry = useCallback((entryUri: string, targetUri: string | null) => {
-    void useDocumentsStore.getState().moveEntry(entryUri, targetUri);
-  }, []);
+  const handleMoveEntry = useCallback(
+    (entryUri: string, targetUri: string | null) => {
+      const sourceDirUri = currentDirectoryUri ?? snapshot?.rootUri;
+      const resolvedTargetUri = targetUri ?? snapshot?.rootUri;
+      if (!sourceDirUri || !resolvedTargetUri) {
+        toastError("Cannot determine source or target directory");
+        return;
+      }
+      moveMut.mutate(
+        { entryUri, sourceDirUri, targetDirUri: resolvedTargetUri },
+        {
+          onSuccess: () => toastSuccess("Moved"),
+          onError: (err) => toastError(err instanceof Error ? err.message : "Move failed"),
+        },
+      );
+    },
+    [moveMut, currentDirectoryUri, snapshot],
+  );
 
-  const handleRenameDirectory = useCallback((dirUri: string, newName: string) => {
-    void useDocumentsStore.getState().renameDirectory(dirUri, newName);
-  }, []);
+  const handleRenameDirectory = useCallback(
+    (dirUri: string, newName: string) => {
+      renameDirMut.mutate(
+        { directoryUri: dirUri, newName },
+        {
+          onSuccess: () => toastSuccess("Renamed"),
+          onError: (err) => toastError(err instanceof Error ? err.message : "Rename failed"),
+        },
+      );
+    },
+    [renameDirMut],
+  );
 
   const handleCreateFolder = useCallback(() => {
     newFolderDialogRef.current?.show();
   }, []);
 
-  const handleNewFolderConfirm = useCallback((name: string) => {
-    void useDocumentsStore.getState().createDirectory(name);
-  }, []);
+  const handleNewFolderConfirm = useCallback(
+    (name: string) => {
+      createDirMut.mutate(
+        { name, parentUri: currentDirectoryUri ?? undefined },
+        {
+          onSuccess: () => toastSuccess("Folder created"),
+          onError: (err) =>
+            toastError(err instanceof Error ? err.message : "Failed to create folder"),
+        },
+      );
+    },
+    [createDirMut, currentDirectoryUri],
+  );
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void file.arrayBuffer().then((buffer) => {
-      void useDocumentsStore
-        .getState()
-        .uploadFile(new Uint8Array(buffer), file.name, file.type || "application/octet-stream");
-    });
-    // Reset input so the same file can be selected again
-    e.target.value = "";
-  }, []);
+  const handleFileSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      void file.arrayBuffer().then((buffer) => {
+        uploadMut.mutate(
+          {
+            data: new Uint8Array(buffer),
+            filename: file.name,
+            mimeType: file.type || "application/octet-stream",
+            directoryUri: currentDirectoryUri ?? undefined,
+          },
+          {
+            onSuccess: () => toastSuccess("File uploaded"),
+            onError: (err) => toastError(err instanceof Error ? err.message : "Upload failed"),
+          },
+        );
+      });
+      // Reset input so the same file can be selected again
+      e.target.value = "";
+    },
+    [uploadMut, currentDirectoryUri],
+  );
 
   // -----------------------------------------------------------------
   // Breadcrumbs
@@ -321,17 +446,29 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
 
   const footerText = `${items.length} ${items.length === 1 ? "item" : "items"} · End-to-end encrypted`;
 
+  // Retry after a load error — a full reload is the simplest way to
+  // re-run the OpakeProvider's FileManagerCache construction and the
+  // useDirectory loadTree. useDirectory doesn't expose an imperative
+  // retry, and there's no dep change we can force while staying on the
+  // same directoryUri, so going through the navigation layer is cheapest.
+  const handleRetry = useCallback(() => {
+    window.location.reload();
+  }, []);
+
   // -----------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------
 
   return (
-    <TreeSnapshotProvider value={treeSnapshot}>
+    <TreeSnapshotProvider value={snapshot}>
       <PanelShell depth={1} breadcrumbs={breadcrumbs} toolbar={toolbar} footer={footerText}>
-        {!loaded ? (
+        {!isReady && !error ? (
           <FileViewSkeleton />
         ) : error ? (
-          <ErrorBanner message={error} />
+          <ErrorBanner
+            message={error.message || "Failed to load directory"}
+            onRetry={handleRetry}
+          />
         ) : (
           <PanelContent
             items={items}
@@ -346,6 +483,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
             onRenameDirectory={handleRenameDirectory}
             rootLabel={rootLabel}
             allowSharing={context.kind === "cabinet"}
+            fileManager={fileManager}
           />
         )}
       </PanelShell>

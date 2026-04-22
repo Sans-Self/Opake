@@ -1,8 +1,9 @@
 // Search results page — renders matching cabinet items and inbox grants.
 
-import { useDeferredValue, useMemo } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { MagnifyingGlassIcon, ListBulletsIcon, SquaresFourIcon } from "@phosphor-icons/react";
+import { useDirectory, useDirectoryMetadata } from "@opake/react";
 import { PanelShell } from "./PanelShell";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
 import { SegmentedToggle } from "@/components/SegmentedToggle";
@@ -10,7 +11,8 @@ import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
 import type { FileItem } from "./types";
 import { useSearchStore } from "@/stores/search";
-import { useDocumentsStore, findParentUri } from "@/stores/documents/store";
+import { snapshotToFileItems } from "@/lib/fileContext";
+import { ancestorsOf as computeAncestors, findParentUri } from "@/lib/directoryTree";
 import { rkeyFromUri } from "@/lib/atUri";
 import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 
@@ -30,14 +32,10 @@ function matchesQuery(item: FileItem, lowerQuery: string): boolean {
 // Parent path display (reuses store's ancestorsOf)
 // ---------------------------------------------------------------------------
 
-function parentPathForItem(
-  uri: string,
-  treeSnapshot: DirectoryTreeSnapshot,
-  ancestorsOf: (dirUri: string | null) => readonly { readonly name: string }[],
-): string {
+function parentPathForItem(uri: string, treeSnapshot: DirectoryTreeSnapshot): string {
   const parentUri = findParentUri(treeSnapshot, uri);
   if (!parentUri || parentUri === treeSnapshot.rootUri) return "Your Cabinet";
-  const ancestors = ancestorsOf(parentUri);
+  const ancestors = computeAncestors(treeSnapshot, parentUri);
   const parentName = treeSnapshot.directories[parentUri].name;
   const names = [...ancestors.map((a) => a.name), ...(parentName ? [parentName] : [])];
   return ["Your Cabinet", ...names].join(" / ");
@@ -109,12 +107,17 @@ export function SearchResults() {
   const inboxItems = useSearchStore((s) => s.inboxItems);
   const inboxLoading = useSearchStore((s) => s.inboxLoading);
   const clearQuery = useSearchStore((s) => s.clearQuery);
-  const items = useDocumentsStore((s) => s.items);
-  const treeSnapshot = useDocumentsStore((s) => s.treeSnapshot);
-  const viewMode = useDocumentsStore((s) => s.viewMode);
-  const setViewMode = useDocumentsStore((s) => s.setViewMode);
-  const ancestorsOf = useDocumentsStore((s) => s.ancestorsOf);
-  const cabinetPathFor = useDocumentsStore((s) => s.cabinetPathFor);
+
+  // Search is currently limited to the cabinet root's immediate entries.
+  // Full-tree search hasn't been rebuilt on the SDK yet — the input is
+  // hidden (814f540); this page only renders via a bookmarked deep link.
+  const { snapshot: treeSnapshot } = useDirectory(null, null);
+  const { data: metadata } = useDirectoryMetadata(null, treeSnapshot?.rootUri ?? null);
+  const items = useMemo(() => {
+    if (!treeSnapshot?.rootUri) return [];
+    return snapshotToFileItems(treeSnapshot.rootUri, treeSnapshot, metadata ?? {});
+  }, [treeSnapshot, metadata]);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
   const deferredQuery = useDeferredValue(query);
   const lowerQuery = deferredQuery.toLowerCase().trim();
@@ -126,11 +129,11 @@ export function SearchResults() {
         inboxResults: [] as readonly SearchResultItem[],
       };
 
-    const cabinet: readonly SearchResultItem[] = Object.values(items)
+    const cabinet: readonly SearchResultItem[] = items
       .filter((item) => matchesQuery(item, lowerQuery))
       .map((item) => ({
         item: treeSnapshot
-          ? { ...item, subtitle: parentPathForItem(item.uri, treeSnapshot, ancestorsOf) }
+          ? { ...item, subtitle: parentPathForItem(item.uri, treeSnapshot) }
           : item,
         section: "cabinet" as const,
       }));
@@ -140,7 +143,7 @@ export function SearchResults() {
       .map((item) => ({ item, section: "inbox" as const }));
 
     return { cabinetResults: cabinet, inboxResults: inbox };
-  }, [lowerQuery, items, treeSnapshot, inboxItems, ancestorsOf]);
+  }, [lowerQuery, items, treeSnapshot, inboxItems]);
 
   const handleClick = (result: SearchResultItem) => {
     clearQuery();
@@ -150,25 +153,30 @@ export function SearchResults() {
       return;
     }
 
-    // Use the store's cabinetPathFor for files — it handles the full ancestor chain
-    const splatPath = cabinetPathFor(result.item.uri);
+    // Build the cabinet path for the file's parent (or the folder itself)
+    // from the tree snapshot.
+    if (!treeSnapshot) return;
 
-    // For folders, cabinetPathFor returns null — build path from ancestors
-    if (splatPath !== null) {
-      void navigate({ to: "/cabinet/files/$", params: { _splat: splatPath } });
-      return;
-    }
-
-    // Folder: build path from ancestors
-    if (result.item.kind === "folder" && treeSnapshot) {
+    if (result.item.kind === "folder") {
       if (result.item.uri === treeSnapshot.rootUri) {
         void navigate({ to: "/cabinet/files" });
         return;
       }
-      const ancestors = ancestorsOf(result.item.uri);
+      const ancestors = computeAncestors(treeSnapshot, result.item.uri);
       const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(result.item.uri)];
       void navigate({ to: "/cabinet/files/$", params: { _splat: segments.join("/") } });
+      return;
     }
+
+    // Document: navigate to its parent directory.
+    const parentUri = findParentUri(treeSnapshot, result.item.uri);
+    if (!parentUri || parentUri === treeSnapshot.rootUri) {
+      void navigate({ to: "/cabinet/files" });
+      return;
+    }
+    const ancestors = computeAncestors(treeSnapshot, parentUri);
+    const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(parentUri)];
+    void navigate({ to: "/cabinet/files/$", params: { _splat: segments.join("/") } });
   };
 
   const totalCount = cabinetResults.length + inboxResults.length;

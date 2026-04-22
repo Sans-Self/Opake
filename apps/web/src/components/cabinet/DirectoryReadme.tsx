@@ -3,8 +3,8 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CaretUpIcon, FileTextIcon } from "@phosphor-icons/react";
+import type { FileManager } from "@opake/sdk";
 import { MarkdownPreview } from "./MarkdownPreview";
-import { getActiveFileManager } from "@/stores/documents/store";
 
 const COLLAPSED_MAX_HEIGHT = 300;
 
@@ -15,11 +15,14 @@ type ReadmeResult =
 // Module-level cache, separate from FilePreview's cache.
 const readmeCache = new Map<string, Promise<ReadmeResult>>();
 
-function getOrCreateReadmePromise(documentUri: string): Promise<ReadmeResult> {
+function getOrCreateReadmePromise(
+  documentUri: string,
+  fileManager: FileManager,
+): Promise<ReadmeResult> {
   const cached = readmeCache.get(documentUri);
   if (cached) return cached;
 
-  const promise = fetchAndDecryptReadme(documentUri);
+  const promise = fetchAndDecryptReadme(documentUri, fileManager);
   // eslint-disable-next-line functional/immutable-data -- module-level cache for Suspense stability
   readmeCache.set(documentUri, promise);
   return promise;
@@ -36,10 +39,12 @@ export function evictAllReadmeCaches(): void {
   readmeCache.clear();
 }
 
-async function fetchAndDecryptReadme(documentUri: string): Promise<ReadmeResult> {
+async function fetchAndDecryptReadme(
+  documentUri: string,
+  fileManager: FileManager,
+): Promise<ReadmeResult> {
   try {
-    const fm = getActiveFileManager();
-    const result = await fm.download(documentUri);
+    const result = await fileManager.download(documentUri);
     return { status: "ready", data: result.data };
   } catch (error) {
     return {
@@ -51,10 +56,11 @@ async function fetchAndDecryptReadme(documentUri: string): Promise<ReadmeResult>
 
 interface DirectoryReadmeProps {
   readonly documentUri: string;
+  readonly fileManager: FileManager;
 }
 
-export function DirectoryReadme({ documentUri }: DirectoryReadmeProps) {
-  const result = use(getOrCreateReadmePromise(documentUri));
+export function DirectoryReadme({ documentUri, fileManager }: DirectoryReadmeProps) {
+  const result = use(getOrCreateReadmePromise(documentUri, fileManager));
   const [expanded, setExpanded] = useState(false);
   const [fullHeight, setFullHeight] = useState<number | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);

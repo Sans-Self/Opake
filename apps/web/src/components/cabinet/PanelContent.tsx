@@ -1,5 +1,5 @@
 import { Suspense, useRef } from "react";
-import type { DirectoryTreeSnapshot } from "@opake/sdk";
+import type { DirectoryTreeSnapshot, FileManager } from "@opake/sdk";
 import { FolderIcon } from "@phosphor-icons/react";
 import { FileListRow } from "./FileListRow";
 import { FileGridCard } from "./FileGridCard";
@@ -69,6 +69,11 @@ interface PanelContentProps {
   readonly rootLabel: string;
   /** Sharing is only supported from the cabinet — hide share actions in workspace context. */
   readonly allowSharing?: boolean;
+  /**
+   * FileManager for the current context. Threaded down so DirectoryReadme
+   * (Suspense-cached) has access without reaching into a singleton.
+   */
+  readonly fileManager: FileManager | null;
 }
 
 export function PanelContent({
@@ -86,6 +91,7 @@ export function PanelContent({
   onRenameDirectory,
   rootLabel,
   allowSharing = true,
+  fileManager,
 }: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
@@ -175,10 +181,10 @@ export function PanelContent({
 
   return (
     <div className="p-3">
-      {readmeItem && (
+      {readmeItem && fileManager && (
         <div className="mb-3">
           <Suspense key={readmeItem.uri} fallback={<DirectoryReadmeSkeleton />}>
-            <DirectoryReadme documentUri={readmeItem.uri} />
+            <DirectoryReadme documentUri={readmeItem.uri} fileManager={fileManager} />
           </Suspense>
         </div>
       )}

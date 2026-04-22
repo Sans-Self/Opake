@@ -1,0 +1,122 @@
+// Shared types for the file browsing surface. The FileContext tag flows
+// from the route component (cabinet vs workspace) down into FileView /
+// EditorView so they can pick the right FileManager + mutation hooks.
+
+import type { DirectoryTreeSnapshot, DocumentMetadata } from "@opake/sdk";
+import type { FileItem } from "@/components/cabinet/types";
+import { mimeTypeToFileType, formatFileSize, formatRelativeDate } from "@/lib/format";
+
+export type FileContext =
+  | { readonly kind: "cabinet" }
+  | { readonly kind: "workspace"; readonly keyringUri: string };
+
+/** Translate a FileContext into the keyringUri expected by @opake/react hooks. */
+export function keyringUriFor(context: FileContext): string | null {
+  return context.kind === "workspace" ? context.keyringUri : null;
+}
+
+export interface MetadataChanges {
+  readonly name: string;
+  readonly tags?: readonly string[];
+  readonly description?: string;
+}
+
+/**
+ * Build the display list for a directory. Subdirectory names come from the
+ * tree snapshot; document names / sizes / dates come from the decrypted
+ * metadata map. Documents without metadata render as "[Encrypted]" placeholders
+ * so the tree structure is visible before the metadata round-trip returns.
+ */
+export function snapshotToFileItems(
+  directoryUri: string,
+  snapshot: DirectoryTreeSnapshot,
+  metadata: Readonly<Record<string, DocumentMetadata>>,
+): readonly FileItem[] {
+  const dir = snapshot.directories[directoryUri];
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
+  if (!dir) return [];
+
+  const items: FileItem[] = dir.entries.map((entry) => {
+    if (entry.type === "directory") {
+      const info = snapshot.directories[entry.uri] as
+        | (typeof snapshot.directories)[string]
+        | undefined;
+      const name = info?.name ?? "Unnamed";
+      return {
+        id: entry.uri,
+        uri: entry.uri,
+        name,
+        kind: "folder" as const,
+        encrypted: false,
+        status: "private" as const,
+        items: info?.entries.length ?? 0,
+        modified: "",
+        decrypted: true,
+        tags: [],
+      };
+    }
+
+    const meta = metadata[entry.uri] as DocumentMetadata | undefined;
+    if (meta) {
+      return {
+        id: entry.uri,
+        uri: entry.uri,
+        name: meta.name,
+        kind: "file" as const,
+        fileType: mimeTypeToFileType(meta.mimeType),
+        mimeType: meta.mimeType,
+        encrypted: true,
+        status: "private" as const,
+        size: formatFileSize(meta.size),
+        modified: meta.modifiedAt
+          ? formatRelativeDate(meta.modifiedAt)
+          : formatRelativeDate(meta.createdAt),
+        decrypted: true,
+        tags: [...meta.tags],
+        description: meta.description ?? undefined,
+      };
+    }
+
+    // Metadata not loaded yet — show a decrypt-pending placeholder so the
+    // directory structure is visible before the metadata round-trip lands.
+    return {
+      id: entry.uri,
+      uri: entry.uri,
+      name: "[Encrypted]",
+      kind: "file" as const,
+      encrypted: true,
+      status: "private" as const,
+      modified: "",
+      decrypted: false,
+      tags: [],
+    };
+  });
+
+  // Folders first, then files, each sorted by name.
+  return [...items].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * Compute a `/cabinet/files/<a>/<b>/<c>` path fragment for the parent of the
+ * given document. Returns null when the document lives at the cabinet root
+ * (in which case the caller wants the plain `/cabinet/files` path).
+ */
+export function cabinetPathForDocument(
+  snapshot: DirectoryTreeSnapshot,
+  documentUri: string,
+  rkeyFromUri: (uri: string) => string,
+  ancestorsOf: (
+    snap: DirectoryTreeSnapshot,
+    dirUri: string,
+  ) => readonly { readonly rkey: string }[],
+  findParentUri: (snap: DirectoryTreeSnapshot, uri: string) => string | null,
+): string | null {
+  const parentUri = findParentUri(snapshot, documentUri);
+  if (!parentUri || parentUri === snapshot.rootUri) return null;
+  const ancestors = ancestorsOf(snapshot, parentUri);
+  const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(parentUri)];
+  return segments.join("/");
+}

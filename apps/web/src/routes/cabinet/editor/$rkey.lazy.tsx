@@ -1,8 +1,9 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
+import { useDirectory } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
-import { documentUri } from "@/lib/atUri";
-import { useDocumentsStore } from "@/stores/documents/store";
+import { documentUri, rkeyFromUri } from "@/lib/atUri";
+import { ancestorsOf, findParentUri } from "@/lib/directoryTree";
 
 function Editor() {
   const { rkey } = Route.useParams();
@@ -12,9 +13,19 @@ function Editor() {
   // then guard rendering below.
   const uri = did ? documentUri(did, rkey) : null;
 
-  // Reactive: updates if the tree snapshot loads after the editor mounts
-  // (e.g., direct URL navigation where the store isn't populated yet).
-  const cabinetPath = useDocumentsStore((s) => (uri ? s.cabinetPathFor(uri) : null));
+  // Reactive tree read so the return path updates if the user arrives via
+  // direct URL before the tree has decrypted (e.g. deep link into an editor).
+  const { snapshot } = useDirectory(null, null);
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- inline is clearer than a helper
+  const cabinetPath = (() => {
+    if (!uri || !snapshot) return null;
+    const parentUri = findParentUri(snapshot, uri);
+    if (!parentUri || parentUri === snapshot.rootUri) return null;
+    const ancestors = ancestorsOf(snapshot, parentUri);
+    const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(parentUri)];
+    return segments.join("/");
+  })();
   const returnPath = cabinetPath ? `/cabinet/files/${cabinetPath}` : "/cabinet/files";
 
   if (!did || !uri) {

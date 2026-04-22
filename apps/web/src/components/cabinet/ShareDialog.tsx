@@ -1,10 +1,9 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ShareNetworkIcon } from "@phosphor-icons/react";
+import { useFileManager } from "@opake/react";
 import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
-import { getActiveFileManager } from "@/stores/documents/store";
 import { toastSuccess, toastError } from "@/stores/toast";
-import { useDocumentsStore } from "@/stores/documents/store";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 
 export interface ShareDialogHandle {
@@ -22,6 +21,8 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   const [errorMessage, setErrorMessage] = useState("");
 
   const session = useAuthStore((s) => s.session);
+  // Sharing is cabinet-only (gated upstream via allowSharing).
+  const { fileManager } = useFileManager(null);
 
   const dismiss = useCallback(() => {
     dialogRef.current?.close();
@@ -48,7 +49,8 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   }));
 
   const handleShare = useCallback(async () => {
-    if (!documentUri || session.status !== "active" || !recipientHandle.trim()) return;
+    if (!documentUri || session.status !== "active" || !recipientHandle.trim() || !fileManager)
+      return;
 
     const recipient = recipientHandle.trim();
 
@@ -67,10 +69,10 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         setStatus("sharing");
 
         // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        await getActiveFileManager().share(documentUri, resolved.did, resolved.publicKey, "read");
+        await fileManager.share(documentUri, resolved.did, resolved.publicKey, "read");
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
-          await getActiveFileManager().createPendingShare(documentUri, recipient, "read", null);
+          await fileManager.createPendingShare(documentUri, recipient, "read", null);
           setStatus("done");
           toastSuccess(
             `${recipient} hasn't set up Opake yet. Share queued — completes automatically once they log in (expires in 7 days).`,
@@ -81,15 +83,10 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         throw resolveError;
       }
 
-      // Optimistically mark the item as shared in the store. `items` is
-      // an array of FileItems for the current directory — find by URI,
-      // replace in place. SSE / directory reload will reconcile later.
-      useDocumentsStore.setState((state) => ({
-        items: state.items.map((item) =>
-          item.uri === documentUri ? { ...item, status: "shared" as const } : item,
-        ),
-      }));
-
+      // No optimistic UI update — the SSE `grant:upsert` echo from the indexer
+      // lands within a firehose round-trip (~1s) and the tree's status badge
+      // reconciles via useDirectory's watcher. Any prior store-level optimistic
+      // setState relied on a singleton `items` array that no longer exists.
       setStatus("done");
       toastSuccess(`Shared "${documentName}" with ${recipient}`);
       dismiss();
@@ -99,7 +96,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       setStatus("error");
       toastError(message);
     }
-  }, [documentUri, session, recipientHandle, documentName, dismiss]);
+  }, [documentUri, session, recipientHandle, documentName, fileManager, dismiss]);
 
   const busy = status === "resolving" || status === "sharing";
 

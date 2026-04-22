@@ -7,19 +7,19 @@
 // The caller (route component) passes the context and mode; this component
 // manages the FileManager lifecycle, loading state, and save plumbing.
 //
-// The editor owns its own FileManager independent of the documents store's
-// activeManager. Both hold Rc clones into the same WASM mutex — safe, but
-// long saves queue behind watcher operations and vice versa.
+// FileManager acquisition goes through @opake/react's useFileManager, which
+// shares the handle with any other hook watching the same context via the
+// provider's refcounted FileManagerCache.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
+import { useFileManager } from "@opake/react";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PanelShell } from "./PanelShell";
-import { getOpake } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { loading } from "@/stores/app";
 import type { FileManager } from "@opake/sdk";
-import type { FileContext } from "@/stores/documents/store";
+import { type FileContext, keyringUriFor } from "@/lib/fileContext";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,49 +41,6 @@ interface EditorViewNewProps {
 }
 
 type EditorViewProps = EditorViewEditProps | EditorViewNewProps;
-
-// ---------------------------------------------------------------------------
-// Hook: acquire a FileManager for the given context
-// ---------------------------------------------------------------------------
-
-function useFileManagerForContext(context: FileContext): FileManager | null {
-  const [fm, setFm] = useState<FileManager | null>(null);
-
-  // Stable key for effect deps
-  const contextKey = context.kind === "workspace" ? `workspace:${context.keyringUri}` : "cabinet";
-
-  useEffect(() => {
-    // eslint-disable-next-line functional/no-let -- cleanup flag for async effect
-    let disposed = false;
-    // eslint-disable-next-line functional/no-let, functional/prefer-immutable-types -- need to capture for cleanup
-    let handle: FileManager | null = null;
-
-    void (async () => {
-      try {
-        const opake = getOpake();
-        handle =
-          context.kind === "cabinet"
-            ? await opake.cabinet()
-            : await opake.workspace(context.keyringUri);
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by cleanup
-        if (!disposed) setFm(handle);
-      } catch (err: unknown) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by cleanup
-        if (!disposed) {
-          toastError(err instanceof Error ? err.message : "Failed to open context");
-        }
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      handle?.dispose();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- contextKey is the stable representation
-  }, [contextKey]);
-
-  return fm;
-}
 
 // ---------------------------------------------------------------------------
 // Hook: load document content for editing
@@ -138,7 +95,7 @@ function useDocumentContent(
 export function EditorView(props: EditorViewProps) {
   const { mode, context, returnPath } = props;
   const navigate = useNavigate();
-  const fm = useFileManagerForContext(context);
+  const { fileManager: fm } = useFileManager(keyringUriFor(context));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
