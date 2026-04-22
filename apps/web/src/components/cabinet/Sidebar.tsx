@@ -7,9 +7,9 @@ import {
   ArrowsClockwiseIcon,
 } from "@phosphor-icons/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
+import { useWorkspaces } from "@opake/react";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
-import { useWorkspaceStore } from "@/stores/workspace";
 import { SidebarItem } from "./SidebarItem";
 import { rkeyFromUri } from "@/lib/atUri";
 
@@ -31,11 +31,8 @@ interface SidebarProps {
 
 export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
   const anyLoading = useAppStore((s) => s.anythingLoading());
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
-  const workspaceError = useWorkspaceStore((s) => s.error);
+  const { data: workspaceEntries } = useWorkspaces();
   const matchRoute = useMatchRoute();
-
-  const workspaceEntries = Object.values(workspaces);
 
   return (
     <aside className="border-base-300/50 bg-base-200 flex h-full w-53 shrink-0 flex-col border-r px-3 py-4">
@@ -108,8 +105,7 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
             </Link>
           );
         })}
-        {workspaceError && <span className="text-caption text-error ml-1">{workspaceError}</span>}
-        {!workspaceError && workspaceEntries.length === 0 && (
+        {workspaceEntries.length === 0 && (
           <span className="text-caption text-text-faint ml-1">No workspaces yet</span>
         )}
       </nav>

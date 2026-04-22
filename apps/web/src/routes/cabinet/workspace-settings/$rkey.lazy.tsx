@@ -12,13 +12,13 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import type { WorkspaceMember } from "@opake/sdk";
+import { useWorkspaces } from "@opake/react";
 import { DestructiveConfirmation } from "@/components/DestructiveConfirmation";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { OpakeLogoSquares } from "@/components/OpakeLogoSquares";
 import { Breadcrumbs, BreadcrumbActive } from "@/components/cabinet/Breadcrumbs";
 import { AddMemberDialog, type AddMemberDialogHandle } from "@/components/cabinet/AddMemberDialog";
 import { getOpake, useAuthStore } from "@/stores/auth";
-import { useWorkspaceStore } from "@/stores/workspace";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { rkeyFromUri } from "@/lib/atUri";
 import { resolveMemberProfile, type MemberProfile } from "@/lib/profileResolution";
@@ -51,10 +51,9 @@ function WorkspaceSettingsPage() {
   const session = useAuthStore((s) => s.session);
   const myDid = session.status === "active" ? session.did : null;
 
-  // Workspace metadata from the sidebar store (loaded on cabinet mount)
-  const workspace = useWorkspaceStore((s) =>
-    Object.values(s.workspaces).find((w) => rkeyFromUri(w.uri) === rkey),
-  );
+  // Workspace metadata — mirrors whatever the WorkspaceKeeper has loaded.
+  const { data: workspaces } = useWorkspaces();
+  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
   const keyringUri = workspace?.uri ?? null;
 
   // Members — fetched on-demand for this page. The workspace group key

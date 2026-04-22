@@ -1,13 +1,12 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
+import { useWorkspaces } from "@opake/react";
 import { FileView } from "@/components/cabinet/FileView";
-import { useWorkspaceStore } from "@/stores/workspace";
 import { rkeyFromUri } from "@/lib/atUri";
 
 function WorkspaceFiles() {
   const { rkey, _splat } = Route.useParams();
-  const workspace = useWorkspaceStore((s) =>
-    Object.values(s.workspaces).find((w) => rkeyFromUri(w.uri) === rkey),
-  );
+  const { data: workspaces } = useWorkspaces();
+  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
 
   if (!workspace) {
     return (

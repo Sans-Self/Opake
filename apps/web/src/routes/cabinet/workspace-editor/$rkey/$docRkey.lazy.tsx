@@ -1,15 +1,14 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
+import { useWorkspaces } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
-import { useWorkspaceStore } from "@/stores/workspace";
 import { documentUri, rkeyFromUri } from "@/lib/atUri";
 
 function WorkspaceEditor() {
   const { rkey, docRkey } = Route.useParams();
   const did = useAuthStore((s) => (s.session.status === "active" ? s.session.did : null));
-  const workspace = useWorkspaceStore((s) =>
-    Object.values(s.workspaces).find((w) => rkeyFromUri(w.uri) === rkey),
-  );
+  const { data: workspaces } = useWorkspaces();
+  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
 
   if (!did || !workspace) {
     return (
