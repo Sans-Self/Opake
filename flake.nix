@@ -66,6 +66,13 @@
 
             # ── task runner ──────────────────────────────────────────
             just
+
+            # ── atproto tooling ──────────────────────────────────────
+            # goat — Go CLI for atproto (repo inspection, XRPC calls,
+            # firehose consumption, identity resolution). Packaged in
+            # nixpkgs as `atproto-goat` to disambiguate from the ASCII
+            # diagram tool `goat`. Binary name on PATH is still `goat`.
+            atproto-goat
           ] ++ nixpkgs.lib.optionals pkgs.stdenv.isLinux [
             # Phoenix LiveReload uses inotify on Linux; macOS uses
             # fsevents natively and doesn't need this.
