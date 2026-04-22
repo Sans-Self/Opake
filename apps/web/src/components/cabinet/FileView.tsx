@@ -123,8 +123,12 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     [treeSnapshot, currentDirectoryUri],
   );
 
+  // Active crumb: only render when we're inside a subdirectory. The root
+  // crumb ("Your Cabinet" / workspace name) is already the root — rendering
+  // the root directory's decrypted name on top of that produces a ghost
+  // "/" segment (e.g. `Your Cabinet / /`).
   const currentDirName =
-    currentDirectoryUri && treeSnapshot
+    currentDirectoryUri && treeSnapshot && currentDirectoryUri !== treeSnapshot.rootUri
       ? // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
         (treeSnapshot.directories[currentDirectoryUri]?.name ?? null)
       : null;
