@@ -1,20 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  MagnifyingGlassIcon,
-  XIcon,
-  BellIcon,
-  KeyIcon,
-  GearIcon,
-  SignOutIcon,
-} from "@phosphor-icons/react";
+import { BellIcon, KeyIcon, GearIcon, SignOutIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { OpakeLogo } from "@/components/OpakeLogo";
 import { MobileMenuIcon } from "./MobileMenuIcon";
 import { useAuthStore } from "@/stores/auth";
 import { useAppStore } from "@/stores/app";
-import { useSearchInput } from "@/hooks/useSearchInput";
 import { truncateDid } from "@/lib/format";
 
 interface TopBarProps {
@@ -23,11 +15,6 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuToggle, menuOpen = false }: TopBarProps) {
-  const {
-    query: searchQuery,
-    handleChange: handleSearchChange,
-    handleClear: handleSearchClear,
-  } = useSearchInput();
   const session = useAuthStore((s) => s.session);
   const logout = useAuthStore((s) => s.logout);
 
@@ -71,22 +58,8 @@ export function TopBar({ onMenuToggle, menuOpen = false }: TopBarProps) {
         </div>
       )}
 
-      {/* Search — hidden on mobile (lives in sidebar instead) */}
-      <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui hidden max-w-90 flex-1 items-center gap-2 rounded-lg py-1.75 md:flex">
-        <MagnifyingGlassIcon size={13} className="text-text-faint" />
-        <input
-          type="text"
-          placeholder="Search your cabinet…"
-          value={searchQuery}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="text-secondary grow bg-transparent"
-        />
-        {searchQuery && (
-          <button onClick={handleSearchClear} className="btn btn-ghost btn-xs text-text-faint p-0">
-            <XIcon size={12} />
-          </button>
-        )}
-      </label>
+      {/* Search input: hidden until full-tree/inbox search is rebuilt on the
+          SDK (current implementation only filters the loaded directory). */}
 
       <div className="flex-1" />
 

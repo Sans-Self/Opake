@@ -3,8 +3,6 @@ import {
   UsersIcon,
   BookOpenIcon,
   GearIcon,
-  MagnifyingGlassIcon,
-  XIcon,
   PlusIcon,
   ArrowsClockwiseIcon,
 } from "@phosphor-icons/react";
@@ -12,7 +10,6 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import { OpakeLogo } from "../OpakeLogo";
 import { useAppStore } from "@/stores/app";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useSearchInput } from "@/hooks/useSearchInput";
 import { SidebarItem } from "./SidebarItem";
 import { rkeyFromUri } from "@/lib/atUri";
 
@@ -37,11 +34,6 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspaceError = useWorkspaceStore((s) => s.error);
   const matchRoute = useMatchRoute();
-  const {
-    query: searchQuery,
-    handleChange: handleSearchChange,
-    handleClear: handleSearchClear,
-  } = useSearchInput();
 
   const workspaceEntries = Object.values(workspaces);
 
@@ -54,26 +46,8 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
         </Link>
       </div>
 
-      {/* Search — mobile only */}
-      <label className="input input-bordered border-base-300/50 bg-base-100/80 text-ui mb-3 flex items-center gap-2 rounded-lg py-1.75 md:hidden">
-        <MagnifyingGlassIcon size={13} className="text-text-faint" />
-        <input
-          type="text"
-          placeholder="Search…"
-          value={searchQuery}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="text-secondary grow bg-transparent"
-        />
-        {searchQuery && (
-          <button
-            onClick={handleSearchClear}
-            className="btn btn-ghost btn-xs text-text-faint p-0"
-            aria-label="Clear search"
-          >
-            <XIcon size={12} />
-          </button>
-        )}
-      </label>
+      {/* Search input: hidden until full-tree/inbox search is rebuilt on the
+          SDK (current implementation only filters the loaded directory). */}
 
       {/* Main nav */}
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
