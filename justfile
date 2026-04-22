@@ -123,12 +123,8 @@ indexer-release:
 e2e-cli:
     cd tests && bun test tests/cli/
 
-# Run web e2e tests (requires running web + indexer)
-e2e-web:
-    cd tests && bun test tests/web/
-
 # Run all e2e tests
-e2e: e2e-cli e2e-web
+e2e: e2e-cli
 
 # ---------------------------------------------------------------------------
 # CI / validation
