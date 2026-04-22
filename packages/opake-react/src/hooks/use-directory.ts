@@ -27,6 +27,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DirectoryTreeSnapshot, DirectoryWatcher, FileManager } from "@opake/sdk";
 import { useFileManager } from "./use-file-manager";
+import { useOptimisticOverlay } from "../provider";
+import { scopeKey } from "../optimistic-overlay";
 
 interface UseDirectoryResult {
   /** Latest snapshot. null until the first watcher fire. */
@@ -97,12 +99,21 @@ export function useDirectory(
   directoryUri: string | null,
 ): UseDirectoryResult {
   const { fileManager, isReady: fmReady } = useFileManager(keyringUri);
+  const overlay = useOptimisticOverlay();
+  const scope = scopeKey(keyringUri);
   const [commit, setCommit] = useState<Commit | null>(null);
   // Retry is a generation counter that invalidates the effect's deps
   // without touching the component's identity, so a fresh loadTree /
   // watcher install happens on demand.
   const [retryGeneration, setRetryGeneration] = useState(0);
   const retry = useCallback(() => setRetryGeneration((g) => g + 1), []);
+
+  // Re-render when the optimistic overlay's patches change. We don't
+  // need the value — just the signal — so a tick counter is enough.
+  const [, setOverlayTick] = useState(0);
+  useEffect(() => {
+    return overlay.subscribe(scope, () => setOverlayTick((t) => t + 1));
+  }, [overlay, scope]);
 
   useEffect(() => {
     if (!fmReady || !fileManager) return;
@@ -184,9 +195,14 @@ export function useDirectory(
     commit !== null && commit.fileManager === fileManager && commit.directoryUri === directoryUri
       ? commit
       : null;
+  const baseSnapshot = current?.snapshot ?? null;
+  // Project optimistic patches over the base snapshot. No-op when the
+  // overlay is empty — project() returns the base unchanged to avoid
+  // a render churn on scopes that never see mutations.
+  const snapshot = baseSnapshot ? overlay.project(scope, baseSnapshot) : null;
   return {
-    snapshot: current?.snapshot ?? null,
-    isReady: current?.snapshot != null,
+    snapshot,
+    isReady: snapshot !== null,
     error: current?.error ?? null,
     resolvedDirectoryUri: current?.resolvedDirectoryUri ?? null,
     retry,

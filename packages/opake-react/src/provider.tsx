@@ -21,9 +21,11 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from "r
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Opake } from "@opake/sdk";
 import { FileManagerCache } from "./file-manager-cache";
+import { OptimisticOverlay } from "./optimistic-overlay";
 
 const OpakeContext = createContext<Opake | null>(null);
 const FileManagerCacheContext = createContext<FileManagerCache | null>(null);
+const OptimisticOverlayContext = createContext<OptimisticOverlay | null>(null);
 
 /**
  * Access the Opake instance from context.
@@ -57,6 +59,20 @@ export function useFileManagerCache(): FileManagerCache {
     throw new Error("useFileManagerCache must be used within an OpakeProvider");
   }
   return cache;
+}
+
+/**
+ * Access the shared OptimisticOverlay. Internal — consumed by
+ * `useTreeMutation` (patches) and `useDirectory` (projection).
+ *
+ * @internal
+ */
+export function useOptimisticOverlay(): OptimisticOverlay {
+  const overlay = useContext(OptimisticOverlayContext);
+  if (!overlay) {
+    throw new Error("useOptimisticOverlay must be used within an OpakeProvider");
+  }
+  return overlay;
 }
 
 interface OpakeProviderProps {
@@ -122,6 +138,11 @@ export function OpakeProvider({
   // cache and let the old one GC naturally.
   const cache = useMemo(() => new FileManagerCache(opake), [opake]);
 
+  // Optimistic overlay is also tied to the opake instance — account
+  // switches start with an empty overlay so stale patches from the
+  // previous identity don't project onto the next user's trees.
+  const overlay = useMemo(() => new OptimisticOverlay(), [opake]);
+
   // Dispose cached FileManagers when the cache is replaced or the
   // provider unmounts.
   useEffect(() => {
@@ -162,7 +183,9 @@ export function OpakeProvider({
   return (
     <QueryClientProvider client={activeClient}>
       <OpakeContext value={opake}>
-        <FileManagerCacheContext value={cache}>{children}</FileManagerCacheContext>
+        <FileManagerCacheContext value={cache}>
+          <OptimisticOverlayContext value={overlay}>{children}</OptimisticOverlayContext>
+        </FileManagerCacheContext>
       </OpakeContext>
     </QueryClientProvider>
   );
