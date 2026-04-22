@@ -55,7 +55,12 @@ function buildFileItems(props: FileActionMenuProps): readonly MenuItem[] {
     ...(props.onEdit ? [{ icon: NotePencilIcon, label: "Edit", onClick: props.onEdit }] : []),
     ...(props.onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: props.onPreview }] : []),
     { icon: PencilSimpleIcon, label: "Edit details", onClick: props.onEditMetadata },
-    { icon: ShareNetworkIcon, label: "Share\u2026", onClick: props.onShare },
+    // Share is gated by allowSharing upstream — the lexicon for workspace-
+    // scoped sharing isn't in the protocol yet, so onShare is undefined in
+    // workspace contexts and the menu entry is suppressed.
+    ...(props.onShare
+      ? [{ icon: ShareNetworkIcon, label: "Share\u2026", onClick: props.onShare }]
+      : []),
     ...(props.onManageSharing
       ? [
           {
