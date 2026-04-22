@@ -1,9 +1,14 @@
 // Search: typing navigates to search page, results match, clicking navigates to file.
+//
+// Skipped: the search input was hidden in commit 814f540 because the current
+// filter only covers the loaded directory, not the full cabinet or inbox.
+// Un-skip once SDK-backed full-tree/inbox search lands — no assertions need
+// to change, only the describe modifiers.
 
 import { test, expect } from "../../helpers/web-fixture.js";
 import { completeSeedPhraseSetup } from "../../helpers/seed-phrase.js";
 
-test.describe("search navigation", () => {
+test.describe.skip("search navigation", () => {
   test("typing in search bar navigates to /cabinet/search", async ({
     page,
     webUrl,
@@ -64,7 +69,7 @@ test.describe("search navigation", () => {
   });
 });
 
-test.describe("search results", () => {
+test.describe.skip("search results", () => {
   test("uploaded file appears in search results", async ({
     page,
     webUrl,
@@ -214,7 +219,7 @@ test.describe("search results", () => {
   });
 });
 
-test.describe("search with panel shell", () => {
+test.describe.skip("search with panel shell", () => {
   test("search page shows breadcrumbs and footer", async ({
     page,
     webUrl,
