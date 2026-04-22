@@ -4,6 +4,36 @@ import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
 
 /**
+ * Locate a document URI in a snapshot by its rkey.
+ *
+ * Cabinet documents are always owned by the current user, so
+ * `documentUri(did, rkey)` is sufficient in those routes. Workspace
+ * documents are authored by whichever member uploaded them — their
+ * URIs are anchored at the uploader's DID, not the workspace owner's
+ * or the current viewer's. Callers that only know the rkey must scan
+ * the tree for the full URI.
+ *
+ * Returns null if no matching document is found, or if multiple
+ * documents in the workspace share the rkey (which shouldn't happen
+ * in practice since rkeys are locally generated TIDs, but we refuse
+ * to guess rather than pick one silently).
+ */
+export function findDocumentUriByRkey(
+  snapshot: DirectoryTreeSnapshot,
+  rkey: string,
+): string | null {
+  const matches = new Set<string>();
+  for (const info of Object.values(snapshot.directories)) {
+    for (const entry of info.entries) {
+      if (entry.type === "document" && rkeyFromUri(entry.uri) === rkey) {
+        matches.add(entry.uri);
+      }
+    }
+  }
+  return matches.size === 1 ? matches.values().next().value ?? null : null;
+}
+
+/**
  * Find the parent directory of an entry (document or directory) in the tree.
  * Returns null if the entry is in the root or not found.
  */
