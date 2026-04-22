@@ -1,9 +1,12 @@
 // Client entry — TanStack Start hydrates the app from here.
 //
-// Opake initialization and the OpakeProvider live in the cabinet route
-// layout (apps/web/src/routes/cabinet/route.lazy.tsx), not here —
-// unauthenticated routes (/devices/login, public /docs) don't need a
-// WASM context. `getOpake()` from stores/auth is the singleton bridge.
+// The OpakeProvider (FileManagerCache + auto-started SSE consumer) is
+// mounted at the cabinet route layout (apps/web/src/routes/cabinet/
+// route.lazy.tsx), not here. Unauthenticated routes (/devices/login,
+// public /docs) still load WASM via `getOpake()` for seed-phrase
+// derivation, key generation, and OAuth login — they just don't need
+// the file-browsing context. `getOpake()` from stores/auth is the
+// singleton bridge.
 
 
 import { StrictMode, startTransition } from "react";

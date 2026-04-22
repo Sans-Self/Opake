@@ -130,22 +130,16 @@ export function OpakeProvider({
     };
   }, [cache]);
 
-  // Auto-start the WASM SSE consumer on mount. On unmount, stop the
-  // stream and wipe the in-memory keepers so a previous user's
-  // `ContentKey`s and decrypted directory names don't linger across
-  // an account switch. The stop + wipe pair is intentional: stopping
-  // the stream alone leaves the tree cached (correct for a user who's
-  // briefly offline), while wiping alone would race against in-flight
-  // SSE event application.
+  // Auto-start the WASM SSE consumer on mount; on unmount, stop the
+  // stream then wipe the keepers so a previous user's ContentKeys and
+  // decrypted names don't linger across account switches. Separate
+  // calls (not a single shutdown) because callers that briefly lose
+  // network want to stop streaming without evicting decrypted state.
   //
-  // This effect intentionally duplicates part of `useStartSseConsumer`
-  // rather than delegating. The two have different semantics: the
-  // hook is start-only with no cleanup (so it's safe to call from
-  // consumers that come and go), while the provider owns the full
-  // start+stop+wipe lifecycle bound to its own mount. Unifying would
-  // need either an option flag (sprawl) or refcounting across possible
-  // competing callers (lifetime complexity). The ~10-line duplication
-  // wins.
+  // Doesn't delegate to `useStartSseConsumer` — that hook is a start-
+  // only primitive with no cleanup (safe for ad-hoc consumers), while
+  // the provider owns the full start+stop+wipe lifecycle bound to the
+  // React tree.
   useEffect(() => {
     if (disableSseAutoStart) return;
     void opake.startSseConsumer().catch((err: unknown) => {
