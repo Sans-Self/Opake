@@ -131,4 +131,4 @@ Your tests talk to a real HTTP server that speaks the real protocol. The parts t
 
 ---
 
-_[Opake](https://opake.app) — encrypted collaboration on the AT Protocol. [Source](https://tangled.org/sans-self.org/opake)._
+_[Opake](https://opake.app) — encrypted collaboration on the AT Protocol. [Source](https://tangled.org/opake.app/opake)._

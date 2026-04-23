@@ -10,6 +10,8 @@ import {
   UsersThreeIcon,
   ArrowsLeftRightIcon,
   PlantIcon,
+  FolderIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr";
 
@@ -24,7 +26,9 @@ export type IconName =
   | "group"
   | "pairing"
   | "seedling"
-  | "terminal";
+  | "terminal"
+  | "folder"
+  | "lightning";
 
 const ICON_MAP: Readonly<Record<IconName, Icon>> = {
   lock: LockIcon,
@@ -38,6 +42,8 @@ const ICON_MAP: Readonly<Record<IconName, Icon>> = {
   pairing: ArrowsLeftRightIcon,
   seedling: PlantIcon,
   terminal: TerminalIcon,
+  folder: FolderIcon,
+  lightning: LightningIcon,
 };
 
 export function resolveIcon(name: string): Icon {

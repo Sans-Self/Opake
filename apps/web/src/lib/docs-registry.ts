@@ -10,6 +10,13 @@ export type DocCategory = "use" | "understand" | "build";
 export interface DocMeta {
   readonly slug: string;
   readonly category: DocCategory;
+  /**
+   * Sub-section inside a category. Pages with a group live at
+   * `/docs/{group}/{slug}`; pages without a group live at `/docs/{slug}`.
+   * Used to book-ify the `build/sdk/*` and `build/react/*` references
+   * without turning every flat doc into a nested URL.
+   */
+  readonly group?: string;
   readonly title: string;
   readonly description: string;
   readonly icon: IconName;
@@ -128,6 +135,15 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     description:
       "Complete command reference for the Opake CLI — identity, files, sharing, and more.",
   },
+  {
+    slug: "overview",
+    group: "sdk",
+    category: "build",
+    title: "@opake/sdk — Overview",
+    icon: "book",
+    description:
+      "Install, initialise, and ship your first encrypted upload with the TypeScript SDK.",
+  },
 
   // -- Cross-cutting ---------------------------------------------------------
   {
@@ -149,4 +165,9 @@ export function findDoc(slug: string): DocMeta | undefined {
 
 export function docsByCategory(category: DocCategory): readonly DocMeta[] {
   return DOCS_REGISTRY.filter((d) => d.category === category && d.slug !== "faq");
+}
+
+/** URL path for a doc — nested under `group` if set, flat otherwise. */
+export function docPath(doc: DocMeta): string {
+  return doc.group ? `/docs/${doc.group}/${doc.slug}` : `/docs/${doc.slug}`;
 }

@@ -13,7 +13,7 @@ const NAV_LINKS: readonly NavItem[] = [
   { label: "About", href: "/#what-is-opake", internal: true },
   { label: "How it works", href: "/#how-it-works", internal: true },
   { label: "Handbook", href: "/docs/", internal: true },
-  { label: "Source code", href: "https://tangled.org/sans-self.org/opake.app" },
+  { label: "Source code", href: "https://tangled.org/opake.app/opake" },
 ];
 
 interface FooterLink {
@@ -43,11 +43,11 @@ const FOOTER_GROUPS: readonly FooterGroup[] = [
   {
     heading: "Resources",
     links: [
-      { label: "Source Code", href: "https://tangled.org/sans-self.org/opake.app" },
-      { label: "Report Issues", href: "https://tangled.org/sans-self.org/opake.app/issues" },
+      { label: "Source Code", href: "https://tangled.org/opake.app/opake" },
+      { label: "Report Issues", href: "https://tangled.org/opake.app/opake/issues" },
       {
         label: "Contributing",
-        href: "https://tangled.org/sans-self.org/opake.app/tree/main/CONTRIBUTING.md",
+        href: "https://tangled.org/opake.app/opake/tree/main/CONTRIBUTING.md",
       },
     ],
   },

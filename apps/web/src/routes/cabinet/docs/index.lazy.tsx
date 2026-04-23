@@ -6,12 +6,10 @@ import { resolveIcon } from "@/components/content/icons";
 import { CATEGORY_META, docsByCategory, findDoc, type DocMeta } from "@/lib/docs-registry";
 
 function DocLink({ doc }: { readonly doc: DocMeta }) {
-  return (
-    <Link
-      to="/cabinet/docs/$slug"
-      params={{ slug: doc.slug }}
-      className="card card-bordered border-base-300/50 bg-base-100 hover:shadow-panel-sm flex cursor-pointer flex-row items-start gap-3 p-3.5 transition-shadow"
-    >
+  const className =
+    "card card-bordered border-base-300/50 bg-base-100 hover:shadow-panel-sm flex cursor-pointer flex-row items-start gap-3 p-3.5 transition-shadow";
+  const content = (
+    <>
       <div className="bg-accent flex size-8 shrink-0 items-center justify-center rounded-lg">
         {createElement(resolveIcon(doc.icon), { size: 14, className: "text-primary" })}
       </div>
@@ -20,6 +18,23 @@ function DocLink({ doc }: { readonly doc: DocMeta }) {
         <div className="text-caption text-text-muted leading-relaxed">{doc.description}</div>
       </div>
       <ArrowSquareOutIcon size={12} className="text-text-faint mt-0.5 shrink-0" />
+    </>
+  );
+
+  // TanStack's typed Link can't take a runtime-conditional `to`, so we split
+  // the two route families explicitly. Docs with a `group` live at the
+  // nested `/cabinet/docs/$category/$slug` route; flat docs stay on `$slug`.
+  return doc.group ? (
+    <Link
+      to="/cabinet/docs/$category/$slug"
+      params={{ category: doc.group, slug: doc.slug }}
+      className={className}
+    >
+      {content}
+    </Link>
+  ) : (
+    <Link to="/cabinet/docs/$slug" params={{ slug: doc.slug }} className={className}>
+      {content}
     </Link>
   );
 }

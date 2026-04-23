@@ -329,7 +329,7 @@ We chose random-nonce AES-256-GCM for v1 because:
 3. AES-GCM has universal hardware acceleration and library support
 4. Streaming encryption without a pre-read pass matters for large uploads
 
-AES-GCM-SIV is planned for `SCHEMA_VERSION` v2 as a cipher swap ([#331](https://tangled.org/sans-self.org/opake.app/issues/331)). The migration path: version-gated decrypt (v1 = AES-GCM, v2 = AES-GCM-SIV), SIV-only encrypt going forward. Existing v1 records remain readable. No key derivation changes, no identity migration — just a cipher swap with a proactive re-encryption command for users who want to upgrade old records.
+AES-GCM-SIV is planned for `SCHEMA_VERSION` v2 as a cipher swap ([#331](https://tangled.org/opake.app/opake/issues/331)). The migration path: version-gated decrypt (v1 = AES-GCM, v2 = AES-GCM-SIV), SIV-only encrypt going forward. Existing v1 records remain readable. No key derivation changes, no identity migration — just a cipher swap with a proactive re-encryption command for users who want to upgrade old records.
 
 ## Post-Quantum
 

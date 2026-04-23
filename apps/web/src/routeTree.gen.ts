@@ -44,6 +44,8 @@ import { Route as CabinetWorkspaceRkeyIndexRouteImport } from './routes/cabinet/
 import { Route as CabinetWorkspaceRkeySplatRouteImport } from './routes/cabinet/workspace/$rkey/$'
 import { Route as CabinetWorkspaceEditorRkeyNewRouteImport } from './routes/cabinet/workspace-editor/$rkey/new'
 import { Route as CabinetWorkspaceEditorRkeyDocRkeyRouteImport } from './routes/cabinet/workspace-editor/$rkey/$docRkey'
+import { Route as CabinetDocsCategorySlugRouteImport } from './routes/cabinet/docs/$category/$slug'
+import { Route as PublicDocsCategorySlugRouteImport } from './routes/_public/docs/$category/$slug'
 
 const DevicesCliCallbackLazyRouteImport = createFileRoute(
   '/devices/cli-callback',
@@ -272,6 +274,18 @@ const CabinetWorkspaceEditorRkeyDocRkeyRoute =
       (d) => d.Route,
     ),
   )
+const CabinetDocsCategorySlugRoute = CabinetDocsCategorySlugRouteImport.update({
+  id: '/$category/$slug',
+  path: '/$category/$slug',
+  getParentRoute: () => CabinetDocsRouteRoute,
+} as any).lazy(() =>
+  import('./routes/cabinet/docs/$category/$slug.lazy').then((d) => d.Route),
+)
+const PublicDocsCategorySlugRoute = PublicDocsCategorySlugRouteImport.update({
+  id: '/docs/$category/$slug',
+  path: '/docs/$category/$slug',
+  getParentRoute: () => PublicRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/cabinet': typeof CabinetRouteRouteWithChildren
@@ -303,6 +317,8 @@ export interface FileRoutesByFullPath {
   '/docs/': typeof PublicDocsIndexRoute
   '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
+  '/docs/$category/$slug': typeof PublicDocsCategorySlugRoute
+  '/cabinet/docs/$category/$slug': typeof CabinetDocsCategorySlugRoute
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
@@ -333,6 +349,8 @@ export interface FileRoutesByTo {
   '/docs': typeof PublicDocsIndexRoute
   '/cabinet/docs': typeof CabinetDocsIndexRoute
   '/cabinet/files': typeof CabinetFilesIndexRoute
+  '/docs/$category/$slug': typeof PublicDocsCategorySlugRoute
+  '/cabinet/docs/$category/$slug': typeof CabinetDocsCategorySlugRoute
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
@@ -370,6 +388,8 @@ export interface FileRoutesById {
   '/_public/docs/': typeof PublicDocsIndexRoute
   '/cabinet/docs/': typeof CabinetDocsIndexRoute
   '/cabinet/files/': typeof CabinetFilesIndexRoute
+  '/_public/docs/$category/$slug': typeof PublicDocsCategorySlugRoute
+  '/cabinet/docs/$category/$slug': typeof CabinetDocsCategorySlugRoute
   '/cabinet/workspace-editor/$rkey/$docRkey': typeof CabinetWorkspaceEditorRkeyDocRkeyRoute
   '/cabinet/workspace-editor/$rkey/new': typeof CabinetWorkspaceEditorRkeyNewRoute
   '/cabinet/workspace/$rkey/$': typeof CabinetWorkspaceRkeySplatRoute
@@ -407,6 +427,8 @@ export interface FileRouteTypes {
     | '/docs/'
     | '/cabinet/docs/'
     | '/cabinet/files/'
+    | '/docs/$category/$slug'
+    | '/cabinet/docs/$category/$slug'
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
@@ -437,6 +459,8 @@ export interface FileRouteTypes {
     | '/docs'
     | '/cabinet/docs'
     | '/cabinet/files'
+    | '/docs/$category/$slug'
+    | '/cabinet/docs/$category/$slug'
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
@@ -473,6 +497,8 @@ export interface FileRouteTypes {
     | '/_public/docs/'
     | '/cabinet/docs/'
     | '/cabinet/files/'
+    | '/_public/docs/$category/$slug'
+    | '/cabinet/docs/$category/$slug'
     | '/cabinet/workspace-editor/$rkey/$docRkey'
     | '/cabinet/workspace-editor/$rkey/new'
     | '/cabinet/workspace/$rkey/$'
@@ -725,17 +751,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CabinetWorkspaceEditorRkeyDocRkeyRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
+    '/cabinet/docs/$category/$slug': {
+      id: '/cabinet/docs/$category/$slug'
+      path: '/$category/$slug'
+      fullPath: '/cabinet/docs/$category/$slug'
+      preLoaderRoute: typeof CabinetDocsCategorySlugRouteImport
+      parentRoute: typeof CabinetDocsRouteRoute
+    }
+    '/_public/docs/$category/$slug': {
+      id: '/_public/docs/$category/$slug'
+      path: '/docs/$category/$slug'
+      fullPath: '/docs/$category/$slug'
+      preLoaderRoute: typeof PublicDocsCategorySlugRouteImport
+      parentRoute: typeof PublicRoute
+    }
   }
 }
 
 interface CabinetDocsRouteRouteChildren {
   CabinetDocsSlugRoute: typeof CabinetDocsSlugRoute
   CabinetDocsIndexRoute: typeof CabinetDocsIndexRoute
+  CabinetDocsCategorySlugRoute: typeof CabinetDocsCategorySlugRoute
 }
 
 const CabinetDocsRouteRouteChildren: CabinetDocsRouteRouteChildren = {
   CabinetDocsSlugRoute: CabinetDocsSlugRoute,
   CabinetDocsIndexRoute: CabinetDocsIndexRoute,
+  CabinetDocsCategorySlugRoute: CabinetDocsCategorySlugRoute,
 }
 
 const CabinetDocsRouteRouteWithChildren =
@@ -837,6 +879,7 @@ interface PublicRouteChildren {
   PublicIndexRoute: typeof PublicIndexRoute
   PublicDocsSlugRoute: typeof PublicDocsSlugRoute
   PublicDocsIndexRoute: typeof PublicDocsIndexRoute
+  PublicDocsCategorySlugRoute: typeof PublicDocsCategorySlugRoute
 }
 
 const PublicRouteChildren: PublicRouteChildren = {
@@ -845,6 +888,7 @@ const PublicRouteChildren: PublicRouteChildren = {
   PublicIndexRoute: PublicIndexRoute,
   PublicDocsSlugRoute: PublicDocsSlugRoute,
   PublicDocsIndexRoute: PublicDocsIndexRoute,
+  PublicDocsCategorySlugRoute: PublicDocsCategorySlugRoute,
 }
 
 const PublicRouteWithChildren =
