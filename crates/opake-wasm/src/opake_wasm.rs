@@ -912,19 +912,6 @@ impl WasmOpakeHandle {
         }
     }
 
-    /// Get the (potentially refreshed) session.
-    pub fn session(&self) -> Result<JsValue, JsError> {
-        let guard = self
-            .inner
-            .try_lock()
-            .ok_or_else(|| JsError::new("Opake is busy — an operation is in progress"))?;
-        let opake = guard
-            .as_ref()
-            .ok_or_else(|| JsError::new("already consumed"))?;
-        let session = opake.session().ok_or_else(|| JsError::new("no session"))?;
-        serde_wasm_bindgen::to_value(session).map_err(|e| JsError::new(&e.to_string()))
-    }
-
     /// Get the authenticated DID without exposing the full session.
     ///
     /// Returns the DID string, or an error if the context is busy or has

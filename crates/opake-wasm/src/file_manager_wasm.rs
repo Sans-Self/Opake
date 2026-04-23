@@ -335,17 +335,6 @@ impl WasmFileManagerHandle {
             .map_err(wasm_err)
     }
 
-    #[wasm_bindgen(js_name = fetchContentKey)]
-    pub async fn fetch_content_key(&self, document_uri: &str) -> Result<Vec<u8>, JsError> {
-        let (mut opake, ctx) = self.parts().await?;
-        let mut mgr = opake.file_manager(ctx);
-        let key = mgr
-            .fetch_content_key(document_uri)
-            .await
-            .map_err(wasm_err)?;
-        Ok(key.0.to_vec())
-    }
-
     // -- Sharing --
 
     pub async fn share(
