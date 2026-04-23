@@ -784,9 +784,12 @@ export class Opake {
    * snapshots cross into JS. Idempotent: safe to call multiple times
    * (StrictMode double-mount is handled internally).
    *
-   * `indexerUrl` is optional: if omitted, the URL is resolved from the
-   * Opake instance's stored config (loaded during `init`). Pass an
-   * explicit value as a fallback for instances without stored config.
+   * `indexerUrl` is optional. Omitted: resolve via the Opake's priority
+   * chain (runtime override → PDS accountConfig → compile-time default).
+   * Provided: promoted to the runtime override (priority 1) — it wins
+   * over PDS config and persists across subsequent indexer calls on the
+   * same Opake instance, so passing it here is equivalent to calling
+   * `setIndexerUrl` before start.
    */
   @wrapWasmErrors
   startSseConsumer(indexerUrl?: string): Promise<void> {

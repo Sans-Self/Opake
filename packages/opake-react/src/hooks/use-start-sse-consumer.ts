@@ -25,10 +25,11 @@ import { useOpake } from "../provider";
  * Start the WASM SSE consumer imperatively. No corresponding stop —
  * see the module comment for why.
  *
- * Omit `indexerUrl` to use the URL stored on the Opake instance from
- * config (recommended). Pass an explicit value to override for
- * instances without stored config. Pass `null` to skip the start
- * (use when gating on a runtime condition).
+ * Omit `indexerUrl` to resolve via the Opake's priority chain (runtime
+ * override → PDS accountConfig → compile-time default). Pass an
+ * explicit string to promote it to the runtime override (priority 1),
+ * winning over PDS config for the rest of the session. Pass `null` to
+ * skip the start entirely (use when gating on a runtime condition).
  *
  * The Provider auto-starts the consumer unless `disableSseAutoStart`
  * is set, so in most apps you don't need this hook at all. Use it
