@@ -117,15 +117,31 @@ The mnemonic is shown once at first login and never stored. Recovery is via `opa
 
 All records live under the `app.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
 
+### Identity and Key Material
+
 ```mermaid
 erDiagram
     ACCOUNT ||--|| PUBLICKEY : "publishes"
     ACCOUNT ||--|| IDENTITY : "derived from seed phrase"
+
+    IDENTITY {
+        bytes x25519_private "decrypts wrapped keys"
+        bytes ed25519_signing "Indexer auth"
+        string seed_phrase "24-word BIP-39 (not stored)"
+    }
+
+    PUBLICKEY {
+        bytes public_key "X25519 (published on PDS)"
+        bytes signing_key "Ed25519 (published on PDS)"
+    }
+```
+
+### Records and Sharing
+
+```mermaid
+erDiagram
     DOCUMENT ||--o{ GRANT : "shared via"
     DOCUMENT }o--o{ KEYRING : "optionally encrypted under"
-    DOCUMENT ||--o{ DOCUMENT_UPDATE : "updated via"
-    KEYRING ||--o{ KEYRING_UPDATE : "member proposals via"
-    DIRECTORY ||--o{ DIRECTORY_UPDATE : "structure proposals via"
 
     DOCUMENT {
         blob encrypted_content
@@ -147,6 +163,15 @@ erDiagram
         int rotation
         keyHistoryEntry[] keyHistory "previous rotation snapshots"
     }
+```
+
+### Workspaces and Proposals
+
+```mermaid
+erDiagram
+    DOCUMENT ||--o{ DOCUMENT_UPDATE : "updated via"
+    KEYRING ||--o{ KEYRING_UPDATE : "member proposals via"
+    DIRECTORY ||--o{ DIRECTORY_UPDATE : "structure proposals via"
 
     DOCUMENT_UPDATE {
         at-uri document "target document"
@@ -165,17 +190,6 @@ erDiagram
         at-uri keyring "target workspace"
         at-uri directory "target directory"
         string actionType "addEntry|removeEntry|moveEntry|createDirectory|deleteDirectory|renameDirectory"
-    }
-
-    IDENTITY {
-        bytes x25519_private "decrypts wrapped keys"
-        bytes ed25519_signing "Indexer auth"
-        string seed_phrase "24-word BIP-39 (not stored)"
-    }
-
-    PUBLICKEY {
-        bytes public_key "X25519 (published on PDS)"
-        bytes signing_key "Ed25519 (published on PDS)"
     }
 ```
 
