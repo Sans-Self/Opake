@@ -1,12 +1,9 @@
 // WasmFileManagerHandle — file operations within a cabinet or workspace.
 //
-// Holds an Rc clone of the parent OpakeContext's async Mutex.
-// If the OpakeContext's Option is set to None, FileManager methods
-// fail cleanly with "Opake not available".
-//
-// All async methods lock the Mutex for the duration of the operation.
-// Concurrent calls (e.g., upload in-flight + token refresh) queue rather
-// than panic — the Mutex handles serialization.
+// Holds an Rc clone of the parent OpakeContext's async Mutex over the
+// same WasmOpake. All async methods lock the Mutex for the duration of
+// the operation; concurrent calls (e.g., upload in-flight + token
+// refresh) queue rather than panic.
 //
 // Methods take &self (not &mut self) — the Mutex provides interior
 // mutability, avoiding wasm-bindgen's borrow tracking which panics
@@ -29,11 +26,11 @@ use crate::wasm_util::{
 /// WASM FileManager handle.
 #[wasm_bindgen(js_name = FileManager)]
 pub struct WasmFileManagerHandle {
-    pub(crate) opake: Rc<Mutex<Option<WasmOpake>>>,
+    pub(crate) opake: Rc<Mutex<WasmOpake>>,
     /// Shared TreeKeeper cloned from the parent OpakeContext. Used for
     /// SSE-driven watcher registration.
     pub(crate) tree_keeper: Rc<Mutex<TreeKeeper>>,
-    pub(crate) context: Option<FileContext>,
+    pub(crate) context: FileContext,
 }
 
 #[wasm_bindgen(js_class = FileManager)]
@@ -461,26 +458,11 @@ impl WasmFileManagerHandle {
             .opake
             .try_lock()
             .ok_or_else(|| JsError::new("Opake is busy — an operation is in progress"))?;
-        let opake = guard
-            .as_ref()
-            .ok_or_else(|| JsError::new("already finished"))?;
-        let ctx = self
-            .context
-            .as_ref()
-            .ok_or_else(|| JsError::new("already finished"))?;
-        Ok(opake.did() == ctx.owner_did())
+        Ok(guard.did() == self.context.owner_did())
     }
 
     /// Lock the Mutex and return the Opake + FileContext.
     async fn parts(&self) -> Result<(OpakeGuard<'_>, &FileContext), JsError> {
-        let guard = self.opake.lock().await;
-        if guard.is_none() {
-            return Err(JsError::new("Opake not available"));
-        }
-        let ctx = self
-            .context
-            .as_ref()
-            .ok_or_else(|| JsError::new("FileManager already finished"))?;
-        Ok((OpakeGuard(guard), ctx))
+        Ok((self.opake.lock().await, &self.context))
     }
 }

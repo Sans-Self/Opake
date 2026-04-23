@@ -211,14 +211,13 @@ impl WasmFileManagerHandle {
         let cb = js_watcher_callback(callback);
 
         // Pick scope based on the FileManager's context.
-        let handle = match self.context.as_ref() {
-            Some(opake_core::manager::FileContext::Cabinet(_)) => {
+        let handle = match &self.context {
+            opake_core::manager::FileContext::Cabinet(_) => {
                 keeper.watch_cabinet(directory_uri, cb)
             }
-            Some(opake_core::manager::FileContext::Workspace(ws)) => {
+            opake_core::manager::FileContext::Workspace(ws) => {
                 keeper.watch_workspace(ws.uri.clone(), directory_uri, cb)
             }
-            None => return Err(JsError::new("FileManager context not available")),
         };
 
         Ok(WasmDirectoryWatcher {
@@ -236,14 +235,13 @@ impl WasmFileManagerHandle {
         // Fast path: already installed? Check without holding the opake lock.
         {
             let keeper = self.tree_keeper.lock().await;
-            let already = match self.context.as_ref() {
-                Some(opake_core::manager::FileContext::Cabinet(_)) => {
+            let already = match &self.context {
+                opake_core::manager::FileContext::Cabinet(_) => {
                     keeper.cabinet_tree().is_some()
                 }
-                Some(opake_core::manager::FileContext::Workspace(ws)) => {
+                opake_core::manager::FileContext::Workspace(ws) => {
                     keeper.workspace_tree(&ws.uri).is_some()
                 }
-                None => return Err(JsError::new("FileManager context not available")),
             };
             if already {
                 return Ok(());
@@ -253,16 +251,9 @@ impl WasmFileManagerHandle {
         // Slow path: load the tree via the existing FileManager path, then install.
         let (tree, scope) = {
             let mut guard = self.opake.lock().await;
-            let opake = guard
-                .as_mut()
-                .ok_or_else(|| JsError::new("Opake context already consumed"))?;
+            let context = &self.context;
 
-            let context = self
-                .context
-                .as_ref()
-                .ok_or_else(|| JsError::new("FileManager context not available"))?;
-
-            let mut mgr = opake.file_manager(context);
+            let mut mgr = guard.file_manager(context);
             let tree = mgr.load_tree().await.map_err(wasm_err)?;
 
             // Extract the scope info before dropping mgr + guard.
@@ -279,10 +270,7 @@ impl WasmFileManagerHandle {
         match scope {
             TreeInstall::Cabinet => {
                 let guard = self.opake.lock().await;
-                let opake = guard
-                    .as_ref()
-                    .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-                let identity = opake
+                let identity = guard
                     .identity()
                     .ok_or_else(|| JsError::new("no identity"))?;
                 let private_key = *identity.private_key_bytes().map_err(wasm_err)?;
@@ -336,13 +324,10 @@ impl WasmOpakeHandle {
         // without a default still surfaces the error cleanly.
         let resolved_url = {
             let mut guard = self.inner.lock().await;
-            let opake = guard
-                .as_mut()
-                .ok_or_else(|| JsError::new("Opake context already consumed"))?;
             if let Some(url) = indexer_url {
-                opake.set_indexer_url(url);
+                guard.set_indexer_url(url);
             }
-            opake.resolve_indexer_url()
+            guard.resolve_indexer_url()
         };
 
         if self.sse_started.get() {
@@ -502,17 +487,14 @@ impl WasmOpakeHandle {
 
 /// Build a token fetcher closure that uses the shared Opake to request
 /// a fresh SSE token on every connect attempt.
-fn make_token_fetcher(opake_rc: Rc<Mutex<Option<WasmOpake>>>, indexer_url: String) -> TokenFetcher {
+fn make_token_fetcher(opake_rc: Rc<Mutex<WasmOpake>>, indexer_url: String) -> TokenFetcher {
     Box::new(move || {
         let opake_rc = Rc::clone(&opake_rc);
         let indexer_url = indexer_url.clone();
         Box::pin(async move {
             let guard = opake_rc.lock().await;
-            let opake = guard
-                .as_ref()
-                .ok_or_else(|| opake_core::error::Error::Sse("opake consumed".into()))?;
-            let did = opake.did().to_string();
-            let identity = opake
+            let did = guard.did().to_string();
+            let identity = guard
                 .identity()
                 .ok_or_else(|| opake_core::error::Error::Sse("no identity".into()))?;
             // Ed25519 signing key — used for indexer auth signatures.
@@ -546,7 +528,7 @@ const PROPOSAL_DEBOUNCE_WINDOW: Duration = Duration::from_millis(2_000);
 
 /// Schedule a debounced workspace sync. Fire-and-forget: returns before
 /// the task spawns so the SSE consumer loop keeps pulling events.
-fn schedule_proposal_sync(opake_rc: Rc<Mutex<Option<WasmOpake>>>, keyring_uri: String) {
+fn schedule_proposal_sync(opake_rc: Rc<Mutex<WasmOpake>>, keyring_uri: String) {
     let generation = PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| {
         let mut state = state.borrow_mut();
         let entry = state.entry(keyring_uri.clone()).or_insert(0);
@@ -582,13 +564,9 @@ fn schedule_proposal_sync(opake_rc: Rc<Mutex<Option<WasmOpake>>>, keyring_uri: S
 
 /// Acquire the Opake lock and call `sync_workspace_by_uri`. Called only
 /// from the debounced scheduler — never from the consumer loop directly.
-async fn dispatch_proposal_sync(opake_rc: &Rc<Mutex<Option<WasmOpake>>>, keyring_uri: &str) {
+async fn dispatch_proposal_sync(opake_rc: &Rc<Mutex<WasmOpake>>, keyring_uri: &str) {
     let mut guard = opake_rc.lock().await;
-    let Some(opake) = guard.as_mut() else {
-        log::warn!("[sse] proposal sync: opake unavailable");
-        return;
-    };
-    match opake.sync_workspace_by_uri(keyring_uri).await {
+    match guard.sync_workspace_by_uri(keyring_uri).await {
         Ok(Some(result)) => {
             if result.proposals_applied > 0 {
                 log::info!(
@@ -643,7 +621,7 @@ async fn wasm_sleep(duration: Duration) {
 /// keeper acquire; this is benign — the next SSE event or the keeper's
 /// idempotent upsert self-corrects.
 async fn apply_keyring_to_workspace_keeper(
-    opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
+    opake_rc: &Rc<Mutex<WasmOpake>>,
     workspace_keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
     started_flag: &Rc<std::cell::Cell<bool>>,
     event: &SseEvent,
@@ -653,12 +631,8 @@ async fn apply_keyring_to_workspace_keeper(
             // Build the entry under the opake lock only.
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
-                let Some(opake) = guard.as_ref() else {
-                    log::warn!("[sse] workspace upsert: opake unavailable");
-                    return;
-                };
-                let did = opake.did().to_string();
-                let Some(identity) = opake.identity() else {
+                let did = guard.did().to_string();
+                let Some(identity) = guard.identity() else {
                     log::warn!("[sse] workspace upsert: no identity");
                     return;
                 };
@@ -695,7 +669,7 @@ async fn apply_keyring_to_workspace_keeper(
 /// `GrantUpsert`: build an entry filtered by the caller's DID.
 /// `GrantDelete`: delete by URI. Other events are no-ops.
 async fn apply_grant_to_inbox_keeper(
-    opake_rc: &Rc<Mutex<Option<WasmOpake>>>,
+    opake_rc: &Rc<Mutex<WasmOpake>>,
     inbox_keeper_rc: &Rc<Mutex<InboxKeeper>>,
     started_flag: &Rc<std::cell::Cell<bool>>,
     event: &SseEvent,
@@ -705,14 +679,7 @@ async fn apply_grant_to_inbox_keeper(
             // Fetch the DID under the opake lock, then drop it before
             // acquiring the keeper lock (matches the workspace keeper
             // pattern — keeps the opake mutex free for SSE throughput).
-            let my_did = {
-                let guard = opake_rc.lock().await;
-                let Some(opake) = guard.as_ref() else {
-                    log::warn!("[sse] inbox upsert: opake unavailable");
-                    return;
-                };
-                opake.did().to_string()
-            };
+            let my_did = opake_rc.lock().await.did().to_string();
             let Some(entry) = ik::try_build_entry_from_sse_record(record, &my_did) else {
                 // Not for us — silently drop.
                 return;

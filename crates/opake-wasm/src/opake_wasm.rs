@@ -2,11 +2,11 @@
 //
 // JS callers construct an OpakeContext, then either:
 // - Call workspace management methods directly (createWorkspace, listWorkspaces, etc.)
-// - Call .cabinet() or .workspace() to get a FileManager for file operations
+// - Call .cabinet() or .workspaceByUri() to get a FileManager for file operations
 //
 // FileManager shares access via Rc<Mutex<>>. Both OpakeContext and
-// FileManager hold Rc clones. If the inner Option is set to None,
-// FileManager methods fail cleanly.
+// FileManager hold Rc clones of the same WasmOpake — the Mutex serializes
+// concurrent async operations.
 //
 // The inner Mutex (futures_util::lock::Mutex) replaces RefCell. RefCell
 // panics when borrowed concurrently across async boundaries (the JS event
@@ -42,7 +42,7 @@ use crate::wasm_util::{
 
 #[wasm_bindgen(js_name = OpakeContext)]
 pub struct WasmOpakeHandle {
-    pub(crate) inner: Rc<Mutex<Option<WasmOpake>>>,
+    pub(crate) inner: Rc<Mutex<WasmOpake>>,
     /// Persistent tree state + SSE watcher registry. Held behind its own
     /// Mutex (separate from the Opake mutex) so SSE event application and
     /// file operations don't block each other.
@@ -78,7 +78,7 @@ impl WasmOpakeHandle {
         let opake = make_opake_from_storage(did.as_deref(), storage_adapter).await?;
         let did_owned = opake.did().to_string();
         Ok(Self {
-            inner: Rc::new(Mutex::new(Some(opake))),
+            inner: Rc::new(Mutex::new(opake)),
             tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
             workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
             inbox_keeper: Rc::new(Mutex::new(InboxKeeper::new())),
@@ -89,17 +89,15 @@ impl WasmOpakeHandle {
     /// Create a cabinet FileManager. Non-consuming — the OpakeContext
     /// remains usable after the FileManager is freed.
     pub async fn cabinet(&self) -> Result<WasmFileManagerHandle, JsError> {
-        let guard = self.inner.lock().await;
-        let opake = guard
-            .as_ref()
-            .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-        let context = cabinet_context(opake)?;
-        drop(guard);
+        let context = {
+            let guard = self.inner.lock().await;
+            cabinet_context(&guard)?
+        };
 
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
             tree_keeper: Rc::clone(&self.tree_keeper),
-            context: Some(context),
+            context,
         })
     }
 
@@ -124,7 +122,7 @@ impl WasmOpakeHandle {
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
             tree_keeper: Rc::clone(&self.tree_keeper),
-            context: Some(context),
+            context,
         })
     }
 
@@ -598,13 +596,8 @@ impl WasmOpakeHandle {
     /// this value via `set_account_config` — so a user-configured
     /// indexer (written via settings) wins over the host default.
     #[wasm_bindgen(js_name = setIndexerUrl)]
-    pub async fn set_indexer_url(&self, url: String) -> Result<(), JsError> {
-        let mut guard = self.inner.lock().await;
-        let opake = guard
-            .as_mut()
-            .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-        opake.set_indexer_url(url);
-        Ok(())
+    pub async fn set_indexer_url(&self, url: String) {
+        self.inner.lock().await.set_indexer_url(url);
     }
 
     /// Verify the session is usable by touching the account config record.
@@ -879,10 +872,7 @@ impl WasmOpakeHandle {
             .inner
             .try_lock()
             .ok_or_else(|| JsError::new("Opake is busy"))?;
-        let opake = guard
-            .as_ref()
-            .ok_or_else(|| JsError::new("already consumed"))?;
-        Ok(opake.did().to_string())
+        Ok(guard.did().to_string())
     }
 
     /// Get the token expiry timestamp without exposing the full session.
@@ -899,40 +889,24 @@ impl WasmOpakeHandle {
         let Some(guard) = self.inner.try_lock() else {
             return -1.0;
         };
-        let Some(opake) = guard.as_ref() else {
-            return -1.0;
-        };
-        opake
+        guard
             .session()
             .and_then(|s| s.expires_at())
             .map(|t| t as f64)
             .unwrap_or(-1.0)
     }
 
+    /// Acquire the Opake mutex.
+    ///
+    /// Result-returning for API continuity with the callsites that predate
+    /// the Option removal; the lock acquisition itself cannot fail in
+    /// single-threaded WASM.
     async fn opake(&self) -> Result<OpakeGuard<'_>, JsError> {
-        let guard = self.inner.lock().await;
-        if guard.is_none() {
-            return Err(JsError::new("Opake context already consumed"));
-        }
-        Ok(OpakeGuard(guard))
+        Ok(self.inner.lock().await)
     }
 }
 
-/// Newtype over MutexGuard that derefs to WasmOpake (unwraps the Option).
-/// The Option is checked in `opake()` — callers can use this like `&mut WasmOpake`.
-pub(crate) struct OpakeGuard<'a>(pub(crate) futures_util::lock::MutexGuard<'a, Option<WasmOpake>>);
-
-impl std::ops::Deref for OpakeGuard<'_> {
-    type Target = WasmOpake;
-    fn deref(&self) -> &WasmOpake {
-        self.0.as_ref().unwrap()
-    }
-}
-
-impl std::ops::DerefMut for OpakeGuard<'_> {
-    fn deref_mut(&mut self) -> &mut WasmOpake {
-        self.0.as_mut().unwrap()
-    }
-}
+/// Shorthand for "locked guard onto the shared WasmOpake."
+pub(crate) type OpakeGuard<'a> = futures_util::lock::MutexGuard<'a, WasmOpake>;
 
 // FileManager is in file_manager_wasm.rs
