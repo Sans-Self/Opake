@@ -72,16 +72,6 @@ pub fn cabinet_context(opake: &WasmOpake) -> Result<FileContext, JsError> {
     opake.cabinet_context().map_err(wasm_err)
 }
 
-/// Empty result for operations that return only the updated session.
-#[derive(Serialize)]
-pub struct EmptyResult {}
-
-/// Result containing a single AT-URI (used by upload, grant create, leave, etc.).
-#[derive(Serialize)]
-pub struct UriResult {
-    pub uri: String,
-}
-
 /// Result containing a decrypted document (filename + plaintext bytes).
 #[derive(Serialize)]
 pub struct DownloadResult {
