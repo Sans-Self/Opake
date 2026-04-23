@@ -862,10 +862,18 @@ impl WasmOpakeHandle {
         }
     }
 
-    /// Get the authenticated DID without exposing the full session.
+    /// Return the DID this Opake was constructed for.
     ///
-    /// Returns the DID string, or an error if the context is busy or has
-    /// no session. Used for self-event filtering in the SSE consumer.
+    /// The DID is invariant for the lifetime of an OpakeContext — it's set
+    /// once at `create()` time (either passed explicitly or resolved from
+    /// the storage's default account) and never changes. Sync + cheap:
+    /// the SDK calls this once during `Opake.init()` to populate a
+    /// `readonly did: string` property, so JS consumers never have to
+    /// round-trip into WASM to answer "who am I signed in as."
+    ///
+    /// Errors only on mutex contention via `try_lock`, which can't happen
+    /// during the init window when the SDK calls it (no other code holds
+    /// the lock before `Opake.init()` returns).
     #[wasm_bindgen(js_name = getDid)]
     pub fn get_did(&self) -> Result<String, JsError> {
         let guard = self

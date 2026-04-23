@@ -117,12 +117,16 @@ function withTokenGuard(_target: any, _context: ClassMethodDecoratorContext) {
  * All async methods proactively refresh the OAuth token before expiry —
  * no manual token management needed.
  *
+ * The signed-in DID is available on the instance as `opake.did` —
+ * invariant for the instance's lifetime, populated at init time.
+ *
  * @example
  * ```typescript
  * import { Opake } from "@opake/sdk";
  * import { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
  *
  * const opake = await Opake.init({ storage: new IndexedDbStorage() });
+ * console.log(`signed in as ${opake.did}`);
  *
  * const cabinet = await opake.cabinet();
  * const tree = await cabinet.loadTree();
@@ -136,9 +140,21 @@ export class Opake {
   private readonly storage: Storage;
   private refreshPromise: Promise<void> | null = null;
 
-  private constructor(ctx: WasmOpakeContext, storage: Storage) {
+  /**
+   * The DID this Opake was constructed for.
+   *
+   * Populated once in `Opake.init()` from the underlying WASM context.
+   * Invariant for the lifetime of the instance — if you need to switch
+   * accounts, destroy this Opake and `init()` a new one with the target
+   * DID. Useful for rendering "signed in as..." UI and for keying
+   * consumer-side caches by account.
+   */
+  readonly did: string;
+
+  private constructor(ctx: WasmOpakeContext, storage: Storage, did: string) {
     this.ctx = ctx;
     this.storage = storage;
+    this.did = did;
     registerCleanup(this, ctx, this);
   }
 
@@ -396,7 +412,10 @@ export class Opake {
 
     try {
       const ctx = await wasm.OpakeContext.create(options?.did ?? null, adapter);
-      return new Opake(ctx, storage);
+      // Cache the resolved DID — sync read, no lock contention possible
+      // this early in the lifecycle (nothing else holds the WASM mutex yet).
+      const did = ctx.getDid();
+      return new Opake(ctx, storage, did);
     } catch (e) {
       throw parseWasmError(e);
     }
