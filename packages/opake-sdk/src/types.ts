@@ -130,14 +130,6 @@ export interface WorkspaceEntry {
   readonly memberCount: number;
 }
 
-/** Resolved workspace context — everything needed to create a FileManager. */
-export interface ResolvedWorkspace {
-  readonly keyringUri: string;
-  readonly ownerDid: string;
-  readonly key: Uint8Array;
-  readonly rotation: number;
-}
-
 /** Resolved identity for a handle or DID. */
 export interface ResolvedIdentity {
   readonly did: string;

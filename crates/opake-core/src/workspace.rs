@@ -37,7 +37,13 @@ pub struct Workspace {
 
 impl Workspace {
     /// Construct from keyring data after unwrapping the group key.
-    pub fn from_keyring(
+    ///
+    /// Intentionally `pub(crate)` — constructing a `Workspace` outside
+    /// `opake-core` would let callers pass a group key + URI + owner that
+    /// don't match reality, and `FileManager` would happily encrypt with
+    /// the wrong key. The supported entry points are `Opake::resolve_workspace`,
+    /// `Opake::file_context`, and the daemon's workspace-resolution helpers.
+    pub(crate) fn from_keyring(
         uri: String,
         name: String,
         description: Option<String>,

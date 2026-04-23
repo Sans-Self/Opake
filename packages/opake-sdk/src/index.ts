@@ -53,7 +53,6 @@ export {
   type WorkspaceRole,
   type WorkspaceMember,
   type WorkspaceEntry,
-  type ResolvedWorkspace,
   type ResolvedIdentity,
   type WorkspaceSyncResult,
   type PairRequestResult,

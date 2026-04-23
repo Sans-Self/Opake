@@ -2,7 +2,7 @@
 //
 // Holds a long-lived WasmOpakeHandle (authenticated XRPC client + identity +
 // storage). Create via `Opake.init()`, then call `.cabinet()` or
-// `.workspaceFromKey()` to get a FileManager for file operations.
+// `.workspace(keyringUri)` to get a FileManager for file operations.
 //
 // All public async methods are decorated with @withTokenGuard, which
 // proactively refreshes the OAuth token before it expires. This eliminates
@@ -22,7 +22,6 @@ import type {
   PendingShareEntry,
   ResolvedGrantMetadata,
   ResolvedIdentity,
-  ResolvedWorkspace,
   WorkspaceEntry,
   WorkspaceMember,
   WorkspaceRole,
@@ -531,27 +530,6 @@ export class Opake {
   @withTokenGuard
   async workspace(keyringUri: string): Promise<FileManager> {
     return new FileManager(await this.requireContext().workspaceByUri(keyringUri));
-  }
-
-  /**
-   * Create a FileManager for a workspace from already-resolved key material.
-   *
-   * Advanced use — prefer `workspace(keyringUri)` which resolves internally
-   * and keeps the group key inside WASM.
-   *
-   * @param workspace - Resolved workspace context with key material.
-   */
-  @wrapWasmErrors
-  async workspaceFromKey(workspace: ResolvedWorkspace): Promise<FileManager> {
-    const ctx = this.requireContext();
-    return new FileManager(
-      await ctx.workspace(
-        workspace.keyringUri,
-        workspace.ownerDid,
-        workspace.key,
-        BigInt(workspace.rotation),
-      ),
-    );
   }
 
   // ---------------------------------------------------------------------------

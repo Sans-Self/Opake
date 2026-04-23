@@ -71,25 +71,6 @@ pub fn cabinet_context(opake: &WasmOpake) -> Result<FileContext, JsError> {
     opake.cabinet_context().map_err(wasm_err)
 }
 
-/// Build a workspace FileContext.
-pub fn workspace_context(
-    keyring_uri: &str,
-    owner_did: &str,
-    key: &[u8],
-    rotation: u64,
-) -> Result<FileContext, JsError> {
-    let gk = crate::content_key_from_slice(key)?;
-    let ws = opake_core::workspace::Workspace::from_keyring(
-        keyring_uri.to_string(),
-        String::new(),
-        None,
-        owner_did.to_string(),
-        gk,
-        rotation,
-    );
-    Ok(FileContext::Workspace(ws))
-}
-
 /// Empty result for operations that return only the updated session.
 #[derive(Serialize)]
 pub struct EmptyResult {}

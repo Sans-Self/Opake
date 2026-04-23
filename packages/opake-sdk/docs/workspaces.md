@@ -63,8 +63,6 @@ ws.dispose();
 ```
 
 The group key is resolved and unwrapped inside WASM — it never touches JS.
-This is the recommended API. For advanced use cases where you already have
-the key material, use `opake.workspaceFromKey({ keyringUri, ownerDid, key, rotation })`.
 
 All FileManager methods (upload, download, move, createDirectory, etc.)
 work identically in workspace context. The difference is in what happens

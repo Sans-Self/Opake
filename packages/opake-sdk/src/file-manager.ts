@@ -1,7 +1,7 @@
 // FileManager — file operations within a cabinet or workspace context.
 //
 // Wraps the WASM WasmFileManagerHandle. Created via `opake.cabinet()` or
-// `opake.workspaceFromKey()`. Call `.dispose()` when done to release the
+// `opake.workspace(keyringUri)`. Call `.dispose()` when done to release the
 // context back to the parent Opake instance.
 
 import type {
@@ -123,7 +123,7 @@ export interface DirectoryWatcher {
 export class FileManager {
   private handle: WasmFileManager | null;
 
-  /** @internal — use `opake.cabinet()` or `opake.workspaceFromKey()` instead. */
+  /** @internal — use `opake.cabinet()` or `opake.workspace(keyringUri)` instead. */
   constructor(handle: WasmFileManager) {
     this.handle = handle;
     registerCleanup(this, handle, this);

@@ -33,7 +33,7 @@ use crate::file_manager_wasm::WasmFileManagerHandle;
 use crate::js_storage::JsStorageAdapter;
 use crate::wasm_util::{
     cabinet_context, make_opake_from_storage, parse_role, pub_key_from_slice, to_js, wasm_err,
-    workspace_context, DownloadResult, MutationResultDto, WasmOpake,
+    DownloadResult, MutationResultDto, WasmOpake,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,30 +96,6 @@ impl WasmOpakeHandle {
         let context = cabinet_context(opake)?;
         drop(guard);
 
-        Ok(WasmFileManagerHandle {
-            opake: Rc::clone(&self.inner),
-            tree_keeper: Rc::clone(&self.tree_keeper),
-            context: Some(context),
-        })
-    }
-
-    /// Create a workspace FileManager. Non-consuming — the OpakeContext
-    /// remains usable after the FileManager is freed.
-    pub async fn workspace(
-        &self,
-        keyring_uri: &str,
-        owner_did: &str,
-        key: &[u8],
-        rotation: u64,
-    ) -> Result<WasmFileManagerHandle, JsError> {
-        // Validate context is alive
-        let guard = self.inner.lock().await;
-        if guard.is_none() {
-            return Err(JsError::new("Opake context already consumed"));
-        }
-        drop(guard);
-
-        let context = workspace_context(keyring_uri, owner_did, key, rotation)?;
         Ok(WasmFileManagerHandle {
             opake: Rc::clone(&self.inner),
             tree_keeper: Rc::clone(&self.tree_keeper),
