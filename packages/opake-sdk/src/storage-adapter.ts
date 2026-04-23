@@ -24,6 +24,9 @@ export interface WasmStorageAdapter {
   loadSession(did: string): Promise<Session>;
   saveSession(did: string, session: Session): Promise<void>;
   removeAccount(did: string): Promise<void>;
+  savePairState(did: string, rkey: string, privateKey: Uint8Array): Promise<void>;
+  loadPairState(did: string, rkey: string): Promise<Uint8Array>;
+  deletePairState(did: string, rkey: string): Promise<void>;
   cacheGetRecord(did: string, collection: string, uri: string): Promise<CachedRecord | null>;
   cachePutRecords(did: string, collection: string, records: readonly CachedRecord[]): Promise<void>;
   cacheRemoveRecord(did: string, collection: string, uri: string): Promise<void>;
@@ -45,6 +48,9 @@ export function createStorageAdapter(storage: Storage): WasmStorageAdapter {
     loadSession: (did) => storage.loadSession(did),
     saveSession: (did, session) => storage.saveSession(did, session),
     removeAccount: (did) => storage.removeAccount(did),
+    savePairState: (did, rkey, privateKey) => storage.savePairState(did, rkey, privateKey),
+    loadPairState: (did, rkey) => storage.loadPairState(did, rkey),
+    deletePairState: (did, rkey) => storage.deletePairState(did, rkey),
     cacheGetRecord: (did, collection, uri) => storage.cacheGetRecord(did, collection, uri),
     cachePutRecords: (did, collection, records) =>
       storage.cachePutRecords(did, collection, records),

@@ -23,6 +23,13 @@ pub enum Error {
     #[error("record not found: {0}")]
     NotFound(String),
 
+    /// This device is authenticated (session is present) but no encryption
+    /// identity is persisted locally. Callers should route the user to
+    /// recovery (seed phrase) or pairing (another device) to bootstrap one.
+    /// Distinct from `NotFound` so the SDK/CLI can prompt for the right flow.
+    #[error("no encryption identity for this device — recover from seed phrase or pair another device")]
+    IdentityMissing,
+
     /// The target handle or DID is a valid identity but has not published an
     /// Opake public key yet (`app.opake.publicKey/self` is absent). Distinct
     /// from `NotFound` (which covers handle-resolution failures) so callers

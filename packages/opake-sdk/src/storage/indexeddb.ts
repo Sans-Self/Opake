@@ -50,6 +50,12 @@ interface CacheMetaRow {
   fetchedAt: number;
 }
 
+interface PairStateRow {
+  did: string;
+  rkey: string;
+  privateKey: Uint8Array;
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
@@ -58,6 +64,7 @@ class OpakeDatabase extends Dexie {
   readonly configs!: Readonly<EntityTable<ConfigRow, "key">>;
   readonly identities!: Readonly<EntityTable<IdentityRow, "did">>;
   readonly sessions!: Readonly<EntityTable<SessionRow, "did">>;
+  readonly pairStates!: Readonly<Table<PairStateRow>>;
   readonly cacheRecords!: Readonly<Table<CacheRecordRow>>;
   readonly cacheMeta!: Readonly<Table<CacheMetaRow>>;
 
@@ -67,6 +74,16 @@ class OpakeDatabase extends Dexie {
       configs: "key",
       identities: "did",
       sessions: "did",
+      cacheRecords: "[did+collection+uri], [did+collection], did",
+      cacheMeta: "[did+collection], did",
+    });
+    // v2 adds the pair_states table for WASM-owned ephemeral pair keys.
+    // Existing databases upgrade in-place; no data migration required.
+    this.version(2).stores({
+      configs: "key",
+      identities: "did",
+      sessions: "did",
+      pairStates: "[did+rkey], did",
       cacheRecords: "[did+collection+uri], [did+collection], did",
       cacheMeta: "[did+collection], did",
     });
@@ -139,6 +156,25 @@ export class IndexedDbStorage implements Storage {
   async clearSession(did: string): Promise<void> {
     const key = sanitizeDid(did);
     await this.db.sessions.delete(key);
+  }
+
+  // -- Pair state -----------------------------------------------------------
+
+  async savePairState(did: string, rkey: string, privateKey: Uint8Array): Promise<void> {
+    const key = sanitizeDid(did);
+    await this.db.pairStates.put({ did: key, rkey, privateKey });
+  }
+
+  async loadPairState(did: string, rkey: string): Promise<Uint8Array> {
+    const key = sanitizeDid(did);
+    const row = await this.db.pairStates.get([key, rkey]);
+    if (!row) throw new StorageError(`no pair state for ${did}/${rkey}`);
+    return row.privateKey;
+  }
+
+  async deletePairState(did: string, rkey: string): Promise<void> {
+    const key = sanitizeDid(did);
+    await this.db.pairStates.delete([key, rkey]);
   }
 
   // -- Cache: record-level --------------------------------------------------
@@ -244,6 +280,7 @@ export class IndexedDbStorage implements Storage {
         this.db.configs,
         this.db.identities,
         this.db.sessions,
+        this.db.pairStates,
         this.db.cacheRecords,
         this.db.cacheMeta,
       ],
@@ -251,6 +288,7 @@ export class IndexedDbStorage implements Storage {
         await this.db.configs.put({ key: CONFIG_KEY, value: updatedConfig });
         await this.db.identities.delete(key);
         await this.db.sessions.delete(key);
+        await this.db.pairStates.where("did").equals(key).delete();
         await this.db.cacheRecords.where("did").equals(did).delete();
         await this.db.cacheMeta.where("did").equals(did).delete();
       },

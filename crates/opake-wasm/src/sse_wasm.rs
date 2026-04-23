@@ -270,10 +270,7 @@ impl WasmFileManagerHandle {
         match scope {
             TreeInstall::Cabinet => {
                 let guard = self.opake.lock().await;
-                let identity = guard
-                    .identity()
-                    .ok_or_else(|| JsError::new("no identity"))?;
-                let private_key = *identity.private_key_bytes().map_err(wasm_err)?;
+                let private_key = *guard.identity().private_key_bytes().map_err(wasm_err)?;
                 drop(guard);
 
                 let mut keeper = self.tree_keeper.lock().await;
@@ -494,11 +491,8 @@ fn make_token_fetcher(opake_rc: Rc<Mutex<WasmOpake>>, indexer_url: String) -> To
         Box::pin(async move {
             let guard = opake_rc.lock().await;
             let did = guard.did().to_string();
-            let identity = guard
+            let signing_key = guard
                 .identity()
-                .ok_or_else(|| opake_core::error::Error::Sse("no identity".into()))?;
-            // Ed25519 signing key — used for indexer auth signatures.
-            let signing_key = identity
                 .signing_key_bytes()
                 .map_err(|e| opake_core::error::Error::Sse(format!("{e}")))?
                 .ok_or_else(|| {
@@ -632,11 +626,7 @@ async fn apply_keyring_to_workspace_keeper(
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
-                let Some(identity) = guard.identity() else {
-                    log::warn!("[sse] workspace upsert: no identity");
-                    return;
-                };
-                let private_key = match identity.private_key_bytes() {
+                let private_key = match guard.identity().private_key_bytes() {
                     Ok(pk) => pk,
                     Err(e) => {
                         log::warn!("[sse] workspace upsert: private_key_bytes failed: {e}");

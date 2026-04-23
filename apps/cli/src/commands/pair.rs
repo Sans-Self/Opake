@@ -2,11 +2,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Args, Subcommand};
 use log::debug;
-use opake_core::atproto;
 use opake_core::client::Session;
 use opake_core::crypto::OsRng;
 use opake_core::pairing;
-use opake_core::records::{PairRequest, PairResponse, PAIR_RESPONSE_COLLECTION};
+use opake_core::records::PairRequest;
 
 use crate::commands::Execute;
 use crate::identity;
@@ -62,13 +61,12 @@ fn fingerprint(key: &[u8; 32]) -> String {
         .join(":")
 }
 
-// request runs on the NEW device — no identity exists yet, so ctx.opake()
-// can't be used (it requires identity). Keep session::load_client for the
-// authenticated PDS client and use raw pairing functions.
+// The new-device flow runs without an identity, so it goes through the
+// storage-backed pairing free functions rather than `Opake::for_account`.
+// The ephemeral private key stays in `ctx.storage` for the duration.
 async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Session>> {
     let mut client = session::load_client(&ctx.storage, &ctx.did)?;
 
-    // Bail if this device already has an identity — use `opake account login` instead.
     if identity::load_identity(&ctx.storage, &ctx.did).is_ok() {
         anyhow::bail!(
             "this device already has an encryption identity for {}. \
@@ -77,72 +75,28 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
         );
     }
 
-    let (record_ref, ephemeral_keypair) =
-        pairing::create_pair_request(&mut client, &Utc::now().to_rfc3339(), &mut OsRng).await?;
-
-    let request_uri = &record_ref.uri;
-    let request_at_uri = atproto::parse_at_uri(request_uri)?;
+    let info = pairing::create_pair_request(
+        &mut client,
+        &ctx.storage,
+        &ctx.did,
+        &Utc::now().to_rfc3339(),
+        &mut OsRng,
+    )
+    .await?;
 
     println!("Pairing request created.");
-    println!(
-        "Fingerprint: {}",
-        fingerprint(&ephemeral_keypair.public_key)
-    );
+    println!("Fingerprint: {}", fingerprint(&info.ephemeral_public_key));
     println!();
     println!("Run `opake pair approve` on your existing device.");
     println!("Waiting for response...");
 
-    // Poll for a matching pairResponse record.
     let interval = std::time::Duration::from_secs(args.interval);
-    let response: PairResponse = loop {
-        tokio::time::sleep(interval).await;
-        debug!("polling for pair response...");
-
-        let page = client
-            .list_records(PAIR_RESPONSE_COLLECTION, Some(100), None)
-            .await?;
-
-        let found = page.records.into_iter().find(|entry| {
-            serde_json::from_value::<PairResponse>(entry.value.clone())
-                .map(|r| r.request == *request_uri)
-                .unwrap_or(false)
-        });
-
-        if let Some(entry) = found {
-            break serde_json::from_value(entry.value)?;
+    loop {
+        if pairing::try_complete_pair(&mut client, &ctx.storage, &ctx.did, &info.rkey).await? {
+            break;
         }
-    };
-
-    let received_identity = pairing::receive_pair_response(
-        &mut client,
-        &ctx.did,
-        &response,
-        &ephemeral_keypair.private_key,
-    )
-    .await?;
-
-    identity::save_identity(&ctx.storage, &ctx.did, &received_identity)?;
-    println!("Identity received and saved.");
-
-    // Clean up both records.
-    let response_page = client
-        .list_records(PAIR_RESPONSE_COLLECTION, Some(100), None)
-        .await?;
-    let response_rkey = response_page
-        .records
-        .iter()
-        .find(|entry| {
-            serde_json::from_value::<PairResponse>(entry.value.clone())
-                .map(|r| r.request == *request_uri)
-                .unwrap_or(false)
-        })
-        .map(|entry| atproto::parse_at_uri(&entry.uri))
-        .transpose()?
-        .map(|uri| uri.rkey);
-
-    if let Some(ref rkey) = response_rkey {
-        pairing::cleanup_pair_records(&mut client, &request_at_uri.rkey, rkey).await?;
-        debug!("cleaned up pairing records");
+        debug!("no matching response yet, sleeping {}s", args.interval);
+        tokio::time::sleep(interval).await;
     }
 
     println!("Pairing complete.");

@@ -119,7 +119,7 @@ export function TopBar({ onMenuToggle, menuOpen = false }: TopBarProps) {
             )}
             <ul className="menu w-full p-1">
               {[
-                { icon: KeyIcon, label: "Encryption Keys", to: "/devices" as const },
+                { icon: KeyIcon, label: "Devices", to: "/devices" as const },
                 { icon: GearIcon, label: "Settings", to: "/cabinet/settings" as const },
               ].map(({ icon: Icon, label, to }) => (
                 <li key={label}>

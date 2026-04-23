@@ -343,3 +343,48 @@ fn save_account_json_sets_0600() {
         & 0o777;
     assert_eq!(mode, 0o600, "expected 0600, got {mode:#o}");
 }
+
+#[tokio::test]
+async fn pair_state_roundtrips() {
+    let (_dir, storage) = test_storage();
+    let did = "did:plc:pair";
+    let rkey = "3krelfgabcdef";
+    let key = [7u8; 32];
+
+    storage.save_pair_state(did, rkey, &key).await.unwrap();
+    let loaded = storage.load_pair_state(did, rkey).await.unwrap();
+    assert_eq!(loaded.as_slice(), &key);
+
+    storage.delete_pair_state(did, rkey).await.unwrap();
+    let missing = storage.load_pair_state(did, rkey).await;
+    assert!(matches!(
+        missing,
+        Err(opake_core::error::Error::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn delete_pair_state_is_idempotent_when_missing() {
+    let (_dir, storage) = test_storage();
+    // Deleting without a prior save returns Ok — avoids a race between the
+    // cancel path and a successful completion that beat it.
+    storage
+        .delete_pair_state("did:plc:none", "nope")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn pair_state_file_is_mode_0600() {
+    let (_dir, storage) = test_storage();
+    let did = "did:plc:perm";
+    let rkey = "rk1";
+    storage.save_pair_state(did, rkey, &[0u8; 32]).await.unwrap();
+
+    let path = storage
+        .account_dir(did)
+        .join("pair_states")
+        .join(format!("{rkey}.bin"));
+    let mode = path.metadata().unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "expected 0600, got {mode:#o}");
+}

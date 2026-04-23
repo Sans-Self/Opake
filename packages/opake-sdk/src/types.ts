@@ -149,12 +149,15 @@ export interface WorkspaceSyncResult {
 // Device pairing
 // ---------------------------------------------------------------------------
 
-/** Result of creating a pair request (new device side). */
+/** Result of creating a pair request on the new device.
+ *
+ * `ephemeralPublicKey` is for fingerprint display only — the matching
+ * private key stays inside WASM storage and is consumed automatically
+ * by `awaitPairCompletion`. */
 export interface PairRequestResult {
   readonly uri: string;
   readonly rkey: string;
   readonly ephemeralPublicKey: Uint8Array;
-  readonly ephemeralPrivateKey: Uint8Array;
 }
 
 /** A pending pair request visible to the approving device. */
@@ -163,9 +166,6 @@ export interface PendingPairRequest {
   readonly ephemeralKey: Uint8Array;
   readonly createdAt: string;
 }
-
-/** Raw pair response record — opaque to consumers, passed to receivePairResponse. */
-export type PairResponseRecord = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
 // Sharing

@@ -20,7 +20,7 @@ fn make_test_opake() -> Opake<MockTransport, OsRng, NoopStorage> {
     Opake::new(
         client,
         "did:plc:test".into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         test_now_micros,
@@ -149,7 +149,7 @@ fn make_owner_opake(
     Opake::new(
         client,
         OWNER_DID.into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         test_now_micros,

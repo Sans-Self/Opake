@@ -5,10 +5,11 @@ use clap::Args;
 use opake_core::client::Session;
 use opake_core::crypto::{derive_identity_from_mnemonic, parse_mnemonic, parse_mnemonic_grid};
 use opake_core::records::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
+use opake_core::storage::Storage;
 
 use crate::commands::Execute;
 use crate::identity;
-use crate::session::CommandContext;
+use crate::session::{self, CommandContext};
 
 /// Recover encryption identity from a 24-word seed phrase
 ///
@@ -29,7 +30,6 @@ impl Execute for RecoverCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let did = &ctx.did;
 
-        // Check for existing local identity.
         if identity::load_identity(&ctx.storage, did).is_ok() {
             anyhow::bail!(
                 "local identity already exists for {did}. \
@@ -54,9 +54,11 @@ impl Execute for RecoverCommand {
 
         let derived = derive_identity_from_mnemonic(&mnemonic, did);
 
-        // Compare against published key on PDS.
-        let mut opake = ctx.opake().await?;
-        let mismatch = check_published_key_mismatch(&mut opake, did, &derived).await?;
+        // Use the raw authenticated client for the published-key check: we
+        // can't build an Opake yet (no identity in storage), and building one
+        // after saving the identity would require a redundant round-trip.
+        let mut client = session::load_client(&ctx.storage, did)?;
+        let mismatch = check_published_key_mismatch(&mut client, did, &derived).await?;
 
         if mismatch {
             println!();
@@ -74,11 +76,10 @@ impl Execute for RecoverCommand {
             }
         }
 
-        opake.save_identity(&derived).await?;
+        ctx.storage.save_identity(did, &derived).await?;
         println!("Identity recovered and saved.");
 
-        // Rebuild Opake so it loads the newly saved identity from disk.
-        drop(opake);
+        // Now that identity is on disk, the standard Opake path succeeds.
         let mut opake = ctx.opake().await?;
         opake
             .publish_public_key()
@@ -93,11 +94,11 @@ impl Execute for RecoverCommand {
 /// Check if the derived identity's public key matches the one published on PDS.
 /// Returns `true` if there's a mismatch, `false` if keys match or no key is published.
 async fn check_published_key_mismatch(
-    opake: &mut crate::session::CliOpake,
+    client: &mut opake_core::client::XrpcClient<impl opake_core::client::Transport>,
     did: &str,
     derived: &opake_core::storage::Identity,
 ) -> Result<bool> {
-    let published = opake
+    let published = client
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await;
 
@@ -112,10 +113,7 @@ async fn check_published_key_mismatch(
             let derived_bytes = derived.public_key_bytes()?;
             Ok(published_bytes != derived_bytes)
         }
-        Err(opake_core::error::Error::NotFound(_)) => {
-            // No published key — no mismatch possible. First-time setup.
-            Ok(false)
-        }
+        Err(opake_core::error::Error::NotFound(_)) => Ok(false),
         Err(e) => Err(anyhow::anyhow!("failed to check published key: {e}")),
     }
 }

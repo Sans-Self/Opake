@@ -201,8 +201,7 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let identity = opake.require_identity().map_err(wasm_err)?;
-        let private_key = identity.private_key_bytes().map_err(wasm_err)?;
+        let private_key = opake.identity().private_key_bytes().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
         let keyrings = opake
@@ -458,35 +457,9 @@ impl WasmOpakeHandle {
         })
     }
 
-    /// Create a pair request (new device side). Returns { uri, rkey, ephemeralPublicKey, ephemeralPrivateKey }.
-    #[wasm_bindgen(js_name = createPairRequest)]
-    pub async fn create_pair_request(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let (record_ref, keypair) = opake.create_pair_request().await.map_err(wasm_err)?;
-
-        #[derive(Serialize)]
-        struct R {
-            uri: String,
-            rkey: String,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            ephemeral_public_key: Vec<u8>,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            ephemeral_private_key: Vec<u8>,
-        }
-
-        let rkey = opake_core::atproto::parse_at_uri(&record_ref.uri)
-            .map(|u| u.rkey)
-            .unwrap_or_default();
-
-        to_js(&R {
-            uri: record_ref.uri,
-            rkey,
-            ephemeral_public_key: keypair.public_key.to_vec(),
-            ephemeral_private_key: keypair.private_key.to_vec(),
-        })
-    }
-
-    /// Approve a pair request (existing device side). Creates the pair response record.
+    /// Approve a pair request from an already-authenticated device. Wraps
+    /// this device's identity to the requester's ephemeral public key and
+    /// publishes the response record.
     #[wasm_bindgen(js_name = approvePairRequest)]
     pub async fn approve_pair_request(
         &self,
@@ -499,27 +472,6 @@ impl WasmOpakeHandle {
             .approve_pair_request(request_uri, &pubkey)
             .await
             .map_err(wasm_err)
-    }
-
-    /// Receive a pair response (new device side). Returns the derived Identity.
-    #[wasm_bindgen(js_name = receivePairResponse)]
-    pub async fn receive_pair_response(
-        &self,
-        response_js: JsValue,
-        ephemeral_private_key: &[u8],
-    ) -> Result<JsValue, JsError> {
-        let response: opake_core::records::PairResponse =
-            serde_wasm_bindgen::from_value(response_js)
-                .map_err(|e| JsError::new(&e.to_string()))?;
-        let privkey: opake_core::crypto::X25519PrivateKey = ephemeral_private_key
-            .try_into()
-            .map_err(|_| JsError::new("ephemeral private key must be 32 bytes"))?;
-        let mut opake = self.opake().await?;
-        let identity = opake
-            .receive_pair_response(&response, &privkey)
-            .await
-            .map_err(wasm_err)?;
-        to_js(&identity)
     }
 
     /// Sync a single workspace by keyring URI. Returns null if the URI is not
@@ -715,28 +667,6 @@ impl WasmOpakeHandle {
         let mut opake = self.opake().await?;
         let entries = opake.list_pair_requests().await.map_err(wasm_err)?;
         to_js(&entries)
-    }
-
-    /// List pair responses on this account.
-    #[wasm_bindgen(js_name = listPairResponses)]
-    pub async fn list_pair_responses(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let entries = opake.list_pair_responses().await.map_err(wasm_err)?;
-        to_js(&entries)
-    }
-
-    /// Clean up pair request + response records after successful pairing.
-    #[wasm_bindgen(js_name = cleanupPairRecords)]
-    pub async fn cleanup_pair_records(
-        &self,
-        request_rkey: &str,
-        response_rkey: &str,
-    ) -> Result<(), JsError> {
-        let mut opake = self.opake().await?;
-        opake
-            .cleanup_pair_records(request_rkey, response_rkey)
-            .await
-            .map_err(wasm_err)
     }
 
     /// Delete all expired pair requests and orphaned responses (daemon use).

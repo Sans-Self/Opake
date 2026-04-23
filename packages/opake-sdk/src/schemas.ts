@@ -321,13 +321,11 @@ export const pairRequestResultSchema = z
     uri: z.string(),
     rkey: z.string(),
     ephemeral_public_key: uint8Array,
-    ephemeral_private_key: uint8Array,
   })
   .transform((r) => ({
     uri: r.uri,
     rkey: r.rkey,
     ephemeralPublicKey: r.ephemeral_public_key,
-    ephemeralPrivateKey: r.ephemeral_private_key,
   }));
 
 export type PairRequestResult = z.output<typeof pairRequestResultSchema>;

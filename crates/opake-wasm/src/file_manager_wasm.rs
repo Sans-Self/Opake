@@ -429,8 +429,7 @@ impl WasmFileManagerHandle {
     pub async fn get_document_metadata(&self, document_uri: &str) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let did = opake.did().to_owned();
-        let identity = opake.require_identity().map_err(wasm_err)?;
-        let private_key = identity.private_key_bytes().map_err(wasm_err)?;
+        let private_key = opake.identity().private_key_bytes().map_err(wasm_err)?;
         let group_key = match ctx {
             FileContext::Workspace(ref ws) => Some(ws.key.clone()),
             FileContext::Cabinet(_) => None,

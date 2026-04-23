@@ -37,7 +37,7 @@ use crate::workspace::Workspace;
 pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) client: XrpcClient<T>,
     pub(crate) did: String,
-    pub(crate) identity: Option<Identity>,
+    pub(crate) identity: Identity,
     pub(crate) rng: R,
     pub(crate) storage: S,
     /// Injected clock returning microseconds since Unix epoch. RFC 3339
@@ -64,11 +64,34 @@ pub const DEFAULT_INDEXER_URL: &str = match option_env!("OPAKE_INDEXER_URL") {
     None => "https://indexer.opake.app",
 };
 
+/// Build an authenticated XrpcClient for an already-logged-in account.
+///
+/// Loads the PDS URL from Config and the session from Storage. Used by
+/// identity-less bootstrap flows (pairing) where `Opake::for_account`
+/// would otherwise fail with `Error::IdentityMissing`.
+pub async fn authenticated_client<T: Transport, S: Storage>(
+    storage: &S,
+    did: &str,
+    transport: T,
+) -> Result<XrpcClient<T>, Error> {
+    let config = storage.load_config().await?;
+    let account = config
+        .accounts
+        .get(did)
+        .ok_or_else(|| Error::NotFound(format!("no account for {did}")))?;
+    let session = storage.load_session(did).await?;
+    Ok(XrpcClient::with_session(
+        transport,
+        account.pds_url.clone(),
+        session,
+    ))
+}
+
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub fn new(
         client: XrpcClient<T>,
         did: String,
-        identity: Option<Identity>,
+        identity: Identity,
         rng: R,
         storage: S,
         now_micros: fn() -> u64,
@@ -90,8 +113,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Build an Opake for a specific account, reading from Storage.
     ///
     /// Loads config (to resolve DID + PDS URL), session (authentication),
-    /// and identity (encryption keys, if present). If the identity exists
-    /// but lacks signing keys, migrates it automatically.
+    /// and identity (encryption keys). If the identity exists but lacks
+    /// signing keys, migrates it automatically.
+    ///
+    /// Returns `Error::IdentityMissing` if the account is authenticated
+    /// (session present) but has no encryption identity yet — callers
+    /// should route the user to recovery (seed phrase) or pairing
+    /// (another device) to bootstrap one, then retry.
     ///
     /// Indexer URL resolution (highest priority wins):
     /// 1. Runtime env override — CLI checks `OPAKE_INDEXER_URL` after construction
@@ -122,15 +150,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         let session = storage.load_session(&target_did).await?;
 
-        let identity = match storage.load_identity(&target_did).await {
-            Ok(mut id) => {
-                if id.ensure_signing_keys(&mut rng) {
-                    let _ = storage.save_identity(&target_did, &id).await;
-                }
-                Some(id)
-            }
-            Err(_) => None,
-        };
+        let mut identity = storage
+            .load_identity(&target_did)
+            .await
+            .map_err(|_| Error::IdentityMissing)?;
+        if identity.ensure_signing_keys(&mut rng) {
+            let _ = storage.save_identity(&target_did, &identity).await;
+        }
 
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
         let mut opake = Self::new(client, target_did, identity, rng, storage, now_micros);
@@ -177,7 +203,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 Ok(FileContext::Workspace(ws))
             }
             None => {
-                let cabinet = Cabinet::from_identity(self.require_identity()?)?;
+                let cabinet = Cabinet::from_identity(&self.identity)?;
                 Ok(FileContext::Cabinet(cabinet))
             }
         }
@@ -185,7 +211,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Build a cabinet FileContext.
     pub fn cabinet_context(&self) -> Result<FileContext, Error> {
-        let cabinet = Cabinet::from_identity(self.require_identity()?)?;
+        let cabinet = Cabinet::from_identity(&self.identity)?;
         Ok(FileContext::Cabinet(cabinet))
     }
 
@@ -238,7 +264,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// A `workspace ls` immediately after `workspace create` may miss the
     /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
 
         let keyrings = self.discover_member_keyrings().await?;
@@ -277,7 +303,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let at_uri = atproto::parse_at_uri(keyring_uri)?;
         if at_uri.authority == self.did {
             // Own keyring — fetch with authenticated client
-            let identity = self.require_identity()?;
+            let identity = &self.identity;
             let private_key = identity.private_key_bytes()?;
             let entry = self
                 .client
@@ -307,7 +333,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// endpoint), unwraps the group key, decrypts metadata. Used for
     /// workspaces where the caller is a member but not the owner.
     pub async fn resolve_foreign_workspace(&self, keyring_uri: &str) -> Result<Workspace, Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
         let at_uri = crate::atproto::parse_at_uri(keyring_uri)?;
         let owner_did = &at_uri.authority;
@@ -356,18 +382,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self.client
     }
 
-    /// The caller's identity, if one exists (may be absent pre-pairing).
-    pub fn identity(&self) -> Option<&Identity> {
-        self.identity.as_ref()
-    }
-
-    /// The caller's identity, or error if absent.
+    /// The caller's encryption identity.
     ///
-    /// Use this for operations that need encryption keys.
-    pub fn require_identity(&self) -> Result<&Identity, Error> {
-        self.identity.as_ref().ok_or_else(|| {
-            Error::NotFound("no identity — generate keys or pair this device first".into())
-        })
+    /// Always present — Opake requires an identity at construction time.
+    /// Accounts that authenticate but haven't bootstrapped an identity yet
+    /// (via recovery or pairing) produce `Error::IdentityMissing` from
+    /// `for_account` rather than an `Opake` with a dangling handle.
+    pub fn identity(&self) -> &Identity {
+        &self.identity
     }
 
     /// Current RFC 3339 UTC timestamp (microsecond precision).
@@ -441,7 +463,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         name: &str,
         description: Option<&str>,
     ) -> Result<(String, ContentKey), Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let pubkey = identity.public_key_bytes()?;
         let now = self.now();
         let result = keyrings::create_keyring(
@@ -485,7 +507,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         log::trace!("sync: discovering workspaces for {}", self.did);
         let indexer_keyrings = self.discover_member_keyrings().await?;
         log::trace!("sync: found {} workspaces", indexer_keyrings.len());
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
 
         let mut results = Vec::with_capacity(indexer_keyrings.len());
@@ -510,7 +532,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let target = indexer_keyrings.iter().find(|kr| kr.uri == keyring_uri);
         let Some(kr) = target else { return Ok(None) };
 
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
         let result = self.sync_single_workspace(kr, &private_key).await;
         self.auto_persist_session().await?;
@@ -654,7 +676,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // Derive identity + group key once for all proposals that need key wrapping.
         // Mutable because removeMember/leave rotates the key — subsequent proposals
         // must use the rotated key.
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
         let mut group_key = Self::unwrap_workspace_key(&keyring.members, &self.did, &private_key)?;
 
@@ -1378,7 +1400,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// The grant and document live on the owner's PDS. All fetches are
     /// unauthenticated public endpoint calls. Returns `(filename, plaintext)`.
     pub async fn download_from_grant(&self, grant_uri: &str) -> Result<(String, Vec<u8>), Error> {
-        let private_key = self.require_identity()?.private_key_bytes()?;
+        let private_key = self.identity.private_key_bytes()?;
         crate::documents::download_from_grant(self.client.transport(), &private_key, grant_uri)
             .await
     }
@@ -1391,7 +1413,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &self,
         grant_uri: &str,
     ) -> Result<(String, crate::crypto::DocumentMetadata), Error> {
-        let private_key = self.require_identity()?.private_key_bytes()?;
+        let private_key = self.identity.private_key_bytes()?;
         crate::documents::resolve_grant_metadata(self.client.transport(), &private_key, grant_uri)
             .await
     }
@@ -1449,11 +1471,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// The token is passed as a query parameter to the SSE endpoint,
     /// sidestepping EventSource's inability to send custom headers.
     pub async fn request_sse_token(&mut self) -> Result<String, Error> {
-        let identity = self.require_identity()?;
-        let signing_key = identity
-            .signing_key_bytes()?
-            .ok_or_else(|| Error::Auth("no signing key for SSE token request".into()))?;
-
+        let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
         crate::indexer::request_sse_token(self.client.transport(), &url, &self.did, &signing_key)
             .await
@@ -1462,42 +1480,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     // -- Inbox (incoming grants via Indexer) --
 
     /// Fetch all incoming grants from the Indexer.
-    ///
-    /// Returns an empty list if no signing key exists.
     pub async fn list_inbox(&mut self) -> Result<Vec<crate::indexer::InboxGrant>, Error> {
-        let identity = match self.identity.as_ref() {
-            Some(id) => id,
-            None => return Ok(vec![]),
-        };
-        let signing_key = match identity.signing_key_bytes()? {
-            Some(k) => k,
-            None => return Ok(vec![]),
-        };
-
+        let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
-
         crate::indexer::fetch_inbox_all(self.client.transport(), &url, &self.did, &signing_key)
             .await
     }
 
     /// Fetch workspace documents from the Indexer.
-    ///
-    /// Returns an empty list if no signing key exists.
     pub async fn list_workspace_documents(
         &mut self,
         keyring_uri: &str,
     ) -> Result<Vec<crate::indexer::WorkspaceDocument>, Error> {
-        let identity = match self.identity.as_ref() {
-            Some(id) => id,
-            None => return Ok(vec![]),
-        };
-        let signing_key = match identity.signing_key_bytes()? {
-            Some(k) => k,
-            None => return Ok(vec![]),
-        };
-
+        let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
-
         crate::indexer::fetch_workspace_documents(
             self.client.transport(),
             &url,
@@ -1509,22 +1505,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     }
 
     /// Fetch all keyrings the user is a member of, with full record data.
-    ///
-    /// Returns an empty list if no signing key exists.
     pub async fn discover_member_keyrings(
         &mut self,
     ) -> Result<Vec<crate::indexer::IndexerKeyring>, Error> {
-        let identity = match self.identity.as_ref() {
-            Some(id) => id,
-            None => return Ok(vec![]),
-        };
-        let signing_key = match identity.signing_key_bytes()? {
-            Some(k) => k,
-            None => return Ok(vec![]),
-        };
-
+        let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
-
         crate::indexer::fetch_member_keyrings(
             self.client.transport(),
             &url,
@@ -1532,6 +1517,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &signing_key,
         )
         .await
+    }
+
+    /// Fetch the Ed25519 signing key for Indexer auth, or error if missing.
+    ///
+    /// Identity migration runs in `for_account`, so a freshly loaded Opake
+    /// always has signing keys. The only way to hit this error is a custom
+    /// `Opake::new` caller that supplied a legacy Identity without signing
+    /// keys — surface the problem rather than quietly returning empty data.
+    fn require_signing_key(&self) -> Result<crate::storage::Ed25519SecretKey, Error> {
+        self.identity
+            .signing_key_bytes()?
+            .ok_or_else(|| Error::Auth("identity is missing Ed25519 signing key".into()))
     }
 
     // -- Sharing (pending shares) --
@@ -1558,7 +1555,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         resolver_transport: &impl Transport,
     ) -> Result<crate::sharing::RetryResult, Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
         let now = crate::client::time::unix_now();
         let pds_url = self.client.base_url().to_owned();
@@ -1648,7 +1645,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         document_uri: &str,
     ) -> Result<crate::documents::KeyringDownloadResult, Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let private_key = identity.private_key_bytes()?;
         crate::documents::download_from_keyring_member(
             self.client.transport(),
@@ -1674,7 +1671,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Publish or update the caller's public key record on the PDS.
     pub async fn publish_public_key(&mut self) -> Result<String, Error> {
-        let identity = self.require_identity()?;
+        let identity = &self.identity;
         let pubkey = identity.public_key_bytes()?;
         let signing_key = identity.verify_key_bytes()?;
         let now = self.now();
@@ -1688,17 +1685,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         self.signoff(result).await
     }
 
-    // -- Pairing --
-
-    /// Create a pair request (new device side). Returns the record ref + ephemeral keypair.
-    pub async fn create_pair_request(
-        &mut self,
-    ) -> Result<(crate::client::RecordRef, crate::crypto::EphemeralKeypair), Error> {
-        let now = self.now();
-        let result =
-            crate::pairing::create_pair_request(&mut self.client, &now, &mut self.rng).await;
-        self.signoff(result).await
-    }
+    // -- Pairing (existing-device side) --
+    //
+    // The new-device side is identity-less and lives in `crate::pairing`
+    // as free functions — see that module for the full flow.
 
     /// List pending pair requests on this account.
     pub async fn list_pair_requests(&mut self) -> Result<Vec<crate::client::RecordEntry>, Error> {
@@ -1710,62 +1700,23 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(page.records)
     }
 
-    /// List pair response records on this account.
-    pub async fn list_pair_responses(&mut self) -> Result<Vec<crate::client::RecordEntry>, Error> {
-        let result = self
-            .client
-            .list_records(crate::records::PAIR_RESPONSE_COLLECTION, Some(100), None)
-            .await;
-        let page = self.signoff(result).await?;
-        Ok(page.records)
-    }
-
-    /// Approve a pair request (existing device side).
+    /// Approve a pair request by wrapping this device's identity to the
+    /// requester's ephemeral public key and publishing the response.
     pub async fn approve_pair_request(
         &mut self,
         request_uri: &str,
         ephemeral_public_key: &crate::crypto::X25519PublicKey,
     ) -> Result<(), Error> {
-        let identity = self.identity.as_ref().ok_or_else(|| {
-            Error::NotFound("no identity — generate keys or pair this device first".into())
-        })?;
         let now = self.now();
         let result = crate::pairing::respond_to_pair_request(
             &mut self.client,
-            identity,
+            &self.identity,
             request_uri,
             ephemeral_public_key,
             &now,
             &mut self.rng,
         )
         .await;
-        self.signoff(result).await
-    }
-
-    /// Receive a pair response and derive the identity (new device side).
-    pub async fn receive_pair_response(
-        &mut self,
-        response: &crate::records::PairResponse,
-        ephemeral_private_key: &crate::crypto::X25519PrivateKey,
-    ) -> Result<Identity, Error> {
-        crate::pairing::receive_pair_response(
-            &mut self.client,
-            &self.did,
-            response,
-            ephemeral_private_key,
-        )
-        .await
-    }
-
-    /// Clean up pair request and response records after successful pairing.
-    pub async fn cleanup_pair_records(
-        &mut self,
-        request_rkey: &str,
-        response_rkey: &str,
-    ) -> Result<(), Error> {
-        let result =
-            crate::pairing::cleanup_pair_records(&mut self.client, request_rkey, response_rkey)
-                .await;
         self.signoff(result).await
     }
 

@@ -48,12 +48,12 @@ import { createStorageAdapter } from "./storage-adapter";
 import { registerCleanup, unregisterCleanup } from "./finalizer";
 import {
   createPairRequest as pairingCreate,
+  awaitPairCompletion as pairingAwait,
+  cancelPairRequest as pairingCancel,
   listPairRequests as pairingList,
-  listPairResponses as pairingListResponses,
   approvePairRequest as pairingApprove,
-  receivePairResponse as pairingReceive,
-  cleanupPairRecords as pairingCleanup,
   cleanupExpiredPairRequests as pairingCleanupExpired,
+  type AwaitPairOptions,
 } from "./pairing";
 
 // The WASM module types. We import dynamically after init.
@@ -1058,14 +1058,54 @@ export class Opake {
   }
 
   // ---------------------------------------------------------------------------
-  // Device pairing (implementations in ./pairing.ts)
+  // Device pairing
   // ---------------------------------------------------------------------------
+  //
+  // The new-device side (create request + await completion) is exposed as
+  // static methods — they don't require an Opake instance because the new
+  // device has no Identity yet. See the `Opake.createPairRequest` /
+  // `Opake.awaitPairCompletion` pair below.
+  //
+  // The existing-device side stays on the instance: it already has an
+  // Identity and the authenticated context to wrap it against the
+  // requesting device's ephemeral public key.
 
-  /** Create a pair request (new device). Returns the record URI + ephemeral keypair. */
-  @wrapWasmErrors
-  @withTokenGuard
-  createPairRequest(): Promise<import("./types").PairRequestResult> {
-    return pairingCreate(this.requireContext());
+  /**
+   * Start a device-pairing request from the new device.
+   *
+   * Must run after `Opake.startLogin` / `Opake.completeLogin` have put an
+   * authenticated session in Storage but before `Opake.init` — which would
+   * fail with `IdentityMissing` at this stage. The returned fingerprint
+   * (first bytes of `ephemeralPublicKey`) is for out-of-band comparison
+   * with the approving device.
+   */
+  static async createPairRequest(
+    storage: import("./storage").Storage,
+    did: string,
+  ): Promise<import("./types").PairRequestResult> {
+    return pairingCreate(storage, did);
+  }
+
+  /**
+   * Poll until the paired device approves. Resolves once the received
+   * identity has been persisted to Storage; `Opake.init` then succeeds.
+   */
+  static async awaitPairCompletion(
+    storage: import("./storage").Storage,
+    did: string,
+    requestRkey: string,
+    options?: AwaitPairOptions,
+  ): Promise<void> {
+    return pairingAwait(storage, did, requestRkey, options);
+  }
+
+  /** Cancel an in-flight pair request. Wipes pair state on both sides. */
+  static async cancelPairRequest(
+    storage: import("./storage").Storage,
+    did: string,
+    requestRkey: string,
+  ): Promise<void> {
+    return pairingCancel(storage, did, requestRkey);
   }
 
   /** List pending pair requests on this account. */
@@ -1075,37 +1115,11 @@ export class Opake {
     return pairingList(this.requireContext());
   }
 
-  /** List pair responses on this account. */
-  @wrapWasmErrors
-  @withTokenGuard
-  listPairResponses(): Promise<
-    readonly { uri: string; requestUri: string; value: import("./types").PairResponseRecord }[]
-  > {
-    return pairingListResponses(this.requireContext());
-  }
-
   /** Approve a pair request (existing device). Encrypts and sends the identity. */
   @wrapWasmErrors
   @withTokenGuard
   approvePairRequest(requestUri: string, ephemeralPublicKey: Uint8Array): Promise<void> {
     return pairingApprove(this.requireContext(), requestUri, ephemeralPublicKey);
-  }
-
-  /** Receive a pair response (new device). Decrypts the identity from the approving device. */
-  @wrapWasmErrors
-  @withTokenGuard
-  receivePairResponse(
-    response: import("./types").PairResponseRecord,
-    ephemeralPrivateKey: Uint8Array,
-  ): Promise<import("./storage").Identity> {
-    return pairingReceive(this.requireContext(), response, ephemeralPrivateKey);
-  }
-
-  /** Clean up pair request + response records after successful pairing. */
-  @wrapWasmErrors
-  @withTokenGuard
-  cleanupPairRecords(requestRkey: string, responseRkey: string): Promise<void> {
-    return pairingCleanup(this.requireContext(), requestRkey, responseRkey);
   }
 
   /** Delete expired pair requests and orphaned responses. */

@@ -37,6 +37,7 @@ export class MemoryStorage implements Storage {
   private config: Config = { accounts: {} };
   private readonly identities = new Map<string, Identity>();
   private readonly sessions = new Map<string, Session>();
+  private readonly pairStates = new Map<string, Uint8Array>();
   private readonly cacheRecords = new Map<string, Map<string, CachedRecord>>();
   private readonly cacheMeta = new Map<string, number>();
 
@@ -72,6 +73,28 @@ export class MemoryStorage implements Storage {
     this.sessions.delete(did);
   }
 
+  // -- Pair state ------------------------------------------------------------
+
+  private pairStateKey(did: string, rkey: string): string {
+    return `${did}::${rkey}`;
+  }
+
+  async savePairState(did: string, rkey: string, privateKey: Uint8Array): Promise<void> {
+    // Copy the buffer so later mutations by the caller don't affect stored state.
+    this.pairStates.set(this.pairStateKey(did, rkey), new Uint8Array(privateKey));
+  }
+
+  async loadPairState(did: string, rkey: string): Promise<Uint8Array> {
+    const key = this.pairStateKey(did, rkey);
+    const bytes = this.pairStates.get(key);
+    if (!bytes) throw new StorageError(`No pair state for ${did}/${rkey}`);
+    return new Uint8Array(bytes);
+  }
+
+  async deletePairState(did: string, rkey: string): Promise<void> {
+    this.pairStates.delete(this.pairStateKey(did, rkey));
+  }
+
   async removeAccount(did: string): Promise<void> {
     const remainingAccounts = Object.fromEntries(
       Object.entries(this.config.accounts).filter(([key]) => key !== did),
@@ -89,6 +112,10 @@ export class MemoryStorage implements Storage {
     };
     this.identities.delete(did);
     this.sessions.delete(did);
+    const pairPrefix = `${did}::`;
+    for (const key of [...this.pairStates.keys()]) {
+      if (key.startsWith(pairPrefix)) this.pairStates.delete(key);
+    }
     await this.cacheClear(did);
   }
 

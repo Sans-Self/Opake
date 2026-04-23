@@ -132,6 +132,21 @@ export interface Storage {
   /** Remove all data for an account (identity, session, cache). */
   removeAccount(did: string): Promise<void>;
 
+  // -- Pair state (ephemeral private key during device pairing) --------------
+  //
+  // The new device persists its ephemeral X25519 private key here while
+  // waiting for the old device to approve. WASM writes and reads these
+  // bytes directly through the adapter — they never become a Uint8Array
+  // in app code. Storage implementations should treat this material the
+  // same as an Identity: persist durably, never log, never transmit.
+
+  /** Persist the ephemeral private key for a pending pair request. */
+  savePairState(did: string, rkey: string, privateKey: Uint8Array): Promise<void>;
+  /** Load the ephemeral private key for a pending pair request. */
+  loadPairState(did: string, rkey: string): Promise<Uint8Array>;
+  /** Delete the ephemeral private key (on completion or cancellation). */
+  deletePairState(did: string, rkey: string): Promise<void>;
+
   // -- Cache: record-level ---------------------------------------------------
 
   /** Look up a single cached record by URI. */

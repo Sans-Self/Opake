@@ -392,12 +392,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         cached: CachedCollection,
     ) -> Result<(Vec<CachedRecord>, Vec<crate::indexer::TreeProposal>), Error> {
         let indexer_url = self.opake.resolve_indexer_url();
-        let signing_key = match self.opake.require_identity() {
-            Ok(id) => match id.signing_key_bytes() {
-                Ok(Some(k)) => k,
-                _ => return Ok((cached.records, Vec::new())),
-            },
-            Err(_) => return Ok((cached.records, Vec::new())),
+        let signing_key = match self.opake.identity().signing_key_bytes() {
+            Ok(Some(k)) => k,
+            _ => return Ok((cached.records, Vec::new())),
         };
 
         // Extract sync cursor from the metadata sentinel record (uri = "__sync__")
@@ -541,8 +538,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     async fn bootstrap_tree(&mut self) -> Result<DirectoryTree, Error> {
         let indexer_url = self.opake.resolve_indexer_url();
 
-        let identity = self.opake.require_identity()?;
-        let signing_key = identity
+        let signing_key = self
+            .opake
+            .identity()
             .signing_key_bytes()?
             .ok_or_else(|| Error::Auth("signing key required for Indexer sync".into()))?;
 
@@ -614,7 +612,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let mut group_keys = HashMap::new();
                 group_keys.insert(ws.uri.clone(), ws.key.clone());
 
-                let private_key = self.opake.require_identity()?.private_key_bytes()?;
+                let private_key = self.opake.identity().private_key_bytes()?;
                 tree.decrypt_names_with_group_keys(&self.opake.did, &private_key, &group_keys);
             }
         }

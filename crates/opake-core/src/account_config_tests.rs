@@ -62,7 +62,7 @@ fn make_test_opake(mock: MockTransport) -> crate::opake::Opake<MockTransport, Os
     crate::opake::Opake::new(
         client,
         "did:plc:test".into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,

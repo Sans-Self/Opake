@@ -296,6 +296,37 @@ pub trait Storage {
 
     fn remove_account(&self, did: &str) -> impl std::future::Future<Output = Result<(), Error>>;
 
+    // -- Pair state (ephemeral private key during device pairing) ------------
+    //
+    // The new device generates an X25519 ephemeral keypair for each pair
+    // request. The private half must survive between `create_pair_request`
+    // and `try_complete_pair` — which can be minutes to days apart — so it
+    // is persisted here. These bytes never cross the WASM/JS boundary: WASM
+    // writes them via the storage adapter, reads them back the same way,
+    // and wipes them once pairing succeeds or the request is cancelled.
+
+    /// Persist the ephemeral private key for a pending pair request.
+    fn save_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+        private_key: &[u8],
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    /// Load the ephemeral private key for a pending pair request.
+    fn load_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, Error>>;
+
+    /// Delete the ephemeral private key for a pair request (on completion or cancellation).
+    fn delete_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
     // -- Cache: record-level -------------------------------------------------
 
     /// Look up a single cached record by URI.
@@ -383,6 +414,20 @@ impl Storage for NoopStorage {
         Ok(())
     }
     async fn remove_account(&self, _did: &str) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn save_pair_state(
+        &self,
+        _did: &str,
+        _rkey: &str,
+        _private_key: &[u8],
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn load_pair_state(&self, _did: &str, _rkey: &str) -> Result<Vec<u8>, Error> {
+        Err(Error::NotFound("NoopStorage".into()))
+    }
+    async fn delete_pair_state(&self, _did: &str, _rkey: &str) -> Result<(), Error> {
         Ok(())
     }
     async fn cache_get_record(

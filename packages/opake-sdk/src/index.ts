@@ -57,7 +57,9 @@ export {
   type WorkspaceSyncResult,
   type PairRequestResult,
   type PendingPairRequest,
-  type PairResponseRecord,
+} from "./types";
+export type { AwaitPairOptions } from "./pairing";
+export {
   type InvitationEntry,
   type TaskDef,
   type GrantEntry,

@@ -275,6 +275,44 @@ impl Storage for FileStorage {
             .map_err(|e| Error::Storage(e.to_string()))
     }
 
+    // -- Pair state (raw bytes, 0600) ------------------------------------------
+    //
+    // Stored as the raw 32-byte key, not base64. The directory + file both
+    // inherit the 0700/0600 mode the rest of the account data uses.
+
+    async fn save_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+        private_key: &[u8],
+    ) -> Result<(), Error> {
+        let dir = pair_state_dir(&self.account_dir(did));
+        Self::ensure_sensitive_dir(&dir).map_err(|e| Error::Storage(e.to_string()))?;
+        let path = dir.join(pair_state_filename(rkey));
+        Self::write_sensitive_file(&path, private_key)
+            .map_err(|e| Error::Storage(format!("failed to write pair state: {e}")))
+    }
+
+    async fn load_pair_state(&self, did: &str, rkey: &str) -> Result<Vec<u8>, Error> {
+        let path = pair_state_dir(&self.account_dir(did)).join(pair_state_filename(rkey));
+        fs::read(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Error::NotFound(format!("pair state {rkey}"))
+            } else {
+                Error::Storage(format!("failed to read pair state: {e}"))
+            }
+        })
+    }
+
+    async fn delete_pair_state(&self, did: &str, rkey: &str) -> Result<(), Error> {
+        let path = pair_state_dir(&self.account_dir(did)).join(pair_state_filename(rkey));
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Error::Storage(format!("failed to delete pair state: {e}"))),
+        }
+    }
+
     async fn cache_get_record(
         &self,
         did: &str,
@@ -362,6 +400,17 @@ impl Storage for FileStorage {
 pub use opake_core::storage::{
     resolve_handle_or_did, sanitize_did, AccountEntry, Config, Identity,
 };
+
+fn pair_state_dir(account_dir: &Path) -> PathBuf {
+    account_dir.join("pair_states")
+}
+
+fn pair_state_filename(rkey: &str) -> String {
+    // Rkeys are ATProto TIDs (base32, no dots/slashes) so passthrough is safe.
+    // Belt-and-braces: strip any separators defensively.
+    let safe = rkey.replace(['/', '\\', '.', ':'], "_");
+    format!("{safe}.bin")
+}
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

@@ -91,7 +91,7 @@ let opakeInstance: Opake | null = null;
 // eslint-disable-next-line functional/no-let
 let bootPromise: Promise<void> | null = null;
 
-async function getStorage(): Promise<IndexedDbStorage> {
+export async function getStorage(): Promise<IndexedDbStorage> {
   if (!storage) {
     // Request persistent storage BEFORE first IDB write. Without this,
     // the browser may evict our identity keys under disk pressure,
@@ -161,7 +161,12 @@ interface AuthActions {
   generateSeedPhrase(): Promise<string>;
   validateSeedPhrase(phrase: string): Promise<boolean>;
   saveIdentity(seedPhrase: string): Promise<void>;
-  saveReceivedIdentity(identity: import("@opake/sdk").Identity): Promise<void>;
+  /**
+   * Called after `Opake.awaitPairCompletion` resolves. The identity is
+   * already persisted inside WASM's storage write; this refreshes the
+   * auth store so the rest of the app picks it up.
+   */
+  finalizePairing(): Promise<void>;
   publishPublicKey(): Promise<void>;
 }
 
@@ -472,14 +477,14 @@ export const useAuthStore = create<AuthStore>()(
       }
     },
 
-    async saveReceivedIdentity(identity) {
+    async finalizePairing() {
       const did = requireActiveDid();
-      const done = loading("save-identity");
+      const done = loading("finalize-pairing");
       try {
         const { Opake } = await loadSdk();
         const s = await getStorage();
-        await s.saveIdentity(did, identity);
-
+        // `awaitPairCompletion` already wrote the identity to storage via
+        // WASM — we just spin up an Opake handle and refresh store state.
         const opake = await Opake.init({ storage: s, did });
         await seedIndexerUrl(opake);
         opakeInstance?.destroy();

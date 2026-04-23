@@ -79,7 +79,7 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     let mut opake = Opake::new(
         client,
         DID.into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,
@@ -167,7 +167,7 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
     let mut opake = Opake::new(
         client,
         DID.into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,
@@ -242,7 +242,7 @@ async fn workspace_non_owner_delete_emits_directory_update_proposal() {
     let mut opake = Opake::new(
         client,
         ALICE_DID.into(),
-        Some(identity),
+        identity,
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,

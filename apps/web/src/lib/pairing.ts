@@ -1,9 +1,15 @@
-// Device pairing — thin wrappers over @opake/sdk pairing methods.
+// Device pairing — thin wrappers over @opake/sdk.
+//
+// New-device flow (`createPairRequest` / `awaitPairCompletion` / `cancel`)
+// lives entirely in the SDK as static methods that take Storage + DID —
+// it can't use `getOpake()` because there's no Opake handle yet on the
+// new device. The existing-device helpers below go through the handle.
 
-import { getOpake } from "@/stores/auth";
+import { getOpake, useAuthStore } from "@/stores/auth";
+import { getStorage } from "@/stores/auth";
 import { formatFingerprint } from "@/lib/encoding";
-import { rkeyFromUri } from "@/lib/atUri";
-import type { PairRequestResult, PairResponseRecord, Identity } from "@opake/sdk";
+import { Opake } from "@opake/sdk";
+import type { PairRequestResult, AwaitPairOptions } from "@opake/sdk";
 
 // ---------------------------------------------------------------------------
 // Types (re-exported for UI consumption)
@@ -16,18 +22,38 @@ export interface PendingPairRequest {
   readonly ephemeralKey: Uint8Array;
 }
 
-export type { PairResponseRecord };
+export type { PairRequestResult };
 
 // ---------------------------------------------------------------------------
-// Create pair request (new device)
+// New-device flow
 // ---------------------------------------------------------------------------
+
+function requireActiveDid(): string {
+  const s = useAuthStore.getState().session;
+  if (s.status !== "active") throw new Error("no active session");
+  return s.did;
+}
 
 export async function createPairRequest(): Promise<PairRequestResult> {
-  return getOpake().createPairRequest();
+  const storage = await getStorage();
+  return Opake.createPairRequest(storage, requireActiveDid());
+}
+
+export async function awaitPairCompletion(
+  requestRkey: string,
+  options?: AwaitPairOptions,
+): Promise<void> {
+  const storage = await getStorage();
+  return Opake.awaitPairCompletion(storage, requireActiveDid(), requestRkey, options);
+}
+
+export async function cancelPairRequest(requestRkey: string): Promise<void> {
+  const storage = await getStorage();
+  return Opake.cancelPairRequest(storage, requireActiveDid(), requestRkey);
 }
 
 // ---------------------------------------------------------------------------
-// List pending pair requests (existing device)
+// Existing-device flow (uses the Opake handle)
 // ---------------------------------------------------------------------------
 
 export async function listPairRequests(maxAge: number): Promise<PendingPairRequest[]> {
@@ -43,50 +69,9 @@ export async function listPairRequests(maxAge: number): Promise<PendingPairReque
     }));
 }
 
-// ---------------------------------------------------------------------------
-// Poll for pair response (new device)
-// ---------------------------------------------------------------------------
-
-export async function pollForPairResponse(
-  requestRkey: string,
-  did: string,
-): Promise<PairResponseRecord | null> {
-  const responses = await getOpake().listPairResponses();
-  const requestUri = `at://${did}/app.opake.pairRequest/${requestRkey}`;
-  const match = responses.find((r) => r.requestUri === requestUri);
-  return match?.value ?? null;
-}
-
-// ---------------------------------------------------------------------------
-// Receive pair response (new device — SDK handles unwrap + decrypt)
-// ---------------------------------------------------------------------------
-
-export async function receivePairResponse(
-  response: PairResponseRecord,
-  ephemeralPrivKey: Uint8Array,
-): Promise<Identity> {
-  return getOpake().receivePairResponse(response, ephemeralPrivKey);
-}
-
-// ---------------------------------------------------------------------------
-// Approve pair request (existing device — SDK handles encrypt + wrap)
-// ---------------------------------------------------------------------------
-
 export async function approvePairRequest(
   requestUri: string,
   ephemeralPubKey: Uint8Array,
 ): Promise<void> {
   await getOpake().approvePairRequest(requestUri, ephemeralPubKey);
-}
-
-// ---------------------------------------------------------------------------
-// Cleanup (delete request + response records)
-// ---------------------------------------------------------------------------
-
-export async function cleanupPairRecords(
-  requestUri: string,
-  responseRkey: string | null,
-): Promise<void> {
-  const requestRkey = rkeyFromUri(requestUri);
-  await getOpake().cleanupPairRecords(requestRkey, responseRkey ?? "");
 }

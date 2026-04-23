@@ -1,31 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "@/stores/auth";
 import { formatFingerprint } from "@/lib/encoding";
 import {
+  awaitPairCompletion,
+  cancelPairRequest,
   createPairRequest,
-  pollForPairResponse,
-  receivePairResponse,
-  cleanupPairRecords,
 } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
-import type { PairRequestResult } from "@opake/sdk";
 
-const POLL_INTERVAL_MS = 3000;
-
-// Module-level promise dedup: WASM async methods hold RefCell<&mut self>,
-// so concurrent calls on the same context panic. StrictMode double-mounts
-// would fire two createPairRequest calls — this ensures only one runs.
-const pairInitState = { current: null as Promise<PairRequestResult> | null };
-
-// ---------------------------------------------------------------------------
-// Page — new device requesting identity from an existing device
-// ---------------------------------------------------------------------------
+// Module-level dedup promise: StrictMode double-mounts would otherwise
+// fire two createPairRequest calls in rapid succession. Both would write
+// distinct pair-request records to the PDS and leave an orphan behind.
+const pairInitState = {
+  current: null as Promise<{ rkey: string; fingerprint: string; uri: string }> | null,
+};
 
 type RequestState =
   | { step: "generating" }
-  | { step: "waiting"; fingerprint: string; requestUri: string }
+  | { step: "waiting"; fingerprint: string; requestRkey: string; requestUri: string }
   | { step: "receiving" }
   | { step: "success" }
   | { step: "error"; message: string };
@@ -33,98 +27,80 @@ type RequestState =
 function PairRequestPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<RequestState>({ step: "generating" });
-  const { addLoading, removeLoading, isLoading } = useAppStore();
-  const ephemeralPrivKeyRef = useRef<Uint8Array | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const cleanup = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+  const { addLoading, removeLoading } = useAppStore();
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const cancelledRef = { current: false };
+    let cancelled = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     async function init() {
-      const authState = useAuthStore.getState();
-      if (authState.session.status !== "active") return;
-
-      const { did } = authState.session;
+      if (useAuthStore.getState().session.status !== "active") return;
 
       addLoading("pair-request-init");
+      let info: { rkey: string; fingerprint: string; uri: string } | null = null;
       try {
-        // Deduplicate: StrictMode double-mount shares one WASM call.
-        pairInitState.current ??= createPairRequest();
-        const pairResult = await pairInitState.current;
-        ephemeralPrivKeyRef.current = pairResult.ephemeralPrivateKey;
+        pairInitState.current ??= createPairRequest().then((r) => ({
+          rkey: r.rkey,
+          uri: r.uri,
+          fingerprint: formatFingerprint(r.ephemeralPublicKey),
+        }));
+        info = await pairInitState.current;
 
-        if (cancelledRef.current) return;
-
-        const fingerprint = formatFingerprint(pairResult.ephemeralPublicKey);
-        setState({ step: "waiting", fingerprint, requestUri: pairResult.uri });
-
-        pollRef.current = setInterval(async () => {
-          // Guard: WASM holds RefCell<&mut self> for async calls. Overlapping
-          // polls would panic with "recursive use of an object detected."
-          if (isLoading("pair-request-poll")) return;
-          addLoading("pair-request-poll");
-          try {
-            const response = await pollForPairResponse(pairResult.rkey, did);
-            if (!response || cancelledRef.current) return;
-
-            cleanup();
-            setState({ step: "receiving" });
-            addLoading("pair-request-receive");
-
-            const privKey = ephemeralPrivKeyRef.current;
-            if (!privKey) {
-              setState({ step: "error", message: "Ephemeral private key unavailable" });
-              removeLoading("pair-request-receive");
-              return;
-            }
-
-            const identity = await receivePairResponse(response, privKey);
-            await useAuthStore.getState().saveReceivedIdentity(identity);
-
-            // Clean up PDS records (best-effort)
-            await cleanupPairRecords(pairResult.uri, null).catch(Function.prototype as () => void);
-
-            setState({ step: "success" });
-            removeLoading("pair-request-receive");
-            setTimeout(() => navigate({ to: "/cabinet" }), 1500);
-          } catch (err) {
-            console.error("[pairing] receive failed:", err);
-            cleanup();
-            removeLoading("pair-request-receive");
-            setState({
-              step: "error",
-              message: err instanceof Error ? err.message : String(err),
-            });
-          } finally {
-            removeLoading("pair-request-poll");
-          }
-        }, POLL_INTERVAL_MS);
+        if (cancelled) return;
+        setState({
+          step: "waiting",
+          fingerprint: info.fingerprint,
+          requestRkey: info.rkey,
+          requestUri: info.uri,
+        });
       } catch (err) {
         console.error("[pairing] init failed:", err);
-        if (cancelledRef.current) return;
+        if (cancelled) return;
         setState({
           step: "error",
           message: err instanceof Error ? err.message : String(err),
         });
+        return;
       } finally {
         pairInitState.current = null;
         removeLoading("pair-request-init");
+      }
+
+      try {
+        await awaitPairCompletion(info.rkey, { signal: controller.signal });
+        if (cancelled) return;
+        setState({ step: "receiving" });
+        await useAuthStore.getState().finalizePairing();
+        setState({ step: "success" });
+        setTimeout(() => navigate({ to: "/cabinet" }), 1500);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error("[pairing] completion failed:", err);
+        setState({
+          step: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
     void init();
     return () => {
-      cancelledRef.current = true;
-      cleanup();
+      cancelled = true;
+      controller.abort();
+      abortRef.current = null;
+      // Fire-and-forget: if the user walks away before the request was
+      // created, there's nothing to cancel; if it was, we tear it down so
+      // the PDS and storage don't retain orphan state.
+      const s = useAuthStore.getState();
+      const rkey =
+        state.step === "waiting" ? state.requestRkey : undefined;
+      if (rkey && s.session.status === "active") {
+        void cancelPairRequest(rkey).catch(() => {});
+      }
     };
-  }, [cleanup, navigate, addLoading, removeLoading, isLoading]);
+  }, [navigate, addLoading, removeLoading]);
 
   return (
     <div className="flex w-full max-w-md flex-col items-center">

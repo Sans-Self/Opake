@@ -124,7 +124,7 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
         return Ok(None);
     }
 
-    let private_key = opake.require_identity()?.private_key_bytes()?;
+    let private_key = opake.identity().private_key_bytes()?;
     let did = opake.did();
 
     for kr in &keyrings {
