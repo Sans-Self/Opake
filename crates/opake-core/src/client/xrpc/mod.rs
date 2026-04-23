@@ -37,13 +37,21 @@ pub enum Session {
 }
 
 /// Legacy password-based session (createSession / refreshSession).
+///
+/// The atproto lexicon wire format uses camelCase (`accessJwt`,
+/// `refreshJwt`); local storage historically used snake_case. Aliases on
+/// both fields let the same struct parse either without maintaining
+/// separate DTOs. Serialization always emits the primary (snake_case)
+/// name so files written today stay consistent with older storage.
 #[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
 pub struct LegacySession {
     pub did: String,
     pub handle: String,
     #[redact]
+    #[serde(alias = "accessJwt")]
     pub access_jwt: String,
     #[redact]
+    #[serde(alias = "refreshJwt")]
     pub refresh_jwt: String,
 }
 

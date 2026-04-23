@@ -128,22 +128,25 @@ pub struct AccountInfo {
 
 /// Encryption + signing keypairs, stored as base64.
 ///
-/// Encryption + signing keypairs, stored as base64.
-///
 /// `#[redact]` fields are zeroized on drop automatically (via RedactedDebug).
-/// The signing fields are optional for backward compat with old identity files.
+/// The signing fields are optional for backward compat with old identity
+/// files. Field aliases accept both snake_case (the primary, canonical
+/// serialization) and camelCase — older identity files on disk used the
+/// camelCase form, so the migration path relies on the aliases.
 #[derive(crate::RedactedDebug, Serialize, Deserialize)]
 pub struct Identity {
     pub did: String,
+    #[serde(alias = "publicKey")]
     pub public_key: String,
     #[redact]
+    #[serde(alias = "privateKey")]
     pub private_key: String,
     /// Ed25519 signing secret key (base64).
-    #[serde(default)]
+    #[serde(default, alias = "signingKey")]
     #[redact]
     pub signing_key: Option<String>,
     /// Ed25519 signing public/verify key (base64).
-    #[serde(default)]
+    #[serde(default, alias = "verifyKey")]
     pub verify_key: Option<String>,
 }
 
