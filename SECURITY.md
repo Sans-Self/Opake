@@ -19,9 +19,10 @@ If you find a vulnerability, we want to know about it before anyone else does.
 
 - **opake-core** — encryption, key wrapping, seed phrase derivation, XRPC client, record types
 - **opake-cli** — command handling, file storage, credential management
-- **opake-wasm** — WASM bindings and the web worker bridge
-- **web/** — the React SPA (auth flows, state management, UI rendering of sensitive data)
-- **indexer/** — the Elixir indexer (API auth, grant/keyring discovery, rate limiting)
+- **opake-wasm** — WASM bindings and the JsStorage bridge
+- **packages/opake-sdk + @opake/react + @opake/daemon** — TypeScript layer (auth surfaces, storage adapters, SSE consumer wiring)
+- **apps/web** — the React SPA (auth flows, state management, UI rendering of sensitive data)
+- **apps/indexer** — the Elixir indexer (API auth, SSE token exchange, grant/keyring discovery, rate limiting)
 - **lexicons** — schema definitions under `app.opake.*`
 
 ### Out of scope

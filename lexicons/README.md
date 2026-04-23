@@ -2,7 +2,7 @@
   NOTE TO EDITORS: 
   Opake uses a dual-documentation system. If you modify the AT Protocol 
   schemas or lexicon definitions in this file, you MUST also update the 
-  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+  corresponding MDX content in `apps/web/src/content/` to prevent documentation drift. 
 -->
 
 # app.opake.* Lexicon Schemas
@@ -27,7 +27,6 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.document` | record | An encrypted file/document with metadata |
 | `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
-| `app.opake.keyringLeave` | record | Opt-out record — member signals they're leaving a workspace |
 | `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
 | `app.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
 | `app.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
@@ -142,7 +141,7 @@ sequenceDiagram
     participant MemberPDS as Member's PDS
     participant Indexer
 
-    Member->>MemberPDS: createRecord(keyringLeave, { keyring })
+    Member->>MemberPDS: createRecord(keyringUpdate, { keyring, actionType: "leave" })
     MemberPDS->>Indexer: firehose event
     Indexer->>Indexer: remove member from workspace index
     Note right of Indexer: Workspace disappears from<br/>member's sidebar
@@ -161,6 +160,7 @@ sequenceDiagram
     Note over DevB,PDS: 1. New device creates pair request
     DevB->>DevB: Generate ephemeral X25519 keypair
     DevB->>PDS: createRecord(pairRequest, { ephemeralKey })
+    DevB->>DevB: Persist private key to local Storage (keyed by DID+rkey)
     DevB->>DevB: Display key fingerprint
     DevB->>DevB: Poll for pairResponse...
 
@@ -179,11 +179,13 @@ sequenceDiagram
     Note over DevB,PDS: 4. New device receives identity
     DevB->>PDS: listRecords(pairResponse)
     PDS-->>DevB: Matching response
+    DevB->>DevB: Load ephemeral private key from Storage
     DevB->>DevB: Unwrap K with ephemeral private key
     DevB->>DevB: Decrypt identity JSON
     DevB->>PDS: getRecord(publicKey/self)
     DevB->>DevB: Verify public key matches published key
     DevB->>DevB: Save identity.json
+    DevB->>DevB: Wipe pair state from Storage
 
     Note over DevB,PDS: 5. Cleanup
     DevB->>PDS: deleteRecord(pairRequest)

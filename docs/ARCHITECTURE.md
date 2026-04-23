@@ -79,7 +79,7 @@ The algorithm name `x25519-hkdf-a256kw` is intentionally distinct from JWE's `EC
 
 **Direct encryption** — the content key is wrapped individually to each authorized DID. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
 
-**Keyring encryption (workspaces)** — a named group has a shared group key (GK), wrapped to each member's X25519 public key with a role (manager, editor, viewer). The keyring has a canonical `owner` DID. Documents have their content key wrapped under GK (AES-256-KW) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members. Editors propose changes via `documentUpdate` records on their own PDS; the owner applies them. Members can opt out via `keyringLeave` records.
+**Keyring encryption (workspaces)** — a named group has a shared group key (GK), wrapped to each member's X25519 public key with a role (manager, editor, viewer). The keyring has a canonical `owner` DID. Documents have their content key wrapped under GK (AES-256-KW) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members. Editors propose changes via `documentUpdate` records on their own PDS; the owner applies them. Membership changes go through `keyringUpdate` proposals (action types: `addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`, and `leave` for opt-outs).
 
 **Workspace directories** — workspace folder hierarchies reuse `app.opake.directory` with `keyringKeyWrapping` (content key wrapped under the group key). Directories live on the owner's PDS only — members read them via public fetches. The workspace root uses a deterministic rkey (`ws-{keyring_rkey}`). Non-owner members propose structural changes (add/move/rename/delete entries) via `directoryUpdate` records on their own PDS; the owner's daemon applies them. Directories use `KeyWrapping` instead of the document `Encryption` type — no `algo`/`nonce` since directories have no blob.
 
@@ -124,7 +124,8 @@ erDiagram
     DOCUMENT ||--o{ GRANT : "shared via"
     DOCUMENT }o--o{ KEYRING : "optionally encrypted under"
     DOCUMENT ||--o{ DOCUMENT_UPDATE : "updated via"
-    KEYRING ||--o{ KEYRING_LEAVE : "opted out via"
+    KEYRING ||--o{ KEYRING_UPDATE : "member proposals via"
+    DIRECTORY ||--o{ DIRECTORY_UPDATE : "structure proposals via"
 
     DOCUMENT {
         blob encrypted_content
@@ -154,8 +155,16 @@ erDiagram
         at-uri supersedes "for adoption"
     }
 
-    KEYRING_LEAVE {
-        at-uri keyring "workspace being left"
+    KEYRING_UPDATE {
+        at-uri keyring "target workspace"
+        string actionType "addMember|removeMember|updateRole|rename|updateDescription|leave"
+        did memberDid "for member actions"
+    }
+
+    DIRECTORY_UPDATE {
+        at-uri keyring "target workspace"
+        at-uri directory "target directory"
+        string actionType "addEntry|removeEntry|moveEntry|createDirectory|deleteDirectory|renameDirectory"
     }
 
     IDENTITY {
@@ -188,14 +197,16 @@ All three are unauthenticated reads — AT Protocol records and blobs are public
 
 opake-core exposes a domain-driven API through three types:
 
-- **`Opake<T, R, S>`** — Root context. Bundles the authenticated PDS client, identity, RNG, platform time, and storage layer. Owns the storage so it can auto-persist sessions after mutations. All CLI commands except `pair request` (new device, no identity yet) route through Opake. Key method categories:
-  - **Context:** `file_context(workspace_name?)`, `file_manager(&context)`, `workspace_admin()`, `resolve_workspace(name)`, `did()`, `identity()`, `now()`, `session()`
+- **`Opake<T, R, S>`** — Root context. Bundles the authenticated PDS client, identity, RNG, platform time, and storage layer. Owns the storage so it can auto-persist sessions after mutations. A constructed `Opake` always has an Identity: `for_account` returns `Error::IdentityMissing` when the account is authenticated but has no encryption keys yet, and callers route to the bootstrap flows (`recover` or `pair`) to produce one. Key method categories:
+  - **Context:** `file_context(workspace_name?)`, `file_manager(&context)`, `workspace_admin()`, `resolve_workspace(name)`, `did()`, `identity()`, `now()` (the WASM handle exposes a narrower surface — `getDid` / `tokenExpiresAt` only, no session accessor — to keep tokens and DPoP keys from crossing into JS-managed memory)
   - **Workspaces:** `create_workspace`, `list_workspaces`, `add_workspace_member`, `leave_workspace`, `unwrap_workspace_key`
   - **Sharing:** `download_from_grant`, `download_as_workspace_member`, `list_pending_shares`, `cancel_pending_share`, `retry_pending_shares`
   - **Identity/account:** `resolve_identity`, `publish_public_key`, `save_identity`, `remove_account`, `get_account_config`, `set_account_config`
-  - **Pairing:** `create_pair_request`, `list_pair_requests`, `list_pair_responses`, `approve_pair_request`, `receive_pair_response`, `cleanup_pair_records`, `cleanup_expired_pair_requests`
+  - **Pairing (existing device):** `list_pair_requests`, `approve_pair_request`, `cleanup_expired_pair_requests`
   - **Maintenance:** `heal_stale_grants`, `purge_collection`
   - **Low-level:** `create_record`, `get_record`
+
+  The new-device side of pairing runs *before* an Identity exists, so it is exposed as free functions in `crate::pairing` — `create_pair_request`, `try_complete_pair`, `cancel_pair_request` — which take `&S: Storage` and `did` directly. The ephemeral X25519 private key is persisted via `Storage::save_pair_state` and never crosses the WASM/JS boundary; the resulting Identity is written to Storage by `try_complete_pair` on success, at which point the standard `Opake::for_account` path succeeds.
 
 - **`FileManager<'a, T, R, S>`** — Borrows `&'a mut Opake` and `&'a FileContext`. Unified file operations for both cabinet (personal) and workspace (shared) contexts, dispatching internally based on `FileContext`. All mutations use `applyWrites` for atomicity — no ghost documents or dangling directory references on partial failure. Path-based methods: `upload_at`, `download_at`, `create_directory_at`, `resolve_entry`, `resolve_document_names`, `resolve_document_names_in`, `resolve_document_metadata_in`, `read_metadata`, `delete_recursive`, `create_record`. Also: `load_tree`, `update_metadata`, `update_content`, `fetch_content_key`, `move_entry`, `share`, `revoke_share`, `list_shares`.
 
@@ -203,7 +214,7 @@ opake-core exposes a domain-driven API through three types:
 
 Construction example:
 ```rust
-let mut opake = Opake::new(client, identity, rng, storage, now, now_micros);
+let mut opake = Opake::new(client, did, identity, rng, storage, now_micros);
 let ctx = opake.file_context(Some("family-photos")).await?;
 let mut mgr = opake.file_manager(&ctx);
 mgr.upload_at(&plaintext, "photo.jpg", "image/jpeg", None, None).await?;
@@ -212,7 +223,7 @@ mgr.upload_at(&plaintext, "photo.jpg", "image/jpeg", None, None).await?;
 
 Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` proc-macro attribute (from opake-derive). This generates a wrapper + inner method split: the wrapper calls the inner method, then calls `signoff(result).await` to persist the session if it was refreshed during the call. Two variants: `#[signoff]` (FileManager — routes through `self.opake.signoff()`) and `#[signoff(self)]` (Opake — calls `self.signoff()` directly). If the operation itself failed, signoff is best-effort — the original error is preserved.
 
-`Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. The WASM layer uses `WasmFileManagerHandle` which owns `Opake + FileContext` and creates temporary `FileManager` borrows per JS method call (wasm_bindgen can't have lifetimes). `NoopStorage` is used for WASM (JS handles persistence externally) and tests. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
+`Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. `Workspace::from_keyring` is `pub(crate)`, so the only way to produce a `Workspace` outside opake-core is through the resolution methods (`resolve_workspace`, `file_context`, `workspaceByUri`) — this keeps the invariant that the URI, owner, group key, and rotation all came from the same verified keyring record. The WASM layer uses `WasmFileManagerHandle`, which shares an `Rc<Mutex<WasmOpake>>` with the parent `WasmOpakeHandle` and creates short-lived `FileManager` borrows inside each JS method (wasm_bindgen can't carry lifetimes across the boundary). The shared `Mutex` queues concurrent async operations instead of panicking on aliased `&mut self`. WASM persistence goes through `JsStorage`, a `Storage` impl that calls back into a JS-side `IndexedDbStorage`; `NoopStorage` is tests only. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
 
 ## Further Reading
 

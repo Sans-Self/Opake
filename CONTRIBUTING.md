@@ -60,11 +60,11 @@ apps/
                   - Phoenix API with DID-scoped Ed25519 auth (Erlang :crypto)
                   - rate limiting via Hammer
 
-  web/            React SPA (Vite + TanStack Router + Tailwind/daisyUI)
-                  - opake-core via @opake/sdk (WASM under the hood)
-                  - IndexedDbStorage (impl Storage over Dexie.js/IndexedDB)
-                  - Zustand stores, Web Worker for off-main-thread crypto
-                  - cabinet file browser UI with panel navigation
+  web/            React SPA (Vite + TanStack Router/Start + Tailwind/daisyUI)
+                  - opake-core via @opake/sdk (WASM under the hood, main-thread)
+                  - IndexedDbStorage (Dexie.js/IndexedDB, bound into WASM via JsStorage)
+                  - Zustand for small app-level state; @opake/react hooks for SDK data
+                  - cabinet file browser UI with panel navigation, live via SSE
 
 packages/
   @opake/sdk      TypeScript SDK wrapping WASM bindings

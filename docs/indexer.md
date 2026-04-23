@@ -7,7 +7,7 @@
 
 # Indexer: API & Deployment
 
-The Indexer indexes five `app.opake.*` collections from the AT Protocol firehose — `grant`, `keyring`, `document` (keyring-encrypted only), `documentUpdate`, and `keyringLeave` — and serves them via a REST API. It enables the `inbox` command ("what's been shared with me?") and workspace queries without scanning every PDS in the network.
+The Indexer ingests the eight `app.opake.*` collections from the AT Protocol firehose and serves them via a REST API plus a Server-Sent Events stream. It backs the `inbox` query ("what's been shared with me?"), workspace document / directory discovery, and the live update pipeline that keeps web and CLI clients in sync without polling.
 
 Built with Elixir/Phoenix. Source lives in `apps/indexer/`.
 
@@ -52,9 +52,13 @@ This starts postgres and the indexer container. The entrypoint auto-creates the 
 |-------|-----|---------|
 | `cursor` | `id` (singleton) | Jetstream cursor position |
 | `grants` | `uri` | Indexed sharing grants |
-| `keyring_members` | `(keyring_uri, member_did)` | Denormalized keyring membership with role |
-| `workspace_documents` | `document_uri` | Documents encrypted under a keyring |
+| `keyrings` | `uri` | Keyring records (owner, metadata) |
+| `keyring_members` | `(keyring_uri, member_did)` | Denormalized membership with role |
+| `keyring_updates` | `uri` | Membership proposals (add/remove member) |
+| `documents` | `uri` | Keyring-encrypted documents (join target for workspace ops) |
 | `document_updates` | `uri` | Pending collaborative edit proposals |
+| `directories` | `uri` | Workspace directory records |
+| `directory_updates` | `uri` | Pending structural proposals (add/move/rename/delete entry) |
 
 ## Configuration
 
@@ -186,7 +190,7 @@ Returns documents encrypted under a keyring. **Requires the authenticated DID to
 
 ### `GET /api/workspace/updates?document=<uri>&limit=<n>&cursor=<cursor>`
 
-Returns pending document updates. If `document` is provided, returns updates for that specific document. If omitted, returns all pending updates targeting documents owned by the authenticated DID (joined on workspace_documents ownership).
+Returns pending document updates. If `document` is provided, returns updates for that specific document. If omitted, returns all pending updates targeting documents owned by the authenticated DID (joined on `documents` ownership).
 
 | Param | Required | Default | Max |
 |-------|----------|---------|-----|
@@ -208,15 +212,52 @@ Returns pending document updates. If `document` is provided, returns updates for
 }
 ```
 
+### `GET /api/workspace/directory-updates?keyring=<uri>&limit=<n>&cursor=<cursor>`
+
+Returns pending structural proposals for a workspace (add/move/rename/delete entry). Requires the authenticated DID to be a member of the keyring.
+
+### Tree snapshots and sync
+
+`/api/cabinet/snapshot` and `/api/workspace/snapshot?keyring=<uri>` return the full directory tree + document list for cold starts. `/api/cabinet/sync?since=<iso8601>` and `/api/workspace/sync?keyring=<uri>&since=<iso8601>` return only records whose `indexed_at` is newer than `since`, for incremental catch-up after a reconnect. Both sync endpoints reply with `{ directories, documents, serverTime }`; the caller uses `serverTime` as the next `since` value.
+
+### SSE event streaming
+
+Two endpoints work together to push indexed events to authenticated consumers in real time.
+
+`POST /api/events/token` (Ed25519-authenticated) returns a short-lived single-use token:
+
+```json
+{ "token": "<opaque>", "ttl": 60 }
+```
+
+`GET /api/events?token=<opaque>` upgrades to a chunked text/event-stream response. The consumer subscribes to:
+- their personal topic (keyring memberships affecting them, grants addressed to them, their own proposals)
+- every workspace keyring they are currently a member of (re-computed dynamically as `keyring:upsert` events flow through)
+
+Events are formatted as:
+
+```
+event: <type>
+data: <json payload>
+
+```
+
+Types include `keyring:upsert` / `keyring:delete`, `grant:upsert` / `grant:delete`, `directory:upsert` / `directory:delete`, `document:upsert` / `document:delete`, and the matching `*:proposal` events for the update collections. A keepalive comment is emitted every 15 seconds to survive proxy idle timeouts.
+
+Each DID is capped at a small number of concurrent SSE connections (tracked in ETS); additional connections return `429`. Token exchange is one-shot — the consumer must POST again after losing the connection.
+
 ## Firehose Collections
 
 | Collection | Events | Effect |
 |------------|--------|--------|
-| `app.opake.grant` | create/update/delete | Index/remove grants in `grants` table |
-| `app.opake.keyring` | create/update/delete | Upsert/delete keyring members (with roles) in `keyring_members` |
-| `app.opake.document` | create/update/delete | If `keyringEncryption`, index in `workspace_documents`. Direct-encrypted documents are ignored. |
+| `app.opake.grant` | create/update/delete | Index/remove in `grants` |
+| `app.opake.keyring` | create/update/delete | Upsert `keyrings` row; replace `keyring_members` (with roles) |
+| `app.opake.keyringUpdate` | create/update/delete | Index/remove in `keyring_updates` (add/remove-member proposals) |
+| `app.opake.document` | create/update/delete | Keyring-encrypted documents → `documents`. Direct-encrypted documents are ignored by the indexer. |
 | `app.opake.documentUpdate` | create/update/delete | Index/remove in `document_updates` |
-| `app.opake.keyringLeave` | create | Remove the authoring member from `keyring_members` for the referenced keyring |
+| `app.opake.directory` | create/update/delete | Upsert/delete in `directories` |
+| `app.opake.directoryUpdate` | create/update/delete | Index/remove in `directory_updates` (add/move/rename/delete entry proposals) |
+| `app.opake.accountConfig` | create/update/delete | Parsed as a proof-of-life heartbeat; not persisted |
 
 ## Rate Limiting
 

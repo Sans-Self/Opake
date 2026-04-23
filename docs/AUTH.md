@@ -64,7 +64,7 @@ The `Config` type tracks all logged-in accounts with a `default_did` pointer. Ea
 
 On the web, `IndexedDbStorage` uses the same logical layout over IndexedDB tables, keyed by DID.
 
-CLI commands that need an account resolve it via: explicit `--did` flag, then `default_did` from config, then error. `opake accounts` lists all accounts; `opake set-default` switches.
+CLI commands that need an account resolve it via: explicit `--as <did>` flag, then `default_did` from config, then error. `opake account list` lists all accounts (`*` marks the default); `opake account set-default <did>` switches.
 
 ## Device Pairing
 
@@ -77,6 +77,7 @@ sequenceDiagram
     participant Old as Existing Device
 
     New->>New: Generate ephemeral X25519 keypair
+    New->>Storage: save_pair_state(did, rkey, privkey)
     New->>PDS: createRecord(pairRequest) { ephemeralKey }
     New->>New: Display fingerprint (first 8 bytes, hex)
 
@@ -86,14 +87,15 @@ sequenceDiagram
     Old->>PDS: createRecord(pairResponse) { wrappedKey, ciphertext, nonce }
 
     New->>PDS: Poll for matching pairResponse
+    New->>Storage: load_pair_state(did, rkey)
     New->>New: Unwrap key, decrypt identity
     New->>PDS: getRecord(publicKey/self)
     New->>New: Verify derived pubkey == published pubkey
-    New->>New: Save identity.json (0600)
+    New->>Storage: save_identity + delete_pair_state
     New->>PDS: Delete pairRequest + pairResponse
 ```
 
-The ephemeral private key never leaves memory. The identity payload uses the same AES-256-GCM + x25519-hkdf-a256kw primitives as file encryption. Visual fingerprint comparison is the current SAS mechanism; programmatic verification is a follow-up.
+The ephemeral private key is persisted to the new device's `Storage` (0600 file on CLI, dedicated IndexedDB table on web) between `create_pair_request` and `try_complete_pair` — it needs to survive page reloads or CLI restarts while the user walks to the other device, so in-memory only isn't sufficient. It never crosses the WASM/JS boundary: the SDK exposes `Opake.createPairRequest(storage, did)` → `{uri, rkey, ephemeralPublicKey}` and `Opake.awaitPairCompletion(storage, did, rkey)` → `void`. JS sees the public key (for fingerprint display) and nothing else. The identity payload uses the same AES-256-GCM + x25519-hkdf-a256kw primitives as file encryption. Visual fingerprint comparison is the current SAS mechanism; programmatic verification is a follow-up.
 
 Login on a new device detects an existing `publicKey/self` record and prompts for pairing instead of generating a new keypair (which would orphan encryption on the existing device).
 

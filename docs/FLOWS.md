@@ -2,7 +2,7 @@
   NOTE TO EDITORS: 
   Opake uses a dual-documentation system. If you modify the operation flows 
   or data models in this file, you MUST also update the corresponding MDX 
-  content in `web/src/content/` to prevent documentation drift. 
+  content in `apps/web/src/content/` to prevent documentation drift. 
 -->
 
 # Opake — Operation Flows
@@ -51,7 +51,7 @@ After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry`
 
 `wipeState` → `WorkspaceKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). `stopSseConsumer` only flips the consumer's cancellation flag; the keeper drain lives on `wipeState` so callers that need to stop streaming without losing decrypted state (e.g. temporary network pause) can do so without forcing a fresh re-bootstrap.
 
-See `WorkspaceKeeper` in `crates/opake-core/src/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
+See `WorkspaceKeeper` in `crates/opake-core/src/indexer/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
 
 ## Inbox live updates
 
@@ -78,4 +78,4 @@ SSE `grant:delete` events:
 
 `wipeState` → `InboxKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). See the `WorkspaceKeeper` section above for the reason `stopSseConsumer` doesn't drain the keepers itself.
 
-See `InboxKeeper` in `crates/opake-core/src/inbox_keeper/` and `apply_grant_to_inbox_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
+See `InboxKeeper` in `crates/opake-core/src/indexer/inbox_keeper/` and `apply_grant_to_inbox_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.

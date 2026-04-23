@@ -2,7 +2,7 @@
   NOTE TO EDITORS:
   Opake uses a dual-documentation system. If you modify the technical details,
   command list, or installation steps in this README, you MUST also update
-  the corresponding MDX content in `web/src/content/` to prevent
+  the corresponding MDX content in `apps/web/src/content/` to prevent
   documentation drift.
 -->
 
@@ -54,18 +54,25 @@ No modifications to the PDS. All crypto happens on your machine.
 
 ## Repository Structure
 
-- `opake-core/` — Platform-agnostic library (Rust/WASM).
-- `opake-cli/` — CLI implementation.
-- `indexer/` — Elixir/Phoenix indexer for grant discovery.
-- `web/` — React SPA (Vite + TanStack).
+- `crates/opake-core/` — Platform-agnostic library (Rust/WASM).
+- `crates/opake-wasm/` — WASM bindings compiled by `wasm-pack`.
+- `apps/cli/` — CLI implementation (`opake` binary).
+- `apps/indexer/` — Elixir/Phoenix indexer for grant discovery.
+- `apps/web/` — React SPA (Vite + TanStack Start).
+- `packages/opake-sdk/` — TypeScript SDK wrapping the WASM bindings.
+- `packages/opake-react/` — React hooks over the SDK.
+- `packages/opake-daemon/` — Scheduled maintenance tasks.
 - `lexicons/` — AT Protocol schemas (`app.opake.*`).
 
 ## Development
 
 ```sh
-cargo test           # Rust tests
-bun run wasm:build   # Build WASM for web
-mix setup            # Setup Indexer
+just build          # cargo build --workspace
+just rust-test      # cargo test --workspace
+just wasm           # wasm-pack build → packages/opake-sdk/wasm
+just sdk-build      # build @opake/sdk (implies wasm)
+just web-build      # build apps/web (implies sdk-build)
+just indexer-test   # mix test --cd apps/indexer
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit conventions.

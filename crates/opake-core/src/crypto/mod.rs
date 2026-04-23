@@ -3,7 +3,7 @@
 // NOTE TO EDITORS:
 // Opake uses a dual-documentation system. If you modify the cryptographic
 // primitives, key wrapping schemes, or security model in this file, you
-// MUST also update the corresponding MDX content in `web/src/content/`
+// MUST also update the corresponding MDX content in `apps/web/src/content/`
 // to prevent documentation drift.
 //
 // This module handles AES-256-GCM content encryption and asymmetric key
