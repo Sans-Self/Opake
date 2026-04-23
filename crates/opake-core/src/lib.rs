@@ -42,6 +42,7 @@ pub mod scope;
 pub mod sharing;
 pub mod storage;
 pub mod tid;
+pub mod timestamp;
 pub mod workspace;
 
 #[cfg(any(test, feature = "test-utils"))]

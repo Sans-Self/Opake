@@ -9,10 +9,6 @@ use crate::records::{keyring_update, Keyring, KeyringMember};
 use crate::storage::{Identity, NoopStorage};
 use crate::test_utils::MockTransport;
 
-fn test_now() -> String {
-    "2026-01-01T00:00:00Z".to_string()
-}
-
 fn test_now_micros() -> u64 {
     1_700_000_000_000_000
 }
@@ -27,7 +23,6 @@ fn make_test_opake() -> Opake<MockTransport, OsRng, NoopStorage> {
         Some(identity),
         OsRng,
         NoopStorage,
-        test_now,
         test_now_micros,
     )
 }
@@ -39,9 +34,10 @@ fn did_returns_identity_did() {
 }
 
 #[test]
-fn now_calls_injected_function() {
+fn now_derives_rfc3339_from_injected_micros() {
     let opake = make_test_opake();
-    assert_eq!(opake.now(), "2026-01-01T00:00:00Z");
+    // `test_now_micros()` returns 1_700_000_000_000_000 µs.
+    assert_eq!(opake.now(), "2023-11-14T22:13:20.000000Z");
 }
 
 #[test]
@@ -156,7 +152,6 @@ fn make_owner_opake(
         Some(identity),
         OsRng,
         NoopStorage,
-        test_now,
         test_now_micros,
     )
 }

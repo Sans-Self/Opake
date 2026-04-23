@@ -82,7 +82,6 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
         Some(identity),
         OsRng,
         NoopStorage,
-        || "2026-01-01T00:00:00Z".into(),
         || 1_700_000_000_000_000,
     );
 
@@ -119,7 +118,10 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
         vec![OTHER_DOC_URI.to_string()],
         "deleted doc URI must be pruned from parent.entries; siblings preserved",
     );
-    assert_eq!(updated.modified_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+    assert_eq!(
+        updated.modified_at.as_deref(),
+        Some("2023-11-14T22:13:20.000000Z")
+    );
 }
 
 /// Workspace delete where the caller owns the parent directory is the same
@@ -168,7 +170,6 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
         Some(identity),
         OsRng,
         NoopStorage,
-        || "2026-01-01T00:00:00Z".into(),
         || 1_700_000_000_000_000,
     );
 
@@ -244,7 +245,6 @@ async fn workspace_non_owner_delete_emits_directory_update_proposal() {
         Some(identity),
         OsRng,
         NoopStorage,
-        || "2026-01-01T00:00:00Z".into(),
         || 1_700_000_000_000_000,
     );
 

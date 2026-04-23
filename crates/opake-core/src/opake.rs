@@ -10,8 +10,11 @@
 // - R: CryptoRng + RngCore (OsRng for both, ChaCha8Rng for tests)
 // - S: Storage (FileStorage for CLI, NoopStorage for WASM until IndexedDb lands)
 //
-// Time is injected as a function pointer — CLI passes chrono, WASM passes
-// js_sys::Date. No captures, no allocation.
+// Time is injected as a single `fn() -> u64` returning microseconds since
+// the Unix epoch. CLI passes a chrono-backed fn, WASM passes one backed by
+// `js_sys::Date`. RFC 3339 strings for record timestamp fields are derived
+// from the same source via `timestamp::rfc3339_from_micros` — one clock, one
+// injection, no drift between CLI and WASM formatting.
 //
 // Session persistence is automatic: after any XRPC call that triggers a
 // token refresh, Opake persists the new session through Storage.
@@ -37,7 +40,9 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) identity: Option<Identity>,
     pub(crate) rng: R,
     pub(crate) storage: S,
-    pub(crate) now_fn: fn() -> String,
+    /// Injected clock returning microseconds since Unix epoch. RFC 3339
+    /// timestamps are derived from this via `timestamp::rfc3339_from_micros`,
+    /// so there is a single source of truth for "what time is it".
     pub(crate) now_micros_fn: fn() -> u64,
     /// Host-set runtime override — highest priority. Populated via
     /// `set_indexer_url` at boot (CLI: `OPAKE_INDEXER_URL` env var;
@@ -66,7 +71,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         identity: Option<Identity>,
         rng: R,
         storage: S,
-        now: fn() -> String,
         now_micros: fn() -> u64,
     ) -> Self {
         Self {
@@ -75,7 +79,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             identity,
             rng,
             storage,
-            now_fn: now,
             now_micros_fn: now_micros,
             runtime_indexer_url: None,
             config_indexer_url: None,
@@ -101,7 +104,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         did: Option<&str>,
         transport: T,
         mut rng: R,
-        now: fn() -> String,
         now_micros: fn() -> u64,
     ) -> Result<Self, Error> {
         let config = storage.load_config().await?;
@@ -131,7 +133,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         };
 
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
-        let opake = Self::new(client, target_did, identity, rng, storage, now, now_micros);
+        let opake = Self::new(client, target_did, identity, rng, storage, now_micros);
         // Indexer URL resolution happens lazily in `resolve_indexer_url`:
         // runtime override → PDS config → compile-time default. No seeding
         // needed here — the priority chain has a const fallback.
@@ -363,9 +365,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         })
     }
 
-    /// Current ISO 8601 timestamp from the platform clock.
+    /// Current RFC 3339 UTC timestamp (microsecond precision).
     pub fn now(&self) -> String {
-        (self.now_fn)()
+        crate::timestamp::rfc3339_from_micros((self.now_micros_fn)())
     }
 
     /// Generate a TID (Timestamp ID) for use as a record rkey.

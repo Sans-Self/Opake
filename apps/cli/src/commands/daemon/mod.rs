@@ -403,7 +403,6 @@ async fn build_opake(
         Some(did),
         ReqwestTransport::new(),
         OsRng,
-        session::chrono_now,
         session::chrono_now_micros,
     )
     .await?;

@@ -65,7 +65,6 @@ fn make_test_opake(mock: MockTransport) -> crate::opake::Opake<MockTransport, Os
         Some(identity),
         OsRng,
         NoopStorage,
-        || "2026-01-01T00:00:00Z".to_string(),
         || 1_700_000_000_000_000,
     )
 }
@@ -243,8 +242,8 @@ async fn update_account_config_preserves_untouched_fields() {
         "indexer_url must be preserved when absent from updates"
     );
     assert_eq!(
-        result.modified_at, "2026-01-01T00:00:00Z",
-        "modified_at must be refreshed to the mocked now()"
+        result.modified_at, "2023-11-14T22:13:20.000000Z",
+        "modified_at must be refreshed to the mocked now() (derived from test_now_micros)"
     );
 }
 

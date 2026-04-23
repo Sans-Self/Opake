@@ -17,10 +17,6 @@ pub struct CommandContext {
     pub storage: FileStorage,
 }
 
-pub fn chrono_now() -> String {
-    Utc::now().to_rfc3339()
-}
-
 pub fn chrono_now_micros() -> u64 {
     Utc::now().timestamp_micros() as u64
 }
@@ -37,7 +33,6 @@ impl CommandContext {
             Some(&self.did),
             ReqwestTransport::new(),
             OsRng,
-            chrono_now,
             chrono_now_micros,
         )
         .await?;

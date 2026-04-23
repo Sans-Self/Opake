@@ -117,7 +117,6 @@ pub async fn make_opake_from_storage(
         did,
         WasmTransport::new(),
         OsRng,
-        crate::now_iso,
         crate::now_micros,
     )
     .await

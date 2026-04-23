@@ -33,13 +33,10 @@ pub fn init() {
     console_log::init_with_level(log::Level::Debug).ok();
 }
 
-/// ISO 8601 UTC timestamp via JS Date.
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn now_iso() -> String {
-    js_sys::Date::new_0().to_iso_string().into()
-}
-
-/// Microseconds since Unix epoch via JS Date.now() (milliseconds → micros).
+/// Microseconds since Unix epoch via JS `Date.now()` (milliseconds → micros).
+///
+/// Single clock source for the WASM build — RFC 3339 strings are derived
+/// from this value inside `opake-core` (`timestamp::rfc3339_from_micros`).
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn now_micros() -> u64 {
     (js_sys::Date::now() * 1000.0) as u64
