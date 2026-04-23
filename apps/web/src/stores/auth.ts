@@ -347,9 +347,7 @@ export const useAuthStore = create<AuthStore>()(
       const done = loading("login");
       try {
         const { Opake } = await loadSdk();
-        const s = await getStorage();
         const { authUrl, pending } = await Opake.startLogin(handle, {
-          storage: s,
           redirectUri: redirectUri(),
         });
 

@@ -260,7 +260,6 @@ export class Opake {
    */
   static async login(handle: string, options: LoginOptions): Promise<void> {
     const { authUrl, pending } = await Opake.startLogin(handle, {
-      storage: options.storage,
       redirectUri: options.redirectUri,
     });
     const { code, state } = await options.authorize(authUrl);
@@ -332,8 +331,7 @@ export class Opake {
     options: StartLoginOptions,
   ): Promise<{ authUrl: string; pending: PendingLogin }> {
     const wasm = await initWasm();
-    const adapter = createStorageAdapter(options.storage);
-    const result = await wasm.startOAuthLogin(handle, options.redirectUri, adapter);
+    const result = await wasm.startOAuthLogin(handle, options.redirectUri);
     return result as { authUrl: string; pending: PendingLogin };
   }
 

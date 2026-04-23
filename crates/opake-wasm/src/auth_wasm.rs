@@ -65,10 +65,8 @@ fn generate_csrf_state(rng: &mut OsRng) -> String {
 pub async fn start_oauth_login(
     handle: &str,
     redirect_uri: &str,
-    storage_adapter: JsStorageAdapter,
 ) -> Result<JsValue, JsError> {
     let transport = WasmTransport::new();
-    let storage = JsStorage::new(storage_adapter);
     let mut rng = OsRng;
 
     // 1. Resolve handle → DID + PDS URL

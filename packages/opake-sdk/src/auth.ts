@@ -51,6 +51,5 @@ export interface LoginOptions {
 
 /** Options for the two-step login flow. */
 export interface StartLoginOptions {
-  readonly storage: Storage;
   readonly redirectUri: string;
 }
