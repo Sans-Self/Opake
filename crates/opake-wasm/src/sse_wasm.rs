@@ -317,26 +317,32 @@ impl WasmOpakeHandle {
     /// and dispatches them to the shared TreeKeeper.
     ///
     /// `indexer_url` is optional: if omitted, the URL is resolved from
-    /// the Opake instance's stored config (loaded during `init`). Pass
-    /// an explicit value as a fallback for Opake instances whose config
-    /// doesn't include an indexer URL.
+    /// the Opake instance's priority chain (runtime override, PDS
+    /// accountConfig, compile-time default). If provided, it's promoted
+    /// to the runtime override (priority 1) for this Opake instance —
+    /// it wins over accountConfig and persists across subsequent indexer
+    /// calls within the same session.
     ///
     /// Idempotent: subsequent calls are no-ops while an existing
     /// consumer is running. React StrictMode's double-mount is thus
     /// harmless — only one consumer task exists per OpakeContext.
     #[wasm_bindgen(js_name = startSseConsumer)]
     pub async fn start_sse_consumer(&self, indexer_url: Option<String>) -> Result<(), JsError> {
-        // Resolve the URL BEFORE flipping the started flag — if no URL
-        // is available anywhere, we want to fail loudly without leaving
-        // the flag in a broken state.
+        // If the caller supplied a URL, promote it to the runtime override
+        // (priority 1) before resolving — so passing a URL here wins over
+        // PDS accountConfig and is consistent with every subsequent
+        // indexer call made through this Opake instance. Resolve BEFORE
+        // flipping `sse_started` so a URL-less call on a fresh Opake
+        // without a default still surfaces the error cleanly.
         let resolved_url = {
-            let guard = self.inner.lock().await;
+            let mut guard = self.inner.lock().await;
             let opake = guard
-                .as_ref()
+                .as_mut()
                 .ok_or_else(|| JsError::new("Opake context already consumed"))?;
-            opake
-                .resolve_indexer_url(indexer_url.as_deref())
-                .map_err(wasm_err)?
+            if let Some(url) = indexer_url {
+                opake.set_indexer_url(url);
+            }
+            opake.resolve_indexer_url()
         };
 
         if self.sse_started.get() {

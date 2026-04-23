@@ -225,17 +225,14 @@ impl WasmOpakeHandle {
     /// bootstrapped, incremental SSE events keep the keeper in sync
     /// without further `listWorkspaces` round-trips.
     #[wasm_bindgen(js_name = listWorkspaces)]
-    pub async fn list_workspaces(
-        &self,
-        default_indexer_url: Option<String>,
-    ) -> Result<JsValue, JsError> {
+    pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let identity = opake.require_identity().map_err(wasm_err)?;
         let private_key = identity.private_key_bytes().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
         let keyrings = opake
-            .discover_member_keyrings(default_indexer_url.as_deref())
+            .discover_member_keyrings()
             .await
             .map_err(wasm_err)?;
         drop(opake);
@@ -694,14 +691,10 @@ impl WasmOpakeHandle {
 
     /// Fetch workspace documents from the Indexer.
     #[wasm_bindgen(js_name = listWorkspaceDocuments)]
-    pub async fn list_workspace_documents(
-        &self,
-        keyring_uri: &str,
-        default_indexer_url: Option<String>,
-    ) -> Result<JsValue, JsError> {
+    pub async fn list_workspace_documents(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let docs = opake
-            .list_workspace_documents(keyring_uri, default_indexer_url.as_deref())
+            .list_workspace_documents(keyring_uri)
             .await
             .map_err(wasm_err)?;
         to_js(&docs)
@@ -709,26 +702,17 @@ impl WasmOpakeHandle {
 
     /// Discover keyrings the user is a member of (across all PDSes).
     #[wasm_bindgen(js_name = discoverMemberKeyrings)]
-    pub async fn discover_member_keyrings(
-        &self,
-        default_indexer_url: Option<String>,
-    ) -> Result<JsValue, JsError> {
+    pub async fn discover_member_keyrings(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let keyrings = opake
-            .discover_member_keyrings(default_indexer_url.as_deref())
-            .await
-            .map_err(wasm_err)?;
+        let keyrings = opake.discover_member_keyrings().await.map_err(wasm_err)?;
         to_js(&keyrings)
     }
 
     /// Request a short-lived SSE token from the Indexer.
     #[wasm_bindgen(js_name = requestSseToken)]
-    pub async fn request_sse_token(&self, indexer_url: Option<String>) -> Result<String, JsError> {
+    pub async fn request_sse_token(&self) -> Result<String, JsError> {
         let mut opake = self.opake().await?;
-        opake
-            .request_sse_token(indexer_url.as_deref())
-            .await
-            .map_err(wasm_err)
+        opake.request_sse_token().await.map_err(wasm_err)
     }
 
     /// Fetch all incoming grants from the Indexer.
@@ -740,12 +724,9 @@ impl WasmOpakeHandle {
     /// events keep the keeper in sync without further `listInbox`
     /// round-trips.
     #[wasm_bindgen(js_name = listInbox)]
-    pub async fn list_inbox(&self, indexer_url: Option<String>) -> Result<JsValue, JsError> {
+    pub async fn list_inbox(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let grants = opake
-            .list_inbox(indexer_url.as_deref())
-            .await
-            .map_err(wasm_err)?;
+        let grants = opake.list_inbox().await.map_err(wasm_err)?;
         drop(opake);
 
         let entries: Vec<opake_core::indexer::inbox_keeper::InboxEntry> =

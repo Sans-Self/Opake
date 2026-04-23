@@ -391,10 +391,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &self,
         cached: CachedCollection,
     ) -> Result<(Vec<CachedRecord>, Vec<crate::indexer::TreeProposal>), Error> {
-        let indexer_url = match self.opake.resolve_indexer_url(None) {
-            Ok(url) => url,
-            Err(_) => return Ok((cached.records, Vec::new())),
-        };
+        let indexer_url = self.opake.resolve_indexer_url();
         let signing_key = match self.opake.require_identity() {
             Ok(id) => match id.signing_key_bytes() {
                 Ok(Some(k)) => k,
@@ -542,9 +539,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Fetches a full snapshot from the Indexer, caches it locally,
     /// and returns a tree built from the cached records.
     async fn bootstrap_tree(&mut self) -> Result<DirectoryTree, Error> {
-        let indexer_url = self.opake.resolve_indexer_url(None).map_err(|_| {
-            Error::Storage("Indexer URL required — configure one or self-host".into())
-        })?;
+        let indexer_url = self.opake.resolve_indexer_url();
 
         let identity = self.opake.require_identity()?;
         let signing_key = identity

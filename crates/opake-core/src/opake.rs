@@ -133,10 +133,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         };
 
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
-        let opake = Self::new(client, target_did, identity, rng, storage, now_micros);
-        // Indexer URL resolution happens lazily in `resolve_indexer_url`:
-        // runtime override → PDS config → compile-time default. No seeding
-        // needed here — the priority chain has a const fallback.
+        let mut opake = Self::new(client, target_did, identity, rng, storage, now_micros);
+        // Seed `config_indexer_url` (priority 2 of `resolve_indexer_url`) from
+        // the user's PDS accountConfig so the priority chain actually works on
+        // cold start. Best-effort — offline, missing record, or auth blips
+        // fall through silently to the compile-time default. Runtime overrides
+        // installed after construction via `set_indexer_url` still win.
+        if let Ok(Some(config)) = opake.get_account_config().await {
+            opake.config_indexer_url = config.indexer_url;
+        }
         Ok(opake)
     }
 
@@ -236,7 +241,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let identity = self.require_identity()?;
         let private_key = identity.private_key_bytes()?;
 
-        let keyrings = self.discover_member_keyrings(None).await?;
+        let keyrings = self.discover_member_keyrings().await?;
         let matches: Vec<String> = keyrings
             .iter()
             .filter(|kr| {
@@ -478,7 +483,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
     ) -> Result<Vec<crate::indexer::daemon::WorkspaceSyncResult>, Error> {
         log::trace!("sync: discovering workspaces for {}", self.did);
-        let indexer_keyrings = self.discover_member_keyrings(None).await?;
+        let indexer_keyrings = self.discover_member_keyrings().await?;
         log::trace!("sync: found {} workspaces", indexer_keyrings.len());
         let identity = self.require_identity()?;
         let private_key = identity.private_key_bytes()?;
@@ -501,7 +506,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         keyring_uri: &str,
     ) -> Result<Option<crate::indexer::daemon::WorkspaceSyncResult>, Error> {
-        let indexer_keyrings = self.discover_member_keyrings(None).await?;
+        let indexer_keyrings = self.discover_member_keyrings().await?;
         let target = indexer_keyrings.iter().find(|kr| kr.uri == keyring_uri);
         let Some(kr) = target else { return Ok(None) };
 
@@ -1420,22 +1425,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Resolve the indexer URL to use for a request.
     ///
     /// Priority (highest first):
-    /// 1. Runtime override (`set_indexer_url`)
-    /// 2. PDS account config (`config_indexer_url`, mirrored from
-    ///    `accountConfig.indexerUrl`)
-    /// 3. Caller-provided fallback (legacy arg, usually `None`)
-    /// 4. Compile-time `DEFAULT_INDEXER_URL`
+    /// 1. Runtime override — `set_indexer_url()`. Host-level knob populated
+    ///    at boot from `OPAKE_INDEXER_URL` (CLI) or `VITE_INDEXER_URL`
+    ///    (web). Wins so dev/ops overrides aren't undone by stored config.
+    /// 2. PDS accountConfig — `config_indexer_url`, mirrored from the
+    ///    user's `app.opake.accountConfig` record. Seeded best-effort by
+    ///    `for_account` at boot; kept in sync by `set_account_config`.
+    /// 3. Compile-time `DEFAULT_INDEXER_URL` — always present.
     ///
-    /// Always resolves — the compile-time default is a non-empty const,
-    /// so the `Result` shape is preserved for API compatibility but the
-    /// `NotFound` arm is unreachable under normal operation.
-    pub fn resolve_indexer_url(&self, default: Option<&str>) -> Result<String, Error> {
+    /// Always returns a valid URL. Plain `String` rather than `Result`
+    /// because the const fallback is unreachable-free.
+    pub fn resolve_indexer_url(&self) -> String {
         self.runtime_indexer_url
             .clone()
             .or_else(|| self.config_indexer_url.clone())
-            .or_else(|| default.map(|s| s.to_string()))
-            .or_else(|| Some(DEFAULT_INDEXER_URL.to_string()))
-            .ok_or_else(|| Error::NotFound("no indexer URL configured".into()))
+            .unwrap_or_else(|| DEFAULT_INDEXER_URL.to_string())
     }
 
     // -- SSE token (for EventSource auth) --
@@ -1444,16 +1448,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ///
     /// The token is passed as a query parameter to the SSE endpoint,
     /// sidestepping EventSource's inability to send custom headers.
-    pub async fn request_sse_token(
-        &mut self,
-        default_indexer_url: Option<&str>,
-    ) -> Result<String, Error> {
+    pub async fn request_sse_token(&mut self) -> Result<String, Error> {
         let identity = self.require_identity()?;
         let signing_key = identity
             .signing_key_bytes()?
             .ok_or_else(|| Error::Auth("no signing key for SSE token request".into()))?;
 
-        let url = self.resolve_indexer_url(default_indexer_url)?;
+        let url = self.resolve_indexer_url();
         crate::indexer::request_sse_token(self.client.transport(), &url, &self.did, &signing_key)
             .await
     }
@@ -1462,11 +1463,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Fetch all incoming grants from the Indexer.
     ///
-    /// Returns an empty list if no indexer URL is configured or no signing key exists.
-    pub async fn list_inbox(
-        &mut self,
-        default_indexer_url: Option<&str>,
-    ) -> Result<Vec<crate::indexer::InboxGrant>, Error> {
+    /// Returns an empty list if no signing key exists.
+    pub async fn list_inbox(&mut self) -> Result<Vec<crate::indexer::InboxGrant>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
             None => return Ok(vec![]),
@@ -1476,7 +1474,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_indexer_url(default_indexer_url)?;
+        let url = self.resolve_indexer_url();
 
         crate::indexer::fetch_inbox_all(self.client.transport(), &url, &self.did, &signing_key)
             .await
@@ -1484,11 +1482,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Fetch workspace documents from the Indexer.
     ///
-    /// Returns an empty list if no indexer URL is configured or no signing key exists.
+    /// Returns an empty list if no signing key exists.
     pub async fn list_workspace_documents(
         &mut self,
         keyring_uri: &str,
-        default_indexer_url: Option<&str>,
     ) -> Result<Vec<crate::indexer::WorkspaceDocument>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
@@ -1499,7 +1496,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_indexer_url(default_indexer_url)?;
+        let url = self.resolve_indexer_url();
 
         crate::indexer::fetch_workspace_documents(
             self.client.transport(),
@@ -1513,10 +1510,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Fetch all keyrings the user is a member of, with full record data.
     ///
-    /// Returns an empty list if no indexer URL is configured or no signing key exists.
+    /// Returns an empty list if no signing key exists.
     pub async fn discover_member_keyrings(
         &mut self,
-        default_indexer_url: Option<&str>,
     ) -> Result<Vec<crate::indexer::IndexerKeyring>, Error> {
         let identity = match self.identity.as_ref() {
             Some(id) => id,
@@ -1527,7 +1523,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             None => return Ok(vec![]),
         };
 
-        let url = self.resolve_indexer_url(default_indexer_url)?;
+        let url = self.resolve_indexer_url();
 
         crate::indexer::fetch_member_keyrings(
             self.client.transport(),

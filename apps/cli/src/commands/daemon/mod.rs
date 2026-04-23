@@ -263,13 +263,7 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
         }
     };
 
-    let indexer_url = match opake.resolve_indexer_url(None) {
-        Ok(url) => url,
-        Err(e) => {
-            warn!("sync: no indexer URL for {did}: {e}");
-            return;
-        }
-    };
+    let indexer_url = opake.resolve_indexer_url();
 
     let opake = Rc::new(Mutex::new(opake));
 
@@ -389,7 +383,7 @@ fn make_native_token_fetcher(opake: SharedOpake) -> TokenFetcher {
         let opake = Rc::clone(&opake);
         Box::pin(async move {
             let mut guard = opake.lock().await;
-            guard.request_sse_token(None).await
+            guard.request_sse_token().await
         })
     })
 }

@@ -595,7 +595,7 @@ export class Opake {
   @withTokenGuard
   listWorkspaces(): Promise<readonly WorkspaceEntry[]> {
     return this.requireContext()
-      .listWorkspaces(null)
+      .listWorkspaces()
       .then(listWorkspacesResultSchema.parse);
   }
 
@@ -933,7 +933,7 @@ export class Opake {
   @withTokenGuard
   listInbox(): Promise<readonly InboxGrant[]> {
     return this.requireContext()
-      .listInbox(null)
+      .listInbox()
       .then((raw) => inboxGrantsSchema.parse(raw)) as Promise<readonly InboxGrant[]>;
   }
 

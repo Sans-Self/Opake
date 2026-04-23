@@ -117,7 +117,7 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     // member of — owned workspaces included, since the owner is always a
     // member of their own. Staleness window exists after `workspace
     // create` until Jetstream delivers the commit to the indexer's firehose consumer.
-    let keyrings = opake.discover_member_keyrings(None).await?;
+    let keyrings = opake.discover_member_keyrings().await?;
 
     if keyrings.is_empty() {
         println!("no workspaces");

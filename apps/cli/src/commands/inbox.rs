@@ -43,11 +43,14 @@ impl Execute for InboxCommand {
     async fn execute(self, ctx: &CommandContext) -> Result<Option<Session>> {
         let mut opake = ctx.opake().await?;
 
-        // CLI: flag → env var → account config (core handles the last one).
-        let env_url = std::env::var("OPAKE_INDEXER_URL").ok();
-        let indexer_url = self.indexer.as_deref().or(env_url.as_deref());
+        // `--indexer` promotes to the runtime override (priority 1), above
+        // OPAKE_INDEXER_URL (already seeded by `ctx.opake()`) and the user's
+        // accountConfig. This is a per-invocation debugging knob.
+        if let Some(url) = self.indexer {
+            opake.set_indexer_url(url);
+        }
 
-        let grants = opake.list_inbox(indexer_url).await?;
+        let grants = opake.list_inbox().await?;
 
         if grants.is_empty() {
             println!("no incoming grants");
