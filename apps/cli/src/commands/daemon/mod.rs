@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task::LocalSet;
 
 use crate::config::FileStorage;
-use crate::session;
+use crate::session::build_opake;
 
 /// Shared handle to a CLI-side Opake. Held behind `tokio::sync::Mutex`
 /// so the SSE consumer's token fetcher and the event handler serialize
@@ -388,25 +388,6 @@ fn make_native_token_fetcher(opake: SharedOpake) -> TokenFetcher {
     })
 }
 
-async fn build_opake(
-    storage: &FileStorage,
-    did: &str,
-) -> Result<Opake<ReqwestTransport, OsRng, FileStorage>> {
-    let mut opake = Opake::for_account(
-        storage.clone(),
-        Some(did),
-        ReqwestTransport::new(),
-        OsRng,
-        session::chrono_now_micros,
-    )
-    .await?;
-
-    if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
-        opake.set_indexer_url(url);
-    }
-
-    Ok(opake)
-}
 
 // ---------------------------------------------------------------------------
 // Shared helpers

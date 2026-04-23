@@ -21,28 +21,38 @@ pub fn chrono_now_micros() -> u64 {
     Utc::now().timestamp_micros() as u64
 }
 
+/// Build an `Opake` for the given account from a `FileStorage`.
+///
+/// The single construction point shared by `CommandContext::opake` (user-
+/// facing commands) and the daemon's per-task builder. Reads identity and
+/// session from Storage, wires up a reqwest transport, and applies the
+/// `OPAKE_INDEXER_URL` runtime override so env tweaks don't require a
+/// rebuild. Storage is cloned so the returned Opake owns its own handle
+/// for `#[signoff]` auto-persist.
+pub async fn build_opake(storage: &FileStorage, did: &str) -> anyhow::Result<CliOpake> {
+    let mut opake = Opake::for_account(
+        storage.clone(),
+        Some(did),
+        ReqwestTransport::new(),
+        OsRng,
+        chrono_now_micros,
+    )
+    .await?;
+
+    if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
+        opake.set_indexer_url(url);
+    }
+
+    Ok(opake)
+}
+
 impl CommandContext {
     /// Build an Opake context for this account.
     ///
-    /// Reads identity and session from Storage, constructs an authenticated
-    /// XRPC client, and bundles everything into an Opake with Storage for
-    /// automatic session persistence.
+    /// Thin forwarder over [`build_opake`] for ergonomics at command
+    /// callsites (`ctx.opake().await?`).
     pub async fn opake(&self) -> anyhow::Result<CliOpake> {
-        let mut opake = Opake::for_account(
-            self.storage.clone(),
-            Some(&self.did),
-            ReqwestTransport::new(),
-            OsRng,
-            chrono_now_micros,
-        )
-        .await?;
-
-        // Runtime env override (dev/CI convenience — skip recompile).
-        if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
-            opake.set_indexer_url(url);
-        }
-
-        Ok(opake)
+        build_opake(&self.storage, &self.did).await
     }
 }
 
