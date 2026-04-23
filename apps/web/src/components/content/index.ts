@@ -27,6 +27,9 @@ export {
   DocsIndexCard,
   DocsIndexTitle,
   DocsIndexBody,
+  DocsIndexPrimary,
+  DocsIndexSecondary,
+  DocsIndexSection,
 } from "./docs";
 
 export {

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ogMeta } from "@/lib/og-meta";
 import { MdxContent } from "@/components/content/MdxProvider";
-import FaqContent from "@/content/faq.mdx";
+import FaqContent from "@/content/docs/faq.mdx";
 
 function FaqPage() {
   return (

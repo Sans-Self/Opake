@@ -5,16 +5,17 @@ import { PanelShell } from "@/components/cabinet/PanelShell";
 import { MdxContent } from "@/components/content/MdxProvider";
 import { findDoc } from "@/lib/docs-registry";
 
-import GettingStarted from "@/content/docs/getting-started.mdx";
-import AtProtocol from "@/content/docs/at-protocol.mdx";
-import EncryptionKeys from "@/content/docs/encryption-keys.mdx";
-import SharingDids from "@/content/docs/sharing-dids.mdx";
-import Keyrings from "@/content/docs/keyrings.mdx";
-import SeedPhrase from "@/content/docs/seed-phrase.mdx";
-import Pairing from "@/content/docs/pairing.mdx";
-import Cli from "@/content/docs/cli.mdx";
-import Glossary from "@/content/docs/glossary.mdx";
-import Faq from "@/content/faq.mdx";
+import GettingStarted from "@/content/docs/use/getting-started.mdx";
+import Pairing from "@/content/docs/use/pairing.mdx";
+import SeedPhrase from "@/content/docs/use/seed-phrase.mdx";
+import Sharing from "@/content/docs/use/sharing.mdx";
+import Workspaces from "@/content/docs/use/workspaces.mdx";
+import Troubleshooting from "@/content/docs/use/troubleshooting.mdx";
+import Encryption from "@/content/docs/understand/encryption.mdx";
+import AtProtocol from "@/content/docs/understand/at-protocol.mdx";
+import Glossary from "@/content/docs/understand/glossary.mdx";
+import Cli from "@/content/docs/build/cli.mdx";
+import Faq from "@/content/docs/faq.mdx";
 
 type MdxComponent = ComponentType<{
   readonly components?: Record<string, ComponentType<never>>;
@@ -22,14 +23,15 @@ type MdxComponent = ComponentType<{
 
 const CONTENT_BY_SLUG: Partial<Record<string, MdxComponent>> = {
   "getting-started": GettingStarted,
-  "at-protocol": AtProtocol,
-  "encryption-keys": EncryptionKeys,
-  "sharing-dids": SharingDids,
-  keyrings: Keyrings,
-  "seed-phrase": SeedPhrase,
   pairing: Pairing,
-  cli: Cli,
+  "seed-phrase": SeedPhrase,
+  sharing: Sharing,
+  workspaces: Workspaces,
+  troubleshooting: Troubleshooting,
+  encryption: Encryption,
+  "at-protocol": AtProtocol,
   glossary: Glossary,
+  cli: Cli,
   faq: Faq,
 };
 

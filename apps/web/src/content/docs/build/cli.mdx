@@ -11,7 +11,7 @@ The CLI is built in Rust and requires building from source. You'll need Rust 1.7
 
 <CodeBlock language="sh">git clone https://tangled.org/sans-self.org/opake.app</CodeBlock>
 
-<CodeBlock language="sh">cd opake.app && cargo install --path crates/opake-cli</CodeBlock>
+<CodeBlock language="sh">cd opake.app && cargo install --path apps/cli</CodeBlock>
 
 This puts the `opake` binary in your `~/.cargo/bin/` directory. Pre-built binaries and crates.io publishing are planned.
 
@@ -23,19 +23,19 @@ Everything starts with a session. Opake supports multiple accounts and uses AT P
 
 ### Login
 
-<CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
+<CodeBlock language="sh">opake account login you.bsky.social</CodeBlock>
 
 Override the PDS or fall back to legacy app-password auth:
 
-<CodeBlock language="sh">opake login you.bsky.social --pds https://pds.example.com</CodeBlock>
+<CodeBlock language="sh">opake account login you.bsky.social --pds https://pds.example.com</CodeBlock>
 
-<CodeBlock language="sh">opake login you.bsky.social --legacy</CodeBlock>
+<CodeBlock language="sh">opake account login you.bsky.social --legacy</CodeBlock>
 
 ### Managing Accounts
 
-<CodeBlock language="sh">opake accounts</CodeBlock>
+<CodeBlock language="sh">opake account list</CodeBlock>
 
-<CodeBlock language="sh">opake set-default bob.other.com</CodeBlock>
+<CodeBlock language="sh">opake account set-default bob.other.com</CodeBlock>
 
 Use a specific account for a single command with `--as`:
 
@@ -87,21 +87,21 @@ Cryptographic access control at your fingertips.
 
 ### Direct Sharing (Grants)
 
-<CodeBlock language="sh">opake share secret.pdf bob.bsky.social</CodeBlock>
+<CodeBlock language="sh">opake share new secret.pdf bob.bsky.social</CodeBlock>
 
-<CodeBlock language="sh">opake shared</CodeBlock>
+<CodeBlock language="sh">opake share list</CodeBlock>
 
-<CodeBlock language="sh">opake inbox</CodeBlock>
+<CodeBlock language="sh">opake share inbox</CodeBlock>
 
-<CodeBlock language="sh">opake revoke at://did:plc:123/app.opake.grant/tid456</CodeBlock>
+<CodeBlock language="sh">opake share revoke at://did:plc:123/app.opake.grant/tid456</CodeBlock>
 
-### Group Sharing (Keyrings)
+### Group Sharing (Workspaces)
 
-<CodeBlock language="sh">opake keyring create "The Collective"</CodeBlock>
+<CodeBlock language="sh">opake workspace create "The Collective"</CodeBlock>
 
-<CodeBlock language="sh">opake keyring add-member "The Collective" alice.bsky.social</CodeBlock>
+<CodeBlock language="sh">opake workspace add-member "The Collective" alice.bsky.social</CodeBlock>
 
-<CodeBlock language="sh">opake upload internal-docs.zip --keyring "The Collective"</CodeBlock>
+<CodeBlock language="sh">opake upload internal-docs.zip --workspace "The Collective"</CodeBlock>
 
 ---
 
@@ -117,7 +117,7 @@ Run the above on the **new** device, then approve on the **existing** device:
 
 ### The Nuclear Option
 
-<CodeBlock language="sh">opake logout alice.bsky.social</CodeBlock>
+<CodeBlock language="sh">opake account logout alice.bsky.social</CodeBlock>
 
 <CodeBlock language="sh">opake rm -r /</CodeBlock>
 

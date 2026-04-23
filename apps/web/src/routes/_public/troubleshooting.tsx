@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ogMeta } from "@/lib/og-meta";
 import { MdxContent } from "@/components/content/MdxProvider";
-import TroubleshootingContent from "@/content/troubleshooting.mdx";
+import TroubleshootingContent from "@/content/docs/use/troubleshooting.mdx";
 
 function TroubleshootingPage() {
   return (

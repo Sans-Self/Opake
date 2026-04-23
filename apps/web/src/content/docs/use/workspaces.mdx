@@ -38,7 +38,7 @@ A Keyring is its own record on the AT Protocol (`app.opake.keyring`).
 
   </PlatformTab>
   <PlatformTab name="CLI">
-    <CodeBlock language="sh">opake keyring create "Family Photos"</CodeBlock>
+    <CodeBlock language="sh">opake workspace create "Family Photos"</CodeBlock>
   </PlatformTab>
 </PlatformToggle>
 
@@ -61,7 +61,7 @@ This is the most complex part of the system. To ensure the removed member can't 
 3. It keeps a history of the old keys so that older files can still be decrypted by the remaining group.
 
 <Callout type="warning">
-  **Forward Secrecy Reality:** Just like with [Grants](/docs/sharing-dids), removing someone from a
+  **Forward Secrecy Reality:** Just like with [Grants](/docs/sharing), removing someone from a
   Keyring prevents them from accessing *future* files. If they already downloaded and decrypted old
   files, those files remain in their possession.
 </Callout>
@@ -72,8 +72,8 @@ This is the most complex part of the system. To ensure the removed member can't 
 
 When you upload a file, you can choose to associate it with a Keyring instead of an individual person.
 
-<CodeBlock language="sh">opake upload "budget.pdf" --keyring "Family Photos"</CodeBlock>
+<CodeBlock language="sh">opake upload "budget.pdf" --workspace "Family Photos"</CodeBlock>
 
-Every member of that Keyring will see the file in their [Inbox](/docs/sharing-dids) and can decrypt it instantly.
+Every member of that Keyring will see the file in their [Inbox](/docs/sharing) and can decrypt it instantly.
 
 Ready for a quick reference on all these terms? Check the [Glossary](/docs/glossary).
