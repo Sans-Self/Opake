@@ -3,6 +3,7 @@ import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "@phosphor-icons/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
 import { MdxContent } from "@/components/content/MdxProvider";
+import { DocsSidebarCabinet } from "@/components/content/docs-sidebar";
 import { findDoc } from "@/lib/docs-registry";
 
 import GettingStarted from "@/content/docs/use/getting-started.mdx";
@@ -15,6 +16,7 @@ import Encryption from "@/content/docs/understand/encryption.mdx";
 import AtProtocol from "@/content/docs/understand/at-protocol.mdx";
 import Glossary from "@/content/docs/understand/glossary.mdx";
 import Cli from "@/content/docs/build/cli.mdx";
+import Lexicons from "@/content/docs/build/lexicons.mdx";
 import Faq from "@/content/docs/faq.mdx";
 
 type MdxComponent = ComponentType<{
@@ -32,6 +34,7 @@ const CONTENT_BY_SLUG: Partial<Record<string, MdxComponent>> = {
   "at-protocol": AtProtocol,
   glossary: Glossary,
   cli: Cli,
+  lexicons: Lexicons,
   faq: Faq,
 };
 
@@ -70,16 +73,23 @@ function DocChapterPage() {
 
   return (
     <PanelShell depth={1} breadcrumbs={breadcrumbs} footer={`${meta.title} · Opake`}>
-      <div className="overflow-y-auto p-6">
-        <MdxContent Content={Content} className="prose max-w-none text-sm leading-relaxed" />
-        <div className="border-border-accent/30 mt-10 border-t pt-4">
-          <Link
-            to="/cabinet/docs"
-            className="text-text-muted hover:text-primary text-ui inline-flex items-center gap-1.5 transition-colors"
-          >
-            <ArrowLeftIcon size={12} />
-            Back to docs
-          </Link>
+      <div className="flex gap-6 p-6">
+        <aside className="hidden w-44 shrink-0 md:block">
+          <div className="sticky top-0">
+            <DocsSidebarCabinet currentSlug={meta.slug} />
+          </div>
+        </aside>
+        <div className="min-w-0 flex-1">
+          <MdxContent Content={Content} className="prose max-w-none text-sm leading-relaxed" />
+          <div className="border-border-accent/30 mt-10 border-t pt-4">
+            <Link
+              to="/cabinet/docs"
+              className="text-text-muted hover:text-primary text-ui inline-flex items-center gap-1.5 transition-colors"
+            >
+              <ArrowLeftIcon size={12} />
+              Back to docs
+            </Link>
+          </div>
         </div>
       </div>
     </PanelShell>

@@ -1,0 +1,121 @@
+import {
+  startLogin,
+  callbackPage,
+  embeddedLogin,
+  appPasswordLogin,
+  routingOnInitErrors,
+  accountSwitcher,
+} from "./_snippets";
+
+<ChapterHeader title="Authentication" />
+
+<Lead>
+  Auth in Opake is OAuth by default, with legacy app passwords as an escape hatch for places
+  OAuth can't reach. Whichever flow you pick, the user's password stays at their PDS and the
+  resulting tokens stay inside WASM.
+</Lead>
+
+## Pick a shape
+
+Two surfaces depending on how your app handles the redirect to the authorization server:
+
+- `Opake.startLogin` + `Opake.completeLogin` is the explicit two-step. Safe across a browser
+  navigation, because state persists through `sessionStorage` while the user is off authorizing.
+- `Opake.login` is the composed wrapper. One call, given an `authorize` callback you supply for
+  the round-trip. Useful when JS stays alive through authorization (popup window, Electron
+  `BrowserWindow`, mobile custom URL scheme).
+
+SPA that navigates to the AS and comes back: almost always the two-step. Embedded flows where
+you can keep the original page alive: either one works.
+
+## The two-step flow
+
+On the page that triggers login:
+
+<CodeBlock language="typescript" title="start-login.ts" code={startLogin} />
+
+On the callback page:
+
+<CodeBlock language="typescript" title="callback-page.ts" code={callbackPage} />
+
+`savePendingLogin` stashes the DPoP key and PKCE verifier in `sessionStorage` under a namespaced
+key. `loadPendingLogin` reads that state and clears the storage entry on the same call, so the
+DPoP key doesn't linger after the flow completes or fails. The pending state has a ten-minute
+TTL; any older entry reads back as `null`.
+
+Always pass the same `redirectUri` to both calls. It's part of the OAuth exchange that the AS
+verifies, and a mismatch rejects the token exchange with no useful error message.
+
+## The composed flow
+
+When JS stays alive through authorization, `Opake.login` wraps both steps around an `authorize`
+callback:
+
+<CodeBlock language="typescript" title="embedded-login.ts" code={embeddedLogin} />
+
+The SDK calls your `authorize` function with the AS URL and waits for `{ code, state }` back,
+then finishes the exchange internally. You never see the DPoP key or pending state; it never
+leaves WASM.
+
+## App password fallback
+
+OAuth isn't always reachable: Obsidian plugins, scripts without a browser, CI jobs, sandboxes
+without `fetch` redirects. For those, the PDS exposes app passwords. The user generates one in
+their PDS account settings, and you sign in with it once:
+
+<CodeBlock language="typescript" title="app-password-login.ts" code={appPasswordLogin} />
+
+App passwords are scoped credentials, not the user's real password. The user can revoke one
+from the PDS settings at any time. The session lands in Storage with `type: "legacy"` instead
+of `"oauth"`; everything you do with the `Opake` instance afterwards is identical. Refresh goes
+through `com.atproto.server.refreshSession` rather than OAuth's token endpoint, but the SDK
+handles that for you.
+
+## Token refresh is automatic
+
+Every authenticated SDK method runs through a token guard before firing. The guard checks
+`tokenExpiresAt()` (a sync WASM call that returns only the timestamp, not the token). If the
+access token is within 30 seconds of expiry, the guard triggers `proactiveRefresh()` before the
+main call. Concurrent callers share a single in-flight refresh promise, so two parallel
+operations don't each fire their own refresh round.
+
+Reactive refresh is the backup. If the PDS returns `ExpiredToken` unexpectedly, the XRPC client
+catches it, refreshes inline, and retries the original request. You don't need to write any
+refresh logic in application code.
+
+<Callout type="info">
+  **What JS never sees.** `tokenExpiresAt()` returns a number. `proactiveRefresh()` returns
+  void. Neither exposes the token itself. The only token-shaped values in JS memory are the
+  session fields that come out of `storage.loadSession(did)` if you call it directly, which
+  you shouldn't need to.
+</Callout>
+
+## Post-init error branching
+
+After `Opake.init({ storage })`, there are three failure modes worth special-casing:
+
+<CodeBlock
+  language="typescript"
+  title="routing-on-init-errors.ts"
+  code={routingOnInitErrors}
+/>
+
+`IdentityMissing` is the one most apps forget. It fires on a freshly-signed-in device that has
+a session but no `Identity` in Storage. That isn't an error in the "something went wrong" sense;
+it's the shape of a newly-paired-but-not-yet-bootstrapped account. See [Identity &
+pairing](/docs/sdk/identity) for how to resolve it from both ends.
+
+## Multiple accounts
+
+One Storage can hold multiple signed-in accounts. `Opake.listAccounts` returns all of them:
+
+<CodeBlock language="typescript" title="account-switcher.ts" code={accountSwitcher} />
+
+Without `did`, `Opake.init` opens the default account (the one marked default in Config).
+Passing an explicit DID overrides that for this instance.
+
+To sign an account out without removing its identity from storage, clear the session:
+`await storage.clearSession(did)`. To forget the account entirely (identity, session, cached
+records), call `opake.removeAccount(did)` on an instance that currently holds it.
+
+<DocsNext slug="authentication" />

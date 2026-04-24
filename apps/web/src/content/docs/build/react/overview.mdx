@@ -1,0 +1,107 @@
+import {
+  providerSetup,
+  helloHook,
+  providerWithQueryClient,
+  providerDisableSse,
+} from "./_snippets";
+
+<ChapterHeader title="@opake/react — Overview" />
+
+<Lead>
+  React bindings on top of `@opake/sdk`. One provider at the root, a handful of hooks for
+  common read/write patterns, and an optimistic overlay that keeps the UI in sync during
+  in-flight mutations.
+</Lead>
+
+## Install
+
+<CodeBlock language="sh" code={`bun add @opake/react @opake/sdk @tanstack/react-query react`} />
+
+`@opake/react` depends on `@opake/sdk` and `@tanstack/react-query`. React 18+ is required;
+the hooks use modern concurrent features.
+
+## The provider
+
+<CodeBlock language="tsx" title="provider-setup.tsx" code={providerSetup} />
+
+`OpakeProvider` does three things:
+
+- Exposes the passed `Opake` instance via `useOpake()`.
+- Holds a refcounted `FileManagerCache` so multiple components asking for the same
+  `FileManager` share one handle. The cache clears when the provider unmounts.
+- Starts the WASM SSE consumer on mount and stops it + wipes keepers on unmount. This is
+  why the provider is a *component*: its lifecycle is where the live-update stream lives.
+
+All hooks described on the other pages assume they're rendered inside this provider.
+
+## A first hook
+
+<CodeBlock language="tsx" title="hello-hook.tsx" code={helloHook} />
+
+`useDirectory(keyringUri, directoryUri)` is a subscription. The first argument selects the
+context (null for the cabinet, a workspace keyring URI otherwise); the second picks the
+directory to watch (null means "resolve the root of this context"). The initial snapshot
+comes from cache plus a delta sync; subsequent snapshots come from SSE events. No polling,
+no manual invalidation.
+
+The returned shape is `{ snapshot, isReady, error, resolvedDirectoryUri, retry }`. While
+the watcher is installing, `snapshot` is `null` and `isReady` is `false`. Once the first
+fire lands, `snapshot` becomes a `DirectoryTreeSnapshot` and `isReady` flips to `true`.
+If the watched directory gets deleted (by a move, a recursive delete, or a remote peer),
+the watcher fires one last time with a null snapshot and closes — at that point `isReady`
+is `false` again and `snapshot` stays null. If you need to distinguish "still loading"
+from "was here, now gone", track a "have I ever been ready" latch in local state.
+
+## Custom QueryClient
+
+Most apps already have a `@tanstack/react-query` client. Pass it in so Opake's queries share
+the same cache:
+
+<CodeBlock
+  language="tsx"
+  title="with-query-client.tsx"
+  code={providerWithQueryClient}
+/>
+
+Without the `queryClient` prop, `OpakeProvider` creates its own default. That's fine for
+small apps but means Opake and the rest of your app run on separate caches; invalidation
+from one side doesn't cascade to the other.
+
+## Disabling the auto-start
+
+Most apps want the SSE consumer to start automatically with the provider. A few don't: apps
+with an offline mode, apps behind a feature flag, apps that want to start the stream only
+after the user explicitly goes online.
+
+<CodeBlock
+  language="tsx"
+  title="disable-sse.tsx"
+  code={providerDisableSse}
+/>
+
+`disableSseAutoStart` turns off the provider's built-in start. Use `useStartSseConsumer`
+wherever you want to control the timing. Passing `null` to it skips the start entirely;
+passing `undefined` (or any string URL) triggers it. The WASM consumer is idempotent, so
+calling from multiple places is safe.
+
+## The optimistic overlay
+
+When a mutation hook fires (e.g. `useMove`), Opake doesn't wait for the round-trip to
+update your UI. It applies a local patch to the directory-tree snapshot, synchronously.
+Components subscribed via `useDirectory` re-render with the moved entry in its new
+location within the same render tick.
+
+When the real event arrives from SSE (or the mutation resolves, whichever is first), the
+overlay dedups the patch against the real state and drops it. If the mutation fails, the
+overlay rolls back.
+
+The overlay is per-`Opake`-instance. Account switching (passing a new `Opake` as
+`opake={...}`) creates a fresh overlay, so patches from one user don't project onto the
+next user's trees.
+
+You don't interact with the overlay directly; it's transparent. Mutation hooks return
+`react-query` mutation objects with the usual `mutate` / `mutateAsync` / `isPending` /
+`error` API, and reads happen through `useDirectory` which folds overlay patches in
+automatically.
+
+<DocsNext slug="overview" />

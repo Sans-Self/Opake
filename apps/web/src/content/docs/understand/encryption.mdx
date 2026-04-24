@@ -1,3 +1,5 @@
+import { encryptBlob } from "./_snippets";
+
 <ChapterHeader title="Encryption & Keys" />
 
 <Lead>
@@ -5,9 +7,9 @@
   key wrapping for sharing and identity.
 </Lead>
 
-## The Cryptographic Reality
+## What actually happens
 
-We don't use "bank-level security" buzzwords. We use standard, audited cryptographic primitives. If you're a developer, here is exactly what happens when you upload a file.
+Standard, audited cryptographic primitives. Here's what runs when you upload a file.
 
 ### 1. Content Encryption
 
@@ -15,17 +17,7 @@ When you select a file to upload, your device generates a random 256-bit symmetr
 
 The file is then encrypted using **AES-256-GCM**. This algorithm is fast and handles arbitrary-size data efficiently. This produces the ciphertext blob that will actually be uploaded to your PDS.
 
-<CodeBlock language="rust" title="opake-core/src/crypto/content.rs">
-  {`// The core primitive.
-pub fn encrypt_blob(
-    plaintext: &[u8],
-    key: &ContentKey
-) -> Result<Vec<u8>, CryptoError> {
-    // Generates 12-byte random nonce
-    // Applies AES-GCM
-    // Returns ciphertext with appended authentication tag
-}`}
-</CodeBlock>
+<CodeBlock language="rust" title="opake-core/src/crypto/content.rs" code={encryptBlob} />
 
 ### 2. Key Wrapping (The Lockbox)
 
@@ -46,13 +38,17 @@ The result is a `WrappedKey`. This lockbox is safe to store publicly while being
   preventing replay attacks across different users or protocol versions.
 </Callout>
 
-## Cryptographic Heritage
+## Influences
 
-Opake doesn't reinvent the wheel. We stand on the shoulders of giants who have spent decades perfecting modern, easy-to-use, and highly secure encryption. Our design is heavily influenced by the same primitives used by the **Signal Protocol**.
+Opake's primitives and patterns come from a few specific places:
 
-- **Signal's X25519 & Ed25519:** Just like Signal, we use Curve25519 (X25519) for our identity and key wrapping. It is the modern gold standard for elliptic curve cryptography—fast, secure, and designed to be resistant to many types of side-channel attacks.
-- **[Age (Actually Good Encryption)](https://github.com/FiloSottile/age):** Our file-based encryption model (encrypting for specific public key recipients) is conceptually very similar to the `age` tool. We believe in "static" encryption that is robust and doesn't rely on complex state-machine handshakes.
-- **[The Noise Protocol Framework](http://noiseprotocol.org/):** While we aren't a messaging protocol, we follow the Noise philosophy: using simple, composable primitives (Diffie-Hellman + HKDF + AEAD) to build secure systems.
+- **Signal Protocol** — Curve25519 (X25519) for identity and key wrapping. Used here for the
+  same reasons Signal picked it: fast, well-understood, resistant to many side-channel attacks.
+- **[age](https://github.com/FiloSottile/age)** — the file-for-recipients model (one content key,
+  wrapped to each recipient's public key) is borrowed directly. Same "static" encryption —
+  nothing to keep in sync between sessions.
+- **[Noise Protocol Framework](http://noiseprotocol.org/)** — Opake isn't a messaging protocol,
+  but the underlying composition (Diffie-Hellman + HKDF + AEAD) is the Noise recipe.
 
 ---
 

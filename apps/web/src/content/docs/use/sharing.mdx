@@ -1,20 +1,20 @@
 <ChapterHeader title="Sharing & DIDs" />
 
 <Lead>
-  In the traditional cloud, sharing a file means granting a server permission to show your data to
-  someone else. In Opake, sharing means giving a key to your file to another user.
+  Sharing on a traditional cloud means granting a server permission to show your data to someone.
+  Sharing in Opake means handing someone a key to your file. Different model, different threat
+  profile.
 </Lead>
 
-## The "Grant" Model
+## The Grant model
 
-When you share a file with someone in Opake, you are creating a **Grant**.
+When you share a file, you create a **Grant** — a small record containing the file's content
+key, encrypted so that only the recipient's private key can open it. You publish the grant
+record to your own PDS. The recipient finds it via the indexer, unwraps the key with their
+private key, and then fetches the encrypted file directly from your PDS.
 
-Think of a Grant as a small, specialized lockbox. Inside this box is the `Content Key` for your file. This lockbox is specially designed so that only the recipient's private key can open it. Once you've created this box, you leave it on the network. The recipient can then pick it up, open it with their key, and use the `Content Key` to decrypt the file directly from your PDS.
-
-<Callout type="info">
-  **Zero Server Involvement:** Your PDS (and the recipient's PDS) act only as couriers. They never
-  see the key, and they never see the file content.
-</Callout>
+Neither PDS sees the key or the file content. They're just relaying ciphertext between two
+clients.
 
 ---
 
@@ -36,24 +36,30 @@ To share a file, you just need the recipient's AT Protocol handle (e.g., `@bob.b
   </PlatformTab>
 </PlatformToggle>
 
-## 2. Why DIDs Matter
+## 2. Why DIDs matter
 
-You might know your friend as `@bob.bsky.social`, but Opake knows them as `did:plc:z724xy...`.
+You might know your friend as `@bob.bsky.social`, but Opake stores them internally as
+`did:plc:z724xy...`.
 
-A handle is just a nickname that can change. A **DID (Decentralized Identifier)** is a permanent, cryptographic ID. By sharing to a DID, the access remains valid even if your friend moves to a different PDS or changes their handle.
+A handle is a nickname that can change. A **DID (Decentralized Identifier)** is a permanent,
+cryptographic ID. Grants are keyed to DIDs, so access stays valid if your friend moves to a
+different PDS or swaps their handle.
 
-<Callout type="warning">
-  **Public Keys are Public:** Opake automatically publishes your public encryption key to your PDS
-  when you log in. This is how others can wrap files to you without needing to ask for your
-  "address" first.
+<Callout type="info">
+  Opake publishes your public encryption key to your PDS when you first log in. That's how
+  someone else's client can wrap a file to you without you having to exchange an address
+  out-of-band.
 </Callout>
 
 ---
 
-## 3. Revoking Access
+## 3. Revoking access
 
-If you want to stop sharing a file, you simply delete the Grant record.
+To stop sharing a file, delete the grant record.
 
-However, because Opake is truly decentralized, there is a nuance to revocation. Once a recipient has decrypted a file, they have a copy of the plaintext. Deleting a Grant prevents them from fetching _future_ updates or re-downloading the file if they lose their local copy, but it cannot "reach out" and delete the data from their physical device.
+There's an important nuance. Once a recipient has decrypted a file, they have the plaintext
+locally. Deleting the grant prevents them from fetching future updates or re-downloading if
+they lose their copy, but it can't reach out across the network to delete what they already
+have on disk.
 
 Ready to see how to manage your identity across multiple devices? Read about [Multi-Device Magic](/docs/pairing).

@@ -1,8 +1,8 @@
 <ChapterHeader title="Troubleshooting & Common Issues" />
 
 <Lead>
-  Opake is a decentralized protocol, which means sometimes things can get a little messy. Here is
-  how to fix the most common issues you might run into.
+  Federated systems have more moving parts than centralised ones, so occasionally things break in
+  novel ways. Here's a field guide to the issues we see most often.
 </Lead>
 
 ## Login & Authentication
@@ -26,24 +26,28 @@ If the browser window opens for login but never redirects you back to Opake:
 
 ## Files & Uploads
 
-### Upload Fails halfway (Storage Limits)
+### Upload fails halfway (storage limits)
 
-Large files can be tricky. Opake uploads your files as single blobs to the AT Protocol.
+Opake uploads files as single blobs to the AT Protocol, so large files stress both your
+connection and the PDS's blob limits.
 
-- **Politeness Limits:** By default, Opake limits the size of blobs it will upload to respect PDS
-  providers we don't own.
-- **Increasing Storage:** You (or your PDS administrator) can increase these limits by uploading
-  specific configuration records to your repository. Check our [Technical Spec](/docs/protocol)
-  for the exact schema.
-- **Network Stability:** If your connection drops, the upload may fail. Try again when you have a
-  more stable connection.
+- **Default size cap:** Opake caps upload size to stay within what most PDS providers accept
+  without prior coordination.
+- **Increasing the cap:** You (or your PDS administrator) can raise it by publishing
+  configuration records to your repository. See the [Lexicon reference](/docs/lexicons) for the
+  schema.
+- **Network stability:** If your connection drops mid-upload, the upload fails and you have to
+  re-send. Resume support is on the roadmap, not there yet.
 
 ### "Unable to Decrypt File"
 
-This is the most serious error. It means Opake cannot open the "lockbox" for that file.
+The most serious error. Opake can't unwrap the key for this file under the identity you're
+signed in with. Two common causes:
 
-- **Wrong Account:** Ensure you are logged into the correct account (the one the file was shared with).
-- **Missing Keys:** If you recently logged in on a new device but didn't perform a [Device Pairing](/docs/pairing), you won't have the private keys necessary to decrypt existing files.
+- **Wrong account.** Check you're logged into the account the file was shared with.
+- **Missing keys.** If you recently signed in on a new device but haven't recovered from your
+  seed phrase or completed a [Device Pairing](/docs/pairing), this device doesn't yet hold the
+  private keys needed to decrypt. Go through recovery or pairing first.
 
 ---
 

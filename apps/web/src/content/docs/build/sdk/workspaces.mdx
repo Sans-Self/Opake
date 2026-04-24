@@ -1,0 +1,167 @@
+import {
+  createWorkspace,
+  listAndWatchWorkspaces,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+  leaveWorkspace,
+  proposalFlow,
+  mutationResultHandling,
+} from "./_snippets";
+
+<ChapterHeader title="Workspaces" />
+
+<Lead>
+  A workspace is a shared encrypted folder: a named group that owns a tree of files, with a
+  roster of members who can read, write, or administer depending on their role. Technically
+  it's a keyring on the owner's PDS plus a collaborative proposal protocol that lets members
+  edit without needing write access to the owner's repository.
+</Lead>
+
+## When to use a workspace (vs. a one-to-one grant)
+
+If you want to share a single file with one other person, [grants](/docs/sdk/sharing) are the
+lighter tool: one record per sharer, recipient decrypts directly from the sharer's PDS, no
+group state. Grants scale poorly though. Adding a new person to a folder of 200 files means
+200 new grant records. Removing someone means deleting every grant they received.
+
+A workspace inverts that. The content key for each file is wrapped under a single **group
+key**, and the group key is wrapped to each member individually. Adding a member is one
+operation regardless of how many files are in the workspace. Removing a member rotates the
+group key once; future uploads are inaccessible to them automatically.
+
+Use workspaces for anything ongoing and multi-party: a family photo album, a research team's
+working files, a writing group's drafts.
+
+## Create a workspace
+
+<CodeBlock language="typescript" title="create.ts" code={createWorkspace} />
+
+`createWorkspace` generates a fresh group key inside WASM, wraps it to the caller's public
+key with the `manager` role (owners are always managers of their own workspace), writes the
+`app.opake.keyring` record to the caller's PDS, and writes the workspace root directory
+entry. The returned `key` is the group key bytes; you can hold onto it for immediate use, but
+you don't need to store it anywhere. Opake re-resolves via `keyringUri` on every subsequent
+operation.
+
+## List and watch workspaces
+
+<CodeBlock language="typescript" title="list.ts" code={listAndWatchWorkspaces} />
+
+`listWorkspaces` fetches from the indexer and decrypts workspace names inline. It also
+bootstraps the in-memory `WorkspaceKeeper`, so `watchWorkspaces` subscribers receive
+incremental updates from SSE events after the first call without the list round-tripping the
+indexer again.
+
+`@opake/react` wraps this pattern as `useWorkspaces` with the subscription lifecycle handled.
+See [React bindings](/docs/react/overview) when those pages land.
+
+## Add a member
+
+<CodeBlock language="typescript" title="add-member.ts" code={addWorkspaceMember} />
+
+The invitee needs an Opake public key published on their PDS. If `resolveHandleAndPublicKey`
+fails with `RecipientNotReady`, it means the target has a valid atproto identity but hasn't
+logged into Opake yet and therefore has no `app.opake.publicKey/self` record. You can queue a
+pending invite and wait for them to sign up; see [Sharing](/docs/sdk/sharing) for the
+pending-share mechanic, which applies the same way to workspace invites.
+
+Three roles exist:
+
+- **`manager`**: can add or remove members, change workspace metadata, and edit files like any editor.
+- **`editor`**: can read everything, upload new documents, and propose edits to existing ones.
+- **`viewer`**: can read but not write. Proposals from viewers are rejected by the owner daemon.
+
+Roles are enforced at the proposal-apply layer, not at the crypto layer. A viewer has the group
+key (that's what membership means) and can decrypt. Role enforcement stops them from *writing*
+valid proposals that the owner would accept. If your threat model requires a viewer who can't
+see content at all, they shouldn't be a workspace member.
+
+## Remove a member
+
+<CodeBlock language="typescript" title="remove-member.ts" code={removeWorkspaceMember} />
+
+Removing a member is the expensive operation by design. When the owner initiates it:
+
+1. A fresh group key is generated inside WASM.
+2. Every remaining member's entry in the keyring is re-wrapped to the new key.
+3. The previous rotation's wrapped keys are archived into `keyHistory` on the keyring record
+   so the remaining members can still decrypt older documents (which were wrapped under the
+   old key).
+4. The `rotation` counter increments.
+5. Future uploads use the new key.
+
+The removed member keeps whatever they already decrypted or cached locally. Rotation prevents
+*new* access, not retroactive access. If the threat model requires forward secrecy for
+existing documents, the owner has to re-upload them after rotation. Opake doesn't do this
+automatically.
+
+## Leave a workspace
+
+<CodeBlock language="typescript" title="leave.ts" code={leaveWorkspace} />
+
+The member-side counterpart to being removed. Opting out goes through the same proposal path:
+the member writes a `keyringUpdate` with `actionType: "leave"` on their own PDS, the owner's
+daemon picks it up, and the standard rotate-and-re-wrap flow runs.
+
+Owners can't `leaveWorkspace` on their own workspace. Depending on the membership list they'd
+either leave themselves as the only member, or orphan the workspace entirely. To dissolve an
+owned workspace, remove the other members and then delete the keyring record directly.
+
+## How proposals work
+
+Members who aren't the owner can't write to the owner's repository. The PDS auth model doesn't
+allow cross-account writes. So when an editor renames a file in a workspace, or uploads a new
+document, or moves a directory around, Opake doesn't touch the owner's PDS directly. Instead
+it writes a **proposal record** on the member's own PDS, describing the intended change.
+
+<CodeBlock language="typescript" title="proposal-flow.ts" code={proposalFlow} />
+
+The owner's daemon (or wherever the owner's Opake instance is running) periodically scans for
+pending proposals against workspaces it owns. For each, it checks the proposer's role
+(`viewer` → reject; `editor`/`manager` → accept), applies the change as a canonical record on
+the owner's repository, and deletes the proposal from the member's PDS.
+
+The proposal record types are:
+
+- **`app.opake.documentUpdate`**: proposed document changes. Content updates, metadata edits,
+  adoption (claiming an existing member-uploaded document into the owner's canonical tree).
+- **`app.opake.directoryUpdate`**: proposed structure changes. Add entry, remove entry, move
+  entry, create directory, delete directory, rename directory.
+- **`app.opake.keyringUpdate`**: proposed membership changes. Add member, remove member,
+  update role, rename workspace, update description, leave.
+
+From your application's perspective, this is mostly invisible. You call `fm.upload(...)` or
+`fm.move(...)`, the WASM side figures out whether the caller is the owner and routes
+accordingly, and you get a `MutationResult` back that tells you whether the write was applied
+directly or proposed.
+
+## Reading `MutationResult`
+
+<CodeBlock
+  language="typescript"
+  title="mutation-result.ts"
+  code={mutationResultHandling}
+/>
+
+`proposed: true` means the write is pending apply on the owner's side. The returned URI is the
+proposal record on the caller's own PDS, not the target document or directory on the owner's
+PDS (which doesn't exist yet).
+
+For optimistic UI, render the change immediately with a "pending" affordance. When the owner
+applies, the SSE consumer fires a tree update on the target directory and the pending marker
+can come off. If the owner rejects or if the daemon hasn't run in a while, the pending marker
+stays until the proposal is applied or cancelled.
+
+## A note on the indexer
+
+Workspaces are discovered via the Opake [indexer](/docs/glossary#indexer), not the PDS firehose
+directly. `listWorkspaces` calls `/api/keyrings` with the caller's DID as a filter; the
+indexer returns every keyring where the caller appears in the member list (including
+keyrings the caller owns, since owners are always listed as the first member).
+
+If you're running against a self-hosted indexer instead of the default, set the URL via the
+`OPAKE_INDEXER_URL` env var at build time, or call `opake.setIndexerUrl()` at runtime. See
+the account config mechanic in [Authentication](/docs/sdk/authentication) for how a user's
+preferred indexer syncs across their devices.
+
+<DocsNext slug="workspaces" />

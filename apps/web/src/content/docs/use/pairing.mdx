@@ -1,30 +1,28 @@
 <ChapterHeader title="A Secure Handshake" />
 
 <Lead>
-  Your identity in Opake isn't a username and password; it's a private key that stays with you. When
-  you get a new phone or laptop, you need a way to pass that key to your new device without
-  anyone—including the network—ever catching a glimpse.
+  Your Opake identity is a private key, not a username and password. When you get a new phone or
+  laptop, you need a way to hand that key over without the network — or anyone watching it —
+  ever seeing it in plaintext.
 </Lead>
 
-## The Problem: Identity vs. Access
+## Identity vs. access
 
-Traditional apps "sync" your data by sending a master copy to a central server. If that server is compromised, your privacy vanishes.
+Traditional apps sync your data by copying everything to a central server. If that server is
+compromised, so is your privacy.
 
-Opake uses **Device Pairing**. Think of this as a private, one-on-one conversation between two of your own devices. They perform a cryptographic handshake to securely transfer your encryption identity so it never touches the internet in a readable form.
-
-<Callout type="info">
-  **The Silent Messenger:** We use your Personal Data Server (PDS) as a "dumb relay." It passes the
-  encrypted messages back and forth, but it doesn't speak the language and has no way of knowing
-  what’s inside the envelopes.
-</Callout>
+Opake uses **Device Pairing** instead: a direct exchange between two of your own devices. They
+perform a cryptographic handshake that transfers your encryption identity through the PDS as
+ciphertext. The PDS relays the messages without understanding what's inside them.
 
 ---
 
 ## The Pairing Process
 
-This process ensures that your private keys are only ever unlocked on the devices you personally hold.
+Your private keys only leave one device to arrive on another. At no point are they readable by
+anyone but the two devices in the handshake.
 
-### 1. The Request (New Device)
+### 1. Requesting access (New Device)
 
 On your new phone or laptop, you'll initiate the pairing. Your device generates a temporary "invitation" and publishes it to your PDS. This invitation includes a one-time lock that only this specific new device can open.
 
@@ -39,7 +37,7 @@ On your new phone or laptop, you'll initiate the pairing. Your device generates 
   </PlatformTab>
 </PlatformToggle>
 
-### 2. The Approval (Existing Device)
+### 2. Approvaling access (Existing Device)
 
 Your current device will see a notification that a new guest is asking to join your cabinet.
 
@@ -50,22 +48,28 @@ When you click **Approve**, your device:
 3. Wraps your private identity keys inside that secret.
 4. Posts the locked package back to your PDS.
 
-### 3. The Completion (New Device)
+### 3. Finishing up (New Device)
 
-The new device picks up the package, unlocks it using its temporary key, and saves your identity. It then "shreds" the invitation and response records from your PDS, leaving no trail behind.
+The new device picks up the response, unlocks it with its temporary key, and saves your
+identity. Then it deletes the request and response records from your PDS.
 
 ---
 
 ## Why is this safe?
 
-Even if someone were monitoring your PDS at the exact moment of the handshake, they could not steal your keys.
+Even if someone is actively watching your PDS during the handshake, they can't recover the keys.
 
-The package is scrambled using high-grade encryption that is physically unreadable to anyone except the device that started the request. Only the two devices involved in the handshake hold the necessary "strength" to decode the identity.
+The "temporary lock" your new device made in step 1 is unique to that device — only it holds
+the matching key. When your existing device wraps your identity inside that lock, the only
+party who can unlock the package is the new device itself. The PDS shuttles the locked package
+between the two devices; it never holds the key.
+
+For the specific algorithms Opake uses underneath, see [Encryption & Keys](/docs/encryption).
 
 <Callout type="warning">
-  **The Human Element:** Always verify that the pairing request you are approving is actually from
-  your own device. Approving a request is like handing over a physical key to your cabinet—only do
-  it for devices you own and trust.
+  Verify that the pairing request you're approving is actually from your own device. Approving a
+  request is like handing over a physical key to your cabinet — only do it for devices you own
+  and trust.
 </Callout>
 
 Ready to learn about the foundation of all this? Read about the [AT Protocol](/docs/at-protocol).

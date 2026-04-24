@@ -1,23 +1,23 @@
 <ChapterHeader title="The Open Network: Your Data, Anywhere" />
 
 <Lead>
-  Opake isn't a walled garden; it's a resident of the Atmosphere — the open network built on the
-  AT Protocol. Your data doesn't sit in a silo; it lives on a foundation you control, alongside
-  everyone else's.
+  Opake is built on the AT Protocol — the open, federated network behind Bluesky and the wider
+  Atmosphere. Your data lives on infrastructure you control, interoperable with every other
+  atproto-native app.
 </Lead>
 
 ## Why Opake was built on the Atmosphere
 
-The social web most of us grew up with is broken. For years we lived in digital fiefdoms where a
-single company could decide the fate of our data, our identities, and our connections. When Elon
-Musk bought Twitter and spent two years dismantling its safety and moderation systems, the urgency
-of a real alternative became undeniable.
+Most cloud products lock identity and storage into a single company. When that company's
+priorities shift, so does your access to your own data. When Elon Musk bought Twitter and spent
+two years dismantling its safety and moderation systems, a lot of people were reminded how much
+of their digital life depended on a single company's choices.
 
-The AT Protocol — and the wider Atmosphere around it — is one answer. It's an open, federated
-protocol: no single person or corporation gets to own your digital life. Opake didn't invent any
-of that. We picked it as our foundation because it already solves the hard parts of identity,
-portability, and federation, and because building on top of an ecosystem is a better long-term bet
-than trying to run our own silo.
+The AT Protocol is one answer to that problem. It's an open, federated protocol: identity,
+storage, and data portability are specified in the open, and no single company owns the pieces.
+Opake didn't invent any of it. We picked it as our foundation because it already solves the hard
+parts — identity, portability, federation — and because building on an existing ecosystem is a
+better long-term bet than running our own silo.
 
 ### Breaking the silo
 
@@ -43,20 +43,16 @@ locked into our interface. If someone builds a better file explorer tomorrow, yo
 log in with your handle and your files will be right there. Our code and algorithms are
 public; the "vault" belongs to you, we just provide the keys.
 
-<Callout type="info">
-  **Our Guarantee:** We don't want to trap you. We want to be the best way for you to manage your
-  private cabinet, but we believe you should always have the right to leave and take your data with
-  you.
-</Callout>
+We'd rather be the best way to manage your private cabinet than a lock-in. Leaving is a
+first-class path, not an afterthought — your data walks with you.
 
 ---
 
-## Effortless sharing across the network
+## Sharing across the network
 
-The real advantage of an open network is how easily you can connect. In traditional encrypted
-apps, you have to exchange complex "invite codes" or "public keys" just to see a single file.
-
-Since everyone in the Atmosphere already has a digital identity, sharing is built-in.
+Most encrypted apps make sharing painful — you exchange invite codes or copy public keys around
+to see a single file. On the Atmosphere, every user already has a cryptographic identity, so
+sharing works off of handles you already know.
 
 ### No more invite codes
 
@@ -68,12 +64,12 @@ handle. You don't need to ask for their "Opake address." You just type their han
 2. It identifies their public lock on the network.
 3. It creates a secure "Grant" that only their key can open.
 
-### Collaboration Without Borders
+### Across providers
 
-It doesn't matter if you are with one provider and your friend is with another. The servers
-talk to each other seamlessly. You can share a 1GB encrypted video with a friend on a
-different host, and they can stream it directly from your cabinet—safely, privately,
-and without any "middleman" watching from the sidelines.
+You and your friend don't need to be on the same PDS. The servers relay records and blobs to
+each other as part of the protocol — you can share a 1 GB encrypted video with someone on a
+different host and they stream it straight from your cabinet. The PDS on each side only ever
+sees ciphertext; the encryption is the access control.
 
 ---
 
@@ -93,9 +89,5 @@ tech behind this movement, we recommend these resources:
 - **[Introduction to AT Protocol](https://mackuba.eu/2024/02/20/atproto-intro/):** A great "from scratch" deep dive into how the network functions.
 - **[A Social Filesystem](https://overreacted.io/a-social-filesystem/):** Dan Abramov's vision of the AT Protocol as a decentralized filesystem—the very vision Opake is building.
 
-<Callout type="info">
-  **The Network is the App:** Opake is just a lens. The AT Protocol is the foundation. This means
-  your digital life is no longer at the mercy of a single company's terms of service.
-</Callout>
 
 Ready to learn about how we keep this open network private? Read about [Encryption & Keys](/docs/encryption).

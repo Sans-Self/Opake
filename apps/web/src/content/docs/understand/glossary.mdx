@@ -8,7 +8,8 @@ The decentralized social networking protocol that Opake is built on. It handles 
 
 ### AES-256-GCM
 
-The symmetric encryption algorithm we use for file contents. It's fast, secure, and industry-standard.
+The symmetric encryption algorithm used for file content. Authenticated (detects tampering),
+fast on modern hardware, and well-studied.
 
 ### Indexer
 
@@ -16,7 +17,8 @@ A specialized service that indexes the [Firehose](#firehose) and provides a fast
 
 ### Cabinet
 
-Our name for the Opake interface—the place where you manage your files, keys, and sharing grants.
+The Opake interface for your personal (non-shared) files. Where you manage uploads, keys, and
+outgoing sharing grants.
 
 ### Content Key
 
@@ -34,9 +36,11 @@ The real-time stream of all public records being created on the AT Protocol. Our
 
 A record that "grants" a specific person access to a file by wrapping the file's [Content Key](#content-key) for their [Public Key](#public-key).
 
-### Keyring
+### Workspace
 
-A named group of users that shares a common Group Key. It makes sharing folders with teams or families effortless.
+A named group of users sharing a common group key. Lets you share folders with teams or families
+without wrapping every file to every member individually. The underlying atproto record is named
+`app.opake.keyring` for legacy reasons; the app calls it a workspace everywhere it's user-facing.
 
 ### PDS (Personal Data Server)
 
@@ -52,7 +56,8 @@ A [Content Key](#content-key) that has been encrypted for a specific recipient u
 
 ### X25519
 
-The specific elliptic curve we use for asymmetric encryption and key wrapping. It's modern, fast, and secure.
+The elliptic curve used for asymmetric encryption and key wrapping. Same curve Signal and age
+use; well-understood, fast, resistant to many side-channel attacks.
 
 ---
 

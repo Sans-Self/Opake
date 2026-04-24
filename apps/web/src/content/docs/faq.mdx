@@ -14,23 +14,22 @@
   </FaqItem>
 
 <FaqItem question="Where is my data actually stored?">
-  Opake uses a **bring-your-own-storage** design. Your encrypted files live on your PDS. In the
-  future, we may offer managed storage options, but the goal is always to keep you in control of
-  where your bits live.
+  Opake is bring-your-own-storage. Your encrypted files live on your Personal Data Server
+  (PDS) — either self-hosted or run by a provider you trust. The app is the interface; the
+  storage is yours to move, copy, or walk away with.
 </FaqItem>
 
 <FaqItem question="Can Opake see my files?">
-  **No.** Encryption happens entirely on your device (browser or CLI) before any data is sent to
-  internet. We never see the contents of your files, your filenames, your tags, or your private
-  keys. To us, your data is just opaque noise.
+  **No.** Encryption happens entirely on your device (browser or CLI) before any data is sent
+  over the network. We never see the contents of your files, your filenames, your tags, or
+  your private keys. From our perspective, your data is opaque bytes.
 </FaqItem>
 
 <FaqItem question="Can I share files with people who don't use Opake?">
-  Because of how our [Encryption & Keys](/docs/encryption) work, the recipient *must* have an
-  AT Protocol identity (a DID) to receive a secure sharing [Grant](/docs/sharing). This is a
-  feature, not a bug. It ensures that the file key is wrapped specifically to their public key. If
-  you need to share with a total outsider, you'll need to help them join the network first—it's
-  worth it for the privacy.
+  The recipient needs an AT Protocol identity (a DID) to receive a [Grant](/docs/sharing) — the
+  grant wraps the file's content key to their published public key, and there's no public key to
+  wrap to if they've never set up an account. If you want to share with someone outside the
+  network, help them sign up first.
 </FaqItem>
 
 <FaqItem question="What happens if I lose my device?">
@@ -47,13 +46,14 @@
 </FaqItem>
 
   <FaqItem question="How do I contribute?">
-    You can [View the Sourcecode on Tangled](https://tangled.org/opake.app/opake) or [report issues](https://tangled.org/opake.app/opake/issues) there. We are built for the community, by the community.
+    The source is on [Tangled](https://tangled.org/opake.app/opake) — browse the code, open
+    issues, or send a pull request. Everything happens in the open there.
   </FaqItem>
 </FaqSection>
 
 <CenterAction
   headline="Still curious?"
-  subtext="The handbook covers everything from encryption to keyrings to device pairing."
+  subtext="The handbook covers encryption, sharing, workspaces, and device pairing in detail."
 >
   <TextLink href="/docs">
     Read the full Handbook

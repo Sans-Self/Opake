@@ -30,6 +30,7 @@ export {
   DocsIndexPrimary,
   DocsIndexSecondary,
   DocsIndexSection,
+  DocsNext,
 } from "./docs";
 
 export {

@@ -2,6 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowRightIcon } from "@phosphor-icons/react";
 import { resolveIcon } from "./icons";
+import { nextDoc } from "@/lib/docs-registry";
 
 /* ─── Docs index header ────────────────────────────────────────────────────── */
 
@@ -141,6 +142,51 @@ export function DocsIndexSecondary({ href, icon, label, body }: DocsIndexSeconda
         />
       </Link>
     </div>
+  );
+}
+
+/* ─── Linear "Next" chapter link ─────────────────────────────────────────── */
+
+interface DocsNextProps {
+  /** Slug of the current page; the next doc in the same group/category is resolved from the registry. */
+  readonly slug: string;
+}
+
+/**
+ * Small "Next chapter" link at the end of a doc page. Reads from
+ * {@link nextDoc} so the reading order is always the registry order —
+ * there's nothing to maintain per-page beyond the component usage.
+ * Renders nothing when the current doc is the last in its sequence.
+ */
+export function DocsNext({ slug }: DocsNextProps) {
+  const next = nextDoc(slug);
+  if (!next) return null;
+
+  // `no-underline` defeats Tailwind Typography's default link styling; the
+  // card is its own visual affordance and doesn't need an underline on top.
+  const className =
+    "not-prose border-border-accent/40 bg-base-100 group hover:border-primary/60 hover:shadow-panel-sm mt-12 flex items-center justify-between rounded-xl border p-4 no-underline transition-all";
+  const body = (
+    <>
+      <div className="flex flex-col">
+        <span className="text-text-muted text-ui">Next</span>
+        <span className="text-base-content text-[1.05rem] font-medium">{next.title}</span>
+      </div>
+      <ArrowRightIcon
+        size={18}
+        className="text-primary transition-transform group-hover:translate-x-1"
+      />
+    </>
+  );
+
+  return next.group ? (
+    <Link to="/docs/$category/$slug" params={{ category: next.group, slug: next.slug }} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <Link to="/docs/$slug" params={{ slug: next.slug }} className={className}>
+      {body}
+    </Link>
   );
 }
 

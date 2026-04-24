@@ -9,6 +9,7 @@ import {
 } from "react";
 import { InfoIcon, WarningIcon, DesktopIcon, TerminalIcon } from "@phosphor-icons/react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 /* ─── Chapter header ───────────────────────────────────────────────────────── */
 
@@ -140,7 +141,14 @@ export function PlatformTab({ name, children }: PlatformTabProps) {
 interface CodeBlockProps {
   readonly language: string;
   readonly title?: string;
-  readonly children: ReactNode;
+  readonly children?: ReactNode;
+  /**
+   * Explicit code string. When passed, bypasses `children` extraction.
+   * Use this for multi-line snippets in MDX: JSX children go through MDX's
+   * whitespace normalization (which strips the minimum indent among
+   * indented lines), but JSX attribute strings pass through untouched.
+   */
+  readonly code?: string;
 }
 
 function extractText(node: ReactNode): string {
@@ -153,11 +161,12 @@ function extractText(node: ReactNode): string {
   return "";
 }
 
-export function CodeBlock({ language, title, children }: CodeBlockProps) {
-  const code = extractText(children).trim();
+export function CodeBlock({ language, title, children, code }: CodeBlockProps) {
+  const source = code ?? extractText(children);
+  const trimmed = source.trim();
 
   return (
-    <div className="border-border-accent/30 my-4 overflow-hidden rounded-lg border">
+    <div className="not-prose border-border-accent/30 my-4 overflow-hidden rounded-lg border">
       {title && (
         <div className="bg-base-200/60 border-b border-inherit px-4 py-1.5">
           <span className="text-text-muted font-mono text-[0.72rem]">{title}</span>
@@ -165,10 +174,23 @@ export function CodeBlock({ language, title, children }: CodeBlockProps) {
       )}
       <SyntaxHighlighter
         language={language}
-        useInlineStyles={false}
-        className="bg-base-100! text-ui m-0! p-4! leading-relaxed"
+        style={oneLight}
+        customStyle={{
+          margin: 0,
+          padding: "1rem",
+          fontSize: "0.82rem",
+          lineHeight: "1.55",
+          whiteSpace: "pre",
+        }}
+        codeTagProps={{
+          style: {
+            fontFamily:
+              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            whiteSpace: "pre",
+          },
+        }}
       >
-        {code}
+        {trimmed}
       </SyntaxHighlighter>
     </div>
   );

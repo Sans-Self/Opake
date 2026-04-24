@@ -1,3 +1,11 @@
+import {
+  helloCabinet,
+  staticSurface,
+  instanceSurface,
+  storageOptions,
+  errorHandling,
+} from "./_snippets";
+
 <ChapterHeader title="@opake/sdk — Overview" />
 
 <Lead>
@@ -32,25 +40,7 @@ AGPL-3.0. If you bundle it into a web app, that app becomes a derivative work. S
 
 The minimum it takes to upload and read back one encrypted file:
 
-<CodeBlock language="typescript" title="example.ts">
-{`import { Opake } from "@opake/sdk";
-import { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
-
-const storage = new IndexedDbStorage();
-
-// Assumes the user has already logged in. See authentication.mdx.
-const opake = await Opake.init({ storage });
-const fm = await opake.cabinet();
-
-// Upload
-const bytes = new TextEncoder().encode("hello from an encrypted cabinet");
-await fm.uploadAt(bytes, "greetings.txt", "text/plain");
-
-// Read back
-const { plaintext, filename } = await fm.downloadAt("/greetings.txt");
-console.log(filename, new TextDecoder().decode(plaintext));
-// → "greetings.txt hello from an encrypted cabinet"`}
-</CodeBlock>
+<CodeBlock language="typescript" title="example.ts" code={helloCabinet} />
 
 Under those calls: `IndexedDbStorage` persisted the session and the identity keypair, so the
 next page load starts from `Opake.init` without redoing OAuth. `FileManager.uploadAt` generated
@@ -67,25 +57,7 @@ once an identity is loaded.
 
 ### Static surface
 
-<CodeBlock language="typescript" title="before init">
-{`// OAuth two-step
-Opake.startLogin(handle, options);
-Opake.completeLogin(code, state, pending, options);
-Opake.loginWithAppPassword(options);
-
-// Seed-phrase recovery
-Opake.generateMnemonic();
-Opake.validateSeedPhrase(phrase);
-Opake.createIdentity(phrase, did);
-
-// Device pairing
-Opake.createPairRequest(storage, did);
-Opake.awaitPairCompletion(storage, did, rkey);
-Opake.cancelPairRequest(storage, did, rkey);
-
-// The one that returns an Opake instance
-Opake.init({ storage, did? });`}
-</CodeBlock>
+<CodeBlock language="typescript" title="before init" code={staticSurface} />
 
 So much of the API is static because those three flows run before any identity exists on a
 device. They can't live on an instance because you haven't got one. Once any of them finishes,
@@ -93,28 +65,7 @@ device. They can't live on an instance because you haven't got one. Once any of 
 
 ### Instance surface
 
-<CodeBlock language="typescript" title="after init">
-{`opake.did; // invariant for the instance's lifetime
-
-// FileManager access
-opake.cabinet();
-opake.workspaceByUri(uri);
-
-// Workspace lifecycle
-opake.createWorkspace(name, description?);
-opake.listWorkspaces();
-opake.watchWorkspaces(handler);
-
-// Incoming shares
-opake.listInbox();
-opake.watchInbox(handler);
-
-// Live updates
-opake.startSseConsumer(indexerUrl?);
-opake.stopSseConsumer();
-
-// ...plus pairing (approving side) and maintenance ops`}
-</CodeBlock>
+<CodeBlock language="typescript" title="after init" code={instanceSurface} />
 
 The `did` field is the caller's DID, set during `init` and constant for the life of the
 `Opake` instance. Safe as a React `useMemo` dependency or a cache key.
@@ -125,19 +76,11 @@ Any operation that persists something goes through the `Storage` interface: sess
 identity keys, ephemeral pair state, the local record cache. Two implementations ship with the
 SDK:
 
-<CodeBlock language="typescript" title="storage options">
-{`// Browsers. The default choice.
-import { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
-const storage = new IndexedDbStorage(); // persists via Dexie
-
-// Tests and scripts. In-memory, lost on process exit.
-import { MemoryStorage } from "@opake/sdk";
-const storage = new MemoryStorage();`}
-</CodeBlock>
+<CodeBlock language="typescript" title="storage options" code={storageOptions} />
 
 If you need a different backend (Tauri filesystem, React Native AsyncStorage, something
 server-backed), implement the interface yourself. See [Storage
-contract](/docs/sdk/storage) for what each method persists and when it's called.
+interface](/docs/sdk/storage) for what each method persists and when it's called.
 
 If you build one that's reusable, consider sending it upstream. The `Storage` contract is
 small; most backends are one file plus tests. Keeping your implementation in the main repo
@@ -149,30 +92,7 @@ platform find it next to the built-ins instead of re-solving the problem. Issues
 
 Every SDK method throws `OpakeError` on failure. Branch on `.kind`:
 
-<CodeBlock language="typescript" title="error handling">
-{`import { OpakeError } from "@opake/sdk";
-
-try {
-  const opake = await Opake.init({ storage });
-} catch (err) {
-  if (err instanceof OpakeError) {
-    switch (err.kind) {
-      case "IdentityMissing":
-        // Normal: the user is signed in but hasn't bootstrapped an
-        // identity on this device yet. Route them to recovery or pair.
-        break;
-      case "NotFound":
-        // No session at all. Send them to login.
-        break;
-      case "Auth":
-        // Token refresh failed. The session is dead.
-        break;
-      default:
-        throw err;
-    }
-  }
-}`}
-</CodeBlock>
+<CodeBlock language="typescript" title="error handling" code={errorHandling} />
 
 `kind` maps 1-to-1 to the `opake_core::Error` variants in Rust, so anything the core library can
 surface is reachable from TS without `any` casts.
@@ -183,36 +103,4 @@ signed in on a fresh device and needs to either recover from a seed phrase or pa
 existing device to bootstrap an `Identity` into Storage. Route them to that flow, don't surface
 it as a generic failure.
 
-## Where to go next
-
-<DocsIndexGrid>
-  <DocsIndexCard href="/docs/sdk/authentication" icon="lock">
-    <DocsIndexTitle>Authentication</DocsIndexTitle>
-    <DocsIndexBody>How `startLogin` and `completeLogin` compose, the app-password fallback, and how token refresh actually happens.</DocsIndexBody>
-  </DocsIndexCard>
-
-  <DocsIndexCard href="/docs/sdk/identity" icon="seedling">
-    <DocsIndexTitle>Identity & pairing</DocsIndexTitle>
-    <DocsIndexBody>Seed phrases and device pairing, with private key material never touching JS memory.</DocsIndexBody>
-  </DocsIndexCard>
-
-  <DocsIndexCard href="/docs/sdk/files" icon="folder">
-    <DocsIndexTitle>Files & directories</DocsIndexTitle>
-    <DocsIndexBody>The `FileManager` contract and how to subscribe to tree changes as they arrive.</DocsIndexBody>
-  </DocsIndexCard>
-
-  <DocsIndexCard href="/docs/sdk/sharing" icon="share">
-    <DocsIndexTitle>Sharing & workspaces</DocsIndexTitle>
-    <DocsIndexBody>One-to-one grants, group workspaces, and the proposal model that lets members edit on other people's PDSes.</DocsIndexBody>
-  </DocsIndexCard>
-
-  <DocsIndexCard href="/docs/sdk/events" icon="network">
-    <DocsIndexTitle>Live updates</DocsIndexTitle>
-    <DocsIndexBody>Starting the SSE consumer and subscribing to workspace, inbox, and directory changes.</DocsIndexBody>
-  </DocsIndexCard>
-
-  <DocsIndexCard href="/docs/sdk/storage" icon="book">
-    <DocsIndexTitle>Storage contract</DocsIndexTitle>
-    <DocsIndexBody>Every method on `Storage`, what it persists, and when the SDK reaches for it.</DocsIndexBody>
-  </DocsIndexCard>
-</DocsIndexGrid>
+<DocsNext slug="overview" />
