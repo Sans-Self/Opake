@@ -317,6 +317,26 @@
     margin-bottom: 0.5em;
     color: var(--color-base-content);
   }
+  /* rehype-autolink-headings appends a link with class `.heading-anchor` to
+     every h2/h3/h4 whose target is the heading's own slug. Hidden until the
+     heading is hovered or keyboard-focused so it doesn't clutter the layout,
+     but still keyboard-reachable via Tab for assistive tech. */
+  .prose h2 .heading-anchor,
+  .prose h3 .heading-anchor,
+  .prose h4 .heading-anchor {
+    color: var(--color-text-faint);
+    opacity: 0;
+    margin-left: 0.35em;
+    font-weight: 400;
+    text-decoration: none;
+    transition: opacity 0.15s ease-out;
+  }
+  .prose h2:hover .heading-anchor,
+  .prose h3:hover .heading-anchor,
+  .prose h4:hover .heading-anchor,
+  .prose .heading-anchor:focus-visible {
+    opacity: 1;
+  }
   .prose ul {
     list-style-type: disc;
     margin-block: 0.75em;

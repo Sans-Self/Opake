@@ -5,11 +5,39 @@ import { comlink } from "vite-plugin-comlink";
 import wasm from "vite-plugin-wasm";
 import mdx from "@mdx-js/rollup";
 import remarkGfm from "remark-gfm";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 export default defineConfig({
   plugins: [
-    // MDX must run before React transform
-    { enforce: "pre" as const, ...mdx({ remarkPlugins: [remarkGfm] }) },
+    // MDX must run before React transform.
+    // rehype-slug gives every heading a stable id slug (used for deep links
+    // like /docs/troubleshooting#unable-to-decrypt-file from in-app error
+    // toasts). rehype-autolink-headings wraps the heading text so the
+    // anchor is clickable to copy the link.
+    {
+      enforce: "pre" as const,
+      ...mdx({
+        remarkPlugins: [remarkGfm],
+        rehypePlugins: [
+          rehypeSlug,
+          [
+            rehypeAutolinkHeadings,
+            {
+              behavior: "append",
+              properties: {
+                className: ["heading-anchor"],
+                ariaLabel: "Link to this section",
+              },
+              content: {
+                type: "text",
+                value: " #",
+              },
+            },
+          ],
+        ],
+      }),
+    },
     tailwindcss(),
     wasm(),
     comlink(),

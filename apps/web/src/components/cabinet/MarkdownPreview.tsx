@@ -7,7 +7,7 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { ComponentPropsWithoutRef } from "react";
 
 const MermaidBlock = lazy(() =>
-  import("./MermaidBlock").then((m) => ({ default: m.MermaidBlock })),
+  import("@/components/content/MermaidBlock").then((m) => ({ default: m.MermaidBlock })),
 );
 
 interface MarkdownPreviewProps {

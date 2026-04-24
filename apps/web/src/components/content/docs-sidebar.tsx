@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { CATEGORY_META, findDoc, partitionCategoryForSidebar, type DocMeta } from "@/lib/docs-registry";
+import { DocsSearch, DocsSearchButton } from "./DocsSearch";
 
 interface DocsSidebarProps {
   /**
@@ -42,6 +44,7 @@ export function DocsSidebar({
   variant = "public",
 }: DocsSidebarProps) {
   const faq = findDoc("faq");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const baseSectionGap = variant === "cabinet" ? "space-y-4" : "space-y-5";
   const headingSize = variant === "cabinet" ? "text-caption" : "text-ui";
@@ -49,6 +52,8 @@ export function DocsSidebar({
 
   return (
     <nav aria-label="Documentation" className={`${baseSectionGap} text-sm`}>
+      <DocsSearchButton onClick={() => setSearchOpen(true)} />
+      <DocsSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <Link
         to="/docs"
         className={`text-text-muted hover:text-base-content ${linkSize} block font-medium`}
@@ -165,9 +170,12 @@ export function DocsSidebarCabinet({
   readonly currentGroup?: string;
 }) {
   const faq = findDoc("faq");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   return (
     <nav aria-label="Documentation" className="text-caption space-y-4">
+      <DocsSearchButton onClick={() => setSearchOpen(true)} compact />
+      <DocsSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <Link
         to="/cabinet/docs"
         className="text-text-muted hover:text-base-content block text-xs font-medium"

@@ -14,12 +14,14 @@ neither does your Personal Data Server (PDS).
 
 When you first set up Opake, you'll receive a **24-word secret phrase** — a backup that can
 reconstruct your keys on any device. If you lose both the phrase and every device you're signed
-in on, your encrypted files stay permanently unreadable. That's how end-to-end encryption works;
-there's no recovery channel to exploit.
+in on, your encrypted files stay permanently unreadable. That's how end-to-end encryption
+works: no hidden override, no emergency hatch, no support team with a backup copy. Any of
+those would also be a way in for everyone else.
 
 <Callout type="warning">
-  Write down your 24 words and store it somewhere safe. It is the only way to recover your files
-  if you lose access to all your devices. Read more in [Your Seed Phrase](/docs/seed-phrase).
+  Write down your 24 words and store them somewhere safe. They're the only way to recover your
+  files if you lose access to all your devices. Read more in
+  [What your key actually looks like](/docs/seed-phrase).
 </Callout>
 
 ---
@@ -59,7 +61,7 @@ Your cabinet assembles itself once you provide your keys. Opake pulls the encryp
 the network, decrypts the metadata locally, and reconstructs the folder hierarchy — instantly,
 and only for you.
 
-Even if your server is compromised, an admin only sees opaque blobs and encrypted records. They
-can't tell which file is a PDF or an image, or what folder it sits in.
+Even if your server is compromised, an admin only sees scrambled, unreadable data. They can't
+tell which file is a PDF or an image, or what folder it sits in.
 
-Ready to go deeper into how the math actually works? Read about [Encryption & Keys](/docs/encryption).
+<DocsNext slug="getting-started" />

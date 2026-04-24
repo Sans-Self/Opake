@@ -56,7 +56,7 @@ function NestedDocChapterPage() {
   return (
     <div className="mx-auto flex w-full max-w-6xl gap-10 px-6 pt-28 pb-20 sm:px-10">
       <aside className="hidden shrink-0 lg:block lg:w-60">
-        <div className="sticky top-24">
+        <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1">
           <DocsSidebar currentSlug={slug} currentGroup={category} />
         </div>
       </aside>

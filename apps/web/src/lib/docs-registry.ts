@@ -50,14 +50,14 @@ export const CATEGORY_META: readonly CategoryMeta[] = [
     description: "Store, share, and recover files with Opake.",
   },
   {
-    key: "understand",
-    label: "Under the hood",
-    description: "How Opake protects your data — the crypto, the records, the protocol.",
-  },
-  {
     key: "build",
     label: "For developers",
     description: "Program against Opake: CLI, SDK, React hooks, lexicons.",
+  },
+  {
+    key: "understand",
+    label: "Under the hood",
+    description: "How Opake protects your data — the crypto, the records, the protocol.",
   },
 ];
 
@@ -81,28 +81,30 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     title: "Multi-Device Magic",
     icon: "pairing",
     description:
-      "Securely transfer your identity keypair to new devices using your PDS as a relay.",
+      "Move your identity onto a new phone or laptop without putting it on the network in plaintext.",
   },
   {
     slug: "seed-phrase",
     category: "use",
-    title: "Your Seed Phrase",
+    title: "What your key actually looks like",
     icon: "seedling",
-    description: "Back up and recover your identity with a 24-word recovery phrase.",
+    description:
+      "Twenty-four words that can bring your identity back on any device — your fallback when nothing else is left.",
   },
   {
     slug: "sharing",
     category: "use",
     title: "Sharing",
     icon: "share",
-    description: "Share files with another person — one-to-one grants and recipient discovery.",
+    description: "Share a file with someone else. All you need is their handle.",
   },
   {
     slug: "workspaces",
     category: "use",
     title: "Workspaces",
     icon: "group",
-    description: "Share folders with teams, families, and research groups — no re-encryption.",
+    description:
+      "Share folders with teams, families, and research groups. Add and remove people without re-uploading files.",
   },
   {
     slug: "troubleshooting",
@@ -110,29 +112,6 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     title: "Troubleshooting",
     icon: "question",
     description: "Common problems and how to fix them.",
-  },
-
-  // -- Under the hood --------------------------------------------------------
-  {
-    slug: "encryption",
-    category: "understand",
-    title: "Encryption & Keys",
-    icon: "lock",
-    description: "How end-to-end encryption works in Opake and how your keys are managed.",
-  },
-  {
-    slug: "at-protocol",
-    category: "understand",
-    title: "AT Protocol",
-    icon: "network",
-    description: "The open standard powering Opake — identity, data portability, and federation.",
-  },
-  {
-    slug: "glossary",
-    category: "understand",
-    title: "Glossary",
-    icon: "book",
-    description: "A quick-hit reference for the terminology and acronyms we use in Opake.",
   },
 
   // -- For developers --------------------------------------------------------
@@ -259,6 +238,29 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     icon: "network",
     description:
       "The atproto collections, record schemas, and encryption envelope Opake publishes to a PDS.",
+  },
+
+  // -- Under the hood --------------------------------------------------------
+  {
+    slug: "encryption",
+    category: "understand",
+    title: "Encryption & Keys",
+    icon: "lock",
+    description: "How end-to-end encryption works in Opake and how your keys are managed.",
+  },
+  {
+    slug: "at-protocol",
+    category: "understand",
+    title: "AT Protocol",
+    icon: "network",
+    description: "The open standard powering Opake — identity, data portability, and federation.",
+  },
+  {
+    slug: "glossary",
+    category: "understand",
+    title: "Glossary",
+    icon: "book",
+    description: "A quick-hit reference for the terminology and acronyms we use in Opake.",
   },
 
   // -- Cross-cutting ---------------------------------------------------------

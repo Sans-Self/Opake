@@ -21,6 +21,11 @@ interface MermaidBlockProps {
   readonly code: string;
 }
 
+/**
+ * Render a Mermaid diagram from its source string. Mermaid is dynamically
+ * imported so the ~500 KB library only loads on pages that use it (cabinet
+ * markdown preview, docs sequence diagrams).
+ */
 export function MermaidBlock({ code }: MermaidBlockProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,5 +69,15 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     );
   }
 
-  return <div ref={containerRef} className="my-4 flex justify-center [&>svg]:max-w-full" />;
+  // `role="img"` marks the rendered SVG as a single image for assistive tech.
+  // The accessible name comes from the wrapping `<figure aria-label=...>`
+  // in SequenceDiagram; if MermaidBlock is used standalone (MarkdownPreview),
+  // the surrounding context is expected to carry that meaning.
+  return (
+    <div
+      ref={containerRef}
+      role="img"
+      className="my-4 flex justify-center [&>svg]:max-w-full"
+    />
+  );
 }

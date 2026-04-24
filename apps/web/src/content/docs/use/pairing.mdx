@@ -11,16 +11,16 @@
 Traditional apps sync your data by copying everything to a central server. If that server is
 compromised, so is your privacy.
 
-Opake uses **Device Pairing** instead: a direct exchange between two of your own devices. They
-perform a cryptographic handshake that transfers your encryption identity through the PDS as
-ciphertext. The PDS relays the messages without understanding what's inside them.
+Opake uses **Device Pairing** instead: a direct, encrypted exchange between two of your own
+devices. Your identity moves from the old device to the new one through the PDS, but it's
+scrambled on the way. The PDS relays the bytes without seeing what's in them.
 
 ---
 
 ## The Pairing Process
 
 Your private keys only leave one device to arrive on another. At no point are they readable by
-anyone but the two devices in the handshake.
+anyone but the two devices involved.
 
 ### 1. Requesting access (New Device)
 
@@ -37,7 +37,7 @@ On your new phone or laptop, you'll initiate the pairing. Your device generates 
   </PlatformTab>
 </PlatformToggle>
 
-### 2. Approvaling access (Existing Device)
+### 2. Approving access (Existing Device)
 
 Your current device will see a notification that a new guest is asking to join your cabinet.
 
@@ -59,12 +59,12 @@ identity. Then it deletes the request and response records from your PDS.
 
 Even if someone is actively watching your PDS during the handshake, they can't recover the keys.
 
-The "temporary lock" your new device made in step 1 is unique to that device — only it holds
-the matching key. When your existing device wraps your identity inside that lock, the only
-party who can unlock the package is the new device itself. The PDS shuttles the locked package
-between the two devices; it never holds the key.
+The "temporary lock" your new device made in step 1 belongs only to that device; nobody else
+holds the matching key. When your existing device wraps your identity inside that lock, only
+the new device can unlock the package. The PDS shuttles the locked package between the two
+devices; it never holds the key.
 
-For the specific algorithms Opake uses underneath, see [Encryption & Keys](/docs/encryption).
+For the specific algorithms Opake uses, see [Encryption & Keys](/docs/encryption).
 
 <Callout type="warning">
   Verify that the pairing request you're approving is actually from your own device. Approving a
@@ -72,4 +72,4 @@ For the specific algorithms Opake uses underneath, see [Encryption & Keys](/docs
   and trust.
 </Callout>
 
-Ready to learn about the foundation of all this? Read about the [AT Protocol](/docs/at-protocol).
+<DocsNext slug="pairing" />

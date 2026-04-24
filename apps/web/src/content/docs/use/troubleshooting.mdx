@@ -20,7 +20,9 @@ If Opake can't find your account, it's usually because your handle (e.g., `you.b
 If the browser window opens for login but never redirects you back to Opake:
 
 - **Check for ad-blockers:** Some aggressive browser extensions might block the redirect URL.
-- **CLI specific:** The CLI uses a temporary server on `127.0.0.1`. Ensure your firewall is not blocking local loopback connections.
+- **CLI specific:** The CLI spins up a small server on your own machine (`127.0.0.1`) to
+  receive the redirect. Make sure your firewall isn't blocking connections to your own
+  machine.
 
 ---
 
@@ -28,20 +30,19 @@ If the browser window opens for login but never redirects you back to Opake:
 
 ### Upload fails halfway (storage limits)
 
-Opake uploads files as single blobs to the AT Protocol, so large files stress both your
-connection and the PDS's blob limits.
+Opake uploads each file to the AT Protocol in one piece, so large files lean on both your
+connection and whatever size limit your PDS enforces.
 
 - **Default size cap:** Opake caps upload size to stay within what most PDS providers accept
   without prior coordination.
-- **Increasing the cap:** You (or your PDS administrator) can raise it by publishing
-  configuration records to your repository. See the [Lexicon reference](/docs/lexicons) for the
-  schema.
+- **Increasing the cap:** You (or your PDS administrator) can raise it by publishing a
+  configuration record. See the [Lexicon reference](/docs/lexicons) for the exact format.
 - **Network stability:** If your connection drops mid-upload, the upload fails and you have to
   re-send. Resume support is on the roadmap, not there yet.
 
 ### "Unable to Decrypt File"
 
-The most serious error. Opake can't unwrap the key for this file under the identity you're
+The most serious error. Opake can't unlock the key for this file under the identity you're
 signed in with. Two common causes:
 
 - **Wrong account.** Check you're logged into the account the file was shared with.
@@ -58,14 +59,18 @@ signed in with. Two common causes:
 If you can't share a file with someone:
 
 - **Handle vs. DID:** Ensure the handle is correct.
-- **Public Key Missing:** The recipient must have logged into Opake at least once to publish their [Public Encryption Key](/docs/encryption). If they haven't done this, you cannot "wrap" a file to them.
+- **Public Key Missing:** The recipient has to have logged into Opake at least once, so their
+  [Public Encryption Key](/docs/encryption) is published on their PDS. If it isn't, Opake has
+  no key to encrypt the file against.
 
 ### "I don't see shared files in my inbox"
 
-Opake uses an **indexer** to index sharing grants.
+Opake relies on an **indexer** — a helper service that watches for new grants across the
+network and routes each one to the right inbox.
 
-- **Index Lag:** Sometimes it takes a few moments for the firehose to catch up.
-- **Indexer Status:** Check if the indexer service is healthy. If the indexer is down, your inbox will appear empty even if the files exist.
+- **Index Lag:** Sometimes it takes a few moments for newly published grants to be picked up.
+- **Indexer Status:** If the indexer service is down or unhealthy, your inbox will appear
+  empty even if the files exist.
 
 ---
 
@@ -74,3 +79,5 @@ Opake uses an **indexer** to index sharing grants.
   Tangled](https://tangled.org/opake.app/opake/issues). Include any error messages and
   details about your environment (Web or CLI).
 </Callout>
+
+<DocsNext slug="troubleshooting" />

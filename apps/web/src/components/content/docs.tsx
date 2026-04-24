@@ -166,25 +166,44 @@ export function DocsNext({ slug }: DocsNextProps) {
   // card is its own visual affordance and doesn't need an underline on top.
   const className =
     "not-prose border-border-accent/40 bg-base-100 group hover:border-primary/60 hover:shadow-panel-sm mt-12 flex items-center justify-between rounded-xl border p-4 no-underline transition-all";
+  // Accessible name for screen readers. The visible "Next" + title works for
+  // sighted users, but the role-less link needs an explicit aria-label so
+  // SR users hear a single clear "Next chapter: <title>" announcement.
+  const accessibleLabel = `Next chapter: ${next.title}`;
   const body = (
     <>
       <div className="flex flex-col">
-        <span className="text-text-muted text-ui">Next</span>
-        <span className="text-base-content text-[1.05rem] font-medium">{next.title}</span>
+        <span aria-hidden="true" className="text-text-muted text-ui">
+          Next
+        </span>
+        <span aria-hidden="true" className="text-base-content text-[1.05rem] font-medium">
+          {next.title}
+        </span>
       </div>
       <ArrowRightIcon
         size={18}
+        aria-hidden="true"
         className="text-primary transition-transform group-hover:translate-x-1"
       />
     </>
   );
 
   return next.group ? (
-    <Link to="/docs/$category/$slug" params={{ category: next.group, slug: next.slug }} className={className}>
+    <Link
+      to="/docs/$category/$slug"
+      params={{ category: next.group, slug: next.slug }}
+      className={className}
+      aria-label={accessibleLabel}
+    >
       {body}
     </Link>
   ) : (
-    <Link to="/docs/$slug" params={{ slug: next.slug }} className={className}>
+    <Link
+      to="/docs/$slug"
+      params={{ slug: next.slug }}
+      className={className}
+      aria-label={accessibleLabel}
+    >
       {body}
     </Link>
   );

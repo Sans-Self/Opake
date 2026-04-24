@@ -1,3 +1,5 @@
+import { sharingFlow } from "./_diagrams";
+
 <ChapterHeader title="The Open Network: Your Data, Anywhere" />
 
 <Lead>
@@ -71,6 +73,11 @@ each other as part of the protocol — you can share a 1 GB encrypted video with
 different host and they stream it straight from your cabinet. The PDS on each side only ever
 sees ciphertext; the encryption is the access control.
 
+<SequenceDiagram
+  code={sharingFlow}
+  caption="Sharing across the Atmosphere: the grant travels through the indexer, the ciphertext stays on the original PDS, and the recipient fetches directly."
+/>
+
 ---
 
 ## Resources & Further Reading
@@ -90,4 +97,4 @@ tech behind this movement, we recommend these resources:
 - **[A Social Filesystem](https://overreacted.io/a-social-filesystem/):** Dan Abramov's vision of the AT Protocol as a decentralized filesystem—the very vision Opake is building.
 
 
-Ready to learn about how we keep this open network private? Read about [Encryption & Keys](/docs/encryption).
+<DocsNext slug="at-protocol" />

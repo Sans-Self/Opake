@@ -75,7 +75,7 @@ function DocChapterPage() {
     <PanelShell depth={1} breadcrumbs={breadcrumbs} footer={`${meta.title} · Opake`}>
       <div className="flex gap-6 p-6">
         <aside className="hidden w-44 shrink-0 md:block">
-          <div className="sticky top-0">
+          <div className="sticky top-0 max-h-[calc(100vh-2rem)] overflow-y-auto pr-1">
             <DocsSidebarCabinet currentSlug={meta.slug} />
           </div>
         </aside>
