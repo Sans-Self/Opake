@@ -61,7 +61,7 @@ function LoginPage() {
           Use the handle from any AT Protocol app — Bluesky, your own PDS, or anywhere else in the
           Atmosphere. Opake doesn't issue its own accounts.
         </p>
-        <label className="input input-bordered mb-3 flex items-center gap-2">
+        <label className="input input-bordered mb-3 flex w-full items-center gap-2">
           <input
             type="text"
             placeholder="you.bsky.social"

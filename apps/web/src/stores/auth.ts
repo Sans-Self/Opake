@@ -10,6 +10,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Opake, ResolvedIdentity } from "@opake/sdk";
+import { OpakeError } from "@opake/sdk";
 import type { IndexedDbStorage } from "@opake/sdk/storage/indexeddb";
 import { base64ToUint8Array } from "@/lib/encoding";
 import { ensurePersistentStorage } from "@/lib/persistent-storage";
@@ -215,6 +216,120 @@ async function resolveIdentityState(
   return keysMatch ? { status: "ready" } : { status: "conflict" };
 }
 
+/**
+ * Resolve identity state when no Opake instance is available — i.e. when
+ * `Opake.init` threw `IdentityMissing` because there's no local identity on
+ * this device yet. We can't call `opake.resolveIdentity(...)` without an
+ * instance, so probe the PDS directly for `app.opake.publicKey/self` to
+ * distinguish `remote_only` (user has an Opake identity elsewhere, needs
+ * recovery) from `none` (genuinely fresh account, needs identity creation).
+ *
+ * `com.atproto.repo.getRecord` is unauthenticated, so no session is needed.
+ */
+async function resolveIdentityStateWithoutOpake(
+  storage: IndexedDbStorage,
+  did: string,
+  pdsUrl: string,
+): Promise<IdentityState> {
+  const hasRemoteKey = await probeRemotePublicKey(pdsUrl, did);
+  // `resolveIdentityState` handles the local-identity lookup + match logic;
+  // pass a minimal remote shape reflecting only whether a key exists.
+  const remote: ResolvedIdentity | null = hasRemoteKey
+    ? ({ publicKey: new Uint8Array(0) } as ResolvedIdentity)
+    : null;
+  const state = await resolveIdentityState(storage, did, remote);
+  // With no local identity, `resolveIdentityState` returns `remote_only` for
+  // any non-null remote — the empty-publicKey sentinel is never compared.
+  // If somehow a local identity also exists (unusual but possible mid-flow),
+  // fall back to `remote_only` so the user lands on the recovery UI rather
+  // than a bogus `conflict` computed against an empty key.
+  return state.status === "conflict" ? { status: "remote_only" } : state;
+}
+
+async function probeRemotePublicKey(pdsUrl: string, did: string): Promise<boolean> {
+  const url = new URL("/xrpc/com.atproto.repo.getRecord", pdsUrl);
+  url.searchParams.set("repo", did);
+  url.searchParams.set("collection", "app.opake.publicKey");
+  url.searchParams.set("rkey", "self");
+  try {
+    const res = await fetch(url);
+    return res.ok;
+  } catch {
+    // Network failure during the probe. Defaulting to `false` lands the user
+    // on the fresh-account flow; a real remote key will surface on the next
+    // boot when the probe retries.
+    return false;
+  }
+}
+
+/**
+ * Outcome of attempting to open an Opake instance for a stored account.
+ *
+ * Boot and OAuth-callback both share the same three-way fork: either we
+ * successfully constructed an Opake (happy path), we have a valid session
+ * but no local identity yet (the user needs to recover or pair), or the
+ * session itself is unusable (missing, revoked, corrupt). Modelling the
+ * outcome as a discriminated union keeps the call sites linear.
+ */
+type OpakeInitResult =
+  | { readonly kind: "opake"; readonly opake: Opake }
+  | { readonly kind: "identity-missing" }
+  | { readonly kind: "signed-out" };
+
+/**
+ * Try to build an Opake for `did`, classifying the outcome. Also runs the
+ * liveness probe (`checkSession`) — a dead session degrades to `signed-out`
+ * so the caller doesn't have to repeat the dead-token cleanup dance.
+ *
+ * The `seedIndexerUrl` call runs on the happy path so the returned Opake is
+ * ready to use immediately; callers just need to assign it to the module
+ * singleton and carry on.
+ */
+async function classifyOpakeInit(
+  OpakeCtor: typeof Opake,
+  storage: IndexedDbStorage,
+  did: string,
+): Promise<OpakeInitResult> {
+  try {
+    const opake = await OpakeCtor.init({ storage });
+    await seedIndexerUrl(opake);
+    return await classifySession(opake, storage, did);
+  } catch (err) {
+    if (err instanceof OpakeError && err.kind === "IdentityMissing") {
+      return { kind: "identity-missing" };
+    }
+    return { kind: "signed-out" };
+  }
+}
+
+/**
+ * Liveness-check an already-constructed Opake. Opake.init loads tokens from
+ * storage without validating them — stale or revoked tokens only fail on the
+ * first real XRPC call. `checkSession` forces that round-trip early so a
+ * dead session doesn't limp into the app and fail somewhere less obvious.
+ */
+async function classifySession(
+  opake: Opake,
+  storage: IndexedDbStorage,
+  did: string,
+): Promise<OpakeInitResult> {
+  try {
+    await opake.checkSession();
+    return { kind: "opake", opake };
+  } catch (err) {
+    if (isDeadSessionError(err)) {
+      opake.destroy();
+      await storage.clearSession(did).catch(() => {
+        /* best effort — storage may already be gone */
+      });
+      return { kind: "signed-out" };
+    }
+    // Non-auth error (network blip, PDS hiccup) — keep the instance, the
+    // caller can retry when the user takes their next action.
+    return { kind: "opake", opake };
+  }
+}
+
 /** Derive identity from seed phrase, save, re-init Opake with the new identity. */
 async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promise<void> {
   const { Opake } = await loadSdk();
@@ -269,38 +384,23 @@ export const useAuthStore = create<AuthStore>()(
             return;
           }
 
-          // Opake.init loads the session — may not exist yet on the
-          // OAuth callback page (config saved pre-redirect, session
-          // saved by completeLogin after redirect).
-          const opake = await Opake.init({ storage: s }).catch(() => null);
-          if (!opake) {
+          // Opake.init can land in three distinct states:
+          //   1. signed-out — session missing / dead / unreadable
+          //   2. identity-missing — authenticated but no local keys yet
+          //                         (user needs recovery or pairing)
+          //   3. opake — happy path
+          const result = await classifyOpakeInit(Opake, s, did);
+
+          if (result.kind === "signed-out") {
+            bootPromise = null;
             set((draft) => {
               draft.session = { status: "none" };
             });
             return;
           }
-          await seedIndexerUrl(opake);
-          opakeInstance = opake;
 
-          // Probe: verify the session is actually usable. Opake.init()
-          // loads tokens from storage without validating them — stale
-          // or revoked tokens only fail on the first real XRPC call.
-          try {
-            await opake.checkSession();
-          } catch (err) {
-            if (isDeadSessionError(err)) {
-              opakeInstance = null;
-              opake.destroy();
-              await s.clearSession(did).catch(() => {
-                /* best effort */
-              });
-              bootPromise = null;
-              set((draft) => {
-                draft.session = { status: "none" };
-              });
-              return;
-            }
-            // Non-auth error (network blip, etc.) — continue
+          if (result.kind === "opake") {
+            opakeInstance = result.opake;
           }
 
           set((draft) => {
@@ -316,7 +416,10 @@ export const useAuthStore = create<AuthStore>()(
 
           fetchProfileInBackground(did);
 
-          const identityState = await fetchAndResolveIdentity(opake, did, s);
+          const identityState =
+            result.kind === "identity-missing"
+              ? await resolveIdentityStateWithoutOpake(s, did, account.pds_url)
+              : await fetchAndResolveIdentity(result.opake, did, s);
           set((draft) => {
             draft.identity = identityState;
           });
@@ -388,10 +491,10 @@ export const useAuthStore = create<AuthStore>()(
           redirectUri: redirectUri(),
         });
 
-        const opake = await Opake.init({ storage: s });
-        await seedIndexerUrl(opake);
-        opakeInstance = opake;
-
+        // Mark session active as soon as OAuth completes — the session is
+        // persisted, so the login itself has succeeded. Identity bootstrap
+        // (which may fail with `IdentityMissing` on a fresh device) is a
+        // separate concern handled below.
         set((draft) => {
           draft.session = {
             status: "active",
@@ -405,10 +508,35 @@ export const useAuthStore = create<AuthStore>()(
 
         fetchProfileInBackground(pending.did);
 
-        const identityState = await fetchAndResolveIdentity(opake, pending.did, s);
-        set((draft) => {
-          draft.identity = identityState;
-        });
+        // Try to construct an Opake instance. On a device that has logged in
+        // to this account before, this succeeds and the full identity-state
+        // resolution runs. On a fresh device, `Opake.init` throws
+        // `IdentityMissing` — expected, not a login failure. Fall back to a
+        // PDS-direct probe so the `/devices` route picks the right view
+        // (`RecoverIdentityView` vs `FreshAccountView`).
+        try {
+          const opake = await Opake.init({ storage: s });
+          await seedIndexerUrl(opake);
+          opakeInstance = opake;
+
+          const identityState = await fetchAndResolveIdentity(opake, pending.did, s);
+          set((draft) => {
+            draft.identity = identityState;
+          });
+        } catch (err) {
+          if (err instanceof OpakeError && err.kind === "IdentityMissing") {
+            const identityState = await resolveIdentityStateWithoutOpake(
+              s,
+              pending.did,
+              pending.pdsUrl,
+            );
+            set((draft) => {
+              draft.identity = identityState;
+            });
+          } else {
+            throw err;
+          }
+        }
 
         // Reset boot promise so it doesn't return stale state
         bootPromise = null;
