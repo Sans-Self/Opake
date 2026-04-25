@@ -20,13 +20,15 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 2. **Grants are separate records**, not inline in the document. Independent creation/deletion, efficient querying, matches the atproto pattern.
 3. **Two-layer key for keyrings.** Per-document content key wrapped under group key. Rotating the group key doesn't require re-encrypting blobs.
 4. **No revocation guarantee for historical access.** Same as git-crypt. True revocation requires re-encrypting the blob with a new content key.
-5. **Plaintext metadata is opt-in transparency.** Names and tags unencrypted by default for AppView indexing. Full opacity via dummy values + encrypted metadata payload.
+5. **All metadata is always encrypted.** Names, tags, MIME types, sizes — everything goes through `encryptedMetadata` (AES-256-GCM with the document's content key). Record-level fields are dummies (`name="encrypted"`, `mimeType="application/octet-stream"`). No server-side search/indexing without client-side decryption.
 6. **Public keys as PDS records.** atproto DID docs only have signing keys. Opake publishes X25519 encryption public keys as `app.opake.publicKey/self` singleton records.
 7. **Multi-device: seed phrase.** Identity keypairs are derived from a BIP-39 24-word mnemonic via PBKDF2 + HKDF. The seed phrase is the default identity creation path — no random keypair fallback. Recovery via `opake recover` (CLI) or the web UI.
 8. **Storage trait in opake-core.** Config, Identity, Session types and the `Storage` trait live in core so both CLI (`FileStorage`, filesystem) and web (`IndexedDbStorage`, IndexedDB) share the same contract. Platform-specific I/O is injected, never imported.
-9. **Domain API: `Opake` → `FileManager` / `WorkspaceAdmin`.** The `Opake<T, R, S>` struct bundles client + identity + RNG + time + storage. All CLI commands route through Opake (sole holdout: `pair request` on a new device with no identity). Call `.file_context(workspace_name?)` + `.file_manager(&context)` for file ops, `.workspace_admin()` for membership ops (add/remove member, leave). Opake itself handles workspace CRUD, sharing, identity, pairing, config, maintenance. All mutations auto-persist sessions via `#[signoff]` (FileManager) or `#[signoff(self)]` (Opake). Raw functions are `pub(crate)`; the domain types ARE the public API.
+9. **Domain API: `Opake` → `FileManager` / `WorkspaceAdmin`.** The `Opake<T, R, S>` struct bundles client + identity + RNG + time + storage. All CLI commands route through Opake (sole holdout: `pair request` on a new device with no identity). Call `.file_context(workspace_name?)` + `.file_manager(&context)` for file ops, `.workspace_admin()` for membership ops (add/remove member, leave). Opake itself handles workspace CRUD, sharing, identity, pairing, config, maintenance. All mutations auto-persist sessions via `#[signoff]` (FileManager) or `#[signoff(self)]` (Opake). Raw functions are `pub(crate)`; the domain types ARE the public API. Live workspace-list state is kept in a `WorkspaceKeeper` (parallel to `TreeKeeper` for directory trees) — bootstrapped by `listWorkspaces`, patched incrementally by SSE `keyring:upsert` / `keyring:delete` events. Incoming shares are tracked in `InboxKeeper` — bootstrapped by `listInbox`, patched by SSE `grant:upsert` / `grant:delete` events (indexer fans both out to owner and recipient personal topics).
 10. **Workspace is the domain concept.** Keyrings are crypto plumbing. The `Workspace` type wraps keyring data with domain semantics. CLI uses `opake workspace`, not `opake keyring`. Lexicon stays `app.opake.keyring` (wire format).
-11. **Sensitive types auto-zeroize.** `RedactedDebug` derive macro generates `Zeroize + Drop` for `#[redact]` fields. ContentKey, Identity, Session types are all zeroized on drop.
+11. **Sensitive types auto-zeroize.** `RedactedDebug` derive macro generates `Zeroize + Drop` for `#[redact]` fields. ContentKey, Identity, DpopKeyPair, Session types are all zeroized on drop. Nested structs chain — dropping an OAuthSession also zeroizes its DpopKeyPair.
+12. **WASM is the security boundary.** Tokens, DPoP keys, session credentials, and all crypto MUST live in WASM (opake-core). JS cannot zeroize memory — strings are immutable and GC'd on the runtime's schedule. The OAuth login flow itself runs in WASM (`startOAuthLogin`, `completeOAuthLogin`, `loginWithAppPasswordWasm`). Token expiry is checked via `tokenExpiresAt()` (returns only the timestamp). Refresh runs via `proactiveRefresh()` (calls `refresh_token` directly). JS never calls `session()` for auth state — that leaks tokens to the GC. Exception: `PendingLogin` state crosses the boundary during redirect flows (DPoP key in sessionStorage), bounded by a 10-minute TTL and auto-cleared on read.
+13. **Granular OAuth scopes.** Per-collection `repo:app.opake.*` scopes instead of the catch-all `transition:generic`. The scope string is built from `crate::scope::OPAKE_COLLECTIONS` — single source of truth. Adding a new collection means adding it to `OPAKE_COLLECTIONS` (compile-time test enforces this), the lexicon JSON, the permission set (`app.opake.authFullAccess`), and the indexer consumer if indexed.
 
 ## Documentation
 
@@ -37,16 +39,16 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 - **[docs/AUTH.md](docs/AUTH.md)** — OAuth/DPoP authentication, multi-account, device pairing
 - **[docs/CRYPTO.md](docs/CRYPTO.md)** — Algorithms, constants, key hierarchy, operation reference
 - **[docs/FLOWS.md](docs/FLOWS.md)** — Sequence diagrams for every operation
-- **[docs/appview.md](docs/appview.md)** — AppView config, auth, API endpoints
+- **[docs/indexer.md](docs/indexer.md)** — Indexer config, auth, API endpoints
 - **[lexicons/README.md](lexicons/README.md)** — Full lexicon schema reference
 - **[lexicons/EXAMPLES.md](lexicons/EXAMPLES.md)** — Annotated example records
 - **[docs/LICENSING.md](docs/LICENSING.md)** — AGPL-3.0 implications for self-hosters, plugin devs, contributors
 - **[SECURITY.md](SECURITY.md)** — Vulnerability reporting, scope, response timeline
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Code style, testing, architecture overview
 
-## AppView (Elixir)
+## Indexer (Elixir)
 
-See **[docs/appview.md](docs/appview.md)** for tables, endpoints, deployment, and firehose details.
+See **[docs/indexer.md](docs/indexer.md)** for tables, endpoints, deployment, and firehose details.
 
 ### Conventions for agents
 

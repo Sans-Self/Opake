@@ -9,10 +9,11 @@ use std::collections::HashMap;
 use log::trace;
 
 use crate::atproto;
-use crate::client::TreeDirectory;
-use crate::crypto::{self, DirectoryMetadata, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, DirectoryMetadata, X25519PrivateKey};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
+use crate::indexer::sse::events::SseDirectoryRecord;
+use crate::indexer::TreeDirectory;
 use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 use crate::storage::CachedRecord;
 
@@ -33,6 +34,73 @@ pub enum EntryKind {
     Document,
     Directory,
 }
+
+/// Result of an incremental mutation via `apply_directory_delta`.
+///
+/// Consumers use this to decide whether to notify watchers and which
+/// parent directories are affected (for URI-targeted watcher routing).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeChange {
+    /// A directory was newly added to the tree.
+    Inserted { uri: String },
+    /// A directory's entries or metadata changed.
+    Updated { uri: String },
+    /// A directory was removed from the tree.
+    Removed { uri: String },
+    /// The delta matched the existing state — no effective change.
+    /// Watchers should skip notification.
+    NoOp,
+}
+
+impl TreeChange {
+    /// The URI affected by this change, if any.
+    pub fn uri(&self) -> Option<&str> {
+        match self {
+            Self::Inserted { uri } | Self::Updated { uri } | Self::Removed { uri } => Some(uri),
+            Self::NoOp => None,
+        }
+    }
+
+    /// True if this change warrants firing watcher notifications.
+    pub fn is_effective(&self) -> bool {
+        !matches!(self, Self::NoOp)
+    }
+}
+
+/// Decryption context for applying SSE events to an in-memory tree.
+///
+/// Provides the keys needed to decrypt directory names. Cabinet trees
+/// use `private_key` for direct key wrapping; workspace trees use
+/// `group_keys` (keyring URI → unwrapped content key) for keyring
+/// wrapping. Trees can hold directories of either kind, so both fields
+/// may be needed on the same context.
+#[derive(Debug)]
+pub struct DecryptionCtx<'a> {
+    pub did: &'a str,
+    pub private_key: Option<&'a X25519PrivateKey>,
+    pub group_keys: &'a HashMap<String, ContentKey>,
+}
+
+impl<'a> DecryptionCtx<'a> {
+    pub fn cabinet(did: &'a str, private_key: &'a X25519PrivateKey) -> Self {
+        Self {
+            did,
+            private_key: Some(private_key),
+            group_keys: EMPTY_GROUP_KEYS.get_or_init(HashMap::new),
+        }
+    }
+
+    pub fn workspace(did: &'a str, group_keys: &'a HashMap<String, ContentKey>) -> Self {
+        Self {
+            did,
+            private_key: None,
+            group_keys,
+        }
+    }
+}
+
+static EMPTY_GROUP_KEYS: std::sync::OnceLock<HashMap<String, ContentKey>> =
+    std::sync::OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct ResolvedPath {
@@ -116,20 +184,22 @@ impl DirectoryTree {
     /// Override the root directory URI.
     ///
     /// Used for workspace trees where the root is not `directory/self` but
-    /// a deterministic `directory/ws-{keyring_rkey}`. Returns false if the
-    /// URI isn't in the tree (caller should handle the error).
-    pub fn set_root(&mut self, uri: &str) -> bool {
-        if self.directories.contains_key(uri) {
-            self.root_uri = Some(uri.to_owned());
-            true
-        } else {
-            false
-        }
+    /// a deterministic `directory/ws-{keyring_rkey}`. Stores the URI
+    /// unconditionally — the tree records "this is the expected root"
+    /// even if the corresponding directory record hasn't landed yet
+    /// (cold indexer window, SSE still catching up). When the record
+    /// does arrive via SSE upsert, it slots into `directories` under
+    /// this URI and the tree becomes fully populated. Gating this on
+    /// `contains_key` made the workspace root silently unmarked during
+    /// the load→install→first-SSE-event window, which surfaced as
+    /// `snapshot.rootUri === undefined` in the JS consumer.
+    pub fn set_root(&mut self, uri: &str) {
+        self.root_uri = Some(uri.to_owned());
     }
 
     /// Load the directory hierarchy from the PDS (test use only).
     ///
-    /// Production code uses AppView snapshots via `from_cached_records()`.
+    /// Production code uses Indexer snapshots via `from_cached_records()`.
     #[cfg(test)]
     pub(crate) async fn load(
         client: &mut crate::client::XrpcClient<impl crate::client::Transport>,
@@ -747,7 +817,98 @@ impl DirectoryTree {
         Self::from_records(pairs)
     }
 
-    /// Apply a delta from the AppView to cached records, returning a new set.
+    // -----------------------------------------------------------------------
+    // Incremental mutation (for SSE-driven tree patching)
+    // -----------------------------------------------------------------------
+
+    /// Apply a single indexed directory record to the in-memory tree.
+    ///
+    /// This is the incremental sibling of [`from_records`] and
+    /// [`with_delta`]. SSE-driven consumers call it per event to keep
+    /// a persistent tree in sync without rebuilding from scratch.
+    ///
+    /// The record's name is decrypted in place using `ctx`, so
+    /// subsequent reads see the correct plaintext name. If decryption
+    /// fails (wrong key, missing keyring), the name falls back to `"?"`
+    /// — consistent with [`decrypt_names_with_group_keys`].
+    ///
+    /// Returns a [`TreeChange`] describing the effect. Callers use this
+    /// to decide whether to fire watcher notifications.
+    pub fn apply_directory_delta(
+        &mut self,
+        dir: &SseDirectoryRecord,
+        ctx: &DecryptionCtx<'_>,
+    ) -> Result<TreeChange, Error> {
+        let uri = &dir.directory_uri;
+
+        // Handle deletion first.
+        if dir.deleted_at.is_some() {
+            if self.directories.remove(uri).is_none() {
+                return Ok(TreeChange::NoOp);
+            }
+            // Clear root_uri if we just removed the root.
+            if self.root_uri.as_deref() == Some(uri.as_str()) {
+                self.root_uri = None;
+            }
+            return Ok(TreeChange::Removed { uri: uri.clone() });
+        }
+
+        // Upsert path. Parse key_wrapping and encrypted_metadata from the
+        // raw JSON values — the SSE payload mirrors the PDS record shape.
+        let key_wrapping = parse_key_wrapping(dir.key_wrapping.as_ref())?;
+        let encrypted_metadata = parse_encrypted_metadata(dir.encrypted_metadata.as_ref())?;
+
+        // NoOp detection happens at the TreeKeeper layer via snapshot
+        // comparison — DirectoryInfo's nested types don't all derive Eq,
+        // and structural equality on encrypted bytes isn't meaningful
+        // anyway (two apply calls of the same record always match).
+        let existed = self.directories.contains_key(uri);
+
+        // Build the new DirectoryInfo.
+        let mut info = DirectoryInfo {
+            name: String::new(),
+            key_wrapping,
+            encrypted_metadata,
+            entries: dir.entries.clone(),
+        };
+
+        // Decrypt name in place. Errors fall through to "?".
+        info.name = decrypt_directory_name(&info, ctx).unwrap_or_else(|| "?".into());
+
+        self.directories.insert(uri.clone(), info);
+
+        // Detect root by rkey=="self" unless we already have a root set
+        // via set_root() (workspace case, where root is ws-<keyring_rkey>).
+        if self.root_uri.is_none() {
+            if let Ok(parsed) = atproto::parse_at_uri(uri) {
+                if parsed.rkey == ROOT_DIRECTORY_RKEY {
+                    self.root_uri = Some(uri.clone());
+                    // Override the just-decrypted name with the canonical root name.
+                    if let Some(entry) = self.directories.get_mut(uri) {
+                        entry.name = ROOT_DIRECTORY_NAME.into();
+                    }
+                }
+            }
+        }
+
+        if existed {
+            Ok(TreeChange::Updated { uri: uri.clone() })
+        } else {
+            Ok(TreeChange::Inserted { uri: uri.clone() })
+        }
+    }
+
+    /// Clear cached decrypted names. Used after a keyring rotation,
+    /// since the content keys that produced the names are now stale.
+    /// Subsequent reads will show `"?"` until the tree is re-decrypted
+    /// (either via a full `decrypt_names` pass or per-directory apply).
+    pub fn invalidate_decrypted_names(&mut self) {
+        for info in self.directories.values_mut() {
+            info.name.clear();
+        }
+    }
+
+    /// Apply a delta from the Indexer to cached records, returning a new set.
     ///
     /// Deleted directories are filtered out. New/updated directories replace
     /// existing records by URI. Pure function — no mutation.
@@ -780,6 +941,50 @@ impl DirectoryTree {
             .chain(upserted.into_values())
             .collect()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Incremental-apply helpers
+// ---------------------------------------------------------------------------
+
+fn parse_key_wrapping(value: Option<&serde_json::Value>) -> Result<KeyWrapping, Error> {
+    let value = value
+        .ok_or_else(|| Error::InvalidRecord("SSE directory event missing key_wrapping".into()))?;
+    serde_json::from_value(value.clone())
+        .map_err(|e| Error::InvalidRecord(format!("invalid key_wrapping: {e}")))
+}
+
+fn parse_encrypted_metadata(value: Option<&serde_json::Value>) -> Result<EncryptedMetadata, Error> {
+    let value = value.ok_or_else(|| {
+        Error::InvalidRecord("SSE directory event missing encrypted_metadata".into())
+    })?;
+    serde_json::from_value(value.clone())
+        .map_err(|e| Error::InvalidRecord(format!("invalid encrypted_metadata: {e}")))
+}
+
+/// Decrypt a single directory's name using the decryption context.
+///
+/// Mirrors the logic in `decrypt_names_with_group_keys` but operates on
+/// one directory at a time. Returns `None` if the key can't be unwrapped
+/// or the metadata can't be decrypted — the caller falls back to `"?"`.
+fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Option<String> {
+    let content_key = match &info.key_wrapping {
+        KeyWrapping::Direct(direct) => {
+            let wrapped = direct.keys.iter().find(|k| k.did == ctx.did)?;
+            let private_key = ctx.private_key?;
+            crypto::unwrap_key(wrapped, private_key).ok()?
+        }
+        KeyWrapping::Keyring(kr) => {
+            let keyring_uri = &kr.keyring_ref.keyring;
+            let group_key = ctx.group_keys.get(keyring_uri)?;
+            let wrapped_bytes = kr.keyring_ref.wrapped_content_key.decode().ok()?;
+            crypto::unwrap_content_key_from_keyring(&wrapped_bytes, group_key).ok()?
+        }
+    };
+
+    crypto::decrypt_metadata::<DirectoryMetadata>(&content_key, &info.encrypted_metadata)
+        .ok()
+        .map(|meta| meta.name)
 }
 
 #[cfg(test)]

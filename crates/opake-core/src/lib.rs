@@ -25,10 +25,10 @@ pub mod atproto;
 pub mod cabinet;
 pub mod client;
 pub mod crypto;
-pub mod daemon;
 pub mod directories;
 pub mod documents;
 pub mod error;
+pub mod indexer;
 pub mod keyrings;
 pub mod manager;
 pub mod metadata;
@@ -38,9 +38,11 @@ pub mod paths;
 pub mod records;
 pub mod reencryption;
 pub mod resolve;
+pub mod scope;
 pub mod sharing;
 pub mod storage;
 pub mod tid;
+pub mod timestamp;
 pub mod workspace;
 
 #[cfg(any(test, feature = "test-utils"))]

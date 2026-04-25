@@ -28,8 +28,8 @@ impl Transport for WasmTransport {
             HttpMethod::Post => "POST",
         };
         log::trace!("[WasmTransport] {} {}", method_str, &request.url);
-        let mut opts = RequestInit::new();
-        opts.method(match request.method {
+        let opts = RequestInit::new();
+        opts.set_method(match request.method {
             HttpMethod::Get => "GET",
             HttpMethod::Post => "POST",
         });
@@ -42,7 +42,7 @@ impl Transport for WasmTransport {
             }
             headers.set(key, value).map_err(js_err)?;
         }
-        opts.headers(&headers);
+        opts.set_headers(&headers);
 
         if let Some(body) = request.body {
             match body {
@@ -51,19 +51,19 @@ impl Transport for WasmTransport {
                     headers
                         .set("Content-Type", "application/json")
                         .map_err(js_err)?;
-                    opts.body(Some(&wasm_bindgen::JsValue::from_str(&serialized)));
+                    opts.set_body(&wasm_bindgen::JsValue::from_str(&serialized));
                 }
                 RequestBody::Bytes { data, content_type } => {
                     headers.set("Content-Type", &content_type).map_err(js_err)?;
                     let array = js_sys::Uint8Array::from(data.as_slice());
-                    opts.body(Some(&array));
+                    opts.set_body(&array);
                 }
                 RequestBody::Form(ref params) => {
                     let encoded = RequestBody::encode_form(params);
                     headers
                         .set("Content-Type", "application/x-www-form-urlencoded")
                         .map_err(js_err)?;
-                    opts.body(Some(&wasm_bindgen::JsValue::from_str(&encoded)));
+                    opts.set_body(&wasm_bindgen::JsValue::from_str(&encoded));
                 }
             }
         }

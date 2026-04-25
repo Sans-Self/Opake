@@ -3,7 +3,7 @@
 // NOTE TO EDITORS:
 // Opake uses a dual-documentation system. If you modify the cryptographic
 // primitives, key wrapping schemes, or security model in this file, you
-// MUST also update the corresponding MDX content in `web/src/content/`
+// MUST also update the corresponding MDX content in `apps/web/src/content/`
 // to prevent documentation drift.
 //
 // This module handles AES-256-GCM content encryption and asymmetric key
@@ -82,6 +82,15 @@ impl std::fmt::Debug for Redacted<'_, Vec<u8>> {
 impl<const N: usize> std::fmt::Debug for Redacted<'_, [u8; N]> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{N} bytes]")
+    }
+}
+
+impl<const N: usize> std::fmt::Debug for Redacted<'_, Option<[u8; N]>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => write!(f, "Some([{N} bytes])"),
+            None => write!(f, "None"),
+        }
     }
 }
 

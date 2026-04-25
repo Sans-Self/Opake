@@ -29,7 +29,7 @@
 
     "keyringMember": {
       "type": "object",
-      "description": "A keyring member: a wrapped group key paired with the member's workspace role. Role is plaintext because the AppView needs it for authorization decisions.",
+      "description": "A keyring member: a wrapped group key paired with the member's workspace role. Role is plaintext because the indexer needs it for authorization decisions.",
       "required": ["wrappedKey", "role"],
       "properties": {
         "wrappedKey": {
@@ -144,7 +144,7 @@
 
     "visibility": {
       "type": "string",
-      "description": "Hint for AppViews and clients about intended visibility of the content.",
+      "description": "Hint for indexers and clients about intended visibility of the content.",
       "knownValues": [
         "private",
         "shared",

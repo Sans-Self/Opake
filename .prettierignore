@@ -1,0 +1,7 @@
+dist/
+node_modules/
+.output/
+target/
+apps/web/src/routeTree.gen.ts
+apps/web/src/wasm/
+packages/opake-sdk/wasm/

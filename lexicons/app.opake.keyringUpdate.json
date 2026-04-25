@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A proposed change to a workspace keyring. Written by a manager to their own PDS when they can't directly modify the owner's keyring record. The owner's daemon applies pending updates via the AppView.",
+      "description": "A proposed change to a workspace keyring. Written by a manager to their own PDS when they can't directly modify the owner's keyring record. The owner's daemon applies pending updates via the indexer.",
       "key": "tid",
       "record": {
         "type": "object",

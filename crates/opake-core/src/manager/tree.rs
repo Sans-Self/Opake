@@ -4,11 +4,11 @@ use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::Transport;
-use crate::client::TreeDelta;
 use crate::crypto::{self, CryptoRng, RngCore};
 use crate::directories::{DirectoryTree, EntryKind, ResolvedPath};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
+use crate::indexer::TreeDelta;
 use crate::records::{Document, Encryption};
 use crate::storage::{CachedCollection, CachedRecord, Storage};
 
@@ -51,7 +51,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     ///
     /// Called after mutations that modify directory records on the PDS.
     /// The cache records stay (for offline use) but `fetched_at` is cleared,
-    /// forcing a full AppView re-sync on next load.
+    /// forcing a full Indexer re-sync on next load.
     pub(crate) async fn invalidate_directory_cache(&self) {
         let scope = dir_scope_key(self.context);
         let _ = self
@@ -64,7 +64,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Load and decrypt the directory tree for the current context.
     ///
     /// Cache-first: reads from local Storage cache if available, syncs
-    /// deltas from the AppView to keep it fresh. Falls back to PDS
+    /// deltas from the Indexer to keep it fresh. Falls back to PDS
     /// `listRecords` for bootstrap (first load with no cache).
     pub async fn load_tree(&mut self) -> Result<DirectoryTree, Error> {
         let scope = dir_scope_key(self.context);
@@ -84,7 +84,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 cached_coll.fetched_at,
             );
 
-            // Sync deltas from AppView if available
+            // Sync deltas from Indexer if available
             let (records, proposals) = self.try_sync_deltas(cached_coll).await?;
             trace!("sync returned {} proposals", proposals.len());
             self.last_proposals = proposals;
@@ -103,7 +103,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Apply pending directory proposals from workspace members.
     ///
     /// Pre-filters proposals against the loaded tree to skip already-applied
-    /// ones (the AppView keeps serving proposals until the editor deletes
+    /// ones (the Indexer keeps serving proposals until the editor deletes
     /// them). Groups remaining proposals by target directory, fetches each
     /// once, batch-applies adds/removes, and submits atomically via
     /// `applyWrites`. Consumes `last_proposals` — subsequent calls return 0.
@@ -306,7 +306,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     ///
     /// After a tree sync, proposals authored by the caller whose effects are
     /// already in the tree are stale. Deleting them from the PDS propagates
-    /// via the firehose so the AppView drops them from its index too.
+    /// via the firehose so the Indexer drops them from its index too.
     ///
     /// Must be called with proposals still in `last_proposals` (before
     /// `apply_pending_proposals` consumes them).
@@ -385,22 +385,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         }
     }
 
-    /// Try to sync deltas from the AppView. If AppView is unavailable,
+    /// Try to sync deltas from the Indexer. If Indexer is unavailable,
     /// return the cached records as-is (offline-capable).
     async fn try_sync_deltas(
         &self,
         cached: CachedCollection,
-    ) -> Result<(Vec<CachedRecord>, Vec<crate::client::TreeProposal>), Error> {
-        let appview_url = match &self.opake.appview_url {
-            Some(url) => url.clone(),
-            None => return Ok((cached.records, Vec::new())),
-        };
-        let signing_key = match self.opake.require_identity() {
-            Ok(id) => match id.signing_key_bytes() {
-                Ok(Some(k)) => k,
-                _ => return Ok((cached.records, Vec::new())),
-            },
-            Err(_) => return Ok((cached.records, Vec::new())),
+    ) -> Result<(Vec<CachedRecord>, Vec<crate::indexer::TreeProposal>), Error> {
+        let indexer_url = self.opake.resolve_indexer_url();
+        let signing_key = match self.opake.identity().signing_key_bytes() {
+            Ok(Some(k)) => k,
+            _ => return Ok((cached.records, Vec::new())),
         };
 
         // Extract sync cursor from the metadata sentinel record (uri = "__sync__")
@@ -413,9 +407,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let delta_result = match self.context {
             FileContext::Cabinet(_) => match since {
                 Some(s) => {
-                    crate::client::fetch_cabinet_sync(
+                    crate::indexer::fetch_cabinet_sync(
                         self.opake.client.transport(),
-                        &appview_url,
+                        &indexer_url,
                         &self.opake.did,
                         &signing_key,
                         s,
@@ -423,9 +417,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .await
                 }
                 None => {
-                    crate::client::fetch_cabinet_snapshot(
+                    crate::indexer::fetch_cabinet_snapshot(
                         self.opake.client.transport(),
-                        &appview_url,
+                        &indexer_url,
                         &self.opake.did,
                         &signing_key,
                     )
@@ -434,9 +428,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             },
             FileContext::Workspace(ws) => match since {
                 Some(s) => {
-                    crate::client::fetch_workspace_sync(
+                    crate::indexer::fetch_workspace_sync(
                         self.opake.client.transport(),
-                        &appview_url,
+                        &indexer_url,
                         &self.opake.did,
                         &signing_key,
                         &ws.uri,
@@ -445,9 +439,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .await
                 }
                 None => {
-                    crate::client::fetch_workspace_snapshot(
+                    crate::indexer::fetch_workspace_snapshot(
                         self.opake.client.transport(),
-                        &appview_url,
+                        &indexer_url,
                         &self.opake.did,
                         &signing_key,
                         &ws.uri,
@@ -464,7 +458,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 Ok((updated, proposals))
             }
             Err(e) => {
-                warn!("AppView sync failed, using cached tree: {e}");
+                warn!("Indexer sync failed, using cached tree: {e}");
                 Ok((cached.records, Vec::new()))
             }
         }
@@ -537,39 +531,33 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .collect()
     }
 
-    /// Bootstrap the tree when no cache exists. Requires AppView.
+    /// Bootstrap the tree when no cache exists. Requires Indexer.
     ///
-    /// Fetches a full snapshot from the AppView, caches it locally,
+    /// Fetches a full snapshot from the Indexer, caches it locally,
     /// and returns a tree built from the cached records.
     async fn bootstrap_tree(&mut self) -> Result<DirectoryTree, Error> {
-        let appview_url = self
-            .opake
-            .appview_url
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Storage("AppView URL required — configure one or self-host".into())
-            })?
-            .clone();
+        let indexer_url = self.opake.resolve_indexer_url();
 
-        let identity = self.opake.require_identity()?;
-        let signing_key = identity
+        let signing_key = self
+            .opake
+            .identity()
             .signing_key_bytes()?
-            .ok_or_else(|| Error::Auth("signing key required for AppView sync".into()))?;
+            .ok_or_else(|| Error::Auth("signing key required for Indexer sync".into()))?;
 
         let snapshot = match self.context {
             FileContext::Cabinet(_) => {
-                crate::client::fetch_cabinet_snapshot(
+                crate::indexer::fetch_cabinet_snapshot(
                     self.opake.client.transport(),
-                    &appview_url,
+                    &indexer_url,
                     &self.opake.did,
                     &signing_key,
                 )
                 .await?
             }
             FileContext::Workspace(ws) => {
-                crate::client::fetch_workspace_snapshot(
+                crate::indexer::fetch_workspace_snapshot(
                     self.opake.client.transport(),
-                    &appview_url,
+                    &indexer_url,
                     &self.opake.did,
                     &signing_key,
                     &ws.uri,
@@ -624,7 +612,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let mut group_keys = HashMap::new();
                 group_keys.insert(ws.uri.clone(), ws.key.clone());
 
-                let private_key = self.opake.require_identity()?.private_key_bytes()?;
+                let private_key = self.opake.identity().private_key_bytes()?;
                 tree.decrypt_names_with_group_keys(&self.opake.did, &private_key, &group_keys);
             }
         }
@@ -891,7 +879,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         tree: &DirectoryTree,
         directory_uri: &str,
-    ) -> Result<HashMap<String, crypto::DocumentMetadata>, Error> {
+    ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
         let (did, private_key, group_key) = self.decryption_params()?;
         let mut result = HashMap::new();
 
@@ -929,7 +917,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     pub async fn resolve_document_metadata_for(
         &mut self,
         uris: &[&str],
-    ) -> Result<HashMap<String, crypto::DocumentMetadata>, Error> {
+    ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
         let (did, private_key, group_key) = self.decryption_params()?;
         let mut result = HashMap::new();
         for uri in uris {
@@ -960,7 +948,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         did: &str,
         private_key: &crypto::X25519PrivateKey,
         group_key: Option<&crypto::ContentKey>,
-    ) -> Result<Option<crypto::DocumentMetadata>, Error> {
+    ) -> Result<Option<super::types::ResolvedDocumentMetadata>, Error> {
         // Cache-first: check local document cache before hitting PDS
         let doc_scope = doc_scope_key(self.context);
         let cached = self
@@ -1031,6 +1019,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             &content_key,
             &doc.encrypted_metadata,
         )?;
-        Ok(Some(metadata))
+        Ok(Some(super::types::ResolvedDocumentMetadata::from_parts(
+            metadata,
+            doc.created_at,
+            doc.modified_at,
+        )))
     }
 }

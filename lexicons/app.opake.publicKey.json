@@ -28,7 +28,7 @@
           "signingKey": {
             "type": "bytes",
             "maxLength": 32,
-            "description": "Raw Ed25519 signing public key bytes. Used for DID-scoped authentication with the AppView."
+            "description": "Raw Ed25519 signing public key bytes. Used for DID-scoped authentication with the indexer."
           },
           "signingAlgo": {
             "type": "string",

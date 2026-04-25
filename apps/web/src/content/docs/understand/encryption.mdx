@@ -1,0 +1,128 @@
+import { encryptBlob } from "./_snippets";
+import { uploadFlow, derivationFlow } from "./_diagrams";
+
+<ChapterHeader title="Encryption & Keys" />
+
+<Lead>
+  Opake employs a hybrid encryption model: symmetric content encryption for speed, and asymmetric
+  key wrapping for sharing and identity.
+</Lead>
+
+## What actually happens
+
+Standard, audited cryptographic primitives. Here's what runs when you upload a file.
+
+### 1. Content Encryption
+
+When you select a file to upload, your device generates a random 256-bit symmetric key (`Content Key`).
+
+The file is then encrypted using **AES-256-GCM**. This algorithm is fast and handles arbitrary-size data efficiently. This produces the ciphertext blob that will actually be uploaded to your PDS.
+
+<CodeBlock language="rust" title="opake-core/src/crypto/content.rs" code={encryptBlob} />
+
+### 2. Key Wrapping (The Lockbox)
+
+We have the encrypted file, but how do we store the `Content Key` so that _only you_ can decrypt it later? We wrap it.
+
+Your Opake identity consists of an **X25519** keypair. We take the `Content Key` and wrap it to your X25519 public key using a scheme called `x25519-hkdf-a256kw`.
+
+1. We generate an ephemeral X25519 keypair.
+2. We perform an ECDH key agreement with your public key.
+3. We derive a wrapping key using HKDF-SHA256.
+4. We wrap the `Content Key` using AES-256-KW.
+
+The result is a `WrappedKey`. This lockbox is safe to store publicly while being streamed through the AT Protocol firehose because it can only be opened by your private X25519 key.
+
+<SequenceDiagram
+  code={uploadFlow}
+  caption="Full upload flow: generate a content key, encrypt the file, wrap the key to you, publish both."
+/>
+
+<Callout type="info">
+  **A Note on JWE:** We intentionally avoided the JSON Web Encryption (JWE) standard. Our specific
+  HKDF info string (`opake-v1-x25519-hkdf-a256kw-{did}`) provides strict domain separation,
+  preventing replay attacks across different users or protocol versions.
+</Callout>
+
+## Influences
+
+Opake's primitives and patterns come from a few specific places:
+
+- **Signal Protocol** — Curve25519 (X25519) for identity and key wrapping. Used here for the
+  same reasons Signal picked it: fast, well-understood, resistant to many side-channel attacks.
+- **[age](https://github.com/FiloSottile/age)** — the file-for-recipients model (one content key,
+  wrapped to each recipient's public key) is borrowed directly. Same "static" encryption —
+  nothing to keep in sync between sessions.
+- **[Noise Protocol Framework](http://noiseprotocol.org/)** — Opake isn't a messaging protocol,
+  but the underlying composition (Diffie-Hellman + HKDF + AEAD) is the Noise recipe.
+
+---
+
+## Where Do Keys Come From?
+
+Your keys are derived from a **24-word secret phrase** generated when you first set up Opake.
+The same phrase always produces the same keys — this is how you can recover your identity on
+a new device without needing your old one. For the user-facing walkthrough (what to do with
+the words, how to back them up), see
+[What your key actually looks like](/docs/seed-phrase).
+
+### The derivation pipeline
+
+Turning 24 words into a working identity is a three-stage process; each stage uses a standard,
+audited primitive.
+
+1. **BIP-39 → 256 bits of entropy.** The 24 words are drawn from the BIP-39 English wordlist:
+   2048 entries, 11 bits each, so 24 × 11 = 264 bits total. The last 8 bits are a checksum,
+   leaving 256 bits of actual randomness — the same entropy budget as the AES-256 keys that
+   get derived from it.
+
+2. **PBKDF2-HMAC-SHA512 → 512-bit master seed.** The words (as UTF-8 bytes) are stretched
+   through PBKDF2 with 2048 rounds and salt `"mnemonic"` — the BIP-39 standard. The rounds are
+   intentional cost: unnoticeable on a legitimate login, meaningful when an attacker is trying
+   to run billions of guesses.
+
+3. **HKDF-SHA256 → two keys.** The 512-bit master seed is fed through HKDF-SHA256 twice, with
+   different `info` strings:
+
+   - `opake-v1-x25519-identity` → X25519 private key (encryption + key wrapping)
+   - `opake-v1-ed25519-signing` → Ed25519 signing key (indexer authentication + record
+     signing)
+
+   The `info` strings provide **domain separation**: even with the same master seed, you can't
+   substitute one key for the other, and a future schema version (`opake-v2-...`) produces
+   cleanly independent keys from the same words.
+
+The pipeline is **deterministic**: same 24 words, same master seed, same X25519 and Ed25519
+keys, every time, on every device. That's what makes seed-phrase recovery possible.
+
+<SequenceDiagram
+  code={derivationFlow}
+  caption="The derivation pipeline: 24 words turn into two independent keypairs via a slow KDF and two domain-separated HKDF applications."
+/>
+
+The PBKDF2 salt is the fixed string `"mnemonic"` per the BIP-39 specification. Security rests
+on the 256-bit entropy of the words themselves, which is already enough randomness to make
+per-user salting redundant.
+
+### The two keys, and what they do
+
+| Key | Purpose |
+|-----|---------|
+| **X25519 keypair** | Encryption. The private half unwraps content keys sent to you. The public half is published on your PDS so others can wrap content keys to you. |
+| **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and (eventually) record envelopes. The public half is published alongside the X25519 key so services can verify signatures. |
+
+Both public halves live in a single `app.opake.publicKey/self` record on your PDS — a
+singleton, republished on every login so it stays current.
+
+## Where Are My Keys Stored?
+
+Your private keys never touch the network.
+
+- **On the Web:** They are stored in your browser's `IndexedDB`, accessible only to the Opake web app domain.
+- **On the CLI:** They are stored in `~/.config/opake/accounts/`, guarded by strict `0600` UNIX file permissions.
+
+Your seed phrase is shown once at setup and never stored. To learn how to back it up and
+recover, see [What your key actually looks like](/docs/seed-phrase). To transfer keys
+between devices without re-entering the phrase, read about [Device Pairing](/docs/pairing).
+
+<DocsNext slug="encryption" />

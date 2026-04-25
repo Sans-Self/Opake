@@ -1,0 +1,75 @@
+<ChapterHeader title="A Secure Handshake" />
+
+<Lead>
+  Your Opake identity is a private key, not a username and password. When you get a new phone or
+  laptop, you need a way to hand that key over without the network — or anyone watching it —
+  ever seeing it in plaintext.
+</Lead>
+
+## Identity vs. access
+
+Traditional apps sync your data by copying everything to a central server. If that server is
+compromised, so is your privacy.
+
+Opake uses **Device Pairing** instead: a direct, encrypted exchange between two of your own
+devices. Your identity moves from the old device to the new one through the PDS, but it's
+scrambled on the way. The PDS relays the bytes without seeing what's in them.
+
+---
+
+## The Pairing Process
+
+Your private keys only leave one device to arrive on another. At no point are they readable by
+anyone but the two devices involved.
+
+### 1. Requesting access (New Device)
+
+On your new phone or laptop, you'll initiate the pairing. Your device generates a temporary "invitation" and publishes it to your PDS. This invitation includes a one-time lock that only this specific new device can open.
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+    After signing in, you will be given the option to pair with another device. On the phone or
+    laptop where you've already signed in before, go to "Devices" to approve the new request. Once
+    finished, both devices can be used to invite future devices.
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    <CodeBlock language="sh">opake pair request</CodeBlock>
+  </PlatformTab>
+</PlatformToggle>
+
+### 2. Approving access (Existing Device)
+
+Your current device will see a notification that a new guest is asking to join your cabinet.
+
+When you click **Approve**, your device:
+
+1. Fetches the invitation and the new device's temporary lock.
+2. Uses a secure "handshake" to create a shared secret between the two devices.
+3. Wraps your private identity keys inside that secret.
+4. Posts the locked package back to your PDS.
+
+### 3. Finishing up (New Device)
+
+The new device picks up the response, unlocks it with its temporary key, and saves your
+identity. Then it deletes the request and response records from your PDS.
+
+---
+
+## Why is this safe?
+
+Even if someone is actively watching your PDS during the handshake, they can't recover the keys.
+
+The "temporary lock" your new device made in step 1 belongs only to that device; nobody else
+holds the matching key. When your existing device wraps your identity inside that lock, only
+the new device can unlock the package. The PDS shuttles the locked package between the two
+devices; it never holds the key.
+
+For the specific algorithms Opake uses, see [Encryption & Keys](/docs/encryption).
+
+<Callout type="warning">
+  Verify that the pairing request you're approving is actually from your own device. Approving a
+  request is like handing over a physical key to your cabinet — only do it for devices you own
+  and trust.
+</Callout>
+
+<DocsNext slug="pairing" />

@@ -1,7 +1,7 @@
 FROM oven/bun:1 AS web-deps
 
-WORKDIR /build/web
-COPY web/package.json web/bun.lock ./
+WORKDIR /build/apps/web
+COPY apps/web/package.json apps/web/bun.lock ./
 RUN bun install --frozen-lockfile
 
 FROM zot.sans-self.org/infra/rust-wasm:latest AS wasm-builder
@@ -9,18 +9,19 @@ FROM zot.sans-self.org/infra/rust-wasm:latest AS wasm-builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+COPY apps/cli/ apps/cli/
 
-RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../web/src/wasm/opake-wasm --out-name opake
+RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../apps/web/src/wasm/opake-wasm --out-name opake
 
 FROM web-deps AS web-builder
 
-ARG VITE_APPVIEW_URL=https://appview.opake.app
+ARG VITE_INDEXER_URL=https://indexer.opake.app
 ARG VITE_SITE_URL=https://opake.app
-ENV VITE_APPVIEW_URL=$VITE_APPVIEW_URL
+ENV VITE_INDEXER_URL=$VITE_INDEXER_URL
 ENV VITE_SITE_URL=$VITE_SITE_URL
 
-COPY web/ ./
-COPY --from=wasm-builder /build/web/src/wasm/opake-wasm/ ./src/wasm/opake-wasm/
+COPY apps/web/ ./
+COPY --from=wasm-builder /build/apps/web/src/wasm/opake-wasm/ ./src/wasm/opake-wasm/
 
 RUN bun run tsc && bun run vite build
 
@@ -29,10 +30,10 @@ FROM oven/bun:1-slim
 RUN groupadd -g 1000 opake || true && useradd -u 1000 -g 1000 -m opake || true
 
 WORKDIR /app
-COPY --from=web-builder --chown=1000:1000 /build/web/dist/ ./dist/
-COPY --from=web-builder --chown=1000:1000 /build/web/node_modules/ ./node_modules/
-COPY --from=web-builder --chown=1000:1000 /build/web/package.json ./
-COPY --from=web-builder --chown=1000:1000 /build/web/serve.ts ./
+COPY --from=web-builder --chown=1000:1000 /build/apps/web/dist/ ./dist/
+COPY --from=web-builder --chown=1000:1000 /build/apps/web/node_modules/ ./node_modules/
+COPY --from=web-builder --chown=1000:1000 /build/apps/web/package.json ./
+COPY --from=web-builder --chown=1000:1000 /build/apps/web/serve.ts ./
 
 USER 1000:1000
 EXPOSE 3000

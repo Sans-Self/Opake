@@ -108,7 +108,7 @@ Note: `entries` can contain cross-PDS AT-URIs — workspace documents live on ea
 
 ## 2b. Directory update (member proposing structural change)
 
-Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the AppView and applies them.
+Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the Indexer and applies them.
 
 ```json
 {
@@ -185,7 +185,7 @@ array only contains Alice's wrapped key — only she can decrypt.
 ```
 
 **How Bob decrypts:**
-1. His client/AppView discovers this grant (firehose, query, or notification)
+1. His client/Indexer discovers this grant (firehose, query, or notification)
 2. Fetches the document record via the `document` AT URI
 3. Uses his private key to decrypt `wrappedKey.ciphertext` → gets AES-256 content key
 4. Fetches the blob via `com.atproto.sync.getBlob`
@@ -284,7 +284,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 - Wrap GK to Dave's pubkey with `"role": "editor"`
 - Update the keyring record to add Dave to `members`
 - Dave can now decrypt *all* documents under this keyring. No per-document changes needed.
-- The AppView enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
+- The Indexer enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
 
 **Removing a member:**
 - Archive the current rotation's remaining member entries into `keyHistory`
@@ -333,12 +333,13 @@ The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and w
 ```
 
 **How the new device decrypts:**
-1. Unwraps the content key using the ephemeral private key (held in memory)
-2. Decrypts the ciphertext with the content key + nonce → identity JSON
-3. Verifies the derived public key matches the published `publicKey/self` record
-4. Saves the identity to disk
+1. Loads the ephemeral private key from local `Storage` (keyed by DID + request rkey)
+2. Unwraps the content key using that private key
+3. Decrypts the ciphertext with the content key + nonce → identity JSON
+4. Verifies the derived public key matches the published `publicKey/self` record
+5. Saves the identity to disk and wipes the pair state entry
 
-Both records are deleted after successful transfer. The ephemeral keypair is never persisted — it exists only in memory during the pairing session.
+Both PDS records are deleted after successful transfer. The ephemeral private key is persisted in `Storage` only between `create_pair_request` and `try_complete_pair` — it has to survive a CLI restart or browser reload while the user walks to the other device, so in-memory alone isn't sufficient. It never crosses the WASM/JS boundary.
 
 
 ## 8. Pending share (recipient hasn't set up Opake yet)
@@ -391,7 +392,7 @@ An editor proposes an update to a document owned by another workspace member. Th
 ```
 
 **How the owner applies it:**
-1. AppView surfaces pending updates via `GET /api/workspace/updates`
+1. Indexer surfaces pending updates via `GET /api/workspace/updates`
 2. Owner's client fetches the update blob from the editor's PDS
 3. Owner re-uploads the blob to their own PDS and updates their document record
 4. Editor's client deletes the `documentUpdate` record after confirmation
@@ -420,22 +421,23 @@ For document adoption (when a member is removed), the `supersedes` field points 
 
 ## 10. Leaving a workspace
 
-A member opts out of a workspace by writing a `keyringLeave` record to their own PDS. The AppView stops listing them as a member.
+A member opts out of a workspace by writing a `keyringUpdate` record with action `leave` to their own PDS. The indexer removes them from the workspace's member list.
 
 ```json
 {
-  "$type": "app.opake.keyringLeave",
+  "$type": "app.opake.keyringUpdate",
   "opakeVersion": 1,
   "keyring": "at://did:plc:alice123/app.opake.keyring/3k...",
+  "actionType": "leave",
   "createdAt": "2026-03-21T11:00:00.000Z"
 }
 ```
 
 **Key points:**
-- This is a visibility opt-out, not a key revocation — the member's wrapped key still exists on the keyring record
-- The workspace disappears from the member's sidebar
-- The owner can follow up with a proper removal (key rotation) to revoke future access
-- Used for both voluntary leave and cleaning up stale/forked workspace membership
+- `leave` is one of the action types on the unified `keyringUpdate` record (alongside `addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`).
+- This is a visibility opt-out, not a key revocation — the member's wrapped key still exists on the keyring record until the owner processes the proposal and rotates the group key.
+- The workspace disappears from the member's sidebar once the indexer processes the record.
+- Used for both voluntary leave and cleaning up stale/forked workspace membership.
 
 ## Design Decisions & Notes
 
@@ -450,7 +452,7 @@ Instead of adding recipients directly to the document record (like adding to the
 `keys` array), grants are separate records because:
 - The document owner might not want to update the document record every time they share
 - Grants can be deleted independently (for revocation)
-- An AppView can efficiently query "what's shared with me?" across all documents
+- An Indexer can efficiently query "what's shared with me?" across all documents
 - It matches the atproto pattern of small, independent records
 
 ### Why the two-layer key for keyrings?

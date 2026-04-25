@@ -1,0 +1,106 @@
+import {
+  shareDocument,
+  handleRecipientNotReady,
+  listOutgoingShares,
+  revokeShareSnippet,
+  listInboxSnippet,
+  watchInbox,
+  downloadFromGrantSnippet,
+  pendingShares,
+} from "./_snippets";
+
+<ChapterHeader title="Sharing" />
+
+<Lead>
+  A grant is an `app.opake.grant` record on the sharer's PDS that wraps a document's content key
+  to one specific recipient's public key. One record, one recipient, one document. This is the
+  minimal sharing primitive — for folders of files shared with multiple people, use
+  [workspaces](/docs/sdk/workspaces) instead.
+</Lead>
+
+## Sharing a document
+
+<CodeBlock language="typescript" title="share.ts" code={shareDocument} />
+
+`resolveIdentity` takes a handle or DID, walks the atproto identity chain (handle resolution,
+DID document, PDS discovery), and fetches the target's `app.opake.publicKey/self` record. The
+result is everything `fm.share` needs: the recipient's DID and their X25519 public key.
+
+The grant itself lives on *your* PDS, not the recipient's. The recipient discovers it through
+the indexer's `/api/inbox` endpoint, which scans the firehose for grants that name them as the
+recipient. No write permission to the recipient's repository is needed.
+
+## When the recipient hasn't set up Opake yet
+
+If `resolveIdentity` succeeds at the atproto layer (the handle exists, the DID resolves, the
+PDS is reachable) but there's no `app.opake.publicKey/self` record, you get `RecipientNotReady`.
+Handle it by queueing:
+
+<CodeBlock
+  language="typescript"
+  title="pending-share.ts"
+  code={handleRecipientNotReady}
+/>
+
+`createPendingShare` writes an `app.opake.pendingShare` record on your PDS. The daemon
+periodically resolves the target handle and tries again. When the recipient eventually logs
+into Opake and publishes their public key, the next retry succeeds: a real grant is written
+and the pending share is deleted. Pending shares expire after seven days.
+
+## Listing outgoing grants
+
+<CodeBlock language="typescript" title="list-shares.ts" code={listOutgoingShares} />
+
+Grants are per-document, per-recipient. A "folder" of shared files is a collection of grants
+that happen to target documents in the same directory, not a distinct record type. Grouping
+them in your UI is the consumer's job. `listShares` gives you the flat list.
+
+## Revoking
+
+<CodeBlock language="typescript" title="revoke.ts" code={revokeShareSnippet} />
+
+Revocation is forward-only. The record is gone from your PDS after revoke, and the indexer
+removes it from the recipient's inbox shortly after that, but you can't claw back the content
+key the recipient already unwrapped. Opake's crypto model is identical to git-crypt here:
+once a recipient has the content key, they have it, and they can decrypt any copy of the
+ciphertext they kept. For actual forward secrecy on a single document, delete and re-upload
+with a fresh content key, then re-grant to the people who should still have access.
+
+## Receiving shares
+
+<CodeBlock language="typescript" title="inbox.ts" code={listInboxSnippet} />
+
+`listInbox` returns all grants visible to you via the indexer. Pair it with a subscription so
+your UI reflects new shares in real time:
+
+<CodeBlock language="typescript" title="watch-inbox.ts" code={watchInbox} />
+
+`@opake/react` wraps `watchInbox` as the `useInbox` hook. See [React
+bindings](/docs/react/overview) when those pages land.
+
+## Downloading shared content
+
+<CodeBlock language="typescript" title="download-grant.ts" code={downloadFromGrantSnippet} />
+
+`downloadFromGrant` walks the full chain: fetches the grant, fetches the document record from
+the sharer's PDS, fetches the blob, unwraps the content key with your private X25519 key, and
+decrypts. All unauthenticated reads — atproto record and blob endpoints are public by design.
+
+`resolveGrantMetadata` is the cheaper variant. It fetches the grant and document record but
+skips the blob; you get the filename, MIME type, size, and tags decrypted, enough to render a
+"shared with me" list without paying download costs for files the user hasn't opened yet.
+
+## Pending shares: the queue
+
+<CodeBlock language="typescript" title="pending.ts" code={pendingShares} />
+
+The daemon runs `retryPendingShares` on a schedule (default every 15 minutes), so in most apps
+you don't call it manually. Exposing it on the SDK is useful for a "retry now" button in a
+settings panel, or for tests that don't want to wait. The outcome shape lets you report
+progress: how many pending shares were checked, how many got promoted to real grants, how many
+expired, how many are still waiting, and how many errored out for other reasons.
+
+`cancelPendingShare` is the "I changed my mind" path. Deletes the record, no retry fires
+again, nothing lands even if the recipient signs up tomorrow.
+
+<DocsNext slug="sharing" />

@@ -67,4 +67,47 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     pub async fn list_shares(&mut self) -> Result<Vec<GrantEntry>, Error> {
         sharing::list_grants(&mut self.opake.client).await
     }
+
+    /// Enqueue a pending share for a recipient who hasn't set up Opake yet.
+    ///
+    /// Cabinet only. Fetches the document's content key and writes a
+    /// `pendingShare` record encrypted with the grant metadata the daemon
+    /// needs to reconstruct the grant once the recipient publishes their
+    /// public key.
+    #[::opake_derive::signoff]
+    pub async fn create_pending_share(
+        &mut self,
+        document_uri: &str,
+        recipient: &str,
+        permissions: &str,
+        note: Option<&str>,
+    ) -> Result<String, Error> {
+        let FileContext::Cabinet(ref cabinet) = self.context else {
+            return Err(Error::InvalidRecord(
+                "pending shares are only supported from the cabinet".into(),
+            ));
+        };
+
+        let now = self.opake.now();
+
+        let content_key = documents::fetch_content_key(
+            &mut self.opake.client,
+            &cabinet.did,
+            &cabinet.private_key,
+            document_uri,
+        )
+        .await?;
+
+        sharing::create_pending_share(
+            &mut self.opake.client,
+            &content_key,
+            document_uri,
+            recipient,
+            permissions,
+            note,
+            &now,
+            &mut self.opake.rng,
+        )
+        .await
+    }
 }

@@ -12,21 +12,21 @@ steps:
       echo "Authenticating as: $ZOT_USERNAME"
       buildah login -u "$ZOT_USERNAME" -p "$ZOT_PASSWORD" zot.sans-self.org
 
-  - name: "Build and push appview"
+  - name: "Build and push indexer"
     command: |
       buildah bud \
-        -f Containerfile.appview \
-        -t zot.sans-self.org/opake/appview:staging \
-        -t zot.sans-self.org/opake/appview:staging-$TANGLED_COMMIT_SHA \
-        appview
-      buildah push zot.sans-self.org/opake/appview:staging
-      buildah push zot.sans-self.org/opake/appview:staging-$TANGLED_COMMIT_SHA
+        -f Containerfile.indexer \
+        -t zot.sans-self.org/opake/indexer:staging \
+        -t zot.sans-self.org/opake/indexer:staging-$TANGLED_COMMIT_SHA \
+        indexer
+      buildah push zot.sans-self.org/opake/indexer:staging
+      buildah push zot.sans-self.org/opake/indexer:staging-$TANGLED_COMMIT_SHA
 
   - name: "Build and push web"
     command: |
       buildah bud \
         -f Containerfile.web \
-        --build-arg VITE_APPVIEW_URL=https://appview.staging.opake.app \
+        --build-arg VITE_INDEXER_URL=https://indexer.staging.opake.app \
         --build-arg VITE_SITE_URL=https://staging.opake.app \
         -t zot.sans-self.org/opake/web:staging \
         -t zot.sans-self.org/opake/web:staging-$TANGLED_COMMIT_SHA \
@@ -38,4 +38,4 @@ steps:
     command: |
       curl -sLO "https://dl.k8s.io/release/v1.32.0/bin/linux/arm64/kubectl"
       chmod +x kubectl
-      ./kubectl rollout restart deployment/opake-web deployment/opake-appview -n opake-staging
+      ./kubectl rollout restart deployment/opake-web deployment/opake-indexer -n opake-staging

@@ -1,0 +1,77 @@
+<ChapterHeader title="Workspaces: group sharing" />
+
+<Lead>
+  Direct sharing works fine for one-off files. For a folder that a family, a team, or a
+  research group all need to read, you want something that scales without re-encrypting
+  everything each time someone joins or leaves.
+</Lead>
+
+## The group-key model
+
+The most direct way to share an encrypted file with several people is to encrypt it separately
+for each of them. Ten members means ten copies of each file's key. An eleventh person joining
+means touching every file.
+
+Opake uses **workspaces** instead — a named group that shares a single **group key**. Every
+file in the workspace is encrypted with that one key. Members then each hold a personal copy of
+the group key itself, encrypted with their own public key.
+
+1. The file's content key is encrypted once for the whole group.
+2. The group key is encrypted once per member, using their personal public key.
+
+Adding a member means encrypting the group key for them once. They immediately gain access to
+every file ever uploaded under that workspace; the files themselves stay exactly as they were.
+
+---
+
+## 1. Creating a workspace
+
+A workspace is a single record on your PDS that describes the group and carries the group key
+(encrypted, of course).
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+
+    1. Click the **(+)** icon in the Sidebar and select **New Workspace**.
+    2. Give it a name (e.g., "Family Photos").
+    3. Opake generates a group key, encrypts it just for you, and publishes the record.
+
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    <CodeBlock language="sh">opake workspace create "Family Photos"</CodeBlock>
+  </PlatformTab>
+</PlatformToggle>
+
+## 2. Managing membership
+
+### Adding a member
+
+Adding someone means encrypting the current group key for them and updating the workspace
+record. They can then decrypt anything stored under that workspace.
+
+### Removing a member (key rotation)
+
+When you remove a member, Opake rotates the group key so the removed member can't decrypt
+files uploaded after their removal:
+
+1. A new group key is generated.
+2. It's encrypted for each of the remaining members.
+3. The previous group key is archived in the workspace's history, so remaining members can
+   still decrypt files that were uploaded under older rotations.
+
+<Callout type="warning">
+  Key rotation prevents the removed member from decrypting _future_ files. Anything they already
+  downloaded and decrypted locally is theirs. Rotation can't reach across the network to delete
+  copies.
+</Callout>
+
+---
+
+## 3. Uploading to a workspace
+
+<CodeBlock language="sh">opake upload "budget.pdf" --workspace "Family Photos"</CodeBlock>
+
+Every member of that workspace sees the file in their directory tree and can decrypt it
+without extra steps.
+
+<DocsNext slug="workspaces" />

@@ -1,0 +1,141 @@
+<ChapterHeader title="What your key actually looks like" />
+
+<Lead>
+  When Opake sets up your identity, it shows you twenty-four ordinary English words. Those
+  words *are* your key — write them down and you can bring your identity back on any device,
+  at any time. Lose them and nothing in the world can help you.
+</Lead>
+
+## What Is It?
+
+When you first set up Opake, the app picks 24 words at random from a fixed list of around
+2000 common English words. Those 24 words carry enough randomness that no other person on
+earth will ever land on the same sequence. Your identity is unique by construction.
+
+Type the same 24 words back in on a different device (a new phone, a fresh laptop, a rebuild
+after you reinstalled the OS) and Opake rebuilds the exact same keys from them. Same words
+in, same identity out.
+
+<Callout type="warning">
+  **Write it down. Store it safely. Never share it.** Your 24 words are the only way back
+  into your cabinet if you lose access to every device you're signed in on. Opake can't
+  recover them for you; there's nobody behind the scenes holding a backup.
+</Callout>
+
+---
+
+## How It Works
+
+Same words in, same keys out; every time, on every device.
+
+Opake runs your 24 words through a fixed, slow-by-design process. "Fixed" means you get
+identical keys every time you type the phrase, which is how old files still decrypt on a new
+phone. "Slow-by-design" means it takes a computer more effort to turn the words into a key — fine
+for you (a second or two of wait on first setup) but very difficult for someone trying to
+guess your words.
+
+<Callout type="info">
+  For the specific algorithms behind this derivation, see [Encryption & Keys](/docs/encryption).
+</Callout>
+
+---
+
+## When You First Set Up
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+    After signing in, Opake will display your 24 words in a numbered grid. You can:
+
+    - **Copy** them to your clipboard
+    - **Download** them as a `.txt` file (saved so only your user account can read it)
+
+    You'll then be asked to confirm 3 randomly chosen words to prove you've saved them.
+
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    On your first login, the CLI displays your 24 words in a numbered grid:
+
+    ```
+     1. mimic          7. action         13. zebra          19. crawl
+     2. short          8. bundle         14. rain           20. pen
+     3. have           9. wagon          15. addict         21. flavor
+     4. picnic        10. wrong          16. legend         22. useful
+     5. neck          11. balance        17. swallow        23. caution
+     6. awful         12. palm           18. space          24. focus
+    ```
+
+    You can save this to a file when prompted. You'll then confirm 3 words to verify you've
+    recorded them.
+
+  </PlatformTab>
+</PlatformToggle>
+
+After confirmation, Opake derives your keys and publishes the public half to your PDS. The
+words themselves are never stored and never shown again.
+
+---
+
+## Recovering on a New Device
+
+If you get a new device (or reinstall), you can bring your identity back without needing the
+old device at all.
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+    After signing in, choose **"Use your recovery phrase"** and enter your 24 words in the grid.
+    You can also paste all 24 words at once — the app distributes them across the fields
+    automatically.
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    <CodeBlock language="sh">opake recover</CodeBlock>
+
+    Or import from a saved `.txt` file:
+
+    <CodeBlock language="sh">opake recover --file ~/opake-seed-phrase.txt</CodeBlock>
+
+  </PlatformTab>
+</PlatformToggle>
+
+If the key Opake rebuilds doesn't match the public half that's already published to your
+PDS, Opake will warn you. That usually means one of two things: a typo in the phrase, or an
+older account that was set up before 24-word phrases were the default.
+
+---
+
+## 24 Words vs. Device Pairing
+
+Both get your identity onto a new device. The difference:
+
+|                          | 24 Words                            | Device Pairing                         |
+| ------------------------ | ----------------------------------- | -------------------------------------- |
+| **Requires old device?** | No                                  | Yes                                    |
+| **Works offline?**       | Partially (need PDS for publishing) | No (PDS relay required)                |
+| **Input method**         | Type or paste 24 words              | Approve on existing device             |
+| **Best for**             | Disaster recovery, first-time setup | Quick setup when you have both devices |
+
+Device pairing is faster when you have both devices handy. The 24 words are your safety net
+when you don't.
+
+---
+
+## Storing Your Words
+
+Some options, in rough order of paranoia:
+
+- **Paper in a safe** — low-tech, survives digital disasters
+- **Password manager** — convenient, but introduces a dependency
+- **Metal backup plate** — survives fire and flood, if you're that kind of person
+
+What you should _not_ do:
+
+- Store it in a cloud notes app (defeats the purpose)
+- Take a screenshot (phone backups aren't end-to-end encrypted by default)
+- Email it to yourself
+
+<Callout type="info">
+  **The `.txt` file** saved during CLI setup is set up so only your user account can read it
+  — a reasonable short-term backup. Still, move the words somewhere more permanent and delete
+  the file when you can.
+</Callout>
+
+<DocsNext slug="seed-phrase" />

@@ -1,0 +1,209 @@
+import {
+  wrappedKeyShape,
+  encryptionEnvelopeShape,
+  keyringRefShape,
+  encryptedMetadataShape,
+  documentRecordShape,
+  grantRecordShape,
+  keyringRecordShape,
+  documentUpdateShape,
+  directoryUpdateShape,
+} from "./lexicons/_snippets";
+
+<ChapterHeader title="Lexicon reference" />
+
+<Lead>
+  Opake publishes `app.opake.*` records to the caller's PDS. This page is a working
+  reference for the schemas — what a document record looks like on the wire, how the
+  encryption envelope is shaped, what fields the indexer relies on. The authoritative
+  schemas live in [`/lexicons`](https://tangled.org/opake.app/opake/tree/main/lexicons)
+  in the repo.
+</Lead>
+
+## Collections
+
+| NSID | Type | Purpose |
+|---|---|---|
+| `app.opake.accountConfig` | record (singleton) | Per-account preferences, indexer URL pin |
+| `app.opake.publicKey` | record (singleton) | X25519 encryption public key for key discovery |
+| `app.opake.document` | record | An encrypted file |
+| `app.opake.directory` | record | Organisational grouping of documents + sub-directories |
+| `app.opake.grant` | record | One-to-one share grant |
+| `app.opake.keyring` | record | Workspace (named group with a shared symmetric key) |
+| `app.opake.pendingShare` | record | Queued share waiting for recipient to publish their key |
+| `app.opake.documentUpdate` | record | Proposed content or metadata change to another member's document |
+| `app.opake.directoryUpdate` | record | Proposed structural change to a workspace directory |
+| `app.opake.keyringUpdate` | record | Proposed membership / role / metadata change to a keyring |
+| `app.opake.invitation` | record | Workspace invitation with token and role |
+| `app.opake.invitationAcceptance` | record | Acceptance of a workspace invitation |
+| `app.opake.pairRequest` | record | New-device identity-transfer request |
+| `app.opake.pairResponse` | record | Existing-device encrypted identity payload |
+| `app.opake.defs` | defs | Shared types (wrappedKey, encryptionEnvelope, keyringRef, encryptedMetadata) |
+| `app.opake.authFullAccess` | permission-set | OAuth scope bundle covering every `app.opake.*` collection |
+
+Everything record-typed lives in the PDS's repo. The only blobs are the encrypted file
+contents referenced from `app.opake.document.blob` — up to 50 MB per the default PDS
+config.
+
+## Encryption primitives
+
+Three small shapes underpin every opaque field on every record. They live in
+[`app.opake.defs`](https://tangled.org/opake.app/opake/blob/main/lexicons/app.opake.defs.json)
+as shared refs.
+
+### `wrappedKey`
+
+<CodeBlock language="json" title="wrappedKey" code={wrappedKeyShape} />
+
+A symmetric key encrypted to a specific recipient's X25519 public key. `algo` is
+`x25519-hkdf-a256kw` — ephemeral-sender Diffie-Hellman, HKDF-derived KEK, AES-KeyWrap
+over the content key. `ciphertext` is `[32-byte ephemeral pubkey || 40-byte wrapped
+key]`.
+
+### `encryptionEnvelope`
+
+<CodeBlock language="json" title="encryptionEnvelope" code={encryptionEnvelopeShape} />
+
+Full shape for direct-sharing: the content key is wrapped once per recipient, all
+copies listed in `keys`. AES-256-GCM on the blob with the given `nonce`. One content
+key, many wrapped copies. Rotating a recipient's wrap doesn't affect the others.
+
+### `keyringRef`
+
+<CodeBlock language="json" title="keyringRef" code={keyringRefShape} />
+
+The workspace alternative to `encryptionEnvelope`. Instead of wrapping the content
+key to each member directly, wrap it under the keyring's group key once. Members
+unwrap the group key from their keyring entry, then use the group key to unwrap the
+content key. `rotation` identifies which generation of the group key was used — the
+keyring record keeps historical rotations in `keyHistory` so remaining members can
+still decrypt pre-rotation documents.
+
+### `encryptedMetadata`
+
+<CodeBlock language="json" title="encryptedMetadata" code={encryptedMetadataShape} />
+
+Record-level metadata (filename, MIME type, size, tags, description) is encrypted in
+one blob with the same key protecting the record's payload. The PDS only ever sees
+ciphertext for these fields — there's no server-side search over real filenames.
+Record-level fields that ARE in plaintext (the `blob.mimeType`, a placeholder `name`)
+are always dummy values.
+
+## Record shapes
+
+### `app.opake.document`
+
+<CodeBlock language="json" title="document" code={documentRecordShape} />
+
+The `encryption` field is a tagged union. `directEncryption` carries a full
+`encryptionEnvelope` — used for cabinet documents and one-to-one shares. Workspace
+documents use `keyringEncryption` instead: just the `keyringRef`, the algo, and the
+nonce. The content key isn't stored on the document at all; it's protected by the
+keyring's group key.
+
+`opakeVersion` lets clients reject records they don't understand. Bumping it on a
+schema change means old clients see a decryption failure, not a silent mis-parse.
+
+### `app.opake.grant`
+
+<CodeBlock language="json" title="grant" code={grantRecordShape} />
+
+One grant per (document, recipient) pair. The grant lives on the **sharer's** PDS,
+not the recipient's — the recipient discovers the grant by subscribing to the indexer.
+Grants reference the document by AT-URI; there's no keyring involved. Revoking a
+grant is a `deleteRecord` call; there's no key rotation because the document was
+already decryptable by the sharer's content key.
+
+### `app.opake.keyring`
+
+<CodeBlock language="json" title="keyring" code={keyringRecordShape} />
+
+A workspace. `members` is keyed by DID, with each entry carrying a wrapped copy of
+the current group key plus the member's role (`manager` / `editor` / `viewer`).
+`keyHistory` retains the wrapped copies from prior rotations so members still in the
+workspace can decrypt documents uploaded under older generations of the group key.
+
+Removing a member atomically:
+
+1. Generates a new group key, bumps `rotation`.
+2. Archives the old `members` dict into `keyHistory[rotation - 1]`.
+3. Writes the new `members` dict (without the removed member, re-wrapped to the rest).
+
+Per-document content keys and blobs aren't touched. The removed member could still
+decrypt anything uploaded under a prior rotation with a cached copy of the old group
+key — "no revocation guarantee for historical access" is called out up front; apps
+that need forward-secret removal must re-upload documents after rotation.
+
+### `app.opake.documentUpdate`
+
+<CodeBlock language="json" title="documentUpdate" code={documentUpdateShape} />
+
+Workspace proposals. When a member who isn't the owner wants to update a document,
+they write this record to their own PDS. The indexer sees it via firehose, validates
+the proposer's role against the target keyring, and surfaces it for the owner to
+apply. Once the owner applies (writing the updated document to their own PDS), the
+proposal record is deleted from the member's PDS.
+
+`actionType` distinguishes `replaceContent` (new blob + nonce) from `replaceMetadata`
+(only the encrypted metadata envelope changed).
+
+### `app.opake.directoryUpdate`
+
+<CodeBlock language="json" title="directoryUpdate" code={directoryUpdateShape} />
+
+Same pattern as `documentUpdate` but for structural changes — move entries between
+directories, rename, create, delete. The indexer validates, the owner applies,
+proposal gets cleaned up.
+
+## Indexing
+
+The indexer subscribes to the atproto firehose and consumes seven `app.opake.*`
+collections. For each event, it:
+
+1. Parses the record against the lexicon schema (rejects malformed records).
+2. Resolves the keyring membership if the record is workspace-scoped (rejects
+   records from non-members).
+3. Writes to its own Postgres index.
+4. Fans out to SSE subscribers via Phoenix PubSub.
+
+The indexer never decrypts anything. All the filtering is over plaintext metadata
+(DIDs, AT-URIs, timestamps, roles) — the encrypted payload passes through opaque.
+
+See [Live updates](/docs/sdk/events) for the client-side stream consumer, and
+[docs/indexer.md](https://tangled.org/opake.app/opake/blob/main/docs/indexer.md)
+for the indexer's own configuration and API.
+
+## Schema versioning
+
+Every record carries `opakeVersion: integer`. Current version is `1` across the board.
+The compatibility contract:
+
+- **Minor additions** (optional fields, new known values for string enums) don't bump
+  the version. Old clients ignore unknown fields.
+- **Breaking changes** (required field additions, envelope restructures, algorithm
+  swaps) bump the version. Old clients are expected to reject.
+- **Decryption-relevant changes** always bump the version, even if the wire format
+  looks backward-compatible. We'd rather an old client fail fast than silently
+  decrypt under the wrong assumption.
+
+If you're building a client that needs to survive across Opake versions, validate
+`opakeVersion` up front and fall back to "please upgrade" messaging for anything past
+your supported set.
+
+## Getting the authoritative schemas
+
+The JSON schema files in [`/lexicons`](https://tangled.org/opake.app/opake/tree/main/lexicons)
+are the canonical source. Every field description, constraint, and `knownValues` list is
+there. Clone the repo and wire them into your codegen:
+
+```sh
+git clone https://tangled.org/opake.app/opake
+# then point your lexicon codegen at opake/lexicons/
+```
+
+The Rust core uses `atproto-rs` codegen over these same files. The TypeScript SDK
+re-exports the field-level types via `@opake/sdk` — check
+[Files & directories](/docs/sdk/files) and [Sharing](/docs/sdk/sharing) for how they
+surface in the high-level API.
+
+<DocsNext slug="lexicons" />

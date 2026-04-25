@@ -1,11 +1,14 @@
 .DS_Store
 /target
-appview/_build/
-appview/deps/
+apps/indexer/_build/
+apps/indexer/deps/
 node_modules/
-web/dist/
-web/src/wasm/
-web/src/routeTree.gen.ts
+bun.lock
+apps/web/dist/
+apps/web/src/wasm/
+apps/web/src/routeTree.gen.ts
+packages/*/dist/
+packages/opake-sdk/wasm/
 settings.local.json
 .claude/settings.local.json
 .mcp.json
@@ -58,3 +61,8 @@ e2e-tests/playwright-report/
 .claude/settings.local.json
 .claude/hooks/node_modules/
 .claude/worktrees
+
+# nix / direnv
+.direnv/
+/result
+/result-*

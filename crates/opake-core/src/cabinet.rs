@@ -27,7 +27,7 @@ impl Cabinet {
         Ok(Self {
             did: identity.did.clone(),
             public_key: identity.public_key_bytes()?,
-            private_key: identity.private_key_bytes()?,
+            private_key: *identity.private_key_bytes()?,
         })
     }
 

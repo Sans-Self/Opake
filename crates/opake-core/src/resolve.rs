@@ -134,7 +134,11 @@ pub async fn resolve_identity(
         .find_map(|alias| alias.strip_prefix("at://"))
         .map(|h| h.to_string());
 
-    // Step 5: Fetch public key record
+    // Step 5: Fetch public key record.
+    // A NotFound here means the DID is valid but hasn't published an Opake
+    // key yet — that's a different situation from the DID/handle not existing
+    // (steps 1–2). Surface it as RecipientNotReady so callers can offer a
+    // pending-share queue without silently queuing shares for typo'd handles.
     trace!("fetching public key from {}", pds_url);
     let entry = get_record_public(
         transport,
@@ -143,7 +147,13 @@ pub async fn resolve_identity(
         PUBLIC_KEY_COLLECTION,
         PUBLIC_KEY_RKEY,
     )
-    .await?;
+    .await
+    .map_err(|e| match e {
+        Error::NotFound(_) => {
+            Error::RecipientNotReady(format!("{did} has not published an Opake public key yet"))
+        }
+        other => other,
+    })?;
 
     let record: PublicKeyRecord = serde_json::from_value(entry.value)?;
     records::check_version(record.opake_version)?;
@@ -343,7 +353,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_public_key_record_returns_not_found() {
+    async fn no_public_key_record_returns_recipient_not_ready() {
+        // A valid DID with no publicKey/self record is a distinct case from a
+        // missing handle — the user exists but hasn't set up Opake yet.
         let mock = MockTransport::new();
         mock.enqueue(success(&did_document_json(
             "did:plc:nopubkey",
@@ -359,7 +371,7 @@ mod tests {
         let err = resolve_identity(&mock, "https://pds.caller", "did:plc:nopubkey")
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::NotFound(_)));
+        assert!(matches!(err, Error::RecipientNotReady(_)));
     }
 
     #[tokio::test]

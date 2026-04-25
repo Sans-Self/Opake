@@ -52,6 +52,20 @@ extern "C" {
     #[wasm_bindgen(method, js_name = removeAccount)]
     fn remove_account_js(this: &JsStorageAdapter, did: &str) -> Promise;
 
+    #[wasm_bindgen(method, js_name = savePairState)]
+    fn save_pair_state_js(
+        this: &JsStorageAdapter,
+        did: &str,
+        rkey: &str,
+        private_key: &[u8],
+    ) -> Promise;
+
+    #[wasm_bindgen(method, js_name = loadPairState)]
+    fn load_pair_state_js(this: &JsStorageAdapter, did: &str, rkey: &str) -> Promise;
+
+    #[wasm_bindgen(method, js_name = deletePairState)]
+    fn delete_pair_state_js(this: &JsStorageAdapter, did: &str, rkey: &str) -> Promise;
+
     #[wasm_bindgen(method, js_name = cacheGetCollection)]
     fn cache_get_collection_js(this: &JsStorageAdapter, did: &str, collection: &str) -> Promise;
 
@@ -149,6 +163,32 @@ impl Storage for JsStorage {
 
     async fn remove_account(&self, did: &str) -> Result<(), Error> {
         resolve(&self.adapter.remove_account_js(did)).await?;
+        Ok(())
+    }
+
+    // -- Pair state: bridged to JS-side IndexedDB ------------------------------
+
+    async fn save_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+        private_key: &[u8],
+    ) -> Result<(), Error> {
+        resolve(&self.adapter.save_pair_state_js(did, rkey, private_key)).await?;
+        Ok(())
+    }
+
+    async fn load_pair_state(&self, did: &str, rkey: &str) -> Result<Vec<u8>, Error> {
+        let val = resolve(&self.adapter.load_pair_state_js(did, rkey)).await?;
+        if val.is_null() || val.is_undefined() {
+            return Err(Error::NotFound(format!("pair state {rkey}")));
+        }
+        // Raw Uint8Array, not a serde shape — bypass `from_js` and copy bytes.
+        Ok(js_sys::Uint8Array::new(&val).to_vec())
+    }
+
+    async fn delete_pair_state(&self, did: &str, rkey: &str) -> Result<(), Error> {
+        resolve(&self.adapter.delete_pair_state_js(did, rkey)).await?;
         Ok(())
     }
 

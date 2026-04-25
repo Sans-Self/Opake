@@ -2,7 +2,7 @@
   NOTE TO EDITORS: 
   Opake uses a dual-documentation system. If you modify the AT Protocol 
   schemas or lexicon definitions in this file, you MUST also update the 
-  corresponding MDX content in `web/src/content/` to prevent documentation drift. 
+  corresponding MDX content in `apps/web/src/content/` to prevent documentation drift. 
 -->
 
 # app.opake.* Lexicon Schemas
@@ -27,13 +27,16 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.document` | record | An encrypted file/document with metadata |
 | `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
 | `app.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
-| `app.opake.keyringLeave` | record | Opt-out record — member signals they're leaving a workspace |
 | `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
 | `app.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
 | `app.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
 | `app.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
+| `app.opake.invitation` | record | Workspace invitation with token and optional role/expiry |
+| `app.opake.invitationAcceptance` | record | Acceptance of a workspace invitation |
+| `app.opake.keyringUpdate` | record | A proposed update to a workspace keyring (member add/remove, metadata, role change) |
 | `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
 | `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
+| `app.opake.authFullAccess` | permission-set | OAuth permission set bundling all `app.opake.*` collections — for `include:` scopes |
 
 ## Flow: Sharing a file with another DID
 
@@ -105,7 +108,7 @@ Any keyring member unwraps GK with their private key, then uses GK to unwrap eac
 sequenceDiagram
     participant Editor
     participant EditorPDS as Editor's PDS
-    participant AppView
+    participant Indexer
     participant Owner
     participant OwnerPDS as Owner's PDS
 
@@ -115,12 +118,12 @@ sequenceDiagram
     Editor->>EditorPDS: uploadBlob(new ciphertext)
     Editor->>EditorPDS: createRecord(documentUpdate)
 
-    EditorPDS->>AppView: firehose event
-    AppView->>AppView: validate editor role, index update
+    EditorPDS->>Indexer: firehose event
+    Indexer->>Indexer: validate editor role, index update
 
     Note over Owner,OwnerPDS: 2. Owner applies the update
-    Owner->>AppView: GET /api/workspace/updates
-    AppView-->>Owner: pending documentUpdate records
+    Owner->>Indexer: GET /api/workspace/updates
+    Indexer-->>Owner: pending documentUpdate records
     Owner->>EditorPDS: getBlob(update cid)
     Owner->>OwnerPDS: uploadBlob + putRecord(document)
 
@@ -136,12 +139,12 @@ The owner's client is the only one that writes to the canonical document record.
 sequenceDiagram
     participant Member
     participant MemberPDS as Member's PDS
-    participant AppView
+    participant Indexer
 
-    Member->>MemberPDS: createRecord(keyringLeave, { keyring })
-    MemberPDS->>AppView: firehose event
-    AppView->>AppView: remove member from workspace index
-    Note right of AppView: Workspace disappears from<br/>member's sidebar
+    Member->>MemberPDS: createRecord(keyringUpdate, { keyring, actionType: "leave" })
+    MemberPDS->>Indexer: firehose event
+    Indexer->>Indexer: remove member from workspace index
+    Note right of Indexer: Workspace disappears from<br/>member's sidebar
 ```
 
 The member's wrapped key still exists on the keyring record — they *could* still decrypt. This is a visibility opt-out, not a key revocation. The owner can follow up with a proper removal (key rotation) if needed.
@@ -157,6 +160,7 @@ sequenceDiagram
     Note over DevB,PDS: 1. New device creates pair request
     DevB->>DevB: Generate ephemeral X25519 keypair
     DevB->>PDS: createRecord(pairRequest, { ephemeralKey })
+    DevB->>DevB: Persist private key to local Storage (keyed by DID+rkey)
     DevB->>DevB: Display key fingerprint
     DevB->>DevB: Poll for pairResponse...
 
@@ -175,11 +179,13 @@ sequenceDiagram
     Note over DevB,PDS: 4. New device receives identity
     DevB->>PDS: listRecords(pairResponse)
     PDS-->>DevB: Matching response
+    DevB->>DevB: Load ephemeral private key from Storage
     DevB->>DevB: Unwrap K with ephemeral private key
     DevB->>DevB: Decrypt identity JSON
     DevB->>PDS: getRecord(publicKey/self)
     DevB->>DevB: Verify public key matches published key
     DevB->>DevB: Save identity.json
+    DevB->>DevB: Wipe pair state from Storage
 
     Note over DevB,PDS: 5. Cleanup
     DevB->>PDS: deleteRecord(pairRequest)

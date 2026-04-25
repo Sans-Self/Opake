@@ -1,0 +1,104 @@
+<ChapterHeader title="Glossary of Terms" />
+
+<Lead>A quick-hit reference for the terminology we use across the Opake ecosystem.</Lead>
+
+### AT Protocol (atproto)
+
+The decentralized social networking protocol that Opake is built on. It handles identity, data storage, and the communication between different servers.
+
+### Atmosphere
+
+The broader ecosystem of apps and services built on the AT Protocol — Bluesky, Opake, and
+anything else speaking the same identity and storage layer. "The Atmosphere" is the
+shorthand for that family of products as a whole.
+
+### AES-256-GCM
+
+The symmetric encryption algorithm used for file content. Authenticated (detects tampering),
+fast on modern hardware, and well-studied.
+
+### BIP-39
+
+A standardized scheme for encoding random bytes as a 24-word phrase drawn from a fixed
+wordlist of 2048 common English words. Opake uses it to generate your seed phrase — the words
+*are* your key material, expressed in a form you can actually write down.
+
+### Blob
+
+A binary blob of data uploaded to a PDS. For Opake, that means the encrypted ciphertext of a
+file. The PDS stores blobs separately from records and hands them back on request by content
+hash.
+
+### Indexer
+
+A specialized service that indexes the [Firehose](#firehose) and provides a fast way to discover which files have been shared with you. It never sees your plaintext data. Fills the atproto "appview" protocol role, but we call it the indexer because all payloads are ciphertext and it serves no rendered views.
+
+### Cabinet
+
+The Opake interface for your personal (non-shared) files. Where you manage uploads, keys, and
+outgoing sharing grants.
+
+### Content Key
+
+A random 256-bit key generated for every single file. It's the key that actually "locks" the file content.
+
+### DID (Decentralized Identifier)
+
+Your permanent, cryptographic ID on the AT Protocol (e.g., `did:plc:123...`). Unlike a handle, a DID never changes.
+
+### Ed25519
+
+The elliptic curve Opake uses for *signing*. Separate from [X25519](#x25519), which handles
+*encryption*. Your Ed25519 private key signs indexer auth tokens and (eventually) record
+envelopes; the public half is published alongside your encryption key.
+
+### Firehose
+
+The real-time stream of all public records being created on the AT Protocol. Our indexer "listens" to the firehose to find new Sharing Grants.
+
+### Grant
+
+A record that "grants" a specific person access to a file by wrapping the file's [Content Key](#content-key) for their [Public Key](#public-key).
+
+### Workspace
+
+A named group of users sharing a common group key. Lets you share folders with teams or families
+without wrapping every file to every member individually. The underlying atproto record is named
+`app.opake.keyring` for legacy reasons; the app calls it a workspace everywhere it's user-facing.
+
+### PDS (Personal Data Server)
+
+The server where your data actually lives. You can host your own, or use a provider like Bluesky.
+
+### Public Key
+
+The part of your cryptographic identity that you share with the world. Others use your public key to "wrap" files specifically for you.
+
+### Publish
+
+Writing a record to your PDS. In Opake, uploading a file, creating a workspace, sharing with
+someone, and pairing a device all involve publishing records under the `app.opake.*`
+namespace. The PDS holds them and makes them available to anyone your lexicons say can read
+them.
+
+### Seed Phrase
+
+The 24 words Opake shows you at first setup. Same words in, same keys out — the phrase is a
+portable, human-writable form of your private key. Your only way back into your cabinet if
+you lose access to every signed-in device. See
+[What your key actually looks like](/docs/seed-phrase).
+
+### Wrapped Key
+
+A [Content Key](#content-key) that has been encrypted for a specific recipient using their [Public Key](#public-key). It's like a small lockbox that only one person can open.
+
+### X25519
+
+The elliptic curve used for asymmetric encryption and key wrapping. Same curve Signal and age
+use; well-understood, fast, resistant to many side-channel attacks.
+
+---
+
+Still curious? Head back to the [Handbook Index](/docs).
+
+<DocsNext slug="glossary" />

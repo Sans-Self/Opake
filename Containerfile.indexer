@@ -1,0 +1,44 @@
+FROM hexpm/elixir:1.18.3-erlang-27.3-debian-bookworm-20250317-slim AS build
+
+RUN apt-get update -y && apt-get install -y build-essential git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN mix local.hex --force && mix local.rebar --force
+
+ENV MIX_ENV=prod
+
+COPY mix.exs mix.lock ./
+RUN mix deps.get --only $MIX_ENV && \
+    mkdir config && \
+    mix deps.compile
+
+COPY config/config.exs config/prod.exs config/runtime.exs config/
+COPY lib lib
+COPY priv priv
+
+RUN mix compile && mix release
+
+# --- Runtime ---
+
+FROM debian:bookworm-slim
+
+RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+RUN groupadd -g 1000 opake && useradd -u 1000 -g opake -m opake
+
+WORKDIR /app
+COPY --from=build --chown=1000:1000 /app/_build/prod/rel/opake_indexer ./
+COPY --chown=1000:1000 rel/entrypoint.sh ./
+
+USER 1000:1000
+EXPOSE 6100
+
+ENV PHX_SERVER=true
+
+ENTRYPOINT ["./entrypoint.sh"]

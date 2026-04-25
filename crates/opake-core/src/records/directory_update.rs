@@ -4,7 +4,7 @@ use super::{default_version, EncryptedMetadata, SCHEMA_VERSION};
 
 pub const DIRECTORY_UPDATE_COLLECTION: &str = "app.opake.directoryUpdate";
 
-/// Action type strings for matching AppView proposal responses.
+/// Action type strings for matching Indexer proposal responses.
 pub const ACTION_ADD_ENTRY: &str = "addEntry";
 pub const ACTION_REMOVE_ENTRY: &str = "removeEntry";
 pub const ACTION_MOVE_ENTRY: &str = "moveEntry";

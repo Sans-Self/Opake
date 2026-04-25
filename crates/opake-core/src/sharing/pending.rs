@@ -5,7 +5,7 @@
 // retries periodically. On success, a grant is created and the pending
 // record is deleted.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::{info, trace, warn};
 
@@ -18,6 +18,40 @@ use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
 use crate::resolve::{self, ResolvedIdentity};
 
 use super::create::{create_grant, GrantParams};
+
+/// Enqueue a pending share for a recipient that hasn't set up Opake yet.
+///
+/// Encrypts the original grant metadata (permissions + note) under the
+/// document's content key so the daemon can reconstruct the full grant
+/// when the recipient publishes their public key. Returns the AT-URI of
+/// the created pendingShare record.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_pending_share(
+    client: &mut XrpcClient<impl Transport>,
+    content_key: &ContentKey,
+    document_uri: &str,
+    recipient: &str,
+    permissions: &str,
+    note: Option<&str>,
+    now: &str,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<String, Error> {
+    let metadata = GrantMetadata {
+        permissions: Some(permissions.to_string()),
+        note: note.map(str::to_string),
+    };
+    let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, rng)?;
+    let record = PendingShare::new(
+        document_uri.to_string(),
+        recipient.to_string(),
+        encrypted_metadata,
+        now.to_string(),
+    );
+    let record_ref = client
+        .create_record(PENDING_SHARE_COLLECTION, &record)
+        .await?;
+    Ok(record_ref.uri)
+}
 
 /// Default TTL for pending shares: 7 days.
 pub const DEFAULT_PENDING_SHARE_TTL_SECONDS: i64 = 7 * 24 * 3600;
@@ -116,6 +150,12 @@ pub async fn retry_pending_shares(
     // crypto unwrap when multiple pending shares reference the same document.
     let mut content_key_cache: HashMap<String, ContentKey> = HashMap::new();
 
+    // Track document URIs where the content-key fetch failed with a permanent
+    // error (document deleted, record corrupted, or decryption failure).
+    // Unlike transient errors, these won't heal on retry — skip subsequent
+    // pending shares that reference the same broken document in this pass.
+    let mut permanent_document_errors: HashSet<String> = HashSet::new();
+
     for entry in &entries {
         let at_uri = match atproto::parse_at_uri(&entry.uri) {
             Ok(u) => u,
@@ -160,7 +200,10 @@ pub async fn retry_pending_shares(
                         identity_cache.insert(entry.recipient.clone(), Some(id.clone()));
                         id
                     }
-                    Err(Error::NotFound(_)) => {
+                    // Recipient exists but hasn't published their Opake key yet.
+                    // This is exactly the condition that triggered the pending share —
+                    // keep it queued so the next retry can try again.
+                    Err(Error::NotFound(_)) | Err(Error::RecipientNotReady(_)) => {
                         identity_cache.insert(entry.recipient.clone(), None);
                         result.still_pending += 1;
                         continue;
@@ -170,7 +213,8 @@ pub async fn retry_pending_shares(
                             "pending share {}: can't resolve {}: {e}",
                             entry.uri, entry.recipient
                         );
-                        // Don't cache transient errors
+                        // Transient errors (network, 5xx, etc.) are not cached so the
+                        // next retry will attempt resolution again.
                         result.failed += 1;
                         continue;
                     }
@@ -184,7 +228,14 @@ pub async fn retry_pending_shares(
             entry.uri, entry.recipient
         );
 
-        // Fetch content key (cached per document)
+        // Fetch content key (cached per document).
+        // Skip immediately for documents that already failed with a permanent
+        // error earlier in this pass — no point hammering the PDS again.
+        if permanent_document_errors.contains(&entry.document) {
+            result.failed += 1;
+            continue;
+        }
+
         let content_key = match content_key_cache.get(&entry.document) {
             Some(key) => key.clone(),
             None => {
@@ -197,14 +248,30 @@ pub async fn retry_pending_shares(
                 .await
                 {
                     Ok(key) => {
-                        content_key_cache.insert(entry.document.clone(), ContentKey(key.0));
+                        content_key_cache.insert(entry.document.clone(), key.clone());
                         key
                     }
                     Err(e) => {
-                        warn!(
-                            "pending share {}: failed to fetch content key for {}: {e}",
-                            entry.uri, entry.document
+                        // Permanent failures: document was deleted, the record is
+                        // corrupt, or the content-key ciphertext won't unwrap.
+                        // Mark the document URI so sibling pending shares for the
+                        // same document skip the round-trip.
+                        let permanent = matches!(
+                            e,
+                            Error::NotFound(_)
+                                | Error::InvalidRecord(_)
+                                | Error::Decryption(_)
+                                | Error::Serialization(_)
                         );
+                        warn!(
+                            "pending share {}: failed to fetch content key for {} ({}): {e}",
+                            entry.uri,
+                            entry.document,
+                            if permanent { "permanent" } else { "transient" },
+                        );
+                        if permanent {
+                            permanent_document_errors.insert(entry.document.clone());
+                        }
                         result.failed += 1;
                         continue;
                     }

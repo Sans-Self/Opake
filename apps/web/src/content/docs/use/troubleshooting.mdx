@@ -1,0 +1,83 @@
+<ChapterHeader title="Troubleshooting & Common Issues" />
+
+<Lead>
+  Federated systems have more moving parts than centralised ones, so occasionally things break in
+  novel ways. Here's a field guide to the issues we see most often.
+</Lead>
+
+## Login & Authentication
+
+### "Invalid Handle" or "PDS not found"
+
+If Opake can't find your account, it's usually because your handle (e.g., `you.bsky.social`) can't be resolved.
+
+- **Check the spelling:** Ensure there are no typos in your handle.
+- **Check your PDS status:** Sometimes the PDS provider you use might be down or having trouble responding to resolution requests.
+- **Legacy Auth:** If your PDS doesn't support OAuth yet, you might need to use the `--legacy` flag in the CLI.
+
+### OAuth Redirect Issues
+
+If the browser window opens for login but never redirects you back to Opake:
+
+- **Check for ad-blockers:** Some aggressive browser extensions might block the redirect URL.
+- **CLI specific:** The CLI spins up a small server on your own machine (`127.0.0.1`) to
+  receive the redirect. Make sure your firewall isn't blocking connections to your own
+  machine.
+
+---
+
+## Files & Uploads
+
+### Upload fails halfway (storage limits)
+
+Opake uploads each file to the AT Protocol in one piece, so large files lean on both your
+connection and whatever size limit your PDS enforces.
+
+- **Default size cap:** Opake caps upload size to stay within what most PDS providers accept
+  without prior coordination.
+- **Increasing the cap:** You (or your PDS administrator) can raise it by publishing a
+  configuration record. See the [Lexicon reference](/docs/lexicons) for the exact format.
+- **Network stability:** If your connection drops mid-upload, the upload fails and you have to
+  re-send. Resume support is on the roadmap, not there yet.
+
+### "Unable to Decrypt File"
+
+The most serious error. Opake can't unlock the key for this file under the identity you're
+signed in with. Two common causes:
+
+- **Wrong account.** Check you're logged into the account the file was shared with.
+- **Missing keys.** If you recently signed in on a new device but haven't recovered from your
+  seed phrase or completed a [Device Pairing](/docs/pairing), this device doesn't yet hold the
+  private keys needed to decrypt. Go through recovery or pairing first.
+
+---
+
+## Sharing & Discovery
+
+### "Recipient not found"
+
+If you can't share a file with someone:
+
+- **Handle vs. DID:** Ensure the handle is correct.
+- **Public Key Missing:** The recipient has to have logged into Opake at least once, so their
+  [Public Encryption Key](/docs/encryption) is published on their PDS. If it isn't, Opake has
+  no key to encrypt the file against.
+
+### "I don't see shared files in my inbox"
+
+Opake relies on an **indexer** — a helper service that watches for new grants across the
+network and routes each one to the right inbox.
+
+- **Index Lag:** Sometimes it takes a few moments for newly published grants to be picked up.
+- **Indexer Status:** If the indexer service is down or unhealthy, your inbox will appear
+  empty even if the files exist.
+
+---
+
+<Callout type="info">
+  **Still Stuck?** If you've found a genuine bug, please [report it on
+  Tangled](https://tangled.org/opake.app/opake/issues). Include any error messages and
+  details about your environment (Web or CLI).
+</Callout>
+
+<DocsNext slug="troubleshooting" />

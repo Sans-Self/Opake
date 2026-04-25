@@ -1,0 +1,33 @@
+{
+  "lexicon": 1,
+  "id": "app.opake.authFullAccess",
+  "defs": {
+    "main": {
+      "type": "permission-set",
+      "title": "Full Opake Access",
+      "detail": "Read and write all Opake records: encrypted files, directories, workspaces, sharing grants, device pairing, and account configuration.",
+      "permissions": [
+        {
+          "type": "permission",
+          "resource": "repo",
+          "collection": [
+            "app.opake.accountConfig",
+            "app.opake.directory",
+            "app.opake.directoryUpdate",
+            "app.opake.document",
+            "app.opake.documentUpdate",
+            "app.opake.grant",
+            "app.opake.invitation",
+            "app.opake.invitationAcceptance",
+            "app.opake.keyring",
+            "app.opake.keyringUpdate",
+            "app.opake.pairRequest",
+            "app.opake.pairResponse",
+            "app.opake.pendingShare",
+            "app.opake.publicKey"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -12,7 +12,7 @@ Opake is licensed under [AGPL-3.0](../LICENSE). This page explains what that mea
 | Running modified Opake as a network service for others | **Yes** |
 | Building a plugin that links against `opake-core` or `opake-wasm` | **Yes** — your plugin is AGPL |
 | Building a tool that only talks to Opake over HTTP/XRPC APIs | No |
-| Bundling `@opake/wasm` in your web app | **Yes** — your app is AGPL |
+| Bundling `@opake/sdk`, `@opake/react`, `@opake/daemon`, or the underlying WASM in your web app | **Yes** — your app is AGPL |
 | Submitting a pull request | Your contribution is licensed under AGPL-3.0 |
 
 ## For Self-Hosters
@@ -36,12 +36,12 @@ The AGPL's copyleft applies to **derivative works**, which in practice means any
 ### What triggers copyleft
 
 - **Importing `opake-core` as a Rust dependency.** Your crate becomes a derivative work. AGPL applies to the combined work.
-- **Bundling `@opake/wasm`** (the WASM module built from `opake-core`) in a web application. The entire application that incorporates the module is covered.
+- **Bundling `@opake/sdk`** (or `@opake/react`, `@opake/daemon`, or the WASM module built from `opake-core`) in a web application. The entire application that incorporates the module is covered.
 - **Calling `opake-core` functions from a WASM host.** Same as linking — the host application is a derivative work.
 
 ### What does NOT trigger copyleft
 
-- **Communicating with Opake over HTTP or XRPC.** The API boundary is not a linking boundary. A mobile app that talks to the Opake AppView over REST, or a script that calls PDS endpoints, is an independent work — license it however you want.
+- **Communicating with Opake over HTTP or XRPC.** The API boundary is not a linking boundary. A mobile app that talks to the Opake Indexer over REST, or a script that calls PDS endpoints, is an independent work — license it however you want.
 - **Reading or writing `app.opake.*` records on a PDS.** Lexicon schemas are interface definitions. Implementing them independently doesn't create a derivative work.
 - **Running Opake alongside your software** without linking (an "aggregate" in GPL terms). Shipping a Docker Compose stack that includes Opake as a separate container is fine.
 

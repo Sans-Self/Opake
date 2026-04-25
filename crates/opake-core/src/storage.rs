@@ -15,6 +15,7 @@ use crate::crypto::{
     X25519PrivateKey, X25519PublicKey,
 };
 use crate::error::Error;
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Cache types
@@ -47,7 +48,7 @@ pub type Ed25519VerifyKey = [u8; 32];
 
 /// Persistent CLI configuration — tracks all logged-in accounts.
 ///
-/// Device-local only. Cross-device preferences (appview URL, telemetry)
+/// Device-local only. Cross-device preferences (indexer URL, telemetry)
 /// live in `AccountConfigRecord` on the PDS.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -127,22 +128,25 @@ pub struct AccountInfo {
 
 /// Encryption + signing keypairs, stored as base64.
 ///
-/// Encryption + signing keypairs, stored as base64.
-///
 /// `#[redact]` fields are zeroized on drop automatically (via RedactedDebug).
-/// The signing fields are optional for backward compat with old identity files.
+/// The signing fields are optional for backward compat with old identity
+/// files. Field aliases accept both snake_case (the primary, canonical
+/// serialization) and camelCase — older identity files on disk used the
+/// camelCase form, so the migration path relies on the aliases.
 #[derive(crate::RedactedDebug, Serialize, Deserialize)]
 pub struct Identity {
     pub did: String,
+    #[serde(alias = "publicKey")]
     pub public_key: String,
     #[redact]
+    #[serde(alias = "privateKey")]
     pub private_key: String,
     /// Ed25519 signing secret key (base64).
-    #[serde(default)]
+    #[serde(default, alias = "signingKey")]
     #[redact]
     pub signing_key: Option<String>,
     /// Ed25519 signing public/verify key (base64).
-    #[serde(default)]
+    #[serde(default, alias = "verifyKey")]
     pub verify_key: Option<String>,
 }
 
@@ -151,8 +155,8 @@ impl Identity {
         decode_key_bytes(&self.public_key, "public_key")
     }
 
-    pub fn private_key_bytes(&self) -> Result<X25519PrivateKey, Error> {
-        decode_key_bytes(&self.private_key, "private_key")
+    pub fn private_key_bytes(&self) -> Result<Zeroizing<X25519PrivateKey>, Error> {
+        decode_key_bytes(&self.private_key, "private_key").map(Zeroizing::new)
     }
 
     pub fn signing_key_bytes(&self) -> Result<Option<Ed25519SecretKey>, Error> {
@@ -171,7 +175,7 @@ impl Identity {
     /// Construct from raw key bytes (e.g. from WASM where keys arrive as Uint8Array).
     ///
     /// Creates an identity without signing keys — those are only needed for
-    /// AppView auth, not file operations.
+    /// Indexer auth, not file operations.
     pub fn from_raw_keys(did: &str, public_key: &[u8; 32], private_key: &[u8; 32]) -> Self {
         Self {
             did: did.to_string(),
@@ -295,6 +299,37 @@ pub trait Storage {
 
     fn remove_account(&self, did: &str) -> impl std::future::Future<Output = Result<(), Error>>;
 
+    // -- Pair state (ephemeral private key during device pairing) ------------
+    //
+    // The new device generates an X25519 ephemeral keypair for each pair
+    // request. The private half must survive between `create_pair_request`
+    // and `try_complete_pair` — which can be minutes to days apart — so it
+    // is persisted here. These bytes never cross the WASM/JS boundary: WASM
+    // writes them via the storage adapter, reads them back the same way,
+    // and wipes them once pairing succeeds or the request is cancelled.
+
+    /// Persist the ephemeral private key for a pending pair request.
+    fn save_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+        private_key: &[u8],
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
+    /// Load the ephemeral private key for a pending pair request.
+    fn load_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, Error>>;
+
+    /// Delete the ephemeral private key for a pair request (on completion or cancellation).
+    fn delete_pair_state(
+        &self,
+        did: &str,
+        rkey: &str,
+    ) -> impl std::future::Future<Output = Result<(), Error>>;
+
     // -- Cache: record-level -------------------------------------------------
 
     /// Look up a single cached record by URI.
@@ -382,6 +417,20 @@ impl Storage for NoopStorage {
         Ok(())
     }
     async fn remove_account(&self, _did: &str) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn save_pair_state(
+        &self,
+        _did: &str,
+        _rkey: &str,
+        _private_key: &[u8],
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    async fn load_pair_state(&self, _did: &str, _rkey: &str) -> Result<Vec<u8>, Error> {
+        Err(Error::NotFound("NoopStorage".into()))
+    }
+    async fn delete_pair_state(&self, _did: &str, _rkey: &str) -> Result<(), Error> {
         Ok(())
     }
     async fn cache_get_record(
@@ -504,7 +553,7 @@ mod tests {
             verify_key: Some(BASE64.encode([4u8; 32])),
         };
         assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
-        assert_eq!(identity.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(*identity.private_key_bytes().unwrap(), [2u8; 32]);
         assert_eq!(identity.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(identity.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
     }

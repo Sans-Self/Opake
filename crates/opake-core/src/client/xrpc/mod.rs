@@ -37,13 +37,21 @@ pub enum Session {
 }
 
 /// Legacy password-based session (createSession / refreshSession).
+///
+/// The atproto lexicon wire format uses camelCase (`accessJwt`,
+/// `refreshJwt`); local storage historically used snake_case. Aliases on
+/// both fields let the same struct parse either without maintaining
+/// separate DTOs. Serialization always emits the primary (snake_case)
+/// name so files written today stay consistent with older storage.
 #[derive(Clone, crate::RedactedDebug, Serialize, Deserialize)]
 pub struct LegacySession {
     pub did: String,
     pub handle: String,
     #[redact]
+    #[serde(alias = "accessJwt")]
     pub access_jwt: String,
     #[redact]
+    #[serde(alias = "refreshJwt")]
     pub refresh_jwt: String,
 }
 
@@ -56,6 +64,8 @@ pub struct OAuthSession {
     pub access_token: String,
     #[redact]
     pub refresh_token: String,
+    // Not #[redact] here — DpopKeyPair has its own RedactedDebug derive
+    // that zeroizes private_key_b64 on drop. Nested zeroization is automatic.
     pub dpop_key: DpopKeyPair,
     pub token_endpoint: String,
     #[serde(default)]
@@ -131,22 +141,39 @@ impl<'de> Deserialize<'de> for Session {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
+        // Use serde's built-in tagged enum support instead of routing
+        // through serde_json::Value. The old approach broke when the
+        // deserializer was serde_wasm_bindgen (JS→Rust), because
+        // serde_json::Value::deserialize from a non-JSON deserializer
+        // is a lossy conversion.
+        //
+        // Backward compat: files without a "type" field are treated as
+        // legacy sessions via the #[serde(other)] fallback below.
 
-        match value.get("type").and_then(|t| t.as_str()) {
-            Some("oauth") => {
-                let oauth: OAuthSession =
-                    serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                Ok(Session::OAuth(oauth))
-            }
-            Some("legacy") | None => {
-                let legacy: LegacySession =
-                    serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                Ok(Session::Legacy(legacy))
-            }
-            Some(other) => Err(serde::de::Error::custom(format!(
-                "unknown session type: {other}"
-            ))),
+        #[derive(Deserialize)]
+        #[serde(tag = "type")]
+        #[allow(clippy::large_enum_variant)]
+        enum Tagged {
+            #[serde(rename = "oauth")]
+            OAuth(OAuthSession),
+            #[serde(rename = "legacy")]
+            Legacy(LegacySession),
+        }
+
+        // Try tagged first (has "type" field)
+        // For backward compat with legacy sessions that lack "type",
+        // use an untagged fallback.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        #[allow(clippy::large_enum_variant)]
+        enum Compat {
+            Tagged(Tagged),
+            LegacyFallback(LegacySession),
+        }
+
+        match Compat::deserialize(deserializer)? {
+            Compat::Tagged(Tagged::OAuth(s)) => Ok(Session::OAuth(s)),
+            Compat::Tagged(Tagged::Legacy(s)) | Compat::LegacyFallback(s) => Ok(Session::Legacy(s)),
         }
     }
 }
@@ -370,7 +397,7 @@ impl<T: Transport> XrpcClient<T> {
         serde_json::from_slice::<Body>(&response.body)
             .ok()
             .and_then(|b| b.error)
-            .is_some_and(|e| e == "ExpiredToken")
+            .is_some_and(|e| e == "ExpiredToken" || e == "AuthenticationFailed")
     }
 
     /// Send a request and check the response status. Every XRPC method except
@@ -390,9 +417,19 @@ impl<T: Transport> XrpcClient<T> {
             self.update_dpop_nonce(&response);
         }
 
-        // After a nonce fix (or on the first attempt), the token itself may be
-        // expired. Refresh and retry. A second nonce error here is not retried —
-        // one retry is the spec-expected behavior (RFC 9449 §7.1).
+        // Some PDSes (including the official self-hosted PDS) return
+        // "AuthenticationFailed" for DPoP nonce mismatches instead of the
+        // spec-mandated "use_dpop_nonce". If the failing response carries a
+        // DPoP-Nonce header, it's telling us the nonce to use — retry with
+        // fresh auth before assuming the token itself is dead.
+        if Self::is_expired_token(&response) && extract_dpop_nonce(&response).is_some() {
+            let retried = self.replace_auth_headers(request.clone())?;
+            response = self.transport.send(retried).await?;
+            self.update_dpop_nonce(&response);
+        }
+
+        // After nonce fixes, the token itself may genuinely be expired.
+        // Refresh and retry once.
         if Self::is_expired_token(&response) {
             self.refresh_session().await?;
             let retried = self.replace_auth_headers(request)?;

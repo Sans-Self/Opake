@@ -6,7 +6,7 @@ use crate::atproto::AtBytes;
 
 /// A member's role in a workspace (keyring).
 ///
-/// Plaintext on the record because the AppView needs it for authorization.
+/// Plaintext on the record because the Indexer needs it for authorization.
 /// Grants ignore this field — it's only meaningful in keyring membership context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -11,8 +11,8 @@ use log::{info, trace, warn};
 use crate::atproto;
 use crate::client::Transport;
 use crate::crypto::{self, ContentKey};
-use crate::daemon::REENCRYPTION_BATCH_SIZE_BYTES;
 use crate::error::Error;
+use crate::indexer::daemon::REENCRYPTION_BATCH_SIZE_BYTES;
 use crate::records;
 
 const DOCUMENT_COLLECTION: &str = "app.opake.document";

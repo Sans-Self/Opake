@@ -1,0 +1,125 @@
+import {
+  useStartSseGated,
+  useStartSseOverride,
+  useDaemonExample,
+  manualInvalidation,
+  keyFactoriesShape,
+} from "./_snippets";
+
+<ChapterHeader title="@opake/react — Live updates" />
+
+<Lead>
+  The provider auto-starts the SSE consumer, so most apps don't need to think about live
+  updates at all. This page covers the escape hatches: gating the stream on runtime
+  conditions, running the daemon for background maintenance, and invalidating the few
+  queries that don't flow through SSE.
+</Lead>
+
+## What's live by default
+
+Render an `OpakeProvider` and you get:
+
+- `useDirectory` — directory trees update as `document:upsert`, `directory:upsert`,
+  `document:delete`, `directory:delete` events arrive from the indexer.
+- `useWorkspaces` — workspace list updates on `keyring:upsert` / `keyring:delete`.
+- `useInbox` — incoming shares update on `grant:upsert` / `grant:delete` for the caller's
+  personal topic.
+- Mutations — the optimistic overlay reflects writes in the same render tick, then dedups
+  against the echo when it arrives.
+
+No polling, no timers, no manual refetching. A typical PDS-write-to-SSE-echo round-trip is
+under a second, so remote changes from other devices surface within that window.
+
+## Gating the auto-start
+
+The provider's auto-start is unconditional: it fires a `startSseConsumer` call on mount.
+That's fine when you only render the provider after the user is authenticated. It's a
+problem when you wrap the whole app in the provider and rely on internal auth state to
+decide who's logged in — an unauthenticated start triggers a token-exchange request that
+fails with `Auth`.
+
+Two options. The clean one: render the provider conditionally. Unmount when the user signs
+out, mount when they sign in. `OpakeProvider` already cleans up on unmount (stops the
+stream, wipes keeper state).
+
+The escape hatch: set `disableSseAutoStart` and drive the start yourself with
+`useStartSseConsumer`:
+
+<CodeBlock language="tsx" title="sse-gate.tsx" code={useStartSseGated} />
+
+`useStartSseConsumer` is deliberately start-only. There's no corresponding stop — it
+exists to let you delay the start past provider mount, not to toggle the stream on and
+off during a session. If you need stop-on-condition, use the conditional-provider pattern
+above.
+
+### Override the indexer URL
+
+The consumer resolves its URL from a priority chain: runtime override →
+`accountConfig.indexerUrl` on the user's PDS → the compile-time default. Pass an explicit
+URL to `useStartSseConsumer` to win the chain:
+
+<CodeBlock language="tsx" title="override.ts" code={useStartSseOverride} />
+
+Typical use: pinning to a specific indexer for testing, or overriding the default in a
+development build.
+
+## The daemon
+
+`@opake/react` ships a side-effect hook for the background daemon:
+
+<CodeBlock language="tsx" title="daemon-runner.tsx" code={useDaemonExample} />
+
+The daemon is pure maintenance now — SSE replaced the tree-sync job, but the daemon still
+runs:
+
+- Pending-share retries (when a recipient publishes their encryption key, the daemon
+  promotes queued pending shares to real grants).
+- Stale pair-request cleanup (requests past their TTL get deleted from the PDS).
+- Grant-healing (finding and repairing grants whose wrapped key is missing or
+  invalidated by a keyring rotation).
+
+`useDaemon` is imperative: it starts the daemon on mount, stops it on unmount, and returns
+nothing. Task state lives in the `TaskStore` you pass in — implement the interface with
+IndexedDB (for persistence across reloads) or an in-memory Map (for tests / SSR). The
+daemon's own data flow is opaque to React; if you want to surface task status, subscribe
+to the `TaskStore` from your own component state.
+
+`onSessionExpired` is called exactly once when a task fails with an `Auth` error. Wire it
+to your app's logout path — by the time this fires the session is dead and no further
+Opake calls will succeed without re-auth.
+
+## Manual invalidation
+
+Most state is SSE-driven. The few queries that aren't:
+
+- `useShares(documentUri)` / `usePendingShares()` — react-query backed, invalidated
+  automatically by `useShareFile` / `useRevokeShare` / `useCancelPendingShare` on success.
+  If you know an external write landed (e.g. a CLI on another device revoked a grant),
+  invalidate manually.
+- `useDirectoryMetadata(keyringUri, directoryUri)` — invalidated by every tree mutation
+  the React layer runs. Not invalidated for writes from other devices.
+- Daemon task state — lives in your `TaskStore`, separate from react-query.
+
+For the first two, `opakeKeys` gives you stable query-key factories:
+
+<CodeBlock language="tsx" title="refresh-button.tsx" code={manualInvalidation} />
+
+The full list of key factories:
+
+<CodeBlock language="typescript" title="opakeKeys" code={keyFactoriesShape} />
+
+Invalidating `opakeKeys.all()` nukes every Opake-owned query, which forces a cold refetch
+of everything react-query caches. Useful as a "something's really off, start over" button;
+heavy otherwise.
+
+## Account switching
+
+Passing a new `Opake` instance to the provider's `opake` prop creates a fresh cache. The
+overlay, FileManager cache, and keeper state all rebuild from the new instance; patches
+and cached FileManagers from the old identity don't leak across.
+
+If your app supports multiple signed-in accounts, the typical pattern is: keep one
+`OpakeProvider` at the root, re-key it when the active account changes. The WASM module
+stops the old stream + wipes keeper state on unmount, then starts fresh on the new mount.
+
+<DocsNext slug="live-updates" />

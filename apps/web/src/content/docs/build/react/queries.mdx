@@ -1,0 +1,131 @@
+import {
+  useDirectoryExample,
+  useDirectoryMetadataExample,
+  useWorkspacesExample,
+  useInboxExample,
+  useSharesExample,
+  usePendingSharesExample,
+} from "./_snippets";
+
+<ChapterHeader title="@opake/react — Reading hooks" />
+
+<Lead>
+  Read-only hooks split by delivery method. Three are subscriptions wired to the WASM
+  keepers and re-render on SSE events within a firehose round-trip. Three are react-query
+  queries that cache and re-fetch on invalidation — useful for state that doesn't flow
+  through the live stream.
+</Lead>
+
+## Subscriptions (SSE-backed)
+
+These hooks install a watcher on the WASM side, get one eager fire with current state, and
+then re-fire on every relevant SSE event. The `OpakeProvider` auto-starts the consumer, so
+everything below is "just works" inside a provider — no bootstrap plumbing.
+
+### `useDirectory(keyringUri, directoryUri)`
+
+<CodeBlock language="tsx" title="directory-view.tsx" code={useDirectoryExample} />
+
+The primary hook for rendering a directory tree. Pass `keyringUri = null` for the cabinet
+or a workspace's keyring URI. Pass `directoryUri = null` to watch the root of that context,
+or a specific directory URI otherwise.
+
+- `snapshot` is a `DirectoryTreeSnapshot` once the initial load lands, `null` before that
+  (and `null` again if the watched directory was deleted).
+- `isReady` is the recommended "do I have data" check. It's `true` exactly when `snapshot`
+  is non-null.
+- `error` is populated if `loadTree` or the watcher install threw. Show a retry UI and
+  call `retry()` to rerun the acquisition.
+- `resolvedDirectoryUri` tells you the URI that's actually being watched — useful when you
+  passed `null` and need to know where the root landed.
+
+Snapshots fold in the optimistic overlay automatically, so a mutation you fire shows up in
+the same render tick. See the [mutations page](/docs/react/mutations) for details.
+
+### `useWorkspaces()`
+
+<CodeBlock language="tsx" title="workspace-list.tsx" code={useWorkspacesExample} />
+
+Subscribes to the `WorkspaceKeeper`. First call bootstraps the keeper via `listWorkspaces`;
+subsequent SSE `keyring:upsert` / `keyring:delete` events patch the list in place.
+
+`data` is a `readonly WorkspaceEntry[]` with `{ uri, ownerDid, rotation, memberCount,
+createdAt, name, description, icon }`. `isLoading` is `true` until the keeper has
+bootstrapped once; after that it stays `false` even when the list is empty. The raw
+`snapshot.loaded` flag is also exposed if you need to distinguish the cold-start state from
+"loaded, currently empty."
+
+### `useInbox()`
+
+<CodeBlock language="tsx" title="inbox.tsx" code={useInboxExample} />
+
+Same subscription shape as `useWorkspaces`. Backed by the `InboxKeeper`, which the indexer
+fans into the caller's personal topic for both owner-side (you just shared something) and
+recipient-side (someone shared with you) events.
+
+Entries are `InboxGrant` values: `{ uri, ownerDid, documentUri, createdAt }`. To actually
+open an incoming share, call `opake.downloadFromGrant(grantUri)` or
+`opake.resolveGrantMetadata(grantUri)` — see the [SDK sharing page](/docs/sdk/sharing).
+
+## Cached reads (react-query)
+
+These hooks don't subscribe to SSE. They fetch once per query key and cache the result. The
+`OpakeProvider` invalidates them automatically when a local mutation changes the relevant
+state; updates from other devices surface on the next manual invalidation or refetch
+trigger.
+
+### `useDirectoryMetadata(keyringUri, directoryUri)`
+
+<CodeBlock
+  language="tsx"
+  title="directory-filenames.tsx"
+  code={useDirectoryMetadataExample}
+/>
+
+Thin read for a directory's document metadata — filenames, MIME types, sizes, tags,
+descriptions. Useful when a list view needs names but you don't want the full subtree that
+`useDirectory` carries.
+
+Returns a react-query `{ data, isLoading, ... }` where `data` is
+`Readonly<Record<string, DocumentMetadata>>` keyed by document URI. The query is
+invalidated whenever any tree mutation fires (to keep things simple, the mutation hook
+invalidates the `["opake", "metadata"]` prefix), which in practice means this is live for
+the user's own writes but not for writes from other devices.
+
+### `useShares(documentUri)`
+
+<CodeBlock language="tsx" title="shares-list.tsx" code={useSharesExample} />
+
+List every active grant for a specific document. The underlying `listShares` call
+enumerates the caller's entire grant collection; the hook filters client-side to the single
+document you asked about. Cabinet-only — workspace sharing doesn't use grants.
+
+`useShareFile` and `useRevokeShare` invalidate this query automatically on success.
+
+### `usePendingShares()`
+
+<CodeBlock
+  language="tsx"
+  title="pending-shares.tsx"
+  code={usePendingSharesExample}
+/>
+
+Pending shares are the queue of "I wanted to share this with Bob, but Bob hasn't published
+an encryption key yet" entries. The daemon retries them on a schedule; the hook reads the
+current queue, and `useCancelPendingShare` drops one.
+
+The query is local-only — pending shares don't flow through SSE, they only exist in the
+caller's cabinet until the daemon completes or expires them.
+
+## Composing with suspense / error boundaries
+
+The subscription hooks don't throw. Errors are surfaced on the `error` field (for
+`useDirectory`) or swallowed (for `useWorkspaces` / `useInbox`, since a bootstrap failure
+just leaves `isLoading` pinned true). Wire your own error boundary around the components
+that call these hooks if you want suspense-style flow.
+
+The react-query hooks behave like any other `useQuery` — they respect `QueryClient`-level
+`defaultOptions.queries.useErrorBoundary`, `retry`, and `suspense` if you opt in. See
+[react-query's docs](https://tanstack.com/query/latest) for the boundary patterns.
+
+<DocsNext slug="queries" />

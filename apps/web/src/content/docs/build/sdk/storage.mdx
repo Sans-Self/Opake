@@ -1,0 +1,102 @@
+import {
+  storageInterface,
+  storageBuiltIns,
+  storageCustomBackend,
+} from "./_snippets";
+
+<ChapterHeader title="Storage interface" />
+
+<Lead>
+  Everything the SDK persists goes through a `Storage` implementation you provide.
+  `IndexedDbStorage` is the browser default, `MemoryStorage` is for tests, and the interface
+  is small enough to port to new backends (Tauri filesystem, React Native, a server-backed
+  sync service) with a few dozen lines.
+</Lead>
+
+## The interface
+
+<CodeBlock language="typescript" title="Storage" code={storageInterface} />
+
+Every method is async. Implementations can use any storage technology underneath, but the
+contract is sequentially consistent per DID: a `saveIdentity` followed by `loadIdentity`
+with the same DID must return what was written.
+
+The four groups of methods serve different lifetime profiles. Config, identity, and session
+are small, read frequently, written rarely. Pair-state is ephemeral: short-lived entries
+created and deleted within a single pairing flow. The cache is high-volume and
+access-pattern-dominant; it's OK for cache implementations to prune aggressively or skip
+writes under pressure.
+
+## Built-in implementations
+
+<CodeBlock language="typescript" title="built-ins.ts" code={storageBuiltIns} />
+
+`IndexedDbStorage` uses Dexie tables for config, identities, sessions, pair-states, and the
+record cache. Database name is `opake` by default; pass a custom name to the constructor if
+you need multiple parallel stores (rare, but useful for test isolation). Schema evolution is
+Dexie-versioned; existing databases upgrade in place when the SDK schema bumps.
+
+`MemoryStorage` is simpler: plain `Map` instances, no persistence. Fine for unit tests. Not
+fine for anything a user would run, because identity keys vanish when the process exits.
+
+## Writing a custom backend
+
+The contract is small enough to implement from scratch. A rough sketch for a Tauri app using
+the file system:
+
+<CodeBlock language="typescript" title="tauri-fs-storage.ts" code={storageCustomBackend} />
+
+The identity, session, and pair-state paths follow the same load-file / save-file pattern.
+For the cache, you'd probably want a single SQLite database rather than one file per record;
+the cache API is designed around (did, collection, uri) tuples which map cleanly to SQL.
+
+If you build one that's reusable, consider sending it upstream. The `Storage` contract is
+small; most backends are one file plus tests. Keeping your implementation in the main repo
+saves you from re-syncing it every time the trait evolves, and means other people on the
+same platform find it next to the built-ins instead of re-solving the problem. Issues and
+PRs at [tangled.org/opake.app/opake](https://tangled.org/opake.app/opake).
+
+## What each method is called for
+
+- **`loadConfig` / `saveConfig`**: called once during `Opake.init` to resolve the target DID
+  (or pick the default), and on every account-mutating operation (login, logout, switch
+  default, remove account). Low-frequency.
+- **`loadIdentity` / `saveIdentity`**: `loadIdentity` runs on `Opake.init`. `saveIdentity`
+  runs during seed-phrase recovery and device-pairing completion. After that, the identity
+  is in WASM memory for the session's lifetime and doesn't get re-read.
+- **`loadSession` / `saveSession` / `clearSession`**: `loadSession` on `Opake.init`.
+  `saveSession` on every token refresh (proactive or reactive), and on fresh login.
+  `clearSession` on logout without account removal.
+- **`removeAccount`**: deletes everything for one DID atomically. The implementation should
+  treat this as a transaction; a half-removed account will fail the next `Opake.init` for
+  that DID in confusing ways.
+- **`savePairState` / `loadPairState` / `deletePairState`**: called exclusively from inside
+  WASM during device pairing. The bytes are the ephemeral X25519 private key for a pending
+  pair request. Implementations should treat these bytes as secret and clear them from any
+  intermediate buffers once the save completes.
+- **Cache methods**: called opportunistically. The SDK survives partial cache failures; if
+  `cachePutRecords` silently no-ops on a particular record, the next operation that needs
+  it just re-fetches from the PDS. The cache is correctness-preserving, not
+  correctness-dependent.
+
+## Invariants implementations must respect
+
+- **No leaking pair-state to JS userland.** `loadPairState` / `savePairState` return and
+  accept `Uint8Array`, but your implementation must not log, persist as plaintext in URLs or
+  query strings, or otherwise serialize these bytes anywhere other than the backing store.
+  IndexedDbStorage writes them as-is into an IDB row whose key is the `(did, rkey)` tuple;
+  anything equivalent is fine.
+- **Atomic `removeAccount`.** If a user clicks "log out and forget", and your
+  `removeAccount` crashes halfway through, the partial state becomes a support ticket. Use
+  whatever transaction primitive your backend offers, even if it's "write to a temp and
+  rename on success."
+- **Sequential consistency per DID.** Multiple in-flight `saveSession` calls for the same
+  DID during concurrent token refreshes must settle to the latest-written value. The SDK's
+  `@withTokenGuard` serialises refreshes into a single-flight promise, so you won't see
+  concurrent writes in practice, but your backend shouldn't rely on that.
+- **No in-place mutation of returned objects.** The SDK assumes `loadIdentity` /
+  `loadSession` / `loadConfig` return fresh copies each call. If your backend caches the
+  parsed object and returns references to it, a consumer mutating the returned value could
+  leak into subsequent loads.
+
+<DocsNext slug="storage" />

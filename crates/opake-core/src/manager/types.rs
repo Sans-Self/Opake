@@ -38,6 +38,7 @@ pub struct UploadRequest<'a> {
     pub filename: &'a str,
     pub mime_type: &'a str,
     pub description: Option<&'a str>,
+    pub tags: &'a [String],
     /// Target directory URI. `None` means the root directory.
     pub directory_uri: Option<&'a str>,
 }
@@ -69,6 +70,40 @@ pub enum MutationOutcome {
     /// `update_uri` is the AT-URI of the affected entity (document or
     /// directory), not the proposal record itself.
     Proposed { update_uri: String },
+}
+
+/// Document metadata including record timestamps.
+///
+/// Combines the decrypted metadata (from the encrypted envelope) with
+/// the unencrypted timestamps from the PDS record.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResolvedDocumentMetadata {
+    pub name: String,
+    pub mime_type: Option<String>,
+    pub size: Option<u64>,
+    pub tags: Vec<String>,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub modified_at: Option<String>,
+}
+
+impl ResolvedDocumentMetadata {
+    /// Build from decrypted metadata + record timestamps.
+    pub fn from_parts(
+        meta: crate::crypto::DocumentMetadata,
+        created_at: String,
+        modified_at: Option<String>,
+    ) -> Self {
+        Self {
+            name: meta.name,
+            mime_type: meta.mime_type,
+            size: meta.size,
+            tags: meta.tags,
+            description: meta.description,
+            created_at,
+            modified_at,
+        }
+    }
 }
 
 impl MutationOutcome {

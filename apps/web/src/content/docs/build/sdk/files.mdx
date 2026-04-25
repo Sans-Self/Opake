@@ -1,0 +1,121 @@
+import {
+  getFileManager,
+  uploadDocument,
+  downloadDocument,
+  readingTrees,
+  structureChanges,
+  updateMetadataContent,
+  watchDirectory,
+} from "./_snippets";
+
+<ChapterHeader title="Files & directories" />
+
+<Lead>
+  Once an identity is loaded, every file operation goes through a `FileManager`. The API is
+  path-and-URI-based, mutations are atomic, and tree state is subscribable so your UI can
+  reflect changes from other devices without polling. This page covers the surface as it applies
+  to your personal cabinet; the same API reaches into shared workspaces, with a few semantics
+  that carry over into [Workspaces](/docs/sdk/workspaces).
+</Lead>
+
+## Getting a `FileManager`
+
+Two constructors on `Opake`, same return type:
+
+<CodeBlock language="typescript" title="get-file-manager.ts" code={getFileManager} />
+
+Each `Opake` instance can hand out multiple `FileManager`s, one per context. They don't share
+state, and freeing one doesn't affect the others; create as many as your UI needs and discard
+when the user navigates away.
+
+## The tree model
+
+A cabinet or workspace is a tree of **directories** (organisational containers, rendered in the
+UI as folders) and **documents** (actual files with encrypted content and metadata). Directories
+hold an ordered list of entries, each pointing to either another directory or a document by
+AT-URI.
+
+Nothing in the tree is ever stored in plaintext on the PDS. Directory names and document
+metadata (filenames, MIME types, sizes, tags, descriptions) are encrypted with the same content
+key that protects the corresponding blob. The PDS sees opaque byte ranges and typed record
+shells.
+
+## Reading the tree
+
+Three functions to pick from, trading off freshness for speed:
+
+<CodeBlock language="typescript" title="reading-trees.ts" code={readingTrees} />
+
+For rendering a file browser, `loadTreeWithMetadata(currentDirectoryUri)` is the right choice —
+you get the whole structure fast, and the directory the user is looking at has its document
+names decrypted. Other directories will render as "N items" placeholders until navigated to.
+
+`syncAndLoadTree` forces a fresh fetch. Use it right after a mutation you want to confirm, or as
+a manual refresh action. Don't use it on every render; the SSE consumer keeps the cache current
+on its own (see [Live updates](/docs/sdk/events)).
+
+## Upload and download
+
+<CodeBlock language="typescript" title="upload.ts" code={uploadDocument} />
+
+`upload` generates a random AES-256-GCM content key inside WASM, encrypts the bytes, wraps the
+key to the caller's X25519 public key, and writes the document record plus blob to the PDS in a
+single `applyWrites` call. If you pass `directoryUri`, the same `applyWrites` also adds the new
+document as an entry in that directory, so the document never appears in the tree without its
+parent reference.
+
+The `result.proposed` check in the example only matters when the `FileManager` is pointed at a
+shared workspace that the caller doesn't own. For cabinet uploads it's always `false`. See
+[Workspaces](/docs/sdk/workspaces#proposal-vs-applied) for what "proposed" means and how the
+owner side picks those up.
+
+<CodeBlock language="typescript" title="download.ts" code={downloadDocument} />
+
+`download` fetches the blob, unwraps the content key with the caller's private key, decrypts,
+and returns the plaintext as a `Uint8Array` plus the decrypted filename. Works identically
+whether the document lives in your own cabinet or in a workspace you're a member of.
+
+## Structural changes
+
+<CodeBlock language="typescript" title="structure.ts" code={structureChanges} />
+
+All four are atomic for cabinet owners: `createDirectory` writes the new directory and updates
+the parent's entries in one `applyWrites`; `move` removes from source and adds to target in one
+call; `delete` removes the document record and its entry together; `deleteRecursive` walks the
+subtree and tears everything down in one batched operation.
+
+For workspace members (i.e. non-owners acting on a workspace someone else created), these turn
+into `directoryUpdate` proposals. See [Workspaces](/docs/sdk/workspaces) for the proposal flow.
+
+## Editing an existing document
+
+<CodeBlock
+  language="typescript"
+  title="update-metadata-content.ts"
+  code={updateMetadataContent}
+/>
+
+`updateMetadata` patches the encrypted metadata record; the blob is untouched, so shares and
+grants stay valid without re-wrapping. `updateContent` re-encrypts the blob with the *same*
+content key the document was originally uploaded with. Recipients who already have that key
+wrapped to them can decrypt the new version immediately. If you want forward secrecy across the
+edit, delete and re-upload instead.
+
+## Live updates
+
+The tree state isn't something you poll. `FileManager.watchDirectory` subscribes you to changes
+for a specific directory URI: uploads, deletes, renames, moves, and directory rearrangements
+fire the handler with the fresh snapshot. When the directory itself is deleted, the handler
+fires with `null`, and the watcher closes automatically.
+
+<CodeBlock language="typescript" title="watch-directory.ts" code={watchDirectory} />
+
+The watcher sits on top of the SSE consumer (see [Live updates](/docs/sdk/events)). When the
+consumer isn't started, the watcher still fires the initial snapshot from cache but won't
+update on remote changes.
+
+`@opake/react` wraps `watchDirectory` as the `useDirectory` hook, with the same subscription
+semantics and the overlay layer for optimistic mutations folded in. See [React
+bindings](/docs/react/overview) when those pages land.
+
+<DocsNext slug="files" />

@@ -1,0 +1,106 @@
+import {
+  helloCabinet,
+  staticSurface,
+  instanceSurface,
+  storageOptions,
+  errorHandling,
+} from "./_snippets";
+
+<ChapterHeader title="@opake/sdk — Overview" />
+
+<Lead>
+  `@opake/sdk` is the TypeScript layer you use when you want to build an app on top of Opake. It
+  wraps the Rust WASM core, so every cryptographic operation runs inside a module JS can't reach.
+  Your code sees type-safe method calls and error objects; that's it.
+</Lead>
+
+You interact with the SDK through a small set of classes. `Opake` is the root. You get one from
+`Opake.init({ storage })`, and it owns the session, the identity keypair, and the authenticated
+client to your PDS. `FileManager` handles uploads, downloads, directory operations, and
+metadata; `opake.cabinet()` returns one for your personal files, and `opake.workspaceByUri(uri)`
+returns one for a shared workspace. The `Storage` interface is yours to implement, though for
+browsers you almost certainly want the built-in `IndexedDbStorage`.
+
+None of the HTTP or crypto is exposed on this side. Tokens, DPoP keys, and identity private
+material live inside the WASM module where JS can't read them. The TypeScript layer is types
+and transport between your code and that module.
+
+## Install
+
+<CodeBlock language="sh">bun add @opake/sdk</CodeBlock>
+
+Or if you're on npm / pnpm / yarn:
+
+<CodeBlock language="sh">npm install @opake/sdk</CodeBlock>
+
+AGPL-3.0. If you bundle it into a web app, that app becomes a derivative work. See
+[Licensing](/docs/faq#licensing).
+
+## Hello, cabinet
+
+The minimum it takes to upload and read back one encrypted file:
+
+<CodeBlock language="typescript" title="example.ts" code={helloCabinet} />
+
+Under those calls: `IndexedDbStorage` persisted the session and the identity keypair, so the
+next page load starts from `Opake.init` without redoing OAuth. `FileManager.uploadAt` generated
+a random AES-256-GCM content key, encrypted the bytes, wrapped the key to your X25519 public
+key, and wrote three records to the PDS (document metadata, blob, and the wrapped-key envelope).
+And if the access token was within 30 seconds of expiring, the SDK refreshed it first,
+single-flight so concurrent calls don't each fire their own refresh.
+
+## The `Opake` class
+
+The surface splits in two. Static methods run before an identity exists in Storage: login,
+seed-phrase recovery, device pairing. Instance methods come out of `Opake.init({ storage })`
+once an identity is loaded.
+
+### Static surface
+
+<CodeBlock language="typescript" title="before init" code={staticSurface} />
+
+So much of the API is static because those three flows run before any identity exists on a
+device. They can't live on an instance because you haven't got one. Once any of them finishes,
+`Opake.init` succeeds.
+
+### Instance surface
+
+<CodeBlock language="typescript" title="after init" code={instanceSurface} />
+
+The `did` field is the caller's DID, set during `init` and constant for the life of the
+`Opake` instance. Safe as a React `useMemo` dependency or a cache key.
+
+## Storage
+
+Any operation that persists something goes through the `Storage` interface: session tokens,
+identity keys, ephemeral pair state, the local record cache. Two implementations ship with the
+SDK:
+
+<CodeBlock language="typescript" title="storage options" code={storageOptions} />
+
+If you need a different backend (Tauri filesystem, React Native AsyncStorage, something
+server-backed), implement the interface yourself. See [Storage
+interface](/docs/sdk/storage) for what each method persists and when it's called.
+
+If you build one that's reusable, consider sending it upstream. The `Storage` contract is
+small; most backends are one file plus tests. Keeping your implementation in the main repo
+saves you from re-syncing it every time the trait evolves, and means other people on the same
+platform find it next to the built-ins instead of re-solving the problem. Issues and PRs at
+[tangled.org/opake.app/opake](https://tangled.org/opake.app/opake).
+
+## Errors
+
+Every SDK method throws `OpakeError` on failure. Branch on `.kind`:
+
+<CodeBlock language="typescript" title="error handling" code={errorHandling} />
+
+`kind` maps 1-to-1 to the `opake_core::Error` variants in Rust, so anything the core library can
+surface is reachable from TS without `any` casts.
+
+One `kind` worth special-casing: `IdentityMissing`. It fires when the caller has a live session
+but no encryption identity on this device yet. That's a normal state. It means the user just
+signed in on a fresh device and needs to either recover from a seed phrase or pair with an
+existing device to bootstrap an `Identity` into Storage. Route them to that flow, don't surface
+it as a generic failure.
+
+<DocsNext slug="overview" />

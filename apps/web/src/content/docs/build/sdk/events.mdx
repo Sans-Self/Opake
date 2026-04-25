@@ -1,0 +1,135 @@
+import {
+  startConsumerBasic,
+  startConsumerCustom,
+  teardownSequence,
+  consumerGating,
+} from "./_snippets";
+
+<ChapterHeader title="Live updates" />
+
+<Lead>
+  Opake ships a WASM-owned Server-Sent Events consumer that keeps the in-memory directory
+  trees, workspace list, and inbox current without polling. One consumer per `Opake` instance.
+  JS starts and stops it; parsing, reconnect, and state reconciliation happen in Rust.
+</Lead>
+
+## Starting the stream
+
+<CodeBlock language="typescript" title="start.ts" code={startConsumerBasic} />
+
+`startSseConsumer` is idempotent. If a consumer is already running (for example, from a
+previous call or a React StrictMode double-mount), the second call returns without spawning
+a duplicate. A single `Opake` instance can only have one consumer in flight at a time.
+
+The call resolves the indexer URL from three sources, highest priority first: a runtime
+override you passed to an earlier `setIndexerUrl` or this function, the `indexerUrl` field in
+the user's `app.opake.accountConfig` record on the PDS, and the `OPAKE_INDEXER_URL` value
+baked in at build time. Pass one explicitly when you need to override:
+
+<CodeBlock language="typescript" title="start-with-override.ts" code={startConsumerCustom} />
+
+Gate the call on whether the user has a live session. Without one, the consumer's token
+exchange returns `Auth` and never actually connects:
+
+<CodeBlock language="typescript" title="gating.ts" code={consumerGating} />
+
+## What the stream delivers
+
+The indexer watches the atproto firehose for `app.opake.*` records and forwards them to any
+connected consumer whose DID appears as owner, recipient, or workspace member. Three
+event families matter to your code:
+
+- **Directory tree events.** Document uploads, deletions, metadata changes, directory
+  creations, moves, renames. Delivered to any `FileManager.watchDirectory` subscribers
+  targeting affected directories. The tree on-disk cache (IndexedDB on web) is also updated
+  in the background.
+- **Workspace list events.** Keyring creations, member add/remove, workspace rename, key
+  rotation. Delivered to any `opake.watchWorkspaces` subscribers. The `WorkspaceKeeper`
+  applies them incrementally; there's no re-fetch until the watcher's own `listWorkspaces`
+  bootstrap or a full reconnect.
+- **Inbox events.** Grant creation, grant deletion. Delivered to any `opake.watchInbox`
+  subscribers. Fans out to both sides of a grant: sharer and recipient.
+
+Each event carries only the record's atproto URI and the decrypted fields the indexer can
+safely derive. Encrypted fields stay encrypted; the keepers unwrap them inside WASM using
+the caller's identity before snapshots go out to handlers.
+
+## Keepers, not caches
+
+The three keepers (`TreeKeeper`, `WorkspaceKeeper`, `InboxKeeper`) live in WASM and hold the
+*decrypted* state that matches each watcher you've installed. Calling `listWorkspaces` or
+`listInbox`, or acquiring a `FileManager` for a given directory, bootstraps the relevant
+keeper with a fresh snapshot. SSE events then patch that state incrementally.
+
+From JS, you don't talk to keepers directly; you install watchers and receive snapshots. The
+keeper is the layer that connects "an event arrived on the stream" to "the snapshot handler
+that represents your UI gets called." If nothing is watching a given scope, events for it
+are parsed and discarded.
+
+## Reconnect and bootstrap
+
+The consumer maintains a connection to `/api/events` and reconnects with exponential backoff
+if the stream closes. On reconnect, it does a full re-sync: `listWorkspaces` / `listInbox` /
+the cabinet + workspace tree syncs all fire again, repopulating the keepers from scratch.
+Full re-sync is the price of a subscription model that doesn't buffer for offline
+subscribers: Phoenix PubSub on the indexer side discards events that had no connected
+listener, so the consumer can't just catch up from a cursor.
+
+In practice this is fine. The full re-sync is fast (tree snapshots are paginated, keyring
+listing hits one indexer endpoint, inbox the same) and the window where a device is offline
+is usually short. If you see stale state in the UI after network recovery, the issue is the
+watchers, not the stream; try an explicit `listWorkspaces` / `listInbox` to kick the
+bootstrap.
+
+## Token exchange
+
+The consumer authenticates to `/api/events` with a short-lived, single-use token rather than
+an Ed25519 signature on every connection. The flow:
+
+1. Consumer wakes up, needs to connect.
+2. `POST /api/events/token` with an Ed25519-signed `Opake-Ed25519` header (timestamp + DID +
+   signature). Indexer verifies against the caller's published `app.opake.publicKey/self`.
+3. Indexer mints a random opaque token, stores it in ETS against the caller's DID with a
+   60-second TTL, returns it in the body.
+4. Consumer opens `GET /api/events?token=…`. Indexer looks up the token in ETS, associates
+   the stream with the DID, deletes the token from ETS so it can't be reused.
+5. Stream is alive; events flow.
+
+If the connection drops and reconnects, steps 2-4 happen again. Tokens are one-shot by
+design, and short enough that a stolen one has a few-seconds window of replay value before
+it either expires or the real consumer consumed it.
+
+Your code never sees the token directly. `startSseConsumer` triggers the exchange under the
+covers.
+
+## Teardown
+
+<CodeBlock language="typescript" title="teardown.ts" code={teardownSequence} />
+
+`stopSseConsumer` is lightweight. It flips the consumer's cancellation flag; the next event
+parse notices and bails cleanly. No network round-trip, no re-exchange needed if you later
+call `startSseConsumer` again.
+
+`wipeState` is the one that costs you state. It drains every keeper, zeroises cached content
+keys (ZeroizeOnDrop fires on the Rust side), and clears decrypted name caches. Anything
+holding a `watch*` handler receives one final snapshot with empty entries and `loaded: false`
+so your UI can tear down gracefully. Do it on logout, account switch, or anywhere else a
+user's crypto state shouldn't bleed into the next session.
+
+Don't `wipeState` without `stopSseConsumer` first. An event landing mid-wipe would try to
+apply against freshly-uninstalled scopes and log a warning. `OpakeProvider` in `@opake/react`
+does the pair in order on unmount.
+
+## Running multiple accounts
+
+One consumer per `Opake` instance. If your app supports multi-account switching, construct
+one `Opake` per signed-in account (via `Opake.init({ storage, did })` with the specific DID)
+and start the consumer on each. Each maintains its own stream and its own keepers. Stopping
+one doesn't affect the others.
+
+In practice most apps render one account at a time and swap the active `Opake`; that's
+enough, since the inactive one's keepers sitting quiet in memory cost nothing. If you want to
+be aggressive about memory, `stopSseConsumer` + `wipeState` on the inactive account and
+restart when the user switches back.
+
+<DocsNext slug="events" />

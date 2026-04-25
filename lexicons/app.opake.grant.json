@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A share grant — gives a specific DID access to a specific document's content encryption key. Created by the document owner when sharing a file ad-hoc (outside of a keyring). The recipient discovers this via their AppView or a notification mechanism. To revoke: delete this record and optionally re-encrypt the document with a new key.",
+      "description": "A share grant — gives a specific DID access to a specific document's content encryption key. Created by the document owner when sharing a file ad-hoc (outside of a keyring). The recipient discovers this via their indexer or a notification mechanism. To revoke: delete this record and optionally re-encrypt the document with a new key.",
       "key": "tid",
       "record": {
         "type": "object",

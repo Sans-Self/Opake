@@ -11,7 +11,7 @@ Quick-reference for every algorithm, constant, and key type in the system. For t
 | AES-256-KW (RFC 3394) | Symmetric key wrapping (content key → group key) | `aes-kw` |
 | HKDF-SHA256 | KDF for key wrapping + identity derivation | `hkdf` + `sha2` |
 | PBKDF2-HMAC-SHA512 | Mnemonic → master seed | `pbkdf2` + `sha2` |
-| Ed25519 | AppView authentication signatures | `ed25519-dalek` |
+| Ed25519 | Indexer authentication signatures | `ed25519-dalek` |
 | BIP-39 | 24-word mnemonic encoding (256-bit entropy) | `bip39` (embedded wordlist) |
 
 `x25519-hkdf-a256kw` is intentionally distinct from JWE's `ECDH-ES+A256KW` — we use HKDF-SHA256, not JWE's Concat KDF.
@@ -198,7 +198,7 @@ Used everywhere: document encryption envelopes, grants, pairing. No role — thi
 }
 ```
 
-Only used in keyring `members` and `keyHistory` arrays. Composes a `WrappedKey` with a workspace role. The role is plaintext because the AppView needs it for authorization — it's not a crypto concept.
+Only used in keyring `members` and `keyHistory` arrays. Composes a `WrappedKey` with a workspace role. The role is plaintext because the Indexer needs it for authorization — it's not a crypto concept.
 
 ### Encryption union on documents
 
@@ -272,8 +272,9 @@ Sensitive types are zeroized on drop to prevent key material lingering in memory
 - **Types with automatic zeroization:**
   - `ContentKey` — AES-256 content encryption key
   - `Identity` — private_key and signing_key fields (base64 strings zeroed)
+  - `DpopKeyPair` — private_key_b64 (P-256 private key for DPoP proof generation)
   - `LegacySession` — access_jwt, refresh_jwt
-  - `OAuthSession` — access_token, refresh_token
+  - `OAuthSession` — access_token, refresh_token (nested `DpopKeyPair` chains zeroization)
   - `Cabinet` — raw X25519 private key bytes (explicit `#[derive(Zeroize, ZeroizeOnDrop)]`)
   - `Workspace` — workspace key / ContentKey (explicit `#[derive(Zeroize, ZeroizeOnDrop)]`)
 
@@ -328,7 +329,7 @@ We chose random-nonce AES-256-GCM for v1 because:
 3. AES-GCM has universal hardware acceleration and library support
 4. Streaming encryption without a pre-read pass matters for large uploads
 
-AES-GCM-SIV is planned for `SCHEMA_VERSION` v2 as a cipher swap ([#331](https://tangled.org/sans-self.org/opake.app/issues/331)). The migration path: version-gated decrypt (v1 = AES-GCM, v2 = AES-GCM-SIV), SIV-only encrypt going forward. Existing v1 records remain readable. No key derivation changes, no identity migration — just a cipher swap with a proactive re-encryption command for users who want to upgrade old records.
+AES-GCM-SIV is planned for `SCHEMA_VERSION` v2 as a cipher swap ([#331](https://tangled.org/opake.app/opake/issues/331)). The migration path: version-gated decrypt (v1 = AES-GCM, v2 = AES-GCM-SIV), SIV-only encrypt going forward. Existing v1 records remain readable. No key derivation changes, no identity migration — just a cipher swap with a proactive re-encryption command for users who want to upgrade old records.
 
 ## Post-Quantum
 

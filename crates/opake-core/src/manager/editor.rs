@@ -100,7 +100,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         match &self.context {
             FileContext::Cabinet(cabinet) => Ok((cabinet.did.clone(), cabinet.private_key, None)),
             FileContext::Workspace(ws) => {
-                let private_key = self.opake.require_identity()?.private_key_bytes()?;
+                let private_key = *self.opake.identity().private_key_bytes()?;
                 Ok((self.opake.did.clone(), private_key, Some(ws.key.clone())))
             }
         }

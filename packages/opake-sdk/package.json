@@ -1,0 +1,51 @@
+{
+  "name": "@opake/sdk",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./storage/indexeddb": {
+      "types": "./dist/storage/indexeddb.d.ts",
+      "import": "./dist/storage/indexeddb.js",
+      "require": "./dist/storage/indexeddb.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "wasm/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typedoc": "typedoc",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'"
+  },
+  "peerDependencies": {
+    "dexie": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "dexie": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "typedoc": "^0.27.0"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

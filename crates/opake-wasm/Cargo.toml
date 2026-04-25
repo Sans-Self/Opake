@@ -20,5 +20,9 @@ log = { workspace = true }
 console_log = { version = "1", features = ["color"] }
 console_error_panic_hook = "0.1"
 
+# Async Mutex for the shared WasmOpake — RefCell panics on concurrent
+# borrow across await points; Mutex queues instead.
+futures-util = { workspace = true }
+
 # OsRng on wasm32 needs crypto.getRandomValues()
 getrandom = { version = "0.2", features = ["js"] }

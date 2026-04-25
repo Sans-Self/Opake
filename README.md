@@ -2,7 +2,7 @@
   NOTE TO EDITORS:
   Opake uses a dual-documentation system. If you modify the technical details,
   command list, or installation steps in this README, you MUST also update
-  the corresponding MDX content in `web/src/content/` to prevent
+  the corresponding MDX content in `apps/web/src/content/` to prevent
   documentation drift.
 -->
 
@@ -14,7 +14,7 @@ An encrypted personal cloud where privacy and collaboration are no longer a trad
 
 Your data is opaque to everyone without the key. That's the point.
 
-[The Handbook](https://opake.app/docs) · [Issue Tracker](https://tangled.org/sans-self.org/opake.app/issues) · [Architecture](docs/ARCHITECTURE.md)
+[The Handbook](https://opake.app/docs) · [Issue Tracker](https://tangled.org/opake.app/opake/issues) · [Architecture](docs/ARCHITECTURE.md)
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ Your data is opaque to everyone without the key. That's the point.
 Requires Rust 1.75+.
 
 ```sh
-cargo install --path crates/opake-cli
+cargo install --path apps/cli
 ```
 
 ### 2. Login
@@ -54,18 +54,25 @@ No modifications to the PDS. All crypto happens on your machine.
 
 ## Repository Structure
 
-- `opake-core/` — Platform-agnostic library (Rust/WASM).
-- `opake-cli/` — CLI implementation.
-- `appview/` — Elixir/Phoenix indexer for grant discovery.
-- `web/` — React SPA (Vite + TanStack).
+- `crates/opake-core/` — Platform-agnostic library (Rust/WASM).
+- `crates/opake-wasm/` — WASM bindings compiled by `wasm-pack`.
+- `apps/cli/` — CLI implementation (`opake` binary).
+- `apps/indexer/` — Elixir/Phoenix indexer for grant discovery.
+- `apps/web/` — React SPA (Vite + TanStack Start).
+- `packages/opake-sdk/` — TypeScript SDK wrapping the WASM bindings.
+- `packages/opake-react/` — React hooks over the SDK.
+- `packages/opake-daemon/` — Scheduled maintenance tasks.
 - `lexicons/` — AT Protocol schemas (`app.opake.*`).
 
 ## Development
 
 ```sh
-cargo test           # Rust tests
-bun run wasm:build   # Build WASM for web
-mix setup            # Setup AppView
+just build          # cargo build --workspace
+just rust-test      # cargo test --workspace
+just wasm           # wasm-pack build → packages/opake-sdk/wasm
+just sdk-build      # build @opake/sdk (implies wasm)
+just web-build      # build apps/web (implies sdk-build)
+just indexer-test   # mix test --cd apps/indexer
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit conventions.

@@ -1,0 +1,149 @@
+import {
+  useUploadExample,
+  useDownloadExample,
+  useDeleteExample,
+  useMoveExample,
+  useDirectoryMutationsExample,
+  useShareMutationsExample,
+  useCreateWorkspaceExample,
+  overlayMechanics,
+} from "./_snippets";
+
+<ChapterHeader title="@opake/react — Writing hooks" />
+
+<Lead>
+  Mutation hooks wrap the SDK's write operations. Every tree-level mutation is paired with
+  an optimistic overlay patch so the UI reflects the change synchronously; hooks that
+  don't affect the tree (sharing, workspace creation, downloads) go through plain
+  react-query mutations.
+</Lead>
+
+## The keyringUri parameter
+
+Every tree mutation hook takes a `keyringUri: string | null`. Pass `null` for the cabinet
+or a workspace's keyring URI otherwise. The keyringUri determines:
+
+- Which `FileManager` the hook acquires from the provider's cache.
+- Which optimistic overlay scope receives the patch (so `useDirectory` watching the same
+  scope re-renders optimistically).
+- Which query-cache entry gets invalidated on settle.
+
+If your component is rendered for a single context, thread the keyringUri in via props or
+a context value and pass it once. Don't rebuild it per call — each distinct keyringUri
+builds a separate overlay scope.
+
+## File operations
+
+### `useUpload(keyringUri)`
+
+<CodeBlock language="tsx" title="upload-button.tsx" code={useUploadExample} />
+
+The input carries `{ data: Uint8Array, filename, mimeType, description?, tags?,
+directoryUri? }`. Omit `directoryUri` to upload to the context root. The optimistic
+overlay inserts a placeholder entry in the target directory right away; the real entry
+replaces it when the SSE echo arrives (~1s after PDS write).
+
+Results are `UploadResult = { uri, proposed }` from the SDK. In a workspace you don't own,
+`proposed: true` means the upload landed as a `documentUpdate` proposal on your own PDS;
+the workspace owner's daemon applies it. See [workspaces](/docs/sdk/workspaces) for the
+proposal flow.
+
+### `useDownload(keyringUri)`
+
+<CodeBlock language="tsx" title="download-button.tsx" code={useDownloadExample} />
+
+Downloads aren't cached — the hook is a `useMutation`, not a `useQuery`, because caching
+decrypted plaintext in react-query would leak it into memory for longer than necessary.
+Each call re-fetches and re-decrypts.
+
+Returns `{ filename, data: Uint8Array }`. `filename` is the decrypted original name;
+`data` is the plaintext. Both are safe to drop from memory as soon as you've handed them
+off (to a `Blob`, a worker, whatever).
+
+### `useDelete(keyringUri)`
+
+<CodeBlock language="tsx" title="delete-button.tsx" code={useDeleteExample} />
+
+`parentDirectoryUri` is required. The delete is atomic with removing the entry from its
+parent, so the hook needs to know which directory to patch. The optimistic overlay filters
+the entry out of the parent immediately; the SSE echo confirms.
+
+### `useMove(keyringUri)`
+
+<CodeBlock language="tsx" title="drag-drop.tsx" code={useMoveExample} />
+
+Moves work across directories in the same context only. A cabinet document can move
+between cabinet directories; a workspace document can move between directories in that
+workspace. Cross-context moves (workspace → cabinet, cabinet → workspace) aren't a move —
+they're a download + upload + delete, and the SDK deliberately doesn't hide that cost
+behind a single call.
+
+The input is `{ entryUri, sourceDirUri, targetDirUri }`. Works for both documents and
+sub-directories — the tree operation is uniform.
+
+## Directory operations
+
+<CodeBlock language="tsx" title="directory-actions.tsx" code={useDirectoryMutationsExample} />
+
+- `useCreateDirectory(keyringUri)` takes `{ name, parentUri? }`. Omit `parentUri` to
+  create at the root. The optimistic overlay inserts a placeholder directory entry
+  immediately; the real entry replaces it on echo.
+- `useRenameDirectory(keyringUri)` takes `{ directoryUri, newName }`. Renames stay
+  optimistic: the tree reflects the new name synchronously.
+- `useDeleteDirectory(keyringUri)` takes `{ directoryUri }` and recursively deletes the
+  directory and every document inside it. Returns a `{ documentsDeleted,
+  directoriesDeleted }` count on success.
+
+## Sharing
+
+<CodeBlock language="tsx" title="share-buttons.tsx" code={useShareMutationsExample} />
+
+`useShareFile` takes `{ documentUri, handleOrDid, note? }`. All grants are read-only;
+there's no permissions parameter. On success the mutation returns `{ pending: false }` for
+a direct share, or `{ pending: true }` when the recipient has a valid atproto identity but
+hasn't published an Opake encryption key yet — at which point it's been queued as a
+pending share for the daemon to retry.
+
+On success the hook invalidates both the per-document `useShares(documentUri)` query and
+the top-level `usePendingShares()` query, so the lists refresh automatically.
+
+`useRevokeShare` takes a grant URI. Deletes the grant record from your PDS; the recipient
+sees the grant disappear from their `useInbox()` on the next firehose round-trip. All
+`useShares` queries are invalidated on success.
+
+## Workspaces
+
+<CodeBlock language="tsx" title="new-workspace-form.tsx" code={useCreateWorkspaceExample} />
+
+`useCreateWorkspace` takes `{ name, description? }` and returns `{ keyringUri, key }`
+(the `key` is the group key; you don't usually need it — subsequent calls re-resolve via
+the URI and the caller's Identity).
+
+The new workspace appears in `useWorkspaces()` automatically via the SSE `keyring:upsert`
+echo — no cache invalidation needed. Membership management hooks (add/remove member,
+leave workspace) aren't wrapped yet; call `opake.addWorkspaceMember(...)` /
+`opake.removeWorkspaceMember(...)` / `opake.leaveWorkspace(...)` directly from `useOpake`.
+
+## How the optimistic overlay behaves
+
+<CodeBlock language="typescript" title="timeline" code={overlayMechanics} />
+
+Under the hood:
+
+- Each mutation hook wraps `useTreeMutation`, which takes an optional `optimisticUpdate`
+  function `(snapshot, input) => snapshot`. That function is called on `onMutate` to
+  compute the patched snapshot; the patch gets pushed onto the provider's `OptimisticOverlay`.
+- `useDirectory` reads `snapshot.project(scope, base)` — the base from the keeper, with
+  overlay patches composed on top. The projection is a no-op when there are no patches,
+  so there's no per-render cost when nothing is in flight.
+- Patches release 2 seconds after the mutation settles. The delay spans the typical
+  PDS-write-to-SSE-echo round-trip; dropping the patch earlier would briefly reveal the
+  pre-mutation tree between the SDK promise resolving and the echo arriving.
+- On error, the patch releases immediately (no server-side state to wait for) and the UI
+  snaps back.
+
+If you build a custom mutation that needs the same behaviour, `useTreeMutation` is
+exported. Pass your own `mutationFn` and `optimisticUpdate` — see the source of
+`useUpload` / `useMove` for real examples.
+
+<DocsNext slug="mutations" />

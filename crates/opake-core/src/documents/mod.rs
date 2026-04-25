@@ -1,7 +1,7 @@
 // Document operations: list, upload+encrypt, download+decrypt, delete.
 //
 // These are the high-level building blocks that both the CLI and the future
-// web AppView use. They talk to the PDS via XrpcClient and handle record
+// web Indexer use. They talk to the PDS via XrpcClient and handle record
 // parsing, schema version checks, and crypto — but never touch the filesystem,
 // config, or user prompts.
 

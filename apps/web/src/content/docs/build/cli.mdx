@@ -1,0 +1,282 @@
+import { pairingCliFlow } from "./_diagrams";
+
+<ChapterHeader title="The CLI Manual" />
+
+<Lead>
+  `opake` is the reference client. Everything the web app does maps back to a command here, and
+  a few things only the CLI does today: shell completions, the background maintenance daemon,
+  and the scripting hooks you'd want for pipelines and cron jobs.
+</Lead>
+
+## Installing
+
+The CLI is written in Rust. For now it only ships as source; pre-built binaries and a
+crates.io release are on the roadmap. Needs Rust 1.75 or later and Git.
+
+<CodeBlock language="sh">git clone https://tangled.org/opake.app/opake</CodeBlock>
+
+<CodeBlock language="sh">cd opake && cargo install --path apps/cli</CodeBlock>
+
+`cargo install` drops the binary at `~/.cargo/bin/opake`. Confirm with `opake --version`.
+
+### Shell completions
+
+Every modern shell gets tab-completion for commands, flags, and subcommands. Pick yours:
+
+<CodeBlock language="sh">opake completions bash > ~/.local/share/bash-completion/completions/opake</CodeBlock>
+
+<CodeBlock language="sh">opake completions zsh > ~/.zfunc/_opake</CodeBlock>
+
+<CodeBlock language="sh">opake completions fish > ~/.config/fish/completions/opake.fish</CodeBlock>
+
+---
+
+## How the CLI thinks
+
+Three concepts orient the rest of this page.
+
+**Paths** look like file paths: `report.pdf`, `projects/Q4/notes.md`, `/`. Internally Opake
+identifies records by AT-URI (`at://did:plc:xxx/app.opake.document/yyy`), and most commands
+accept either — the friendly path when you're at a prompt, the URI when you're piping URIs
+around between commands.
+
+**Workspaces** are a separate namespace from your personal cabinet. A bare `opake ls` lists
+the cabinet; `opake ls --workspace family-photos` lists that workspace. Every file-touching
+command takes the same `--workspace` flag.
+
+**Accounts** stack. `opake account login` adds one; `opake account list` shows the stack;
+`--as alice.bsky.social` runs a single command against a specific account without flipping
+the default. Useful when you keep a personal account and a work account side by side and
+don't want to remember which is currently primary.
+
+Two more globals worth knowing up front: `-v` increases log verbosity (`-vv` debug, `-vvv`
+trace), and `--help` works on every subcommand.
+
+---
+
+## 1. Signing in
+
+OAuth through your PDS is the default. The first `opake account login` on a fresh machine also
+generates your identity keys and prints a **24-word seed phrase** — write it down before you
+close the window. It's the only thing that can bring your identity back if you lose every
+device you're signed in on.
+
+<CodeBlock language="sh">opake account login alice.bsky.social</CodeBlock>
+
+If your PDS is somewhere other than the Bluesky cluster, point at it:
+
+<CodeBlock language="sh">opake account login alice.example.com --pds https://pds.example.com</CodeBlock>
+
+For PDSes that don't speak OAuth, fall back to app-password auth:
+
+<CodeBlock language="sh">opake account login alice.example.com --legacy</CodeBlock>
+
+### Coming back to an existing identity
+
+Two ways to sign in on a new machine without generating a fresh identity: pair off an existing
+device, or restore from the seed phrase.
+
+<CodeBlock language="sh">opake pair request      # on the new device</CodeBlock>
+
+<CodeBlock language="sh">opake pair approve      # on the existing device</CodeBlock>
+
+Pairing hands the new device a wrapped copy of your identity keys through your PDS. Both sides
+delete their half of the handshake as soon as the transfer is complete.
+
+<SequenceDiagram
+  code={pairingCliFlow}
+  caption="Device pairing. Both devices coordinate through your PDS; neither side ever transmits your identity keys in the clear."
+/>
+
+The other way back in is the seed phrase, in case no paired device is available:
+
+<CodeBlock language="sh">opake recover                    # interactive; prompts for all 24 words</CodeBlock>
+
+<CodeBlock language="sh">opake recover -f seed-backup.txt</CodeBlock>
+
+### Managing the account stack
+
+<CodeBlock language="sh">opake account list</CodeBlock>
+
+<CodeBlock language="sh">opake account set-default bob.other.com</CodeBlock>
+
+<CodeBlock language="sh">opake ls --as alice.bsky.social</CodeBlock>
+
+`--as` accepts a handle or a DID. Handles get resolved fresh on each invocation, so if someone
+moved providers recently the CLI still finds them.
+
+---
+
+## 2. Files
+
+`opake upload` puts a file in your cabinet. Destination paths are optional; omit them and the
+file lands at the root.
+
+<CodeBlock language="sh">opake upload report.pdf</CodeBlock>
+
+<CodeBlock language="sh">opake upload report.pdf --dir projects/Q4</CodeBlock>
+
+<CodeBlock language="sh">opake upload report.pdf --description "Quarterly financial summary"</CodeBlock>
+
+<CodeBlock language="sh">opake upload report.pdf --workspace team</CodeBlock>
+
+### Reading them back
+
+<CodeBlock language="sh">opake ls</CodeBlock>
+
+<CodeBlock language="sh">opake ls projects/Q4 -l               # long format, sizes + mime types</CodeBlock>
+
+<CodeBlock language="sh">opake ls --tag finance</CodeBlock>
+
+<CodeBlock language="sh">opake tree</CodeBlock>
+
+<CodeBlock language="sh">opake download report.pdf -o ~/Downloads/</CodeBlock>
+
+<CodeBlock language="sh">opake cat notes.md                    # decrypts to stdout, pipe-friendly</CodeBlock>
+
+`opake cat` is `opake download --stdout` with a shorter name, and it composes with the rest of
+your shell:
+
+<CodeBlock language="sh">opake cat grocery-list.txt | grep -i bread</CodeBlock>
+
+### Moving, renaming, deleting
+
+Rename is a metadata change. Move is structural.
+
+<CodeBlock language="sh">opake metadata rename report.pdf quarterly-report.pdf</CodeBlock>
+
+<CodeBlock language="sh">opake move report.pdf projects/Q4/</CodeBlock>
+
+<CodeBlock language="sh">opake mkdir archive</CodeBlock>
+
+<CodeBlock language="sh">opake rm old-draft.md</CodeBlock>
+
+<CodeBlock language="sh">opake rm -r archive/</CodeBlock>
+
+### Editing metadata
+
+Document metadata is the part Opake still lets you see in the clear — locally. Names, tags,
+and descriptions are encrypted on the wire but rendered in your terminal.
+
+<CodeBlock language="sh">opake metadata show report.pdf</CodeBlock>
+
+<CodeBlock language="sh">opake metadata describe report.pdf "Q4 financial summary"</CodeBlock>
+
+<CodeBlock language="sh">opake metadata tag add report.pdf finance</CodeBlock>
+
+<CodeBlock language="sh">opake metadata tag remove report.pdf draft</CodeBlock>
+
+---
+
+## 3. Sharing
+
+### One file, one person
+
+<CodeBlock language="sh">opake share new secret.pdf bob.bsky.social</CodeBlock>
+
+Opake resolves the handle, fetches Bob's public key from his PDS, wraps the file's content key
+against it, and publishes a grant record. Bob sees the file appear in his inbox the next time
+his client syncs.
+
+<CodeBlock language="sh">opake share list                      # grants you've issued</CodeBlock>
+
+<CodeBlock language="sh">opake share inbox                     # grants issued to you</CodeBlock>
+
+<CodeBlock language="sh">opake share revoke at://did:plc:123/app.opake.grant/tid456</CodeBlock>
+
+Revoking deletes the grant record. It doesn't un-decrypt any copy Bob has already downloaded
+— that ship sailed the moment he opened the file. What revocation does buy you is: Bob can't
+re-fetch, can't get future updates, and anyone else browsing his repo won't see the grant.
+
+Grab the URI of a specific grant from `opake share list`.
+
+### A group of people
+
+Workspaces are shared folders with a shared encryption key. Adding someone to the workspace
+gives them access to every file in it; removing them doesn't re-encrypt history, but it does
+cut them off from future changes.
+
+<CodeBlock language="sh">opake workspace create family-photos</CodeBlock>
+
+<CodeBlock language="sh">opake workspace add-member family-photos alice.bsky.social</CodeBlock>
+
+<CodeBlock language="sh">opake workspace ls -l</CodeBlock>
+
+<CodeBlock language="sh">opake upload vacation.jpg --workspace family-photos</CodeBlock>
+
+<CodeBlock language="sh">opake workspace remove-member family-photos alice.bsky.social</CodeBlock>
+
+<CodeBlock language="sh">opake workspace leave family-photos</CodeBlock>
+
+---
+
+## 4. Looking someone up
+
+Before you ship a grant to a handle you got over email or Signal, it's sometimes worth
+verifying who's on the other end:
+
+<CodeBlock language="sh">opake resolve bob.bsky.social</CodeBlock>
+
+Prints Bob's DID, his PDS, and his X25519 encryption public key. Ask Bob to read his key
+fingerprint to you out-of-band; if it matches what `opake resolve` shows, you've confirmed the
+identity the grant will actually target.
+
+---
+
+## 5. Background sync
+
+The daemon runs maintenance tasks that don't need to be interactive: the SSE subscription for
+live updates, proactive token refresh, and re-encryption passes after a key rotation. You
+don't strictly need it for day-to-day use — every interactive command triggers the minimum
+sync it needs before running. The daemon just means you don't eat that latency each time.
+
+<CodeBlock language="sh">opake daemon run                      # foreground, for systemd / launchd units</CodeBlock>
+
+<CodeBlock language="sh">opake daemon list-tasks               # what's queued and what's running</CodeBlock>
+
+<CodeBlock language="sh">opake daemon install                  # generate + install a launchd or systemd unit</CodeBlock>
+
+<CodeBlock language="sh">opake daemon uninstall</CodeBlock>
+
+`opake daemon install` picks the right service format for your platform (launchd on macOS,
+systemd on Linux) and writes the unit file where the service manager expects it. The service
+starts automatically on login.
+
+---
+
+## 6. Starting over
+
+Three escalating levels of clean slate.
+
+<CodeBlock language="sh">opake account logout alice.bsky.social</CodeBlock>
+
+Drops local session credentials for one account. Your encrypted files stay on your PDS
+untouched; signing back in picks them right up.
+
+<CodeBlock language="sh">opake rm -r /</CodeBlock>
+
+Empties your cabinet of every document and directory but keeps your identity, keys, and
+workspace memberships intact. Good for when you want to repopulate from scratch without
+re-pairing or regenerating anything.
+
+<CodeBlock language="sh">opake purge --dry-run</CodeBlock>
+
+<CodeBlock language="sh">opake purge --force</CodeBlock>
+
+The real nuke. Deletes every `app.opake.*` record from your PDS — files, grants, workspaces,
+published encryption key, the lot. Your atproto identity itself survives (that belongs to the
+PDS, not Opake), but every trace of Opake having been there is gone. `--dry-run` lists what
+would go without touching anything.
+
+<Callout type="warning">
+  `opake purge --force` is irreversible and doesn't prompt. Grants you've issued to other
+  people still point at records that no longer exist after a purge — the links break silently
+  on their end.
+</Callout>
+
+<Callout type="info">
+  Every subcommand takes `--help` for full flags and arguments. Pair it with `-v` when
+  something's misbehaving and you want to see the underlying XRPC calls.
+</Callout>
+
+<DocsNext slug="cli" />

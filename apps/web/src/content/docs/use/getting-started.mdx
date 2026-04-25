@@ -1,0 +1,67 @@
+<ChapterHeader title="Getting Started" />
+
+<Lead>
+  Opake works differently from most cloud storage. There's no account on our servers — you bring
+  your own identity and your own storage, and the Opake app is the interface that ties them
+  together. This page walks you through setting up.
+</Lead>
+
+## Owning your data means owning your keys
+
+In a traditional system, losing a password means a support team resets it for you. They can do that
+because they hold the master keys to your account. Opake can't. We don't have your keys, and
+neither does your Personal Data Server (PDS).
+
+When you first set up Opake, you'll receive a **24-word secret phrase** — a backup that can
+reconstruct your keys on any device. If you lose both the phrase and every device you're signed
+in on, your encrypted files stay permanently unreadable. That's how end-to-end encryption
+works: no hidden override, no emergency hatch, no support team with a backup copy. Any of
+those would also be a way in for everyone else.
+
+<Callout type="warning">
+  Write down your 24 words and store them somewhere safe. They're the only way to recover your
+  files if you lose access to all your devices. Read more in
+  [What your key actually looks like](/docs/seed-phrase).
+</Callout>
+
+---
+
+## 1. Entering your cabinet
+
+Whether you use the Web App or the CLI, the process begins by authenticating with your AT Protocol handle (e.g., `alice.bsky.social`).
+
+<PlatformToggle>
+  <PlatformTab name="Web App">
+
+    1. Navigate to the login screen.
+    2. Enter your handle (e.g., `you.bsky.social`).
+    3. You will be redirected to your PDS (such as Bluesky) to authorize Opake.
+    4. Once authorized, Opake generates your encryption key from a 24-word seed phrase. Write these words down — they're your backup.
+
+  </PlatformTab>
+  <PlatformTab name="CLI">
+    Run the following command in your terminal:
+    <CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
+    This will open a browser window for OAuth authorization. Your keys will be derived from a
+    24-word seed phrase — write it down when prompted.
+  </PlatformTab>
+</PlatformToggle>
+
+## 2. Keeping private what's in your drawers
+
+Inside your cabinet, everything looks familiar — files, folders, the usual grid view. That
+structure is built entirely on your device.
+
+On the network, your data is hidden in plain sight. File names, tags, and folder paths are all
+encrypted before they leave your device, so the storage provider only sees a flat list of
+nameless scrambled records. They can tell something exists; they can't tell whether it's a
+"Project" folder or a "Financial" PDF.
+
+Your cabinet assembles itself once you provide your keys. Opake pulls the encrypted records from
+the network, decrypts the metadata locally, and reconstructs the folder hierarchy — instantly,
+and only for you.
+
+Even if your server is compromised, an admin only sees scrambled, unreadable data. They can't
+tell which file is a PDF or an image, or what folder it sits in.
+
+<DocsNext slug="getting-started" />

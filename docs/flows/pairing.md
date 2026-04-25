@@ -9,6 +9,7 @@ sequenceDiagram
     participant User
     participant CLI as CLI (new device)
     participant Crypto
+    participant Storage
     participant PDS
 
     User->>CLI: opake pair request
@@ -20,6 +21,8 @@ sequenceDiagram
 
     CLI->>PDS: createRecord(pairRequest)<br/>{ ephemeralKey, algo: "x25519" }
     PDS-->>CLI: { uri, cid }
+
+    CLI->>Storage: save_pair_state(did, rkey, private_key)
 
     CLI->>User: Fingerprint: a1:b2:c3:d4:e5:f6:g7:h8
     CLI->>User: Run `opake pair approve` on existing device
@@ -33,7 +36,7 @@ sequenceDiagram
     Note over CLI: Response found — see "Receive" below
 ```
 
-The ephemeral private key stays in memory. The fingerprint (first 8 bytes of the public key, hex-encoded) is displayed for out-of-band verification.
+The ephemeral private key is persisted to `Storage` under `(did, rkey)` so it survives CLI restarts or a browser reload while the user walks to the other device — in-memory only isn't sufficient. On the web the bytes are written straight into IndexedDB through WASM's storage adapter and never become a JS `Uint8Array`. The fingerprint (first 8 bytes of the public key, hex-encoded) is displayed for out-of-band verification.
 
 ## Pair Approve (existing device)
 
@@ -79,9 +82,13 @@ The identity payload includes the X25519 encryption keypair, Ed25519 signing key
 sequenceDiagram
     participant CLI as CLI (new device)
     participant Crypto
+    participant Storage
     participant PDS
 
     Note over CLI: Poll found a matching pairResponse
+
+    CLI->>Storage: load_pair_state(did, rkey)
+    Storage-->>CLI: ephemeral_private_key
 
     CLI->>Crypto: unwrap_key(wrappedKey, ephemeral_private_key)
     Crypto-->>CLI: K (content key)
@@ -96,7 +103,8 @@ sequenceDiagram
 
     CLI->>CLI: Verify identity's public key == published key
 
-    CLI->>CLI: Save identity.json (0600)
+    CLI->>Storage: save_identity(did, identity)
+    CLI->>Storage: delete_pair_state(did, rkey)
 
     CLI->>PDS: deleteRecord(pairRequest)
     CLI->>PDS: deleteRecord(pairResponse)
@@ -104,7 +112,7 @@ sequenceDiagram
     CLI->>CLI: Pairing complete
 ```
 
-The verification step guards against a corrupted or tampered response — the derived public key must match what's already published on the PDS.
+The verification step guards against a corrupted or tampered response — the derived public key must match what's already published on the PDS. Teardown is best-effort: the Identity is saved *before* the pair state and PDS record deletions, so a partial failure still leaves the user paired. Orphan records get swept by the daemon's `cleanup_expired_pair_requests`.
 
 ## Login Detection
 

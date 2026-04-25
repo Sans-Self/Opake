@@ -17,13 +17,28 @@ pub enum Error {
     #[error("XRPC error ({status}): {message}")]
     Xrpc { status: u16, message: String },
 
-    #[error("appview error ({status}): {message}")]
-    Appview { status: u16, message: String },
+    #[error("indexer error ({status}): {message}")]
+    Indexer { status: u16, message: String },
 
     #[error("record not found: {0}")]
     NotFound(String),
 
-    #[error("{count} documents named {name:?} — specify an AT URI instead: {}", uris.join(", "))]
+    /// This device is authenticated (session is present) but no encryption
+    /// identity is persisted locally. Callers should route the user to
+    /// recovery (seed phrase) or pairing (another device) to bootstrap one.
+    /// Distinct from `NotFound` so the SDK/CLI can prompt for the right flow.
+    #[error("no encryption identity for this device — recover from seed phrase or pair another device")]
+    IdentityMissing,
+
+    /// The target handle or DID is a valid identity but has not published an
+    /// Opake public key yet (`app.opake.publicKey/self` is absent). Distinct
+    /// from `NotFound` (which covers handle-resolution failures) so callers
+    /// can offer a pending-share queue for this case without silently swallowing
+    /// typos.
+    #[error("recipient not ready: {0}")]
+    RecipientNotReady(String),
+
+    #[error("{count} records named {name:?} — specify an AT URI instead: {}", uris.join(", "))]
     AmbiguousName {
         name: String,
         count: usize,
@@ -44,4 +59,7 @@ pub enum Error {
 
     #[error("storage error: {0}")]
     Storage(String),
+
+    #[error("SSE error: {0}")]
+    Sse(String),
 }

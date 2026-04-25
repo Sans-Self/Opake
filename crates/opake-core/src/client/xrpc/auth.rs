@@ -1,8 +1,7 @@
 use log::{info, warn};
 
-use super::{LegacySession, Session, Transport};
-// dpop re-exports used transitively via XrpcClient methods
-use crate::client::oauth_token;
+use super::{Session, Transport};
+use crate::client::session_refresh::{proactive_refresh, RefreshOutcome};
 use crate::client::transport::*;
 use crate::crypto::OsRng;
 use crate::error::Error;
@@ -36,92 +35,56 @@ impl<T: Transport> super::XrpcClient<T> {
             )));
         }
 
-        let legacy: LegacySession = serde_json::from_slice(&response.body)?;
+        let legacy: super::LegacySession = serde_json::from_slice(&response.body)?;
         info!("authenticated as {} ({})", legacy.handle, legacy.did);
         self.session = Some(Session::Legacy(legacy));
         Ok(self.session.as_ref().unwrap())
     }
 
-    /// Refresh the session — dispatches to legacy or OAuth refresh.
+    /// Refresh the session via the single `proactive_refresh` implementation.
+    ///
+    /// Uses threshold=i64::MAX so the refresh always fires (reactive use).
+    /// The caller (`send_checked`) invokes this after the PDS returns
+    /// `ExpiredToken` — there's no separate reactive implementation.
     pub(crate) async fn refresh_session(&mut self) -> Result<(), Error> {
         let session = self
             .session
             .take()
             .ok_or_else(|| Error::Auth("not logged in".into()))?;
 
-        match session {
-            Session::Legacy(s) => self.refresh_legacy(s).await,
-            Session::OAuth(s) => self.refresh_oauth(s).await,
-        }
-    }
-
-    async fn refresh_legacy(&mut self, session: LegacySession) -> Result<(), Error> {
-        info!("access token expired, refreshing legacy session");
-
-        let response = self
-            .transport
-            .send(HttpRequest {
-                method: HttpMethod::Post,
-                url: format!("{}/xrpc/com.atproto.server.refreshSession", self.base_url),
-                headers: vec![(
-                    "Authorization".into(),
-                    format!("Bearer {}", session.refresh_jwt),
-                )],
-                body: None,
-            })
-            .await?;
-
-        if response.status != 200 {
-            warn!("session refresh failed with HTTP {}", response.status);
-            // Put the old session back so the user can still try other things
-            self.session = Some(Session::Legacy(session));
-            return Err(Error::Auth(format!(
-                "session refresh failed (HTTP {})",
-                response.status
-            )));
-        }
-
-        let new_legacy: LegacySession = serde_json::from_slice(&response.body)?;
-        info!("session refreshed for {}", new_legacy.handle);
-        self.session = Some(Session::Legacy(new_legacy));
-        self.session_refreshed = true;
-
-        Ok(())
-    }
-
-    async fn refresh_oauth(&mut self, mut session: super::OAuthSession) -> Result<(), Error> {
-        info!("access token expired, refreshing OAuth session");
-
-        let timestamp = super::super::time::unix_now();
-        let result = oauth_token::refresh_token(
+        let now = crate::client::time::unix_now();
+        let outcome = proactive_refresh(
             &self.transport,
-            &session.token_endpoint,
-            &session.client_id,
-            &session.refresh_token,
-            &session.dpop_key,
-            &mut session.dpop_nonce,
-            timestamp,
+            &session,
+            &self.base_url,
+            86400 * 365 * 100, // always refresh — we already know the token is expired
+            now,
             &mut OsRng,
         )
         .await;
 
-        match result {
-            Ok(token_response) => {
-                session.apply_token_response(&token_response, timestamp);
-                info!("OAuth session refreshed for {}", session.handle);
-                self.session = Some(Session::OAuth(session));
+        match outcome {
+            RefreshOutcome::Refreshed(new_session) => {
+                info!("session refreshed for {}", new_session.handle());
+                self.session = Some(*new_session);
                 self.session_refreshed = true;
                 Ok(())
             }
-            Err(e) => {
-                self.session = Some(Session::OAuth(session));
+            RefreshOutcome::NotNeeded => {
+                // Shouldn't happen with i64::MAX threshold, but handle gracefully.
+                self.session = Some(session);
+                Ok(())
+            }
+            RefreshOutcome::Failed(e) => {
+                // Put the old session back so subsequent calls can still try.
+                self.session = Some(session);
                 Err(e)
             }
         }
     }
 
-    /// Set an OAuth session directly (used by the login command after code exchange).
-    pub fn set_oauth_session(&mut self, session: super::OAuthSession) {
-        self.session = Some(Session::OAuth(session));
+    /// Replace the current session (used after login and proactive refresh).
+    pub fn set_session(&mut self, session: Session) {
+        self.session = Some(session);
     }
 }

@@ -9,6 +9,7 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 | `load_config` / `save_config`                   | Read/write the global config (accounts map, default DID)               |
 | `load_identity` / `save_identity`               | Read/write per-account encryption keypairs                             |
 | `load_session` / `save_session`                 | Read/write per-account JWT tokens                                      |
+| `save_pair_state` / `load_pair_state` / `delete_pair_state` | Persist the ephemeral X25519 private key between `create_pair_request` and `try_complete_pair`. Keyed by `(did, rkey)`. Storage-owned so the key never crosses the WASM/JS boundary — it is written and read exclusively from inside WASM. |
 | `remove_account`                                | Full cleanup: mutate config + delete identity/session data + persist   |
 | `cache_get_record` / `cache_put_records`        | Record-level cache: look up or upsert individual PDS records           |
 | `cache_remove_record`                           | Remove a single cached record (e.g. after deletion or metadata update) |
@@ -20,9 +21,9 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 
 **CLI (`FileStorage`)** — TOML config at `~/.config/opake/config.toml`, JSON files in per-account directories, unix permissions (0600/0700). Cache methods are no-ops (not yet implemented).
 
-**Web (`IndexedDbStorage`)** — Dexie.js over IndexedDB. Schema v3 adds `cacheRecords` (compound key `[did+collection+uri]`) and `cacheMeta` (compound key `[did+collection]`) tables. `removeAccount` clears cache as part of its atomic transaction.
+**Web (`IndexedDbStorage`)** — Dexie.js over IndexedDB (`packages/opake-sdk/src/storage/indexeddb.ts`). Schema includes `cacheRecords` (compound key `[did+collection+uri]`) and `cacheMeta` (compound key `[did+collection]`) tables. `removeAccount` clears cache as part of its atomic transaction. The JS side runs on the main thread; `JsStorage` (below) bridges WASM into this implementation.
 
-**WASM (`NoopStorage`)** — All methods return `Error::NotFound`. Used when the JS layer handles persistence externally (IndexedDB via the web worker) and in tests. WASM builds pass `NoopStorage` to `Opake<WasmTransport, OsRng, NoopStorage>`.
+**WASM (`JsStorage`)** — `Storage` impl in `crates/opake-wasm/src/js_storage.rs` that calls back into a JS-side adapter. The adapter wraps `IndexedDbStorage` so WASM's Rust code reads and writes identity, session, config, and the record cache through the same IndexedDB tables the SDK uses directly. `NoopStorage` exists for tests only.
 
 ### Auto-Persist via Signoff
 
@@ -30,47 +31,21 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 
 ## Local Record Cache
 
-The cache stores **encrypted PDS records** — the same ciphertext the PDS returns. No plaintext metadata is ever persisted locally. Decrypted metadata lives only in-memory and is discarded on page unload.
+The cache stores **encrypted PDS records** — the same ciphertext the PDS returns. No plaintext metadata is ever persisted locally. Decrypted metadata lives only in-memory (in the WASM TreeKeeper and its per-directory name cache) and is discarded on logout or `wipeState`.
 
-### Design: Two-Path Loading
+### Population
 
-The cache separates the **UI path** (what the user sees) from the **warming path** (how the cache gets populated). This avoids rate-limiting the PDS while keeping the UI responsive.
+`FileManager::load_tree` and `syncAndLoadTree` are the primary entry points. Both fetch directories and grants via paginated `listRecords`, populate the cache with the encrypted records, and hand a `DirectoryTree` back to the caller. Document records are fetched on demand via `loadTreeWithMetadata` when a consumer needs decrypted filenames / MIME types for a specific directory.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     loadCabinet()                       │
-│                                                         │
-│  1. Fetch directories + grants (small, list-all)        │
-│  2. Build directory tree → show shell immediately       │
-│  3. Kick off background document cache warm             │
-└───────────────────┬─────────────────────────────────────┘
-                    │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-  UI Path (foreground)    Warming Path (background)
-  ┌───────────────────┐   ┌──────────────────────────┐
-  │ ensureDirectory-  │   │ listDocumentsRaw()       │
-  │ Ready(uri)        │   │                          │
-  │                   │   │ One paginated request    │
-  │ For each doc URI: │   │ (1-3 pages) fetches all  │
-  │   cache hit → use │   │ documents → writes each  │
-  │   cache miss →    │   │ to cache via             │
-  │     getRecordRaw  │   │ cachePutCollection()     │
-  │     (rare)        │   │                          │
-  └───────────────────┘   └──────────────────────────┘
-```
+Paginated `listRecords` is O(1-3) requests per collection (cursor-driven), so fetching an entire collection is cheaper than N `getRecord` calls. Mutations invalidate the affected collections so stale records aren't re-used after a change.
 
-**Why not just fetch per-directory?** AT Protocol's `listRecords` is paginated (1-3 requests for an entire collection). Fetching per-directory means N individual `getRecord` calls — one per document. For 50 documents, that's 50 requests vs 2-3. PDS rate limits make the N+1 pattern impractical as the primary fetch strategy.
+### SSE-Driven Refresh
 
-**Why not just fetch all documents upfront?** The user shouldn't wait for all documents to load before seeing the directory tree. The tree (directories + grants) is small and loads fast. Documents are the heavy part — caching them in the background lets the UI show the tree instantly while records trickle into the cache.
-
-**The steady state:** After the first background warm, all subsequent directory navigations are pure cache reads. Zero PDS requests. The background warm runs on each `loadCabinet` call (page load, post-mutation refresh) to keep the cache fresh.
-
-**Cache misses are rare.** They only happen when a document was created between the last `listDocumentsRaw` and the user navigating to its directory. In that case, `ensureDirectoryReady` falls back to a single `getRecordRaw` call for the missing record.
+Live updates come from the indexer over SSE (see `FLOWS.md`). TreeKeeper applies the patches directly in memory; the IDB cache is updated opportunistically during the next cache write. There is no timer-based refresh — the consumer maintains freshness through the event stream, and a reconnect triggers a full re-sync.
 
 ### Invalidation
 
-Mutations invalidate affected caches so stale data isn't shown on the next load:
+Mutations invalidate affected caches so stale data isn't shown on the next cold start:
 
 | Mutation                      | Invalidation                                                               |
 | ----------------------------- | -------------------------------------------------------------------------- |
@@ -78,11 +53,7 @@ Mutations invalidate affected caches so stale data isn't shown on the next load:
 | Delete folder                 | `cacheInvalidateCollection` (documents + directories)                      |
 | Update metadata               | `cacheRemoveRecord` (document)                                             |
 | Rename directory              | `cacheInvalidateCollection` (directories)                                  |
-| Upload / create folder / move | Triggers `loadCabinet` which re-warms the cache                            |
-
-### Future: Daemon Warming
-
-The background warm in `loadCabinet` is the in-process version of daemon warming. A future service worker or background process would do the same thing — call `listDocumentsRaw` periodically and write to the cache via `cachePutCollection`. The `ensureDirectoryReady` UI path doesn't change.
+| Upload / create folder / move | Invalidates the touched collections                                        |
 
 ## File Permissions
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/opake-core", "crates/opake-cli", "crates/opake-derive", "crates/opake-wasm"]
+members = ["crates/opake-core", "crates/opake-derive", "crates/opake-wasm", "apps/cli"]
 resolver = "2"
 
 [workspace.package]
@@ -14,8 +14,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 clap = { version = "4", features = ["derive", "color"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 env_logger = "0.11"
+futures-channel = { version = "0.3", default-features = false, features = ["std", "sink"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
 log = "0.4"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

@@ -1,0 +1,100 @@
+import { sharingFlow } from "./_diagrams";
+
+<ChapterHeader title="The Open Network: Your Data, Anywhere" />
+
+<Lead>
+  Opake is built on the AT Protocol — the open, federated network behind Bluesky and the wider
+  Atmosphere. Your data lives on infrastructure you control, interoperable with every other
+  atproto-native app.
+</Lead>
+
+## Why Opake was built on the Atmosphere
+
+Most cloud products lock identity and storage into a single company. When that company's
+priorities shift, so does your access to your own data. When Elon Musk bought Twitter and spent
+two years dismantling its safety and moderation systems, a lot of people were reminded how much
+of their digital life depended on a single company's choices.
+
+The AT Protocol is one answer to that problem. It's an open, federated protocol: identity,
+storage, and data portability are specified in the open, and no single company owns the pieces.
+Opake didn't invent any of it. We picked it as our foundation because it already solves the hard
+parts — identity, portability, federation — and because building on an existing ecosystem is a
+better long-term bet than running our own silo.
+
+### Breaking the silo
+
+In the traditional cloud (Google Drive, Dropbox, iCloud), your identity and your storage are
+permanently fused together. If you want to leave, you have to pack your bags, download
+everything, and re-upload it somewhere else.
+
+Opake uses the AT Protocol to break that cycle.
+
+### 1. Your Digital Home (The PDS)
+
+When you use Opake, your files are stored on your **Personal Data Server (PDS)**. Think of
+this as your private home on the internet.
+
+- You can host it yourself on your own hardware.
+- You can use a trusted provider (like Bluesky).
+- You can move your entire home to a new host without losing a single file.
+
+### 2. Take Your Data With You
+
+Because Opake speaks a universal language, your data is **portable by design**. You aren't
+locked into our interface. If someone builds a better file explorer tomorrow, you can simply
+log in with your handle and your files will be right there. Our code and algorithms are
+public; the "vault" belongs to you, we just provide the keys.
+
+We'd rather be the best way to manage your private cabinet than a lock-in. Leaving is a
+first-class path, not an afterthought — your data walks with you.
+
+---
+
+## Sharing across the network
+
+Most encrypted apps make sharing painful — you exchange invite codes or copy public keys around
+to see a single file. On the Atmosphere, every user already has a cryptographic identity, so
+sharing works off of handles you already know.
+
+### No more invite codes
+
+If your friends or colleagues are on Bluesky (or any other AT Protocol app), they already have a
+handle. You don't need to ask for their "Opake address." You just type their handle
+(`@name.bsky.social`), and Opake handles the rest.
+
+1. Opake finds their unique digital ID.
+2. It identifies their public lock on the network.
+3. It creates a secure "Grant" that only their key can open.
+
+### Across providers
+
+You and your friend don't need to be on the same PDS. The servers relay records and blobs to
+each other as part of the protocol — you can share a 1 GB encrypted video with someone on a
+different host and they stream it straight from your cabinet. The PDS on each side only ever
+sees ciphertext; the encryption is the access control.
+
+<SequenceDiagram
+  code={sharingFlow}
+  caption="Sharing across the Atmosphere: the grant travels through the indexer, the ciphertext stays on the original PDS, and the recipient fetches directly."
+/>
+
+---
+
+## Resources & Further Reading
+
+Opake is part of a much larger ecosystem. To dive deeper into the philosophy and the
+tech behind this movement, we recommend these resources:
+
+### Official Documentation
+
+- **[AT Protocol Glossary](https://atproto.com/guides/glossary):** A clear list of terms like PDS and Relays explained by the creators.
+- **[atproto.com](https://atproto.com):** The full technical blueprint for the network.
+
+### Community Perspectives
+
+- **[A Rough Sketch of PDS Self-Hosting](https://mutualaid.info/posts/a-rough-sketch-of-at-protocol-and-pds-self-hosting/):** A brilliant, human-readable guide to owning your own bits.
+- **[Introduction to AT Protocol](https://mackuba.eu/2024/02/20/atproto-intro/):** A great "from scratch" deep dive into how the network functions.
+- **[A Social Filesystem](https://overreacted.io/a-social-filesystem/):** Dan Abramov's vision of the AT Protocol as a decentralized filesystem—the very vision Opake is building.
+
+
+<DocsNext slug="at-protocol" />
