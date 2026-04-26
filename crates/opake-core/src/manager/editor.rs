@@ -134,17 +134,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 ml_kem_private_key: Zeroizing::new(cabinet.ml_kem_private_key),
                 group_key: None,
             }),
-            FileContext::Workspace(ws) => {
-                let identity = self.opake.identity();
-                let x25519_private_key = identity.x25519_private_key_bytes()?;
-                let ml_kem_private_key = identity.ml_kem_private_key_bytes()?;
-                Ok(DecryptionKeys {
-                    did: self.opake.did.clone(),
-                    x25519_private_key,
-                    ml_kem_private_key,
-                    group_key: Some(ws.key.clone()),
-                })
-            }
+            FileContext::Workspace(ws) => Ok(DecryptionKeys {
+                did: self.opake.did.clone(),
+                x25519_private_key: Zeroizing::new(*self.opake.cached_private_keys.x25519),
+                ml_kem_private_key: Zeroizing::new(*self.opake.cached_private_keys.ml_kem),
+                group_key: Some(ws.key.clone()),
+            }),
         }
     }
 }

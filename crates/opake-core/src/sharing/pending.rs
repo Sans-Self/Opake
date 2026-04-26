@@ -6,6 +6,7 @@
 // record is deleted.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use log::{info, trace, warn};
 
@@ -144,7 +145,9 @@ pub async fn retry_pending_shares(
     // fetches when sharing multiple documents with the same person.
     // None = NotFound (still pending), Some(Err) would be transient but we
     // use a three-state: present, NotFound, or absent (transient/unchecked).
-    let mut identity_cache: HashMap<String, Option<ResolvedIdentity>> = HashMap::new();
+    // Rc keeps the 1184-byte ML-KEM public key alive without cloning it per
+    // document when one recipient has multiple pending shares.
+    let mut identity_cache: HashMap<String, Option<Rc<ResolvedIdentity>>> = HashMap::new();
 
     // Cache content keys per document URI to avoid redundant PDS fetches +
     // crypto unwrap when multiple pending shares reference the same document.
@@ -186,7 +189,7 @@ pub async fn retry_pending_shares(
 
         // Try to resolve recipient (cached per pass)
         let recipient = match identity_cache.get(&entry.recipient) {
-            Some(Some(id)) => id.clone(),
+            Some(Some(id)) => Rc::clone(id),
             Some(None) => {
                 // Previously confirmed NotFound in this pass
                 result.still_pending += 1;
@@ -197,8 +200,9 @@ pub async fn retry_pending_shares(
                     .await
                 {
                     Ok(id) => {
-                        identity_cache.insert(entry.recipient.clone(), Some(id.clone()));
-                        id
+                        let rc = Rc::new(id);
+                        identity_cache.insert(entry.recipient.clone(), Some(Rc::clone(&rc)));
+                        rc
                     }
                     // Recipient exists but hasn't published their Opake key yet.
                     // This is exactly the condition that triggered the pending share —

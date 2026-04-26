@@ -22,6 +22,7 @@ fn make_test_opake() -> Opake<MockTransport, OsRng, NoopStorage> {
         NoopStorage,
         test_now_micros,
     )
+    .unwrap()
 }
 
 #[test]
@@ -151,6 +152,7 @@ fn make_owner_opake(
         NoopStorage,
         test_now_micros,
     )
+    .unwrap()
 }
 
 /// Build a 2-member keyring (owner + bob) with real hybrid crypto. Both

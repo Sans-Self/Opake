@@ -22,7 +22,7 @@
 use crate::atproto;
 use crate::cabinet::Cabinet;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{ContentKey, CryptoRng, DidMember, RngCore};
+use crate::crypto::{ContentKey, CryptoRng, DidMember, OwnedPrivateKeys, RngCore};
 use crate::error::Error;
 use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
@@ -53,6 +53,11 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     /// `accountConfig.indexerUrl` on PDS. Second priority; falls back to
     /// `DEFAULT_INDEXER_URL` when unset.
     pub(crate) config_indexer_url: Option<String>,
+    /// Decoded private-key material, populated once at construction and
+    /// reused by every RPC entry point that needs to unwrap keys. Avoids
+    /// repeated base64-decode + heap allocation of the 2400-byte ML-KEM-768
+    /// decapsulation key.
+    pub(crate) cached_private_keys: OwnedPrivateKeys,
 }
 
 /// Indexer URL baked into the binary at compile time.
@@ -95,8 +100,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         rng: R,
         storage: S,
         now_micros: fn() -> u64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        let cached_private_keys = identity.owned_private_keys()?;
+        Ok(Self {
             client,
             did,
             identity,
@@ -105,7 +111,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             now_micros_fn: now_micros,
             runtime_indexer_url: None,
             config_indexer_url: None,
-        }
+            cached_private_keys,
+        })
     }
 
     // -- Factory --
@@ -159,7 +166,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         }
 
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
-        let mut opake = Self::new(client, target_did, identity, rng, storage, now_micros);
+        let mut opake = Self::new(client, target_did, identity, rng, storage, now_micros)?;
         // Seed `config_indexer_url` (priority 2 of `resolve_indexer_url`) from
         // the user's PDS accountConfig so the priority chain actually works on
         // cold start. Best-effort — offline, missing record, or auth blips
@@ -264,10 +271,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// A `workspace ls` immediately after `workspace create` may miss the
     /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
-
         let keyrings = self.discover_member_keyrings().await?;
+        let private_keys = self.private_keys_from_cache();
         let matches: Vec<String> = keyrings
             .iter()
             .filter(|kr| {
@@ -304,8 +309,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let at_uri = atproto::parse_at_uri(keyring_uri)?;
         if at_uri.authority == self.did {
             // Own keyring — fetch with authenticated client
-            let identity = &self.identity;
-            let private_keys = identity.owned_private_keys()?;
+            let private_keys = self.private_keys_from_cache();
             let entry = self
                 .client
                 .get_record(&self.did, &at_uri.collection, &at_uri.rkey)
@@ -335,8 +339,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// endpoint), unwraps the group key, decrypts metadata. Used for
     /// workspaces where the caller is a member but not the owner.
     pub async fn resolve_foreign_workspace(&self, keyring_uri: &str) -> Result<Workspace, Error> {
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         let at_uri = crate::atproto::parse_at_uri(keyring_uri)?;
         let owner_did = &at_uri.authority;
 
@@ -393,6 +396,19 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// `for_account` rather than an `Opake` with a dangling handle.
     pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// Copy the decoded private-key bytes out of the cache as an owned bundle.
+    ///
+    /// Stack-copies the X25519 (32 B) and ML-KEM-768 (2400 B) secrets without
+    /// any base64 decode or heap allocation. Use this instead of calling
+    /// `identity.owned_private_keys()` per RPC — that re-decodes base64 every
+    /// time.
+    fn private_keys_from_cache(&self) -> OwnedPrivateKeys {
+        OwnedPrivateKeys {
+            x25519: zeroize::Zeroizing::new(*self.cached_private_keys.x25519),
+            ml_kem: zeroize::Zeroizing::new(*self.cached_private_keys.ml_kem),
+        }
     }
 
     /// Current RFC 3339 UTC timestamp (microsecond precision).
@@ -512,8 +528,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         log::trace!("sync: discovering workspaces for {}", self.did);
         let indexer_keyrings = self.discover_member_keyrings().await?;
         log::trace!("sync: found {} workspaces", indexer_keyrings.len());
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
 
         let mut results = Vec::with_capacity(indexer_keyrings.len());
         for kr in &indexer_keyrings {
@@ -537,8 +552,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let target = indexer_keyrings.iter().find(|kr| kr.uri == keyring_uri);
         let Some(kr) = target else { return Ok(None) };
 
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         let result = self
             .sync_single_workspace(kr, &private_keys.bundle())
             .await;
@@ -682,8 +696,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // Derive identity + group key once for all proposals that need key wrapping.
         // Mutable because removeMember/leave rotates the key — subsequent proposals
         // must use the rotated key.
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         let mut group_key =
             Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
 
@@ -1421,7 +1434,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// The grant and document live on the owner's PDS. All fetches are
     /// unauthenticated public endpoint calls. Returns `(filename, plaintext)`.
     pub async fn download_from_grant(&self, grant_uri: &str) -> Result<(String, Vec<u8>), Error> {
-        let private_keys = self.identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         crate::documents::download_from_grant(
             self.client.transport(),
             &private_keys.bundle(),
@@ -1438,7 +1451,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &self,
         grant_uri: &str,
     ) -> Result<(String, crate::crypto::DocumentMetadata), Error> {
-        let private_keys = self.identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         crate::documents::resolve_grant_metadata(
             self.client.transport(),
             &private_keys.bundle(),
@@ -1584,8 +1597,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         resolver_transport: &impl Transport,
     ) -> Result<crate::sharing::RetryResult, Error> {
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         let now = crate::client::time::unix_now();
         let pds_url = self.client.base_url().to_owned();
         let params = crate::sharing::RetryParams {
@@ -1674,8 +1686,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         document_uri: &str,
     ) -> Result<crate::documents::KeyringDownloadResult, Error> {
-        let identity = &self.identity;
-        let private_keys = identity.owned_private_keys()?;
+        let private_keys = self.private_keys_from_cache();
         crate::documents::download_from_keyring_member(
             self.client.transport(),
             &self.did,
