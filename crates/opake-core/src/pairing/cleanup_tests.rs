@@ -17,14 +17,14 @@ fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
 }
 
 fn pair_request(created_at: &str) -> PairRequest {
-    PairRequest::new(&[0u8; 32], created_at)
+    PairRequest::new(&[0u8; 32], &[0u8; 1184], created_at)
 }
 
 fn pair_response(request_uri: &str) -> serde_json::Value {
     serde_json::json!({
         "opakeVersion": 1,
         "request": request_uri,
-        "wrappedKey": { "did": TEST_DID, "ciphertext": { "$bytes": "AAAA" }, "algo": "x25519-hkdf-a256kw" },
+        "wrappedKey": { "did": TEST_DID, "ciphertext": { "$bytes": "AAAA" }, "algo": "x25519-mlkem768-hkdf-a256kw" },
         "ciphertext": { "$bytes": "BBBB" },
         "nonce": { "$bytes": "CCCC" },
         "algo": "aes-256-gcm",

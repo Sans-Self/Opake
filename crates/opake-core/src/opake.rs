@@ -1732,18 +1732,24 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     }
 
     /// Approve a pair request by wrapping this device's identity to the
-    /// requester's ephemeral public key and publishing the response.
+    /// requester's ephemeral hybrid public-key bundle and publishing the
+    /// response.
     pub async fn approve_pair_request(
         &mut self,
         request_uri: &str,
-        ephemeral_public_key: &crate::crypto::X25519PublicKey,
+        ephemeral_x25519_public_key: &crate::crypto::X25519PublicKey,
+        ephemeral_ml_kem_public_key: &crate::crypto::MlKemPublicKey,
     ) -> Result<(), Error> {
         let now = self.now();
+        let bundle = crate::crypto::PublicKeyBundle {
+            x25519: ephemeral_x25519_public_key,
+            ml_kem: ephemeral_ml_kem_public_key,
+        };
         let result = crate::pairing::respond_to_pair_request(
             &mut self.client,
             &self.identity,
             request_uri,
-            ephemeral_public_key,
+            &bundle,
             &now,
             &mut self.rng,
         )

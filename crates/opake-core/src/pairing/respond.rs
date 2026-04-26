@@ -3,19 +3,20 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use crate::atproto::AtBytes;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{
-    encrypt_blob, generate_content_key, wrap_key_x25519_only, CryptoRng, RngCore, X25519PublicKey,
+    encrypt_blob, generate_content_key, wrap_key, CryptoRng, PublicKeyBundle, RngCore,
 };
 use crate::error::Error;
 use crate::records::{PairResponse, PAIR_RESPONSE_COLLECTION, SCHEMA_VERSION};
 use crate::storage::Identity;
 
 /// Respond to a pairing request by encrypting the local identity to the
-/// requester's ephemeral public key and writing a pairResponse record.
+/// requester's ephemeral hybrid public-key bundle and writing a pairResponse
+/// record.
 pub async fn respond_to_pair_request(
     client: &mut XrpcClient<impl Transport>,
     identity: &Identity,
     request_uri: &str,
-    ephemeral_public_key: &X25519PublicKey,
+    ephemeral_public_keys: &PublicKeyBundle<'_>,
     created_at: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(), Error> {
@@ -24,12 +25,11 @@ pub async fn respond_to_pair_request(
     let identity_json = serde_json::to_vec(identity)?;
     let payload = encrypt_blob(&content_key, &identity_json, rng)?;
 
-    // Wrap the content key to the ephemeral public key. The DID field in
-    // the WrappedKey is the identity's DID — it identifies who is sending.
-    // Pair flow stays X25519-only until the recipient has published their
-    // ML-KEM public key (Phase 3.5 will hybridize it).
-    let wrapped =
-        wrap_key_x25519_only(&content_key, ephemeral_public_key, &identity.did, rng)?;
+    // Wrap the content key to the ephemeral hybrid keypair. The `did` field
+    // on the resulting WrappedKey is the identity's DID — it identifies who
+    // is sending, not who's receiving (the receiver is an unidentified fresh
+    // device for which we only know an ephemeral pubkey bundle).
+    let wrapped = wrap_key(&content_key, ephemeral_public_keys, &identity.did, rng)?;
 
     let record = PairResponse {
         opake_version: SCHEMA_VERSION,

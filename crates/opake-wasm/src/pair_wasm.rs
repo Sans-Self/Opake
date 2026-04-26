@@ -43,19 +43,24 @@ pub async fn create_pair_request_js(
     persist_if_refreshed(&storage, &did, &client).await?;
 
     // Snake_case on the wire matches the rest of the WASM surface; the SDK
-    // transforms to camelCase via `pairRequestResultSchema`.
+    // transforms to camelCase via `pairRequestResultSchema`. Both halves of
+    // the hybrid ephemeral pubkey go back to JS so callers can show
+    // fingerprints / display the request the same way the CLI does.
     #[derive(Serialize)]
     struct Dto {
         uri: String,
         rkey: String,
         #[serde(with = "crate::wasm_util::serde_bytes")]
-        ephemeral_public_key: Vec<u8>,
+        x25519_ephemeral_public_key: Vec<u8>,
+        #[serde(with = "crate::wasm_util::serde_bytes")]
+        ml_kem_ephemeral_public_key: Vec<u8>,
     }
 
     to_js(&Dto {
         uri: info.uri,
         rkey: info.rkey,
-        ephemeral_public_key: info.ephemeral_public_key.to_vec(),
+        x25519_ephemeral_public_key: info.x25519_ephemeral_public_key.to_vec(),
+        ml_kem_ephemeral_public_key: info.ml_kem_ephemeral_public_key.to_vec(),
     })
 }
 

@@ -8,9 +8,8 @@ use zeroize::Zeroizing;
 
 use super::{
     hkdf_info, ContentKey, CryptoRng, DidMember, PrivateKeyBundle, PublicKeyBundle, RngCore,
-    X25519PrivateKey, X25519PublicKey, CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO,
-    ML_KEM_CT_LEN, ML_KEM_ENCAP_RANDOMNESS_LEN, ML_KEM_PK_LEN, ML_KEM_SS_LEN, WRAPPED_KEY_LEN,
-    X25519_KEY_LEN, X25519_ONLY_CIPHERTEXT_LEN, X25519_ONLY_WRAP_ALGO,
+    CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO, ML_KEM_CT_LEN,
+    ML_KEM_ENCAP_RANDOMNESS_LEN, ML_KEM_PK_LEN, ML_KEM_SS_LEN, WRAPPED_KEY_LEN, X25519_KEY_LEN,
 };
 use crate::atproto::AtBytes;
 use crate::error::Error;
@@ -140,22 +139,17 @@ pub fn wrap_key(
 }
 
 /// Unwrap a content key using the recipient's hybrid private-key bundle.
-///
-/// Dispatches on the `algo` field: hybrid envelopes use the post-quantum
-/// path; pair-flow legacy envelopes (`x25519-hkdf-a256kw`) fall through to
-/// `unwrap_key_x25519_only` so old pair records stay readable until Phase 3.5
-/// hybridizes that flow as well.
 pub fn unwrap_key(
     wrapped: &WrappedKey,
     keys: &PrivateKeyBundle<'_>,
 ) -> Result<ContentKey, Error> {
-    match wrapped.algo.as_str() {
-        HYBRID_WRAP_ALGO => unwrap_key_hybrid(wrapped, keys),
-        X25519_ONLY_WRAP_ALGO => unwrap_key_x25519_only(wrapped, keys.x25519),
-        other => Err(Error::Decryption(format!(
-            "unsupported wrap algorithm: {other}"
-        ))),
+    if wrapped.algo != HYBRID_WRAP_ALGO {
+        return Err(Error::Decryption(format!(
+            "expected algo {HYBRID_WRAP_ALGO}, got {}",
+            wrapped.algo
+        )));
     }
+    unwrap_key_hybrid(wrapped, keys)
 }
 
 fn unwrap_key_hybrid(
@@ -207,121 +201,6 @@ fn unwrap_key_hybrid(
         &salt,
         &wrapped.did,
     )?;
-
-    let kek = KekAes256::new((&*wrapping_key).into());
-    let content_key_bytes = kek
-        .unwrap_vec(wrapped_key_bytes)
-        .map_err(|_| Error::Decryption("AES key unwrap failed".into()))?;
-
-    if content_key_bytes.len() != CONTENT_KEY_LEN {
-        return Err(Error::Decryption(format!(
-            "unwrapped key wrong length: expected {CONTENT_KEY_LEN}, got {}",
-            content_key_bytes.len()
-        )));
-    }
-
-    let mut key = [0u8; CONTENT_KEY_LEN];
-    key.copy_from_slice(&content_key_bytes);
-    Ok(ContentKey(key))
-}
-
-// ───── Pair-flow legacy: X25519-only ───────────────────────────────────────
-//
-// Used by `pairing/{respond,receive}.rs`, where the recipient is a freshly
-// generated X25519 ephemeral keypair held in memory only. Hybridizing the
-// pair flow is tracked as Phase 3.5 — the helpers below let the rest of
-// Phase 3b ship without touching pair records.
-
-/// Wrap a content key to a single X25519 public key. Pair-flow only.
-///
-/// Wire envelope: `[X25519 ephemeral pub (32) || AES-KW wrapped (40)]`.
-pub fn wrap_key_x25519_only(
-    content_key: &ContentKey,
-    recipient_public_key: &X25519PublicKey,
-    recipient_did: &str,
-    rng: &mut (impl CryptoRng + RngCore),
-) -> Result<WrappedKey, Error> {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-
-    let ephemeral_secret = EphemeralSecret::random_from_rng(rng);
-    let ephemeral_public_key = PublicKey::from(&ephemeral_secret);
-
-    let recipient_pk = PublicKey::from(*recipient_public_key);
-    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_pk);
-
-    let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
-    let mut wrapping_key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
-    hkdf.expand(
-        &hkdf_info(X25519_ONLY_WRAP_ALGO, recipient_did),
-        &mut *wrapping_key,
-    )
-    .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
-
-    let kek = KekAes256::new((&*wrapping_key).into());
-    let wrapped = kek
-        .wrap_vec(&content_key.0)
-        .map_err(|_| Error::KeyWrap("AES key wrap failed".into()))?;
-
-    let mut envelope = Vec::with_capacity(X25519_ONLY_CIPHERTEXT_LEN);
-    envelope.extend_from_slice(ephemeral_public_key.as_bytes());
-    envelope.extend_from_slice(&wrapped);
-
-    Ok(WrappedKey {
-        did: recipient_did.to_string(),
-        ciphertext: AtBytes {
-            encoded: BASE64.encode(&envelope),
-        },
-        algo: X25519_ONLY_WRAP_ALGO.to_string(),
-    })
-}
-
-/// Unwrap a pair-flow legacy envelope using a single X25519 private key.
-///
-/// Also reachable via [`unwrap_key`] when its `algo` field selects the
-/// legacy path — kept public so `pairing/receive.rs` can call it directly
-/// without constructing a (mostly-unused) ML-KEM private key first.
-pub fn unwrap_key_x25519_only(
-    wrapped: &WrappedKey,
-    private_key: &X25519PrivateKey,
-) -> Result<ContentKey, Error> {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-
-    if wrapped.algo != X25519_ONLY_WRAP_ALGO {
-        return Err(Error::Decryption(format!(
-            "expected algo {X25519_ONLY_WRAP_ALGO}, got {}",
-            wrapped.algo
-        )));
-    }
-
-    let envelope = wrapped
-        .ciphertext
-        .decode()
-        .map_err(|e| Error::Decryption(format!("base64 decode: {e}")))?;
-
-    if envelope.len() != X25519_ONLY_CIPHERTEXT_LEN {
-        return Err(Error::Decryption(format!(
-            "invalid x25519-only envelope length: expected {X25519_ONLY_CIPHERTEXT_LEN}, got {}",
-            envelope.len()
-        )));
-    }
-
-    let (eph_pub_bytes, wrapped_key_bytes) = envelope.split_at(X25519_KEY_LEN);
-    let mut eph_pub: [u8; X25519_KEY_LEN] = [0u8; X25519_KEY_LEN];
-    eph_pub.copy_from_slice(eph_pub_bytes);
-    let ephemeral_public = PublicKey::from(eph_pub);
-
-    let secret = StaticSecret::from(*private_key);
-    let shared_secret = secret.diffie_hellman(&ephemeral_public);
-
-    let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
-    let mut wrapping_key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
-    hkdf.expand(
-        &hkdf_info(X25519_ONLY_WRAP_ALGO, &wrapped.did),
-        &mut *wrapping_key,
-    )
-    .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
 
     let kek = KekAes256::new((&*wrapping_key).into());
     let content_key_bytes = kek

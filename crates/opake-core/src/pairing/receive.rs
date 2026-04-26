@@ -2,7 +2,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{decrypt_blob, unwrap_key_x25519_only, EncryptedPayload, X25519PrivateKey};
+use crate::crypto::{
+    decrypt_blob, unwrap_key, EncryptedPayload, MlKemPrivateKey, PrivateKeyBundle,
+    X25519PrivateKey, ML_KEM_SK_LEN,
+};
 use crate::error::Error;
 use crate::records::{
     PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION,
@@ -11,6 +14,14 @@ use crate::records::{
 use crate::storage::{Identity, Storage};
 
 use super::cleanup::cleanup_pair_records;
+
+/// X25519 private-key length (the classical half of the pair-state blob).
+const X25519_PRIV_LEN: usize = 32;
+
+/// Combined size of the pair-state blob persisted by `create_pair_request`.
+///
+/// `[X25519 private key (32) || ML-KEM-768 private key (2400)]` = 2432 bytes.
+const PAIR_STATE_LEN: usize = X25519_PRIV_LEN + ML_KEM_SK_LEN;
 
 /// Poll once for a pair response matching `request_rkey`.
 ///
@@ -65,15 +76,23 @@ where
     T: Transport,
     S: Storage,
 {
-    let privkey_bytes = storage.load_pair_state(did, request_rkey).await?;
-    let privkey: X25519PrivateKey = privkey_bytes.as_slice().try_into().map_err(|_| {
-        Error::InvalidRecord(format!(
-            "pair state for {request_rkey} has wrong length: expected 32 bytes, got {}",
-            privkey_bytes.len()
-        ))
-    })?;
+    let state = storage.load_pair_state(did, request_rkey).await?;
+    if state.len() != PAIR_STATE_LEN {
+        return Err(Error::InvalidRecord(format!(
+            "pair state for {request_rkey} has wrong length: expected {PAIR_STATE_LEN} bytes, got {}",
+            state.len()
+        )));
+    }
+    // Split the persisted blob back into its two halves. See
+    // `pairing::request::create_pair_request` for the matching writer.
+    let (x25519_bytes, mlkem_bytes) = state.split_at(X25519_PRIV_LEN);
+    let mut x25519_priv = [0u8; X25519_PRIV_LEN];
+    x25519_priv.copy_from_slice(x25519_bytes);
+    let mut mlkem_priv = [0u8; ML_KEM_SK_LEN];
+    mlkem_priv.copy_from_slice(mlkem_bytes);
 
-    let identity = decrypt_pair_response(client, did, response, &privkey).await?;
+    let identity =
+        decrypt_pair_response(client, did, response, &x25519_priv, &mlkem_priv).await?;
     storage.save_identity(did, &identity).await?;
 
     // Tear-down is best-effort from the caller's perspective — the Identity
@@ -110,11 +129,14 @@ async fn decrypt_pair_response(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     response: &PairResponse,
-    ephemeral_private_key: &X25519PrivateKey,
+    ephemeral_x25519_private_key: &X25519PrivateKey,
+    ephemeral_ml_kem_private_key: &MlKemPrivateKey,
 ) -> Result<Identity, Error> {
-    // Pair-flow legacy envelope: see `wrap_key_x25519_only` in
-    // `crypto::key_wrapping`. Phase 3.5 will hybridize this path.
-    let content_key = unwrap_key_x25519_only(&response.wrapped_key, ephemeral_private_key)?;
+    let bundle = PrivateKeyBundle {
+        x25519: ephemeral_x25519_private_key,
+        ml_kem: ephemeral_ml_kem_private_key,
+    };
+    let content_key = unwrap_key(&response.wrapped_key, &bundle)?;
 
     let ciphertext = BASE64.decode(&response.ciphertext.encoded).map_err(|e| {
         Error::Decryption(format!("invalid base64 in pair response ciphertext: {e}"))

@@ -285,60 +285,63 @@ fn cross_recipient_splice_rejected() {
     assert!(unwrap_key(&wrapped_for_alice, &bob.private_keys()).is_err());
 }
 
-// -- Pair-flow legacy (X25519-only) wrap --
+// -- Wrong-algo rejection --
 
 #[test]
-fn x25519_only_wrap_unwrap_roundtrips() {
-    let content_key = generate_content_key(&mut OsRng);
+fn unwrap_rejects_unknown_algo() {
+    // Build a `WrappedKey` with an unsupported `algo` string — `unwrap_key`
+    // must refuse rather than try to parse it as a hybrid envelope.
+    use crate::atproto::AtBytes;
+    use crate::records::WrappedKey;
     let keys = LocalKeys::generate();
-
-    let wrapped = wrap_key_x25519_only(
-        &content_key,
-        &keys.x25519_pub,
-        "did:plc:pair",
-        &mut OsRng,
-    )
-    .unwrap();
-    assert_eq!(wrapped.algo, "x25519-hkdf-a256kw");
-
-    let unwrapped = unwrap_key_x25519_only(&wrapped, &keys.x25519_priv).unwrap();
-    assert_eq!(content_key.0, unwrapped.0);
+    let bogus = WrappedKey {
+        did: "did:plc:test".into(),
+        ciphertext: AtBytes {
+            encoded: BASE64.encode([0u8; HYBRID_CIPHERTEXT_LEN]),
+        },
+        algo: "x25519-hkdf-a256kw".into(),
+    };
+    assert!(unwrap_key(&bogus, &keys.private_keys()).is_err());
 }
 
-#[test]
-fn unwrap_dispatches_on_algo() {
-    // The default `unwrap_key` path also accepts legacy X25519-only envelopes
-    // — the pair-flow records published before Phase 3.5 stay readable.
-    let content_key = generate_content_key(&mut OsRng);
-    let keys = LocalKeys::generate();
-
-    let wrapped = wrap_key_x25519_only(
-        &content_key,
-        &keys.x25519_pub,
-        "did:plc:pair",
-        &mut OsRng,
-    )
-    .unwrap();
-
-    let unwrapped = unwrap_key(&wrapped, &keys.private_keys()).unwrap();
-    assert_eq!(content_key.0, unwrapped.0);
-}
-
-// -- Ephemeral keypair --
+// -- Ephemeral keypair (hybrid) --
 
 #[test]
 fn ephemeral_keypair_has_correct_key_lengths() {
     let kp = generate_ephemeral_keypair(&mut OsRng);
-    assert_eq!(kp.public_key.len(), 32);
-    assert_eq!(kp.private_key.len(), 32);
+    assert_eq!(kp.x25519_public_key.len(), 32);
+    assert_eq!(kp.x25519_private_key.len(), 32);
+    assert_eq!(kp.ml_kem_public_key.len(), ML_KEM_PK_LEN);
+    assert_eq!(kp.ml_kem_private_key.len(), ML_KEM_SK_LEN);
 }
 
 #[test]
 fn ephemeral_keypair_unique_each_time() {
     let a = generate_ephemeral_keypair(&mut OsRng);
     let b = generate_ephemeral_keypair(&mut OsRng);
-    assert_ne!(a.public_key, b.public_key);
-    assert_ne!(a.private_key, b.private_key);
+    assert_ne!(a.x25519_public_key, b.x25519_public_key);
+    assert_ne!(a.x25519_private_key, b.x25519_private_key);
+    assert_ne!(a.ml_kem_public_key, b.ml_kem_public_key);
+    assert_ne!(a.ml_kem_private_key, b.ml_kem_private_key);
+}
+
+#[test]
+fn ephemeral_keypair_roundtrips_through_hybrid_wrap() {
+    // The whole reason the ephemeral keypair carries an ML-KEM half is so
+    // the pair-flow responder can reach the same hybrid `wrap_key` everyone
+    // else uses. Round-trip a content key through that exact path.
+    let kp = generate_ephemeral_keypair(&mut OsRng);
+    let content_key = generate_content_key(&mut OsRng);
+
+    let wrapped = wrap_key(
+        &content_key,
+        &kp.public_keys(),
+        "did:plc:ephemeral",
+        &mut OsRng,
+    )
+    .unwrap();
+    let unwrapped = unwrap_key(&wrapped, &kp.private_keys()).unwrap();
+    assert_eq!(content_key.0, unwrapped.0);
 }
 
 // -- Keyring wrapping (symmetric AES-KW) --

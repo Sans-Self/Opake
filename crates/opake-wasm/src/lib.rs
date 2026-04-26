@@ -242,19 +242,31 @@ pub fn generate_ephemeral_keypair() -> Result<JsValue, JsError> {
     let kp = opake_core::crypto::generate_ephemeral_keypair(&mut OsRng);
 
     // Build the JS object manually so the byte fields are Uint8Array, not Array<number>.
-    // (serde_wasm_bindgen serializes Vec<u8> as Array by default unless serialize_bytes is used,
-    // and #[serde(with)] can't resolve crate-local modules from lib.rs.)
+    // Both halves of the hybrid keypair flow back to JS so callers can echo
+    // them in fingerprints / pair-request UIs without re-deriving anything.
     let obj = js_sys::Object::new();
     js_sys::Reflect::set(
         &obj,
-        &"publicKey".into(),
-        &js_sys::Uint8Array::from(&kp.public_key[..]).into(),
+        &"x25519PublicKey".into(),
+        &js_sys::Uint8Array::from(&kp.x25519_public_key[..]).into(),
     )
     .map_err(|e| JsError::new(&format!("{e:?}")))?;
     js_sys::Reflect::set(
         &obj,
-        &"privateKey".into(),
-        &js_sys::Uint8Array::from(&kp.private_key[..]).into(),
+        &"x25519PrivateKey".into(),
+        &js_sys::Uint8Array::from(&kp.x25519_private_key[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"mlKemPublicKey".into(),
+        &js_sys::Uint8Array::from(&kp.ml_kem_public_key[..]).into(),
+    )
+    .map_err(|e| JsError::new(&format!("{e:?}")))?;
+    js_sys::Reflect::set(
+        &obj,
+        &"mlKemPrivateKey".into(),
+        &js_sys::Uint8Array::from(&kp.ml_kem_private_key[..]).into(),
     )
     .map_err(|e| JsError::new(&format!("{e:?}")))?;
     Ok(obj.into())

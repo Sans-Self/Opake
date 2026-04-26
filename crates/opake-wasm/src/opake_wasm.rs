@@ -466,18 +466,22 @@ impl WasmOpakeHandle {
     }
 
     /// Approve a pair request from an already-authenticated device. Wraps
-    /// this device's identity to the requester's ephemeral public key and
-    /// publishes the response record.
+    /// this device's identity to the requester's ephemeral hybrid public-key
+    /// bundle and publishes the response record.
     #[wasm_bindgen(js_name = approvePairRequest)]
     pub async fn approve_pair_request(
         &self,
         request_uri: &str,
-        ephemeral_public_key: &[u8],
+        ephemeral_x25519_public_key: &[u8],
+        ephemeral_ml_kem_public_key: &[u8],
     ) -> Result<(), JsError> {
-        let pubkey = pub_key_from_slice(ephemeral_public_key)?;
+        let x25519_pubkey = pub_key_from_slice(ephemeral_x25519_public_key)?;
+        let ml_kem_pubkey: opake_core::crypto::MlKemPublicKey = ephemeral_ml_kem_public_key
+            .try_into()
+            .map_err(|_| JsError::new("ML-KEM-768 ephemeral key must be 1184 bytes"))?;
         let mut opake = self.opake().await?;
         opake
-            .approve_pair_request(request_uri, &pubkey)
+            .approve_pair_request(request_uri, &x25519_pubkey, &ml_kem_pubkey)
             .await
             .map_err(wasm_err)
     }

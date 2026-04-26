@@ -1,9 +1,6 @@
 use super::*;
 use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-use crate::crypto::{
-    self, generate_content_key, DidMember, KeyringMetadata, OsRng, X25519DalekPublicKey,
-    X25519DalekStaticSecret,
-};
+use crate::crypto::{self, generate_content_key, DidMember, KeyringMetadata, OsRng};
 use crate::indexer::KeyringProposal;
 use crate::records::{keyring_update, Keyring, KeyringMember};
 use crate::storage::{Identity, NoopStorage};

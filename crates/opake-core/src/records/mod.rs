@@ -45,7 +45,7 @@ pub use invitation::{Invitation, INVITATION_COLLECTION};
 pub use invitation_acceptance::{InvitationAcceptance, INVITATION_ACCEPTANCE_COLLECTION};
 pub use keyring::{KeyHistoryEntry, Keyring};
 pub use keyring_update::{KeyringUpdate, KeyringUpdateRecord, KEYRING_UPDATE_COLLECTION};
-pub use pair_request::{PairRequest, PAIR_REQUEST_COLLECTION};
+pub use pair_request::{PairRequest, PAIR_REQUEST_ALGO, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
