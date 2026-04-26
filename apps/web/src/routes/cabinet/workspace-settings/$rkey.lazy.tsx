@@ -280,7 +280,13 @@ function WorkspaceSettingsPage() {
         try {
           const opake = getOpake();
           const identity = await opake.resolveIdentity(handle);
-          await opake.addWorkspaceMember(uri, identity.did, identity.publicKey, memberRole);
+          await opake.addWorkspaceMember(
+            uri,
+            identity.did,
+            identity.x25519PublicKey,
+            identity.mlKemPublicKey,
+            memberRole,
+          );
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
           await refreshAfterMemberChange(uri);
         } catch (err) {

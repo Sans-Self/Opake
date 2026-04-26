@@ -195,10 +195,12 @@ const opake = await Opake.init({ storage, did: accounts[0]!.did });`;
 
 export const identityShape = `interface Identity {
   did: string;
-  public_key: string;    // X25519, base64
-  private_key: string;   // X25519, base64. Lives in Storage, read by WASM only.
-  signing_key?: string;  // Ed25519, base64. Lives in Storage, read by WASM only.
-  verify_key?: string;   // Ed25519, base64.
+  x25519_public_key: string;    // X25519, base64. Classical half of the hybrid KEM.
+  x25519_private_key: string;   // X25519, base64. Lives in Storage, read by WASM only.
+  ml_kem_public_key: string;    // ML-KEM-768, base64. Post-quantum half.
+  ml_kem_private_key: string;   // ML-KEM-768, base64. Lives in Storage, read by WASM only.
+  signing_key?: string;         // Ed25519, base64. Lives in Storage, read by WASM only.
+  verify_key?: string;          // Ed25519, base64.
 }`;
 
 export const createIdentityFresh = `// Generate a new 24-word BIP-39 phrase.
@@ -272,14 +274,24 @@ try {
 export const approvePairRequestExistingDevice = `// Existing device. Already has an Identity in Storage, so \`opake\` exists.
 
 const requests = await opake.listPairRequests();
-// requests: { uri: string; ephemeralKey: Uint8Array; createdAt: string }[]
+// requests: {
+//   uri: string;
+//   x25519EphemeralKey: Uint8Array;  // 32 bytes — what fingerprints
+//   mlKemEphemeralKey: Uint8Array;   // 1184 bytes — post-quantum half
+//   createdAt: string;
+// }[]
 
-// Present them with fingerprints. The user picks the one matching what
-// their new device is showing. Do NOT auto-approve — the fingerprint
-// check is the only defense against a MITM injecting a fake request.
+// Present them with fingerprints (X25519 half). The user picks the one
+// matching what their new device is showing. Do NOT auto-approve — the
+// fingerprint check is the only defense against a MITM injecting a fake
+// request.
 const selected = await askUserToPickRequest(requests);
 
-await opake.approvePairRequest(selected.uri, selected.ephemeralKey);
+await opake.approvePairRequest(
+  selected.uri,
+  selected.x25519EphemeralKey,
+  selected.mlKemEphemeralKey,
+);
 // The new device's awaitPairCompletion resolves within one poll.`;
 
 // -- files.mdx --------------------------------------------------------------
@@ -371,18 +383,21 @@ watcher.close();`;
 
 // -- sharing.mdx ------------------------------------------------------------
 
-export const shareDocument = `// Resolve the recipient first. This returns { did, pdsUrl, publicKey },
-// where publicKey is the recipient's X25519 public encryption key.
+export const shareDocument = `// Resolve the recipient first. This returns the recipient's hybrid public-key
+// bundle: x25519PublicKey (classical) + mlKemPublicKey (post-quantum), plus
+// the algo strings advertised on their app.opake.publicKey/self record.
 const recipient = await opake.resolveIdentity("bob.bsky.social");
 
 // Direct share. Writes an app.opake.grant record on YOUR PDS that wraps
-// the document's content key to the recipient's public key. The grant
-// lives under your repo; the recipient discovers it via the indexer.
+// the document's content key to BOTH halves of the recipient's hybrid
+// bundle. The grant lives under your repo; the recipient discovers it
+// via the indexer.
 const fm = await opake.cabinet();
 await fm.share(
   documentUri,
   recipient.did,
-  recipient.publicKey,
+  recipient.x25519PublicKey,
+  recipient.mlKemPublicKey,
   "read",
   "For your review — draft v2",
 );`;
@@ -391,7 +406,13 @@ export const handleRecipientNotReady = `import { OpakeError } from "@opake/sdk";
 
 try {
   const recipient = await opake.resolveIdentity(handleOrDid);
-  await fm.share(documentUri, recipient.did, recipient.publicKey, "read");
+  await fm.share(
+    documentUri,
+    recipient.did,
+    recipient.x25519PublicKey,
+    recipient.mlKemPublicKey,
+    "read",
+  );
 } catch (err) {
   if (err instanceof OpakeError && err.kind === "RecipientNotReady") {
     // The target has a valid atproto identity but hasn't published an
@@ -489,15 +510,21 @@ const watcher = opake.watchWorkspaces((snapshot) => {
 // Stop listening when you're done.
 watcher.close();`;
 
-export const addWorkspaceMember = `// Look up the invitee's published public encryption key first.
-// You need both their DID and the X25519 public key bytes.
-const { did, publicKey } = await resolveHandleAndPublicKey(handle);
+export const addWorkspaceMember = `// Look up the invitee's published hybrid public-key bundle first.
+// resolveIdentity returns both halves (X25519 + ML-KEM-768) plus their algos.
+const recipient = await opake.resolveIdentity(handle);
 
-await opake.addWorkspaceMember(keyringUri, did, publicKey, "editor");
+await opake.addWorkspaceMember(
+  keyringUri,
+  recipient.did,
+  recipient.x25519PublicKey,
+  recipient.mlKemPublicKey,
+  "editor",
+);
 
 // The workspace keyring record on the owner's PDS now has an extra
 // member entry containing the group key wrapped to the invitee's
-// public key. They'll see the workspace in their next listWorkspaces.`;
+// hybrid bundle. They'll see the workspace in their next listWorkspaces.`;
 
 export const removeWorkspaceMember = `// Owner removing a member rotates the group key in place.
 const result = await opake.removeWorkspaceMember(keyringUri, memberDid);

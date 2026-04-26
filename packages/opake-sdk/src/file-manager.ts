@@ -55,7 +55,8 @@ type WasmFileManager = {
   share(
     documentUri: string,
     recipientDid: string,
-    recipientPublicKey: Uint8Array,
+    recipientX25519PublicKey: Uint8Array,
+    recipientMlKemPublicKey: Uint8Array,
     permissions: string,
     note: string | null,
   ): Promise<unknown>;
@@ -492,21 +493,24 @@ export class FileManager {
    *
    * @param documentUri - URI of the document to share.
    * @param recipientDid - DID of the recipient.
-   * @param recipientPublicKey - Recipient's X25519 public key (32 bytes).
+   * @param recipientX25519PublicKey - Recipient's X25519 public key (32 bytes).
+   * @param recipientMlKemPublicKey - Recipient's ML-KEM-768 public key (1184 bytes).
    * @param role - Access role ("read" or "write").
    */
   @wrapWasmErrors
   share(
     documentUri: string,
     recipientDid: string,
-    recipientPublicKey: Uint8Array,
+    recipientX25519PublicKey: Uint8Array,
+    recipientMlKemPublicKey: Uint8Array,
     permissions: string,
     note?: string,
   ): Promise<MutationResult> {
     return this.requireHandle().share(
       documentUri,
       recipientDid,
-      recipientPublicKey,
+      recipientX25519PublicKey,
+      recipientMlKemPublicKey,
       permissions,
       note ?? null,
     ) as Promise<MutationResult>;
