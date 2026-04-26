@@ -142,7 +142,11 @@ async fn decrypt_pair_response(
         x25519: ephemeral_x25519_private_key,
         ml_kem: ephemeral_ml_kem_private_key,
     };
-    let content_key = unwrap_key(&response.wrapped_key, &bundle)?;
+    let content_key = unwrap_key(
+        &response.wrapped_key,
+        &bundle,
+        &crate::crypto::WrapContext::PairResponse,
+    )?;
 
     let ciphertext = BASE64.decode(&response.ciphertext.encoded).map_err(|e| {
         Error::Decryption(format!("invalid base64 in pair response ciphertext: {e}"))

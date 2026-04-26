@@ -286,7 +286,11 @@ pub fn try_build_entry(
     // method lives on the generic `impl<T, R, S> Opake<T, R, S>` block,
     // so calling it as a free function would require naming dummy
     // generics. The logic is two lines; duplicating avoids the dance.
-    let group_key = match crypto::unwrap_key(&my_member.wrapped_key, private_keys) {
+    let group_key = match crypto::unwrap_key(
+        &my_member.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Keyring { uri },
+    ) {
         Ok(k) => k,
         Err(_) => {
             // Unwrap failed — corrupt data or wrong key material.

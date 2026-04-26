@@ -29,7 +29,13 @@ pub async fn respond_to_pair_request(
     // on the resulting WrappedKey is the identity's DID — it identifies who
     // is sending, not who's receiving (the receiver is an unidentified fresh
     // device for which we only know an ephemeral pubkey bundle).
-    let wrapped = wrap_key(&content_key, ephemeral_public_keys, &identity.did, rng)?;
+    let wrapped = wrap_key(
+        &content_key,
+        ephemeral_public_keys,
+        &identity.did,
+        &crate::crypto::WrapContext::PairResponse,
+        rng,
+    )?;
 
     let record = PairResponse {
         opake_version: SCHEMA_VERSION,

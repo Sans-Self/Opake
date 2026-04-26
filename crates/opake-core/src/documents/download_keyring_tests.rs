@@ -73,10 +73,22 @@ fn create_keyring_fixture(
 
     // Generate group key and wrap to owner + member
     let group_key = crypto::generate_content_key(rng);
-    let owner_wrapped_gk =
-        crypto::wrap_key(&group_key, &owner_keys.public_keys(), OWNER_DID, rng).unwrap();
-    let member_wrapped_gk =
-        crypto::wrap_key(&group_key, &member_keys.public_keys(), MEMBER_DID, rng).unwrap();
+    let owner_wrapped_gk = crypto::wrap_key(
+        &group_key,
+        &owner_keys.public_keys(),
+        OWNER_DID,
+        &crypto::WrapContext::Keyring { uri: KR_URI },
+        rng,
+    )
+    .unwrap();
+    let member_wrapped_gk = crypto::wrap_key(
+        &group_key,
+        &member_keys.public_keys(),
+        MEMBER_DID,
+        &crypto::WrapContext::Keyring { uri: KR_URI },
+        rng,
+    )
+    .unwrap();
 
     // Generate content key, encrypt blob, wrap CK under group key
     let content_key = crypto::generate_content_key(rng);
@@ -214,8 +226,14 @@ async fn rejects_direct_encrypted_document() {
     // Build a direct-encrypted document (not keyring)
     let content_key = crypto::generate_content_key(&mut OsRng);
     let payload = crypto::encrypt_blob(&content_key, b"data", &mut OsRng).unwrap();
-    let wrapped =
-        crypto::wrap_key(&content_key, &member.public_keys(), MEMBER_DID, &mut OsRng).unwrap();
+    let wrapped = crypto::wrap_key(
+        &content_key,
+        &member.public_keys(),
+        MEMBER_DID,
+        &crypto::WrapContext::Document { uri: DOC_URI },
+        &mut OsRng,
+    )
+    .unwrap();
 
     let metadata = crypto::DocumentMetadata {
         name: "direct-file.txt".into(),

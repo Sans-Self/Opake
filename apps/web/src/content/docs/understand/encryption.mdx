@@ -24,7 +24,7 @@ The file is then encrypted using **AES-256-GCM**. This algorithm is fast and han
 
 We have the encrypted file, but how do we store the `Content Key` so that _only you_ can decrypt it later? We wrap it.
 
-Your Opake identity consists of a **hybrid keypair**: an X25519 half (classical, fast, well-understood) and an ML-KEM-768 half (post-quantum, lattice-based). We wrap the `Content Key` to both halves at once using a scheme called `x25519-mlkem768-hkdf-a256kw`.
+Your Opake identity consists of a **hybrid keypair**: an X25519 half (classical, fast, well-understood) and an ML-KEM-768 half (post-quantum, lattice-based). We wrap the `Content Key` to both halves at once using a scheme called `x25519-mlkem768-hkdf-a256kw-v2`.
 
 1. We generate an ephemeral X25519 keypair and run ECDH against your X25519 public key → 32-byte shared secret.
 2. We run ML-KEM-768 Encaps against your post-quantum public key → 32-byte shared secret + a 1088-byte ciphertext.

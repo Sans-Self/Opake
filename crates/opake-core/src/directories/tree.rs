@@ -236,9 +236,14 @@ impl DirectoryTree {
         for info in self.directories.values_mut() {
             let content_key = match &info.key_wrapping {
                 KeyWrapping::Direct(direct) => {
+                    // Direct-wrapped directories live in the cabinet (workspace
+                    // dirs always go through the keyring path). The original
+                    // wrap was scoped with `WrapContext::Cabinet`.
                     let wrapped = direct.keys.iter().find(|k| k.did == did);
                     match wrapped {
-                        Some(w) => crypto::unwrap_key(w, private_keys).ok(),
+                        Some(w) => {
+                            crypto::unwrap_key(w, private_keys, &crypto::WrapContext::Cabinet).ok()
+                        }
                         None => None,
                     }
                 }
@@ -972,7 +977,7 @@ fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Opti
         KeyWrapping::Direct(direct) => {
             let wrapped = direct.keys.iter().find(|k| k.did == ctx.did)?;
             let private_keys = ctx.private_keys?;
-            crypto::unwrap_key(wrapped, private_keys).ok()?
+            crypto::unwrap_key(wrapped, private_keys, &crypto::WrapContext::Cabinet).ok()?
         }
         KeyWrapping::Keyring(kr) => {
             let keyring_uri = &kr.keyring_ref.keyring;

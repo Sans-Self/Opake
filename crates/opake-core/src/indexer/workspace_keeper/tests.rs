@@ -229,13 +229,25 @@ fn make_member_json(
     role: crate::records::Role,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> serde_json::Value {
-    use crate::crypto::{generate_content_key, wrap_key};
+    use crate::crypto::{generate_content_key, wrap_key, WrapContext};
     use crate::records::KeyringMember;
     use crate::test_utils::TestKeys;
 
     let keys = TestKeys::generate(did);
     let gk = generate_content_key(rng);
-    let wrapped = wrap_key(&gk, &keys.public_keys(), did, rng).unwrap();
+    // Test fixtures bind to a stable test keyring URI; the test that
+    // exercises unwrap-failure feeds garbage keys, so this URI is just
+    // ceremony to satisfy the wrap signature.
+    let wrapped = wrap_key(
+        &gk,
+        &keys.public_keys(),
+        did,
+        &WrapContext::Keyring {
+            uri: "at://did:plc:test/app.opake.keyring/test",
+        },
+        rng,
+    )
+    .unwrap();
     serde_json::to_value(KeyringMember {
         wrapped_key: wrapped,
         role,

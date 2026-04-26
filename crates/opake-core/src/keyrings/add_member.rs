@@ -65,6 +65,9 @@ pub async fn add_member(
         params.group_key,
         &params.new_member_public_keys,
         params.new_member_did,
+        &crypto::WrapContext::Keyring {
+            uri: params.keyring_uri,
+        },
         rng,
     )?;
     keyring.members.push(KeyringMember {
@@ -113,7 +116,7 @@ mod tests {
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
-                    algo: "x25519-mlkem768-hkdf-a256kw".into(),
+                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
                 role: Role::Manager,
             }],
@@ -189,6 +192,7 @@ mod tests {
                 let unwrapped = crypto::unwrap_key(
                     &updated.members[1].wrapped_key,
                     &new_member.private_keys(),
+                    &crypto::WrapContext::Keyring { uri: KEYRING_URI },
                 )
                 .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);

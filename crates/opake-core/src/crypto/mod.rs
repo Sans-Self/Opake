@@ -8,7 +8,7 @@
 //
 // This module handles AES-256-GCM content encryption and asymmetric key
 // wrapping. Wrapping uses the hybrid X25519 + ML-KEM-768 KEM
-// (`x25519-mlkem768-hkdf-a256kw`) — defends against harvest-now-decrypt-later
+// (`x25519-mlkem768-hkdf-a256kw-v2`) — defends against harvest-now-decrypt-later
 // per BSI TR-02102 (Germany) and ANSSI (France) guidance for hybrid
 // post-quantum key establishment. The pair flow generates an ephemeral
 // hybrid bundle on the new device so the same construction applies.
@@ -40,6 +40,8 @@ pub use x25519_dalek::{
 // Re-export all public items at the `crypto::` level.
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
+// `WrapContext` is part of the public wrap/unwrap surface — callers must
+// pass one to scope their wrap to a record context.
 pub use keyring_wrapping::{unwrap_content_key_from_keyring, wrap_content_key_for_keyring};
 pub use metadata::{
     decrypt_metadata, encrypt_metadata, DirectoryMetadata, DocumentMetadata, GrantMetadata,
@@ -62,8 +64,17 @@ const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
 // hybrid post-quantum key establishment. Algorithm sizes from NIST FIPS-203.
 
 /// Algorithm identifier for the default hybrid wrap envelope, written into
-/// `WrappedKey.algo`.
-pub const HYBRID_WRAP_ALGO: &str = "x25519-mlkem768-hkdf-a256kw";
+/// `WrappedKey.algo`. The `-v2` suffix tracks the canonical hybrid recipe:
+///
+/// - HKDF salt commits to the recipient's ML-KEM pubkey alongside the
+///   X25519 transcript pieces (X-Wing / BSI-ANSSI worked-example shape).
+/// - HKDF info commits to a context tag + scoping URI so a `WrappedKey`
+///   lifted from one record context (keyring, document, pair-response,
+///   cabinet) cannot be replayed into another.
+///
+/// Per CLAUDE.md "no install base", v1 envelopes are unreadable under
+/// v2 code by design — no migration shim.
+pub const HYBRID_WRAP_ALGO: &str = "x25519-mlkem768-hkdf-a256kw-v2";
 
 /// ML-KEM-768 public key size (bytes). NIST FIPS-203 §6.1.
 pub const ML_KEM_PK_LEN: usize = 1184;
@@ -302,12 +313,66 @@ pub struct EncryptedPayload {
     pub nonce: [u8; AES_GCM_NONCE_LEN],
 }
 
+/// Where a `WrappedKey` lives on the wire. Folded into the HKDF `info`
+/// so the wrapping-key derivation depends on the record context — a
+/// `WrappedKey` lifted from a keyring and re-published in a document
+/// grant (or vice versa) produces a different derived key on unwrap and
+/// the AES-KW integrity check fails.
+///
+/// `Keyring { uri }` and `Document { uri }` carry the record's AT-URI so
+/// even two keyrings to the same recipient produce different info
+/// strings. `PairResponse` and `Cabinet` are inherently single-context
+/// for the local user and don't need a URI.
+#[derive(Debug, Clone, Copy)]
+pub enum WrapContext<'a> {
+    /// Keyring member-key wrap. URI is the keyring's AT-URI.
+    Keyring { uri: &'a str },
+    /// Document content-key wrap (a grant for an individual recipient).
+    /// URI is the document's AT-URI.
+    Document { uri: &'a str },
+    /// Pair-flow Identity-bundle wrap. The new device's ephemeral keypair
+    /// is the only recipient and the pair-response record itself is the
+    /// scope; no separate URI needed.
+    PairResponse,
+    /// Cabinet content-key wrap under the user's own published pubkey.
+    /// One cabinet per identity, no URI to disambiguate against.
+    Cabinet,
+}
+
+impl WrapContext<'_> {
+    pub(crate) fn tag(&self) -> &'static str {
+        match self {
+            WrapContext::Keyring { .. } => "keyring",
+            WrapContext::Document { .. } => "document",
+            WrapContext::PairResponse => "pair-response",
+            WrapContext::Cabinet => "cabinet",
+        }
+    }
+
+    pub(crate) fn uri(&self) -> &str {
+        match self {
+            WrapContext::Keyring { uri } | WrapContext::Document { uri } => uri,
+            // Static sentinel for contexts that don't carry a URI; gives
+            // a stable string for the info transcript without conflating
+            // with any real AT-URI (which always start with `at://`).
+            WrapContext::PairResponse => "self:pair-response",
+            WrapContext::Cabinet => "self:cabinet",
+        }
+    }
+}
+
 /// HKDF info string for domain separation — includes schema version,
-/// algorithm identifier, and recipient DID so a version bump, algorithm
-/// switch, or different recipient produces different derived keys from
-/// the same shared secret.
-fn hkdf_info(algo: &str, recipient_did: &str) -> Vec<u8> {
-    format!("opake-v{SCHEMA_VERSION}-{algo}-{recipient_did}").into_bytes()
+/// algorithm identifier, context tag, scoping URI, and recipient DID. A
+/// `WrappedKey` lifted between record contexts (keyring → document, or
+/// keyring A → keyring B) produces a different derived key on unwrap
+/// and AES-KW integrity rejects the replay.
+fn hkdf_info(algo: &str, context: &WrapContext<'_>, recipient_did: &str) -> Vec<u8> {
+    format!(
+        "opake-v{SCHEMA_VERSION}-{algo}-{tag}-{uri}-{recipient_did}",
+        tag = context.tag(),
+        uri = context.uri(),
+    )
+    .into_bytes()
 }
 
 #[cfg(test)]

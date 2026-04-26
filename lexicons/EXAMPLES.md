@@ -31,7 +31,7 @@ The root directory is a singleton at rkey `self`. Directory names are always enc
     "keys": [{
       "did": "did:plc:alice123",
       "ciphertext": { "$bytes": "kv7N...1160 bytes...Q==" },
-      "algo": "x25519-mlkem768-hkdf-a256kw"
+      "algo": "x25519-mlkem768-hkdf-a256kw-v2"
     }]
   },
   "encryptedMetadata": {
@@ -59,7 +59,7 @@ The `entries` array is an ordered list of AT-URIs pointing to documents or other
     "keys": [{
       "did": "did:plc:alice123",
       "ciphertext": { "$bytes": "Xm4p...1160 bytes...==" },
-      "algo": "x25519-mlkem768-hkdf-a256kw"
+      "algo": "x25519-mlkem768-hkdf-a256kw-v2"
     }]
   },
   "encryptedMetadata": {
@@ -147,7 +147,7 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
         {
           "did": "did:plc:alice123",
           "ciphertext": { "$bytes": "base64-wrapped-content-key-for-alice" },
-          "algo": "x25519-mlkem768-hkdf-a256kw"
+          "algo": "x25519-mlkem768-hkdf-a256kw-v2"
         }
       ]
     }
@@ -178,7 +178,7 @@ array only contains Alice's wrapped key — only she can decrypt.
   "wrappedKey": {
     "did": "did:plc:bob456",
     "ciphertext": { "$bytes": "base64-wrapped-content-key-for-bob" },
-    "algo": "x25519-mlkem768-hkdf-a256kw"
+    "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
   "permissions": "read",
   "note": "Here's the tax doc you asked about",
@@ -215,7 +215,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:alice123",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
-        "algo": "x25519-mlkem768-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "manager"
     },
@@ -223,7 +223,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:bob456",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
-        "algo": "x25519-mlkem768-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "editor"
     },
@@ -231,7 +231,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:carol789",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
-        "algo": "x25519-mlkem768-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "viewer"
     }
@@ -326,7 +326,7 @@ The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 ke
   "wrappedKey": {
     "did": "did:plc:alice123",
     "ciphertext": { "$bytes": "base64-1160-byte-hybrid-wrap-envelope" },
-    "algo": "x25519-mlkem768-hkdf-a256kw"
+    "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
   "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-identity-json" },
   "nonce": { "$bytes": "base64-encoded-12-byte-nonce" },

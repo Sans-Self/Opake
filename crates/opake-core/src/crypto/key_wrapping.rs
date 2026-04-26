@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 use super::{
     hkdf_info, ContentKey, CryptoRng, DidMember, PrivateKeyBundle, PublicKeyBundle, RngCore,
-    CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO, ML_KEM_CT_LEN,
+    WrapContext, CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO, ML_KEM_CT_LEN,
     ML_KEM_ENCAP_RANDOMNESS_LEN, ML_KEM_PK_LEN, ML_KEM_SS_LEN, WRAPPED_KEY_LEN, X25519_KEY_LEN,
 };
 use crate::atproto::AtBytes;
@@ -20,25 +20,35 @@ use crate::records::WrappedKey;
 // Wire envelope:
 //   [X25519 ephemeral pub (32) || ML-KEM-768 ciphertext (1088) || AES-KW wrapped (40)]
 //
-// HKDF combiner (BSI TR-02102 / ANSSI hybrid pattern):
+// HKDF combiner (X-Wing / BSI TR-02102 / ANSSI hybrid pattern):
 //   ikm    = X25519_shared (32) || ML-KEM_shared (32)
-//   salt   = X25519_eph_pub (32) || X25519_recipient_pub (32) || ML-KEM_ct (1088)
-//   info   = "opake-v{ver}-x25519-mlkem768-hkdf-a256kw-{recipient_did}"
+//   salt   = X25519_eph_pub (32) || X25519_recipient_pub (32) ||
+//            ML-KEM_recipient_pub (1184) || ML-KEM_ct (1088)
+//   info   = "opake-v{ver}-{algo}-{context_tag}-{context_uri}-{recipient_did}"
 //
-// The salt's transcript binding (eph_pub || recipient_pub || ml_kem_ct) prevents
-// splice attacks: a flipped ML-KEM ciphertext cannot redirect the wrap to a
-// different content key, because the wrapping key derivation depends on the
-// exact bytes the recipient will see when decapsulating.
+// The salt's transcript binding prevents splice attacks against the KEM
+// itself: a flipped ML-KEM ciphertext cannot redirect the wrap to a
+// different content key. The info's context binding extends that to record
+// boundaries: a `WrappedKey` lifted from one record context (keyring,
+// document, pair-response, cabinet) cannot be re-published into another
+// because the derived wrapping key would differ.
 
 /// Build the HKDF salt from the wire-format transcript.
+///
+/// Both static recipient pubkeys are committed alongside the ephemeral
+/// X25519 pubkey and the ML-KEM ciphertext — matches the X-Wing /
+/// BSI-ANSSI worked-example shape.
 fn hybrid_salt(
     eph_x25519_pub: &[u8; X25519_KEY_LEN],
     recipient_x25519_pub: &[u8; X25519_KEY_LEN],
+    recipient_ml_kem_pub: &[u8; ML_KEM_PK_LEN],
     ml_kem_ct: &[u8; ML_KEM_CT_LEN],
 ) -> Vec<u8> {
-    let mut salt = Vec::with_capacity(X25519_KEY_LEN + X25519_KEY_LEN + ML_KEM_CT_LEN);
+    let mut salt =
+        Vec::with_capacity(X25519_KEY_LEN + X25519_KEY_LEN + ML_KEM_PK_LEN + ML_KEM_CT_LEN);
     salt.extend_from_slice(eph_x25519_pub);
     salt.extend_from_slice(recipient_x25519_pub);
+    salt.extend_from_slice(recipient_ml_kem_pub);
     salt.extend_from_slice(ml_kem_ct);
     salt
 }
@@ -51,6 +61,7 @@ fn derive_hybrid_wrapping_key(
     x25519_shared: &[u8; X25519_KEY_LEN],
     ml_kem_shared: &[u8; ML_KEM_SS_LEN],
     salt: &[u8],
+    context: &WrapContext<'_>,
     recipient_did: &str,
 ) -> Result<Zeroizing<[u8; 32]>, Error> {
     use hkdf::Hkdf;
@@ -62,8 +73,11 @@ fn derive_hybrid_wrapping_key(
 
     let hkdf = Hkdf::<Sha256>::new(Some(salt), &ikm[..]);
     let mut wrapping_key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
-    hkdf.expand(&hkdf_info(HYBRID_WRAP_ALGO, recipient_did), &mut *wrapping_key)
-        .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
+    hkdf.expand(
+        &hkdf_info(HYBRID_WRAP_ALGO, context, recipient_did),
+        &mut *wrapping_key,
+    )
+    .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
     Ok(wrapping_key)
 }
 
@@ -80,6 +94,7 @@ pub fn wrap_key(
     content_key: &ContentKey,
     recipient: &PublicKeyBundle<'_>,
     recipient_did: &str,
+    context: &WrapContext<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<WrappedKey, Error> {
     // ── Classical half: X25519 ECDH with a fresh ephemeral keypair ──
@@ -109,12 +124,14 @@ pub fn wrap_key(
     let salt = hybrid_salt(
         ephemeral_public.as_bytes(),
         recipient.x25519,
+        recipient.ml_kem,
         &mlkem_ct_bytes,
     );
     let wrapping_key = derive_hybrid_wrapping_key(
         x25519_shared.as_bytes(),
         &mlkem_shared_bytes,
         &salt,
+        context,
         recipient_did,
     )?;
 
@@ -139,9 +156,15 @@ pub fn wrap_key(
 }
 
 /// Unwrap a content key using the recipient's hybrid private-key bundle.
+///
+/// `context` must match the `WrapContext` the wrap side used — passing
+/// the wrong one (or none) produces a different derived wrapping key and
+/// AES-KW integrity rejects the unwrap. This is the splice protection
+/// across record contexts.
 pub fn unwrap_key(
     wrapped: &WrappedKey,
     keys: &PrivateKeyBundle<'_>,
+    context: &WrapContext<'_>,
 ) -> Result<ContentKey, Error> {
     if wrapped.algo != HYBRID_WRAP_ALGO {
         return Err(Error::Decryption(format!(
@@ -149,12 +172,23 @@ pub fn unwrap_key(
             wrapped.algo
         )));
     }
-    unwrap_key_hybrid(wrapped, keys)
+    unwrap_key_hybrid(wrapped, keys, context)
 }
+
+/// FIPS-203 ML-KEM-768 decapsulation key layout:
+///   dk = dk_PKE (1152) || ek (1184) || H(ek) (32) || z (32)
+/// The recipient's encapsulation key (= public key) lives at this offset
+/// inside the dk bytes. Extracting it locally on unwrap avoids carrying
+/// the 1184-byte pubkey on every `PrivateKeyBundle` just to feed the
+/// salt transcript, while still binding to the same bytes the wrap side
+/// committed to.
+const ML_KEM_PUB_IN_DK_START: usize = 1152;
+const ML_KEM_PUB_IN_DK_END: usize = ML_KEM_PUB_IN_DK_START + ML_KEM_PK_LEN;
 
 fn unwrap_key_hybrid(
     wrapped: &WrappedKey,
     keys: &PrivateKeyBundle<'_>,
+    context: &WrapContext<'_>,
 ) -> Result<ContentKey, Error> {
     let envelope = wrapped
         .ciphertext
@@ -197,11 +231,25 @@ fn unwrap_key_hybrid(
             .map_err(|_| Error::Decryption("ML-KEM-768 shared secret had wrong size".into()))?,
     );
 
-    let salt = hybrid_salt(&eph_pub, recipient_x25519_pub.as_bytes(), &mlkem_ct_arr);
+    // Extract recipient's ML-KEM-768 public key from their dk per the
+    // FIPS-203 layout. This matches the bytes the wrap side put into
+    // the salt transcript without trusting the envelope to redundantly
+    // carry the recipient's pubkey.
+    let mut recipient_ml_kem_pub = [0u8; ML_KEM_PK_LEN];
+    recipient_ml_kem_pub
+        .copy_from_slice(&keys.ml_kem[ML_KEM_PUB_IN_DK_START..ML_KEM_PUB_IN_DK_END]);
+
+    let salt = hybrid_salt(
+        &eph_pub,
+        recipient_x25519_pub.as_bytes(),
+        &recipient_ml_kem_pub,
+        &mlkem_ct_arr,
+    );
     let wrapping_key = derive_hybrid_wrapping_key(
         x25519_shared.as_bytes(),
         &mlkem_shared_bytes,
         &salt,
+        context,
         &wrapped.did,
     )?;
 
@@ -225,15 +273,19 @@ fn unwrap_key_hybrid(
 // ───── Group-key creation ──────────────────────────────────────────────────
 
 /// Generate a random group key for a keyring, then wrap it to each member's
-/// hybrid public-key bundle.
+/// hybrid public-key bundle. Every wrap is bound to the keyring's URI via
+/// `WrapContext::Keyring` so a `WrappedKey` lifted out cannot be replayed
+/// in any other record context.
 pub fn create_group_key(
     members: &[DidMember],
+    keyring_uri: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(ContentKey, Vec<WrappedKey>), Error> {
     let group_key = super::generate_content_key(rng);
+    let context = WrapContext::Keyring { uri: keyring_uri };
     let wrapped_keys: Result<Vec<_>, _> = members
         .iter()
-        .map(|m| wrap_key(&group_key, &m.keys, m.did, rng))
+        .map(|m| wrap_key(&group_key, &m.keys, m.did, &context, rng))
         .collect();
     Ok((group_key, wrapped_keys?))
 }

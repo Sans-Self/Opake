@@ -14,12 +14,12 @@ Quick-reference for every algorithm, constant, and key type in the system. For t
 | Ed25519 | Indexer authentication signatures | `ed25519-dalek` |
 | BIP-39 | 24-word mnemonic encoding (256-bit entropy) | `bip39` (embedded wordlist) |
 
-The hybrid construction is `x25519-mlkem768-hkdf-a256kw`. Aligned with [BSI TR-02102](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr02102/tr02102_node.html) (Germany) and [ANSSI](https://www.ssi.gouv.fr/) guidance for hybrid post-quantum key establishment. ML-KEM-768 byte sizes follow [NIST FIPS-203](https://csrc.nist.gov/pubs/fips/203/final).
+The hybrid construction is `x25519-mlkem768-hkdf-a256kw-v2`. Aligned with [BSI TR-02102](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr02102/tr02102_node.html) (Germany) and [ANSSI](https://www.ssi.gouv.fr/) guidance for hybrid post-quantum key establishment. ML-KEM-768 byte sizes follow [NIST FIPS-203](https://csrc.nist.gov/pubs/fips/203/final).
 
 ## Constants
 
 ```rust
-HYBRID_WRAP_ALGO         = "x25519-mlkem768-hkdf-a256kw"
+HYBRID_WRAP_ALGO         = "x25519-mlkem768-hkdf-a256kw-v2"
 CONTENT_KEY_LEN          = 32      // 256 bits (AES-256)
 AES_GCM_NONCE_LEN        = 12      // 96 bits (standard for AES-GCM)
 X25519_KEY_LEN           = 32      // 256 bits (Curve25519)
@@ -123,20 +123,20 @@ wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, rng)
   → wrapping_key = HKDF-SHA256(
        extract_salt = salt,
        ikm          = ikm,
-       expand_info  = "opake-v{SCHEMA_VERSION}-x25519-mlkem768-hkdf-a256kw-{recipient_did}",
+       expand_info  = "opake-v{SCHEMA_VERSION}-x25519-mlkem768-hkdf-a256kw-v2-{recipient_did}",
        length       = 32
      )
   ── AES-KW around the content key ─────────────────────────────
   → wrapped = AES-256-KW(key=wrapping_key, plaintext=content_key)
   → ciphertext = ephemeral_pubkey ‖ mlkem_ct ‖ wrapped   [1160 bytes]
-  → WrappedKey { did, ciphertext, algo = "x25519-mlkem768-hkdf-a256kw" }
+  → WrappedKey { did, ciphertext, algo = "x25519-mlkem768-hkdf-a256kw-v2" }
 ```
 
 The HKDF salt commits to both the recipient's published X25519 pubkey and the ML-KEM ciphertext. An attacker who can flip or substitute the post-quantum half breaks the AES-KW integrity check at the recipient — the construction is "splice-resistant" in the sense of [Bindel et al., "Hybrid Key Encapsulation Mechanisms and Authenticated Key Exchange" (PQCrypto 2019)](https://eprint.iacr.org/2018/903).
 
 ```
 unwrap_key(wrapped_key, keys: &PrivateKeyBundle)
-  → reject if wrapped_key.algo != "x25519-mlkem768-hkdf-a256kw"
+  → reject if wrapped_key.algo != "x25519-mlkem768-hkdf-a256kw-v2"
   → split ciphertext: eph_pub [0..32], mlkem_ct [32..1120], wrapped [1120..1160]
   → x25519_shared = ECDH(keys.x25519, eph_pub)
   → mlkem_shared  = ML-KEM-768 Decaps(keys.ml_kem, mlkem_ct)
@@ -212,7 +212,7 @@ All metadata is always encrypted — there is no plaintext mode. Record-level fi
 {
   "did": "did:plc:alice",
   "ciphertext": { "$bytes": "<1160 bytes base64>" },
-  "algo": "x25519-mlkem768-hkdf-a256kw"
+  "algo": "x25519-mlkem768-hkdf-a256kw-v2"
 }
 ```
 

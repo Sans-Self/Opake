@@ -119,7 +119,13 @@ pub async fn download_from_keyring_member(
 
     // Asymmetric unwrap: member's private key → group key
     trace!("unwrapping group key for {}", member_did);
-    let group_key = crypto::unwrap_key(&member_wrapped.wrapped_key, private_keys)?;
+    let group_key = crypto::unwrap_key(
+        &member_wrapped.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Keyring {
+            uri: &kr_enc.keyring_ref.keyring,
+        },
+    )?;
 
     // Symmetric unwrap: group key → content key
     let wrapped_ck_bytes = kr_enc

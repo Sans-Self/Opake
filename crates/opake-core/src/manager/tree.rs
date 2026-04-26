@@ -1008,7 +1008,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             Encryption::Direct(direct) => {
                 let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
                 match wrapped {
-                    Some(w) => crypto::unwrap_key(w, private_keys)?,
+                    Some(w) => crypto::unwrap_key(
+                        w,
+                        private_keys,
+                        &crypto::WrapContext::Document { uri },
+                    )?,
                     None => return Ok(None),
                 }
             }

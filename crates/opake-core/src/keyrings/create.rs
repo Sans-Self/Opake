@@ -10,12 +10,19 @@ use crate::records::{Keyring, KeyringMember, Role};
 use super::KEYRING_COLLECTION;
 
 /// Everything needed to create a keyring record.
+///
+/// `rkey` is generated client-side (a TID) so we know the keyring's full
+/// AT-URI before wrapping the group key — the URI is bound into the
+/// HKDF info via `WrapContext::Keyring` for cross-context splice
+/// protection. The record is then `put_record`d at that exact rkey
+/// rather than letting the PDS pick one.
 pub struct CreateKeyringParams<'a> {
     pub name: &'a str,
     pub description: Option<&'a str>,
     pub owner_did: &'a str,
     pub owner_x25519_public_key: &'a X25519PublicKey,
     pub owner_ml_kem_public_key: &'a MlKemPublicKey,
+    pub rkey: &'a str,
     pub created_at: &'a str,
 }
 
@@ -29,6 +36,7 @@ pub async fn create_keyring(
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(String, ContentKey), Error> {
     trace!("generating group key for keyring {:?}", params.name);
+    let keyring_uri = crate::tid::uri_with_tid(params.owner_did, KEYRING_COLLECTION, params.rkey);
     let members = [crypto::DidMember {
         did: params.owner_did,
         keys: crypto::PublicKeyBundle {
@@ -36,7 +44,7 @@ pub async fn create_keyring(
             ml_kem: params.owner_ml_kem_public_key,
         },
     }];
-    let (group_key, wrapped_keys) = crypto::create_group_key(&members, rng)?;
+    let (group_key, wrapped_keys) = crypto::create_group_key(&members, &keyring_uri, rng)?;
 
     let keyring_members: Vec<KeyringMember> = wrapped_keys
         .into_iter()
@@ -61,10 +69,12 @@ pub async fn create_keyring(
         params.created_at.to_string(),
     );
 
-    trace!("creating keyring record");
-    let record_ref = client.create_record(KEYRING_COLLECTION, &keyring).await?;
+    trace!("creating keyring record at {}", keyring_uri);
+    client
+        .put_record(KEYRING_COLLECTION, params.rkey, &keyring)
+        .await?;
 
-    Ok((record_ref.uri, group_key))
+    Ok((keyring_uri, group_key))
 }
 
 #[cfg(test)]
@@ -87,7 +97,7 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn create_record_response(uri: &str) -> HttpResponse {
+    fn put_record_response(uri: &str) -> HttpResponse {
         HttpResponse {
             status: 200,
             headers: vec![],
@@ -103,8 +113,9 @@ mod tests {
     async fn happy_path() {
         let owner = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
-        let uri = format!("at://{TEST_DID}/app.opake.keyring/tid123");
-        mock.enqueue(create_record_response(&uri));
+        let rkey = "tid123";
+        let uri = format!("at://{TEST_DID}/app.opake.keyring/{rkey}");
+        mock.enqueue(put_record_response(&uri));
 
         let mut client = mock_client(mock.clone());
         let params = CreateKeyringParams {
@@ -113,6 +124,7 @@ mod tests {
             owner_did: TEST_DID,
             owner_x25519_public_key: &owner.x25519_pub,
             owner_ml_kem_public_key: &owner.ml_kem_pub,
+            rkey,
             created_at: "2026-03-01T00:00:00Z",
         };
 
@@ -125,21 +137,27 @@ mod tests {
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);
-        assert!(reqs[0].url.contains("createRecord"));
+        // create_keyring uses putRecord with a client-chosen rkey so the
+        // keyring URI is known before the group key is wrapped (the URI
+        // is bound into the HKDF info via WrapContext::Keyring).
+        assert!(reqs[0].url.contains("putRecord"));
 
         match &reqs[0].body {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["collection"], KEYRING_COLLECTION);
+                assert_eq!(v["rkey"], rkey);
                 let record: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
                 assert_eq!(record.algo, "aes-256-gcm");
                 assert_eq!(record.rotation, 0);
                 assert_eq!(record.members.len(), 1);
                 assert_eq!(record.members[0].wrapped_key.did, TEST_DID);
 
-                // Verify the wrapped group key is unwrappable
+                // Verify the wrapped group key is unwrappable under the
+                // same context the wrap used.
                 let unwrapped = crypto::unwrap_key(
                     &record.members[0].wrapped_key,
                     &owner.private_keys(),
+                    &crypto::WrapContext::Keyring { uri: &uri },
                 )
                 .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
@@ -165,6 +183,7 @@ mod tests {
             owner_did: TEST_DID,
             owner_x25519_public_key: &owner.x25519_pub,
             owner_ml_kem_public_key: &owner.ml_kem_pub,
+            rkey: "tid456",
             created_at: "2026-03-01T00:00:00Z",
         };
 

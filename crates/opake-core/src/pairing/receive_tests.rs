@@ -92,7 +92,7 @@ fn dummy_response() -> PairResponse {
         "wrappedKey": {
             "did": TEST_DID,
             "ciphertext": { "$bytes": "AAAA" },
-            "algo": "x25519-mlkem768-hkdf-a256kw"
+            "algo": "x25519-mlkem768-hkdf-a256kw-v2"
         },
         "ciphertext": { "$bytes": "BBBB" },
         "nonce": { "$bytes": "CCCC" },

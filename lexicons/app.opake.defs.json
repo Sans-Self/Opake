@@ -21,7 +21,7 @@
           "type": "string",
           "description": "Asymmetric algorithm used for key wrapping. Hybrid X25519 + ML-KEM-768 KEM (BSI TR-02102 / ANSSI guidance).",
           "knownValues": [
-            "x25519-mlkem768-hkdf-a256kw"
+            "x25519-mlkem768-hkdf-a256kw-v2"
           ]
         }
       }

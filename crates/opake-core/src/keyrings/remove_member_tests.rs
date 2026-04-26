@@ -35,7 +35,7 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
-                algo: "x25519-mlkem768-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
             role: Role::Manager,
         },
@@ -45,7 +45,7 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
                 ciphertext: AtBytes {
                     encoded: "BBBB".into(),
                 },
-                algo: "x25519-mlkem768-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
             role: Role::Manager,
         },
@@ -137,9 +137,12 @@ async fn happy_path_removes_and_rotates() {
             assert_eq!(updated.key_history[0].members[0].wrapped_key.did, TEST_DID);
 
             // Owner can unwrap the new group key
-            let unwrapped =
-                crypto::unwrap_key(&updated.members[0].wrapped_key, &owner.private_keys())
-                    .unwrap();
+            let unwrapped = crypto::unwrap_key(
+                &updated.members[0].wrapped_key,
+                &owner.private_keys(),
+                &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+            )
+            .unwrap();
             assert_eq!(unwrapped.0, new_group_key.0);
         }
         _ => panic!("expected JSON body"),

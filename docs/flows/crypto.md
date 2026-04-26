@@ -1,6 +1,6 @@
 # Encryption Primitives
 
-## Key Wrapping (x25519-mlkem768-hkdf-a256kw)
+## Key Wrapping (x25519-mlkem768-hkdf-a256kw-v2)
 
 How a symmetric content key gets wrapped to a recipient's hybrid public key (X25519 + ML-KEM-768). Defends against harvest-now-decrypt-later per BSI TR-02102 / ANSSI guidance. Both KEM outputs are combined via HKDF before use as a KEK.
 
@@ -16,7 +16,7 @@ flowchart LR
         RecipML["Recipient<br/>ML-KEM-768 pubkey"] --> EphML
         MLSec["ML-KEM-768 shared secret"] --> HKDF
 
-        HKDF["HKDF-SHA256<br/>info = 'opake-v1-x25519-mlkem768-hkdf-a256kw-{did}'"] --> KEK
+        HKDF["HKDF-SHA256<br/>info = 'opake-v1-x25519-mlkem768-hkdf-a256kw-v2-{did}'"] --> KEK
         KEK["256-bit key<br/>encryption key"] --> AESKW
         ContentKey["Content key K<br/>(AES-256)"] --> AESKW
         AESKW["AES-256-KW"] --> Ciphertext

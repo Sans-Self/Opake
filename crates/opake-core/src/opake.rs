@@ -315,8 +315,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 .get_record(&self.did, &at_uri.collection, &at_uri.rkey)
                 .await?;
             let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-            let group_key =
-                Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
+            let group_key = Self::unwrap_workspace_key(
+                &keyring.members,
+                &self.did,
+                keyring_uri,
+                &private_keys.bundle(),
+            )?;
             let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
                 .unwrap_or_default();
             Ok(Workspace::from_keyring(
@@ -359,8 +363,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         .await?;
 
         let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-        let group_key =
-            Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
+        let group_key = Self::unwrap_workspace_key(
+            &keyring.members,
+            &self.did,
+            keyring_uri,
+            &private_keys.bundle(),
+        )?;
 
         // Decrypt metadata for the workspace name
         let name =
@@ -486,6 +494,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let pubkey = identity.x25519_public_key_bytes()?;
         let mlkem_pubkey = identity.ml_kem_public_key_bytes()?;
         let now = self.now();
+        let rkey = self.generate_tid();
         let result = keyrings::create_keyring(
             &mut self.client,
             &CreateKeyringParams {
@@ -494,6 +503,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 owner_did: &self.did,
                 owner_x25519_public_key: &pubkey,
                 owner_ml_kem_public_key: &mlkem_pubkey,
+                rkey: &rkey,
                 created_at: &now,
             },
             &mut self.rng,
@@ -580,7 +590,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect();
 
-        let group_key = match Self::unwrap_workspace_key(&members, &self.did, private_keys) {
+        let group_key = match Self::unwrap_workspace_key(&members, &self.did, &kr.uri, private_keys) {
             Ok(k) => k,
             Err(e) => {
                 return WorkspaceSyncResult {
@@ -697,8 +707,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // Mutable because removeMember/leave rotates the key — subsequent proposals
         // must use the rotated key.
         let private_keys = self.private_keys_from_cache();
-        let mut group_key =
-            Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
+        let mut group_key = Self::unwrap_workspace_key(
+            &keyring.members,
+            &self.did,
+            keyring_uri,
+            &private_keys.bundle(),
+        )?;
 
         let mut applied = 0;
 
@@ -732,8 +746,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                         x25519: &resolved.x25519_public_key,
                         ml_kem: &resolved.ml_kem_public_key,
                     };
-                    let wrapped =
-                        crypto::wrap_key(&group_key, &recipient_bundle, did, &mut self.rng)?;
+                    let wrapped = crypto::wrap_key(
+                        &group_key,
+                        &recipient_bundle,
+                        did,
+                        &crypto::WrapContext::Keyring { uri: keyring_uri },
+                        &mut self.rng,
+                    )?;
                     keyring.members.push(records::KeyringMember {
                         wrapped_key: wrapped,
                         role,
@@ -784,7 +803,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                             .collect();
 
                         let (new_key, new_wrapped) =
-                            crypto::create_group_key(&did_members, &mut self.rng)?;
+                            crypto::create_group_key(&did_members, keyring_uri, &mut self.rng)?;
 
                         // Roles must survive re-wrapping (new WrappedKeys lose the association)
                         let role_map: std::collections::HashMap<&str, records::Role> =
@@ -1479,13 +1498,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub fn unwrap_workspace_key(
         members: &[crate::records::KeyringMember],
         did: &str,
+        keyring_uri: &str,
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
     ) -> Result<ContentKey, Error> {
         let member = members
             .iter()
             .find(|m| m.did() == did)
             .ok_or_else(|| Error::NotFound(format!("no member entry for DID {did}")))?;
-        crate::crypto::unwrap_key(&member.wrapped_key, private_keys)
+        crate::crypto::unwrap_key(
+            &member.wrapped_key,
+            private_keys,
+            &crate::crypto::WrapContext::Keyring { uri: keyring_uri },
+        )
     }
 
     // -- Indexer helpers --

@@ -51,9 +51,17 @@ pub async fn download_from_grant(
     let grant: Grant = serde_json::from_value(grant_entry.value)?;
     records::check_version(grant.opake_version)?;
 
-    // Unwrap the content key from the grant
+    // Unwrap the content key from the grant. The wrap was scoped to the
+    // document URI; passing the same context here is what enforces the
+    // splice protection across record contexts.
     trace!("unwrapping content key from grant");
-    let content_key = crypto::unwrap_key(&grant.wrapped_key, private_keys)?;
+    let content_key = crypto::unwrap_key(
+        &grant.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Document {
+            uri: &grant.document,
+        },
+    )?;
 
     // Fetch the document record
     let doc_at = atproto::parse_at_uri(&grant.document)?;
@@ -134,7 +142,13 @@ pub(crate) async fn resolve_grant_metadata(
     let grant: Grant = serde_json::from_value(grant_entry.value)?;
     records::check_version(grant.opake_version)?;
 
-    let content_key = crypto::unwrap_key(&grant.wrapped_key, private_keys)?;
+    let content_key = crypto::unwrap_key(
+        &grant.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Document {
+            uri: &grant.document,
+        },
+    )?;
 
     let doc_at = atproto::parse_at_uri(&grant.document)?;
     let doc_entry = get_record_public(
@@ -238,9 +252,14 @@ mod tests {
         // Owner-side wrap uses an opaque bundle the test never unwraps with.
         // The grant flow ignores the document's own envelope, only its nonce.
         let owner_keys = TestKeys::generate(OWNER_DID);
-        let owner_wrapped =
-            crypto::wrap_key(&content_key, &owner_keys.public_keys(), OWNER_DID, &mut OsRng)
-                .unwrap();
+        let owner_wrapped = crypto::wrap_key(
+            &content_key,
+            &owner_keys.public_keys(),
+            OWNER_DID,
+            &crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
 
         let recipient_wrapped = crypto::wrap_key(
             &content_key,
@@ -249,6 +268,7 @@ mod tests {
                 ml_kem: &recipient_keys.ml_kem_pub,
             },
             "did:plc:recipient",
+            &crypto::WrapContext::Document { uri: DOC_URI },
             &mut OsRng,
         )
         .unwrap();

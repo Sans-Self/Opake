@@ -36,7 +36,7 @@ pub async fn fetch_document_metadata(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.opake_version)?;
 
-    let content_key = unwrap_content_key(&doc, did, private_keys, group_key)?;
+    let content_key = unwrap_content_key(&doc, did, uri, private_keys, group_key)?;
 
     let metadata: DocumentMetadata =
         crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
@@ -53,6 +53,7 @@ pub async fn fetch_document_metadata(
 fn unwrap_content_key(
     doc: &Document,
     did: &str,
+    document_uri: &str,
     private_keys: &PrivateKeyBundle<'_>,
     group_key: Option<&ContentKey>,
 ) -> Result<ContentKey, Error> {
@@ -68,7 +69,11 @@ fn unwrap_content_key(
                         "no wrapped key for DID ({did}) — you may not have access"
                     ))
                 })?;
-            crypto::unwrap_key(wrapped, private_keys)
+            crypto::unwrap_key(
+                wrapped,
+                private_keys,
+                &crypto::WrapContext::Document { uri: document_uri },
+            )
         }
         Encryption::Keyring(kr_enc) => {
             let gk = group_key.ok_or_else(|| {

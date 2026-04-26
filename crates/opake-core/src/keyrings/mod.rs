@@ -72,7 +72,12 @@ pub fn decrypt_indexer_keyring_name(
         .filter_map(|v| serde_json::from_value(v.clone()).ok())
         .collect();
     let member = members.iter().find(|m| m.did() == did)?;
-    let group_key = crypto::unwrap_key(&member.wrapped_key, private_keys).ok()?;
+    let group_key = crypto::unwrap_key(
+        &member.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Keyring { uri: &keyring.uri },
+    )
+    .ok()?;
     let encrypted_metadata: crate::records::EncryptedMetadata =
         serde_json::from_value(keyring.encrypted_metadata.clone()?).ok()?;
     let metadata: KeyringMetadata =
@@ -104,8 +109,14 @@ mod indexer_keyring_tests {
         uri: &str,
     ) -> IndexerKeyring {
         let group_key = generate_content_key(&mut OsRng);
-        let wrapped = wrap_key(&group_key, &member.public_keys(), member_did, &mut OsRng)
-            .expect("wrap_key");
+        let wrapped = wrap_key(
+            &group_key,
+            &member.public_keys(),
+            member_did,
+            &crate::crypto::WrapContext::Keyring { uri },
+            &mut OsRng,
+        )
+        .expect("wrap_key");
         let encrypted = crypto::encrypt_metadata(
             &group_key,
             &KeyringMetadata {

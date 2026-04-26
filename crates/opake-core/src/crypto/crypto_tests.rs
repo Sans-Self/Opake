@@ -73,7 +73,7 @@ fn tampered_nonce_fails() {
     assert!(decrypt_blob(&key, &payload).is_err());
 }
 
-// -- Hybrid key wrapping tests (x25519-mlkem768-hkdf-a256kw) --
+// -- Hybrid key wrapping tests (x25519-mlkem768-hkdf-a256kw-v2) --
 
 /// Owned hybrid keypair for crypto-level tests.
 ///
@@ -136,10 +136,11 @@ fn wrap_unwrap_roundtrips() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &keys.private_keys()).unwrap();
+    let unwrapped = unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet).unwrap();
 
     assert_eq!(content_key.0, unwrapped.0);
 }
@@ -153,6 +154,7 @@ fn wrap_produces_correct_algo() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
@@ -169,6 +171,7 @@ fn wrap_ciphertext_is_expected_length() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
@@ -188,10 +191,11 @@ fn wrong_private_key_fails_unwrap() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
-    assert!(unwrap_key(&wrapped, &wrong_keys.private_keys()).is_err());
+    assert!(unwrap_key(&wrapped, &wrong_keys.private_keys(), &WrapContext::Cabinet).is_err());
 }
 
 #[test]
@@ -203,6 +207,7 @@ fn tampered_wrapped_ciphertext_fails_unwrap() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
@@ -212,7 +217,7 @@ fn tampered_wrapped_ciphertext_fails_unwrap() {
     bytes[last_byte_index] ^= 0xff;
     wrapped.ciphertext.encoded = BASE64.encode(&bytes);
 
-    assert!(unwrap_key(&wrapped, &keys.private_keys()).is_err());
+    assert!(unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet).is_err());
 }
 
 #[test]
@@ -224,6 +229,7 @@ fn each_wrap_produces_unique_ciphertext() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
@@ -231,6 +237,7 @@ fn each_wrap_produces_unique_ciphertext() {
         &content_key,
         &keys.public_keys(),
         "did:plc:test",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
@@ -259,13 +266,15 @@ fn create_group_key_wraps_to_all_members() {
         },
     ];
 
-    let (group_key, wrapped_keys) = create_group_key(&members, &mut OsRng).unwrap();
+    let test_keyring = "at://did:plc:owner/app.opake.keyring/test1";
+    let context = WrapContext::Keyring { uri: test_keyring };
+    let (group_key, wrapped_keys) = create_group_key(&members, test_keyring, &mut OsRng).unwrap();
     assert_eq!(wrapped_keys.len(), 2);
     assert_eq!(wrapped_keys[0].did, "did:plc:alice");
     assert_eq!(wrapped_keys[1].did, "did:plc:bob");
 
-    let unwrapped_a = unwrap_key(&wrapped_keys[0], &alice.private_keys()).unwrap();
-    let unwrapped_b = unwrap_key(&wrapped_keys[1], &bob.private_keys()).unwrap();
+    let unwrapped_a = unwrap_key(&wrapped_keys[0], &alice.private_keys(), &context).unwrap();
+    let unwrapped_b = unwrap_key(&wrapped_keys[1], &bob.private_keys(), &context).unwrap();
     assert_eq!(group_key.0, unwrapped_a.0);
     assert_eq!(group_key.0, unwrapped_b.0);
 }
@@ -283,10 +292,67 @@ fn cross_recipient_splice_rejected() {
         &content_key,
         &alice.public_keys(),
         "did:plc:alice",
+        &WrapContext::Cabinet,
         &mut OsRng,
     )
     .unwrap();
-    assert!(unwrap_key(&wrapped_for_alice, &bob.private_keys()).is_err());
+    assert!(unwrap_key(&wrapped_for_alice, &bob.private_keys(), &WrapContext::Cabinet).is_err());
+}
+
+#[test]
+fn cross_context_splice_rejected() {
+    // A WrappedKey created in a keyring context must not unwrap when fed
+    // back as a document grant — even when the recipient and the wrapped
+    // bytes are intact, the HKDF info differs and AES-KW integrity fails.
+    let alice = LocalKeys::generate();
+    let content_key = generate_content_key(&mut OsRng);
+
+    let keyring_uri = "at://did:plc:owner/app.opake.keyring/k1";
+    let document_uri = "at://did:plc:owner/app.opake.document/d1";
+
+    let wrapped_in_keyring = wrap_key(
+        &content_key,
+        &alice.public_keys(),
+        "did:plc:alice",
+        &WrapContext::Keyring { uri: keyring_uri },
+        &mut OsRng,
+    )
+    .unwrap();
+
+    // Same wrap, same recipient, same private keys — but a different
+    // record context. Replay must be rejected.
+    let result = unwrap_key(
+        &wrapped_in_keyring,
+        &alice.private_keys(),
+        &WrapContext::Document { uri: document_uri },
+    );
+    assert!(
+        result.is_err(),
+        "wrapped key from keyring context must not unwrap as document",
+    );
+
+    // Different keyring URI — same context tag, same recipient, different
+    // scoping URI. Splice across keyrings is also rejected.
+    let result = unwrap_key(
+        &wrapped_in_keyring,
+        &alice.private_keys(),
+        &WrapContext::Keyring {
+            uri: "at://did:plc:owner/app.opake.keyring/k2",
+        },
+    );
+    assert!(
+        result.is_err(),
+        "wrapped key from one keyring must not unwrap under another",
+    );
+
+    // Sanity: the original context still works.
+    let unwrapped = unwrap_key(
+        &wrapped_in_keyring,
+        &alice.private_keys(),
+        &WrapContext::Keyring { uri: keyring_uri },
+    )
+    .unwrap();
+    assert_eq!(unwrapped.0, content_key.0);
 }
 
 // -- Wrong-algo rejection --
@@ -305,7 +371,7 @@ fn unwrap_rejects_unknown_algo() {
         },
         algo: "x25519-hkdf-a256kw".into(),
     };
-    assert!(unwrap_key(&bogus, &keys.private_keys()).is_err());
+    assert!(unwrap_key(&bogus, &keys.private_keys(), &WrapContext::Cabinet).is_err());
 }
 
 // -- Ephemeral keypair (hybrid) --
@@ -341,10 +407,11 @@ fn ephemeral_keypair_roundtrips_through_hybrid_wrap() {
         &content_key,
         &kp.public_keys(),
         "did:plc:ephemeral",
+        &WrapContext::PairResponse,
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &kp.private_keys()).unwrap();
+    let unwrapped = unwrap_key(&wrapped, &kp.private_keys(), &WrapContext::PairResponse).unwrap();
     assert_eq!(content_key.0, unwrapped.0);
 }
 

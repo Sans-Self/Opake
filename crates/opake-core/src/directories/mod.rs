@@ -74,7 +74,16 @@ pub(crate) fn encrypt_directory_envelope(
         description: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, rng)?;
-    let wrapped_key = crypto::wrap_key(&content_key, owner_public_keys, owner_did, rng)?;
+    // Cabinet directories wrap to the owner's own key — `Cabinet` context
+    // tag, no per-directory URI scoping. Workspace directories take the
+    // keyring path below and never reach this branch.
+    let wrapped_key = crypto::wrap_key(
+        &content_key,
+        owner_public_keys,
+        owner_did,
+        &crypto::WrapContext::Cabinet,
+        rng,
+    )?;
 
     let key_wrapping = KeyWrapping::Direct(DirectKeyWrapping {
         keys: vec![wrapped_key],

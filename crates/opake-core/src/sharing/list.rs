@@ -60,7 +60,7 @@ mod tests {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
-                algo: "x25519-mlkem768-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
             dummy_encrypted_metadata(),
             "2026-03-01T12:00:00Z".into(),

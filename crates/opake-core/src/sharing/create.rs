@@ -29,6 +29,9 @@ pub async fn create_grant(
         params.content_key,
         &params.recipient_public_keys,
         params.recipient_did,
+        &crypto::WrapContext::Document {
+            uri: params.document_uri,
+        },
         rng,
     )?;
 
@@ -160,8 +163,14 @@ mod tests {
         let record = &reqs[0].body.as_ref().unwrap();
         if let RequestBody::Json(v) = record {
             let grant: Grant = serde_json::from_value(v["record"].clone()).unwrap();
-            let unwrapped =
-                crypto::unwrap_key(&grant.wrapped_key, &recipient.private_keys()).unwrap();
+            let unwrapped = crypto::unwrap_key(
+                &grant.wrapped_key,
+                &recipient.private_keys(),
+                &crypto::WrapContext::Document {
+                    uri: &grant.document,
+                },
+            )
+            .unwrap();
             assert_eq!(unwrapped.0, content_key.0);
         }
     }

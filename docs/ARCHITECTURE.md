@@ -66,16 +66,16 @@ Same pattern as git-crypt: symmetric content encryption + asymmetric key wrappin
 ```
 plaintext file
   → AES-256-GCM with random content key K → ciphertext blob
-  → x25519-mlkem768-hkdf-a256kw wraps K to recipient's hybrid pubkey bundle → wrappedKey in document record
+  → x25519-mlkem768-hkdf-a256kw-v2 wraps K to recipient's hybrid pubkey bundle → wrappedKey in document record
 ```
 
 **Content encryption** (AES-256-GCM) — fast, handles arbitrary-size data. A random 256-bit key and 96-bit nonce are generated per file.
 
-**Key wrapping** (`x25519-mlkem768-hkdf-a256kw`) — wraps the 256-bit content key to a recipient's hybrid public-key bundle (X25519 + ML-KEM-768). Construction:
+**Key wrapping** (`x25519-mlkem768-hkdf-a256kw-v2`) — wraps the 256-bit content key to a recipient's hybrid public-key bundle (X25519 + ML-KEM-768). Construction:
 
 1. Ephemeral X25519 ECDH between sender and recipient → `x25519_shared` (32 bytes)
 2. ML-KEM-768 Encaps to recipient's KEM public key → `(ml_kem_ct, ml_kem_shared)` (1088 + 32 bytes)
-3. HKDF-SHA256 combiner: `salt = eph_pub ‖ recipient_x25519_pub ‖ ml_kem_ct`, `ikm = x25519_shared ‖ ml_kem_shared`, `info = "opake-v1-x25519-mlkem768-hkdf-a256kw-{recipient_did}"` → 32-byte AES-KW key
+3. HKDF-SHA256 combiner: `salt = eph_pub ‖ recipient_x25519_pub ‖ ml_kem_ct`, `ikm = x25519_shared ‖ ml_kem_shared`, `info = "opake-v1-x25519-mlkem768-hkdf-a256kw-v2-{recipient_did}"` → 32-byte AES-KW key
 4. AES-256-KW wraps the content key → 40 bytes
 
 The wire envelope is `[X25519 ephemeral pubkey (32) ‖ ML-KEM-768 ciphertext (1088) ‖ AES-KW wrapped (40)]` = 1160 bytes total.

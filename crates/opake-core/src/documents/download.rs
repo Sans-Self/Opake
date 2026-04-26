@@ -53,6 +53,7 @@ pub(super) fn decrypt_with_envelope(
 fn unwrap_document_key(
     doc: &Document,
     did: &str,
+    document_uri: &str,
     private_keys: &PrivateKeyBundle<'_>,
     group_key: Option<&ContentKey>,
 ) -> Result<ContentKey, Error> {
@@ -68,7 +69,11 @@ fn unwrap_document_key(
                         "no wrapped key for DID ({did}) — you may not have access"
                     ))
                 })?;
-            crypto::unwrap_key(wrapped, private_keys)
+            crypto::unwrap_key(
+                wrapped,
+                private_keys,
+                &crypto::WrapContext::Document { uri: document_uri },
+            )
         }
         Encryption::Keyring(kr_enc) => {
             let gk = group_key.ok_or_else(|| {
@@ -162,13 +167,19 @@ async fn fetch_document_and_key(
                 .ok_or_else(|| {
                     Error::NotFound(format!("no member entry for DID {did} in keyring"))
                 })?;
-            Some(crypto::unwrap_key(&member.wrapped_key, private_keys)?)
+            Some(crypto::unwrap_key(
+                &member.wrapped_key,
+                private_keys,
+                &crypto::WrapContext::Keyring {
+                    uri: &kr_enc.keyring_ref.keyring,
+                },
+            )?)
         }
         _ => None,
     };
 
     let effective_group_key = resolved_group_key.as_ref().or(group_key);
-    let content_key = unwrap_document_key(&doc, did, private_keys, effective_group_key)?;
+    let content_key = unwrap_document_key(&doc, did, uri, private_keys, effective_group_key)?;
 
     Ok((content_key, doc))
 }
@@ -236,8 +247,17 @@ mod tests {
         let rng = &mut OsRng;
         let content_key = crypto::generate_content_key(rng);
         let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
-        let wrapped_key =
-            crypto::wrap_key(&content_key, &keys.public_keys(), TEST_DID, rng).unwrap();
+        // Test fixture wraps in the Document context bound to the test
+        // document's URI — same context the production download path
+        // expects when it unwraps.
+        let wrapped_key = crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            TEST_DID,
+            &crypto::WrapContext::Document { uri: TEST_URI },
+            rng,
+        )
+        .unwrap();
         EncryptedFixture {
             ciphertext: payload.ciphertext,
             nonce: payload.nonce,

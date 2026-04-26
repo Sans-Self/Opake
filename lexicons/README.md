@@ -173,7 +173,7 @@ sequenceDiagram
     DevA->>DevA: Generate content key K
     DevA->>DevA: Serialize identity → JSON
     DevA->>DevA: Encrypt identity with K (AES-256-GCM)
-    DevA->>DevA: Wrap K to ephemeral hybrid bundle (x25519-mlkem768-hkdf-a256kw)
+    DevA->>DevA: Wrap K to ephemeral hybrid bundle (x25519-mlkem768-hkdf-a256kw-v2)
     DevA->>PDS: createRecord(pairResponse, { wrappedKey, ciphertext })
 
     Note over DevB,PDS: 4. New device receives identity

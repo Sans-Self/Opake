@@ -70,8 +70,19 @@ pub async fn prepare_upload(
         .upload_blob(payload.ciphertext, "application/octet-stream")
         .await?;
 
-    let wrapped_key =
-        crypto::wrap_key(&content_key, &params.owner_public_keys, params.owner_did, rng)?;
+    // Bind the wrap to the document's URI so the owner's own envelope and
+    // any grants wrapped to the same content key share one consistent
+    // context tag (`Document { uri }`). The download / metadata-read
+    // paths unwrap with the same context.
+    let document_uri =
+        crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
+    let wrapped_key = crypto::wrap_key(
+        &content_key,
+        &params.owner_public_keys,
+        params.owner_did,
+        &crypto::WrapContext::Document { uri: &document_uri },
+        rng,
+    )?;
     let encrypted_metadata = build_encrypted_metadata(
         &content_key,
         params.filename,
@@ -297,7 +308,7 @@ mod tests {
                 assert_eq!(enc["envelope"]["keys"][0]["did"], TEST_DID);
                 assert_eq!(
                     enc["envelope"]["keys"][0]["algo"],
-                    "x25519-mlkem768-hkdf-a256kw"
+                    "x25519-mlkem768-hkdf-a256kw-v2"
                 );
             }
             _ => panic!("expected JSON body on createRecord request"),
@@ -338,7 +349,16 @@ mod tests {
             Encryption::Direct(d) => &d.envelope,
             _ => panic!("expected direct encryption"),
         };
-        let content_key = crypto::unwrap_key(&envelope.keys[0], &keys.private_keys()).unwrap();
+        // Match the upload-side context: every document wraps to its own
+        // URI so the same context unlocks both the owner's envelope and
+        // any grants wrapped from it.
+        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let content_key = crypto::unwrap_key(
+            &envelope.keys[0],
+            &keys.private_keys(),
+            &crypto::WrapContext::Document { uri: &test_uri },
+        )
+        .unwrap();
 
         // Decrypt metadata
         let metadata: crypto::DocumentMetadata =
@@ -457,7 +477,13 @@ mod tests {
         };
 
         let wrapped = &envelope.keys[0];
-        let content_key = crypto::unwrap_key(wrapped, &keys.private_keys()).unwrap();
+        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let content_key = crypto::unwrap_key(
+            wrapped,
+            &keys.private_keys(),
+            &crypto::WrapContext::Document { uri: &test_uri },
+        )
+        .unwrap();
 
         let nonce_bytes = BASE64.decode(&envelope.nonce.encoded).unwrap();
         let nonce: [u8; 12] = nonce_bytes.try_into().unwrap();

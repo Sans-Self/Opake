@@ -20,7 +20,14 @@ fn encrypt_fixture(plaintext: &[u8], keys: &TestKeys) -> EncryptedFixture {
     let rng = &mut OsRng;
     let content_key = crypto::generate_content_key(rng);
     let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
-    let wrapped_key = crypto::wrap_key(&content_key, &keys.public_keys(), TEST_DID, rng).unwrap();
+    let wrapped_key = crypto::wrap_key(
+        &content_key,
+        &keys.public_keys(),
+        TEST_DID,
+        &crypto::WrapContext::Document { uri: TEST_URI },
+        rng,
+    )
+    .unwrap();
     EncryptedFixture {
         ciphertext: payload.ciphertext,
         nonce: payload.nonce,

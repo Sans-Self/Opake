@@ -181,7 +181,8 @@ fn two_member_keyring_with_real_crypto(
             },
         },
     ];
-    let (group_key, wrapped_keys) = crypto::create_group_key(&members, &mut OsRng).unwrap();
+    let (group_key, wrapped_keys) =
+        crypto::create_group_key(&members, KEYRING_URI, &mut OsRng).unwrap();
 
     let metadata = KeyringMetadata {
         name: "Test Workspace".into(),
@@ -315,6 +316,7 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
     let unwrapped = Opake::<MockTransport, OsRng, NoopStorage>::unwrap_workspace_key(
         &keyring.members,
         OWNER_DID,
+        KEYRING_URI,
         &owner_private_keys.bundle(),
     )
     .unwrap();
@@ -380,9 +382,12 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
     assert_eq!(updated.key_history[0].members[0].wrapped_key.did, OWNER_DID);
 
     // Owner can unwrap the NEW group key
-    let new_key =
-        crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_private_keys.bundle())
-            .unwrap();
+    let new_key = crypto::unwrap_key(
+        &updated.members[0].wrapped_key,
+        &owner_private_keys.bundle(),
+        &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+    )
+    .unwrap();
     // New key should differ from original (rotation happened)
     assert_ne!(new_key.0, original_group_key.0);
 
@@ -453,9 +458,12 @@ async fn apply_keyring_proposals_rotates_key_on_leave() {
     assert_eq!(updated.key_history.len(), 1);
 
     // Owner can still unwrap
-    let new_key =
-        crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_private_keys.bundle())
-            .unwrap();
+    let new_key = crypto::unwrap_key(
+        &updated.members[0].wrapped_key,
+        &owner_private_keys.bundle(),
+        &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+    )
+    .unwrap();
     let metadata: KeyringMetadata =
         crypto::decrypt_metadata(&new_key, &updated.encrypted_metadata).unwrap();
     assert_eq!(metadata.name, "Test Workspace");
