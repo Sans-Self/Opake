@@ -13,6 +13,17 @@ use crate::client::{
 
 /// Public Bluesky API — used for handle resolution when no PDS is known yet.
 const BSKY_PUBLIC_API: &str = "https://public.api.bsky.app";
+
+/// The only X25519 algorithm we understand on a published public-key record.
+/// Any other string is rejected at resolve time.
+const EXPECTED_X25519_ALGO: &str = "x25519";
+
+/// The only ML-KEM algorithm we understand. Bogus values like
+/// `"ml-kem-512"` slip past byte-length validation but fail
+/// `mlkem768::validate_public_key` later — better to reject upfront with a
+/// clear "wrong algorithm" error than turn this into a DoS at wrap time.
+const EXPECTED_ML_KEM_ALGO: &str = "ml-kem-768";
+
 use crate::crypto::{MlKemPublicKey, X25519PublicKey, ML_KEM_PK_LEN};
 use crate::error::Error;
 use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
@@ -163,6 +174,23 @@ pub async fn resolve_identity(
 
     let record: PublicKeyRecord = serde_json::from_value(entry.value)?;
     records::check_version(record.opake_version)?;
+
+    // Step 5b: Enforce algo strings before decoding bytes. A bogus
+    // algo + matching length would otherwise sneak through here and
+    // fail later at `wrap_key`'s `validate_public_key`, surfacing as
+    // a generic crypto error instead of a clear "wrong algorithm" one.
+    if record.x25519_algo != EXPECTED_X25519_ALGO {
+        return Err(Error::InvalidRecord(format!(
+            "unsupported X25519 algo: expected {EXPECTED_X25519_ALGO}, got {}",
+            record.x25519_algo
+        )));
+    }
+    if record.ml_kem_algo != EXPECTED_ML_KEM_ALGO {
+        return Err(Error::InvalidRecord(format!(
+            "unsupported ML-KEM algo: expected {EXPECTED_ML_KEM_ALGO}, got {}",
+            record.ml_kem_algo
+        )));
+    }
 
     // Step 6: Decode and validate the X25519 public key.
     let key_bytes = record
@@ -651,5 +679,76 @@ mod tests {
             .await
             .unwrap();
         assert!(result.handle.is_none());
+    }
+
+    /// A bogus `ml_kem_algo` like `"ml-kem-512"` paired with 1184 bytes of
+    /// junk would slip past byte-length validation and fail later inside
+    /// `wrap_key`'s `validate_public_key` call. Resolving should reject it
+    /// upfront with a clear "wrong algorithm" error instead.
+    #[tokio::test]
+    async fn resolve_rejects_wrong_ml_kem_algo() {
+        let mock = MockTransport::new();
+        let pubkey = [42u8; 32];
+
+        mock.enqueue(success(&did_document_json(
+            "did:plc:target",
+            "alice.test",
+            "https://pds.alice.example.com",
+        )));
+
+        // Build a public-key record with a bogus algo string.
+        let mut record = PublicKeyRecord::new(
+            &pubkey,
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-03-01T00:00:00Z",
+        );
+        record.ml_kem_algo = "ml-kem-512".to_string();
+        let entry = serde_json::json!({
+            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "cid": "bafyrecord",
+            "value": record,
+        });
+        mock.enqueue(success(&entry.to_string()));
+
+        let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("ml-kem-512") && msg.contains("ml-kem-768")),
+            "expected InvalidRecord with both algo strings, got: {err:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_wrong_x25519_algo() {
+        let mock = MockTransport::new();
+        let pubkey = [42u8; 32];
+
+        mock.enqueue(success(&did_document_json(
+            "did:plc:target",
+            "alice.test",
+            "https://pds.alice.example.com",
+        )));
+
+        let mut record = PublicKeyRecord::new(
+            &pubkey,
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-03-01T00:00:00Z",
+        );
+        record.x25519_algo = "x448".to_string();
+        let entry = serde_json::json!({
+            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "cid": "bafyrecord",
+            "value": record,
+        });
+        mock.enqueue(success(&entry.to_string()));
+
+        let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("x448") && msg.contains("x25519")),
+            "expected InvalidRecord with both algo strings, got: {err:?}",
+        );
     }
 }
