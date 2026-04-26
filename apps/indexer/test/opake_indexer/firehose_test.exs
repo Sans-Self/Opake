@@ -60,7 +60,7 @@ defmodule OpakeIndexer.FirehoseTest do
                 "wrappedKey" => %{
                   "did" => &1,
                   "ciphertext" => %{"$bytes" => "AAAA"},
-                  "algo" => "x25519-hkdf-a256kw"
+                  "algo" => "x25519-mlkem768-hkdf-a256kw"
                 },
                 "role" => "manager"
               }
@@ -88,7 +88,7 @@ defmodule OpakeIndexer.FirehoseTest do
                 "wrappedKey" => %{
                   "did" => &1,
                   "ciphertext" => %{"$bytes" => "AAAA"},
-                  "algo" => "x25519-hkdf-a256kw"
+                  "algo" => "x25519-mlkem768-hkdf-a256kw"
                 },
                 "role" => "manager"
               }

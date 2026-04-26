@@ -83,7 +83,7 @@ defmodule OpakeIndexer.PipelineTest do
               "wrappedKey" => %{
                 "did" => did,
                 "ciphertext" => %{"$bytes" => "AAAA"},
-                "algo" => "x25519-hkdf-a256kw"
+                "algo" => "x25519-mlkem768-hkdf-a256kw"
               },
               "role" => role
             }
