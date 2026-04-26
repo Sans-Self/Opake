@@ -149,3 +149,6 @@ fn hkdf_info(recipient_did: &str) -> Vec<u8> {
 #[cfg(test)]
 #[path = "crypto_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod pq_probe;
