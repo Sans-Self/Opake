@@ -7,6 +7,24 @@ edition = "2021"
 version = "0.1.0"
 license = "AGPL-3.0-or-later"
 
+# Size-optimised release profile.
+#
+# Picked for the WASM binary that ships to the browser via `just wasm`. The
+# defaults (opt-level 3, no LTO, 16 codegen-units, unwinding panics) leave
+# substantial bytes on the floor — `lto = "fat"` alone reclaims most of it
+# by killing cross-crate monomorphization duplicates that wasm-pack's
+# wasm-opt pass can't fully reach.
+#
+# `panic = "abort"` is safe here because nothing in the WASM path catches
+# panics; aborting drops the unwinding tables. `strip = "symbols"` removes
+# debug symbols that wasm-pack would otherwise leave embedded.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 [workspace.dependencies]
 anyhow = "1"
 base64 = "0.22"
