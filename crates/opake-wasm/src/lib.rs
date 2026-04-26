@@ -4,11 +4,10 @@ use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
     ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
-    KeyringMetadata, MlKemPrivateKey, MlKemPublicKey, OsRng, PrivateKeyBundle, PublicKeyBundle,
-    X25519PrivateKey, X25519PublicKey,
+    KeyringMetadata, MlKemPrivateKey, OsRng, PrivateKeyBundle, X25519PrivateKey,
 };
 use opake_core::directories::{DirectoryTree, EntryKind};
-use opake_core::records::{Directory, WrappedKey};
+use opake_core::records::Directory;
 use opake_core::storage::Identity;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -102,58 +101,6 @@ pub fn decrypt_blob(key: &[u8], ciphertext: &[u8], nonce: &[u8]) -> Result<Vec<u
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Hybrid wrap export. Both halves of the recipient's public key flow as
-/// raw byte slices from JS — the WASM side reconstructs the typed bundle
-/// before calling into core. JS callers get this only as a low-level
-/// escape hatch; the production path goes through `Opake`/`FileManager`,
-/// which keep the keys inside core.
-#[wasm_bindgen(js_name = wrapKey)]
-pub fn wrap_key(
-    content_key: &[u8],
-    recipient_x25519_pub_key: &[u8],
-    recipient_ml_kem_pub_key: &[u8],
-    recipient_did: &str,
-) -> Result<JsValue, JsError> {
-    let content_key = content_key_from_slice(content_key)?;
-    let x25519_pub: &X25519PublicKey = recipient_x25519_pub_key
-        .try_into()
-        .map_err(|_| JsError::new("recipient X25519 public key must be exactly 32 bytes"))?;
-    let ml_kem_pub: &MlKemPublicKey = recipient_ml_kem_pub_key
-        .try_into()
-        .map_err(|_| JsError::new("recipient ML-KEM-768 public key must be exactly 1184 bytes"))?;
-    let bundle = PublicKeyBundle {
-        x25519: x25519_pub,
-        ml_kem: ml_kem_pub,
-    };
-    let wrapped = opake_core::crypto::wrap_key(&content_key, &bundle, recipient_did, &mut OsRng)
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&wrapped).map_err(|e| JsError::new(&e.to_string()))
-}
-
-/// Hybrid unwrap export. See `wrap_key` for the security caveat.
-#[wasm_bindgen(js_name = unwrapKey)]
-pub fn unwrap_key(
-    wrapped_key_js: JsValue,
-    x25519_private_key: &[u8],
-    ml_kem_private_key: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    let wrapped: WrappedKey =
-        serde_wasm_bindgen::from_value(wrapped_key_js).map_err(|e| JsError::new(&e.to_string()))?;
-    let x25519_priv: &X25519PrivateKey = x25519_private_key
-        .try_into()
-        .map_err(|_| JsError::new("X25519 private key must be exactly 32 bytes"))?;
-    let ml_kem_priv: &MlKemPrivateKey = ml_kem_private_key
-        .try_into()
-        .map_err(|_| JsError::new("ML-KEM-768 private key must be exactly 2400 bytes"))?;
-    let bundle = PrivateKeyBundle {
-        x25519: x25519_priv,
-        ml_kem: ml_kem_priv,
-    };
-    let content_key = opake_core::crypto::unwrap_key(&wrapped, &bundle)
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    Ok(content_key.0.to_vec())
-}
-
 #[wasm_bindgen(js_name = wrapContentKeyForKeyring)]
 pub fn wrap_content_key_for_keyring(content_key: &[u8], key: &[u8]) -> Result<Vec<u8>, JsError> {
     let content_key = content_key_from_slice(content_key)?;
@@ -231,45 +178,6 @@ pub fn generate_pkce_js() -> Result<JsValue, JsError> {
 pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {
     let identity = Identity::generate(did, &mut OsRng);
     serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
-}
-
-// ---------------------------------------------------------------------------
-// Ephemeral keypair (for device pairing)
-// ---------------------------------------------------------------------------
-
-#[wasm_bindgen(js_name = generateEphemeralKeypair)]
-pub fn generate_ephemeral_keypair() -> Result<JsValue, JsError> {
-    let kp = opake_core::crypto::generate_ephemeral_keypair(&mut OsRng);
-
-    // Build the JS object manually so the byte fields are Uint8Array, not Array<number>.
-    // Both halves of the hybrid keypair flow back to JS so callers can echo
-    // them in fingerprints / pair-request UIs without re-deriving anything.
-    let obj = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &obj,
-        &"x25519PublicKey".into(),
-        &js_sys::Uint8Array::from(&kp.x25519_public_key[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(
-        &obj,
-        &"x25519PrivateKey".into(),
-        &js_sys::Uint8Array::from(&kp.x25519_private_key[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(
-        &obj,
-        &"mlKemPublicKey".into(),
-        &js_sys::Uint8Array::from(&kp.ml_kem_public_key[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    js_sys::Reflect::set(
-        &obj,
-        &"mlKemPrivateKey".into(),
-        &js_sys::Uint8Array::from(&kp.ml_kem_private_key[..]).into(),
-    )
-    .map_err(|e| JsError::new(&format!("{e:?}")))?;
-    Ok(obj.into())
 }
 
 // ---------------------------------------------------------------------------
