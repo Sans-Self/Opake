@@ -37,9 +37,18 @@ pbkdf2 = "0.12"                 # PBKDF2-HMAC-SHA512 for BIP-39 seed derivation
 sha2 = "0.10"                   # SHA-256/512 — used by HKDF and PBKDF2
 zeroize = { version = "1", features = ["derive"] }  # Zero sensitive memory on drop
 
-# Hybrid X25519+ML-KEM-768 — formally verified ML-KEM (FIPS-203) implementation.
-# Default features disabled to skip the `rand` feature (we inject randomness
-# explicitly throughout opake-core) and the unused mlkem512/1024 variants.
+# ML-KEM-768 implementation for the hybrid X25519+ML-KEM-768 KEM.
+# Construction aligned with BSI TR-02102 (German federal cryptographic
+# recommendations) and ANSSI guidance for post-quantum migration. The
+# ML-KEM-768 algorithm itself is specified in NIST FIPS-203.
+#
+# `libcrux-ml-kem` is from Cryspen (formal-verification team based in
+# Aarhus / Berlin); the implementation is verified for panic freedom,
+# functional correctness, and secret independence via the hax toolchain.
+#
+# Default features disabled to skip the `rand` feature (we inject
+# randomness explicitly throughout opake-core) and the unused
+# mlkem512 / mlkem1024 variants.
 libcrux-ml-kem = { version = "0.0.8", default-features = false, features = ["mlkem768"] }
 
 [dev-dependencies]

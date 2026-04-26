@@ -2,12 +2,17 @@
 //! against the assumptions in the PQ migration plan, before any of those
 //! assumptions get baked into production code paths.
 //!
+//! Construction reference: BSI TR-02102 (German federal cryptographic
+//! recommendations) and ANSSI guidance for hybrid post-quantum key
+//! establishment. The ML-KEM-768 algorithm and its byte-level parameter
+//! sizes are specified in NIST FIPS-203.
+//!
 //! Each test pins down one unknown:
 //!   1. `round_trip`              — Encap → Decap recovers the same shared secret
 //!   2. `keygen_is_deterministic` — same randomness → same keypair (recovery from seed phrase)
 //!   3. `encap_is_deterministic`  — same randomness → same ciphertext (testability)
 //!   4. `validate_public_key`     — the function exists and accepts a freshly-generated key
-//!   5. `key_and_ct_sizes`        — the FIPS-203 byte sizes our envelope assumes
+//!   5. `key_and_ct_sizes`        — the published byte sizes our envelope assumes
 //!
 //! WASM compatibility is a separate axis verified by `cargo check
 //! -p opake-core --target wasm32-unknown-unknown`, not by an in-process test.
@@ -17,14 +22,15 @@
 
 use libcrux_ml_kem::mlkem768;
 
-/// FIPS-203 §7.1 — `KeyGen` consumes 64 bytes of randomness:
-/// 32 bytes for the seed `d`, 32 for the implicit-rejection seed `z`.
+/// ML-KEM-768 KeyGen consumes 64 bytes of randomness: 32 for the seed `d`,
+/// 32 for the implicit-rejection seed `z`. Specified in NIST FIPS-203 §7.1.
 const KEYGEN_RANDOMNESS_LEN: usize = 64;
 
-/// FIPS-203 §7.2 — `Encaps` consumes 32 bytes of randomness `m`.
+/// ML-KEM-768 Encaps consumes 32 bytes of randomness `m`. Specified in
+/// NIST FIPS-203 §7.2.
 const ENCAP_RANDOMNESS_LEN: usize = 32;
 
-/// FIPS-203 ML-KEM-768 published parameter sizes.
+/// ML-KEM-768 published parameter sizes (NIST FIPS-203 §6.1 / §6.2).
 const ML_KEM_PK_LEN: usize = 1184;
 const ML_KEM_SK_LEN: usize = 2400;
 const ML_KEM_CT_LEN: usize = 1088;
@@ -94,12 +100,12 @@ fn validate_public_key_accepts_freshly_generated_key() {
 
     assert!(
         mlkem768::validate_public_key(key_pair.public_key()),
-        "a freshly generated public key must pass FIPS-203 validation"
+        "a freshly generated public key must pass ML-KEM-768 validation"
     );
 }
 
 #[test]
-fn key_and_ct_sizes_match_fips203() {
+fn key_and_ct_sizes_match_spec() {
     let kg_randomness = [0x66u8; KEYGEN_RANDOMNESS_LEN];
     let key_pair = mlkem768::generate_key_pair(kg_randomness);
 
