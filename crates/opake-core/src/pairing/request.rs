@@ -1,3 +1,5 @@
+use zeroize::Zeroizing;
+
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{
@@ -6,6 +8,11 @@ use crate::crypto::{
 use crate::error::Error;
 use crate::records::{PairRequest, PAIR_REQUEST_COLLECTION};
 use crate::storage::Storage;
+
+/// Version tag prepended to the persisted pair-state blob. Changing this
+/// deliberately invalidates any in-flight (pre-version-byte) blobs — callers
+/// get a clean length-mismatch error rather than silently misparting keys.
+pub(super) const PAIR_STATE_VERSION: u8 = 0x01;
 
 /// Public-facing result of `create_pair_request`.
 ///
@@ -29,10 +36,10 @@ pub struct PairRequestInfo {
 /// return them for the caller to stash somewhere, we write them to Storage
 /// under `(did, rkey)` so they never leave the crypto-owning layer.
 ///
-/// On-disk layout for the persisted state is the X25519 private key (32
-/// bytes) followed by the ML-KEM-768 private key (2400 bytes), giving a
-/// fixed 2432-byte blob. See `pairing::receive::complete_pair_response`
-/// for the matching parser.
+/// On-disk layout for the persisted state is a 1-byte version prefix (`0x01`)
+/// followed by the X25519 private key (32 bytes) and the ML-KEM-768 private
+/// key (2400 bytes), giving a fixed 2433-byte blob. See
+/// `pairing::receive::complete_pair_response` for the matching parser.
 pub async fn create_pair_request<T, R, S>(
     client: &mut XrpcClient<T>,
     storage: &S,
@@ -58,9 +65,11 @@ where
 
     let rkey = atproto::parse_at_uri(&record_ref.uri)?.rkey;
 
-    // Concatenate the two private halves into the on-disk pair-state blob.
-    let mut state =
-        Vec::with_capacity(keypair.x25519_private_key.len() + keypair.ml_kem_private_key.len());
+    // [VERSION(1) || X25519 priv(32) || ML-KEM priv(2400)] = 2433 bytes.
+    let mut state: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(
+        1 + keypair.x25519_private_key.len() + keypair.ml_kem_private_key.len(),
+    ));
+    state.push(PAIR_STATE_VERSION);
     state.extend_from_slice(&keypair.x25519_private_key);
     state.extend_from_slice(&keypair.ml_kem_private_key);
     storage.save_pair_state(did, &rkey, &state).await?;

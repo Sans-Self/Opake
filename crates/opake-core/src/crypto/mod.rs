@@ -7,16 +7,11 @@
 // to prevent documentation drift.
 //
 // This module handles AES-256-GCM content encryption and asymmetric key
-// wrapping. The default wrap is the hybrid X25519 + ML-KEM-768 KEM
+// wrapping. Wrapping uses the hybrid X25519 + ML-KEM-768 KEM
 // (`x25519-mlkem768-hkdf-a256kw`) — defends against harvest-now-decrypt-later
 // per BSI TR-02102 (Germany) and ANSSI (France) guidance for hybrid
-// post-quantum key establishment.
-//
-// A pair-flow-only legacy helper retains the original `x25519-hkdf-a256kw`
-// envelope. It exists because device pairing wraps an Identity to a fresh
-// ephemeral X25519 keypair before the recipient has a published ML-KEM
-// public key — there is nothing to bind a hybrid construction to. Phase 3.5
-// will deprecate it by hybridizing the pair flow (see CLAUDE.md).
+// post-quantum key establishment. The pair flow generates an ephemeral
+// hybrid bundle on the new device so the same construction applies.
 //
 // The module has no I/O — it takes bytes in and returns bytes out. The
 // calling layer (CLI or WASM) handles reading/writing files and talking
@@ -250,9 +245,12 @@ impl<'a> DidMember<'a> {
 /// else. The private keys live in this struct only long enough to be persisted
 /// to `Storage` (via `save_pair_state`); see the persisted-state docs on the
 /// `Storage` trait for the on-disk byte layout.
+#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct EphemeralKeypair {
+    #[zeroize(skip)]
     pub x25519_public_key: X25519PublicKey,
     pub x25519_private_key: X25519PrivateKey,
+    #[zeroize(skip)]
     pub ml_kem_public_key: MlKemPublicKey,
     pub ml_kem_private_key: MlKemPrivateKey,
 }
@@ -322,6 +320,3 @@ fn hkdf_info(algo: &str, recipient_did: &str) -> Vec<u8> {
 #[cfg(test)]
 #[path = "crypto_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-mod pq_probe;

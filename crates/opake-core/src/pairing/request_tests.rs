@@ -147,13 +147,13 @@ async fn create_pair_request_persists_ephemeral_privkey() {
         .load_pair_state(TEST_DID, "rk1")
         .await
         .expect("private key should be persisted");
-    // [X25519 priv (32) || ML-KEM priv (2400)] = 2432 bytes.
-    assert_eq!(stored.len(), 32 + 2400);
-    // The returned X25519 public key is derived from the first 32 bytes —
-    // verify the DH relationship so a storage-roundtrip bug surfaces here
-    // instead of silently at pair completion.
+    // [VERSION(1) || X25519 priv(32) || ML-KEM priv(2400)] = 2433 bytes.
+    assert_eq!(stored.len(), 1 + 32 + 2400);
+    assert_eq!(stored[0], 0x01, "version byte must be 0x01");
+    // Verify the DH relationship on the X25519 half so a storage-roundtrip bug
+    // surfaces here rather than silently at pair completion.
     let mut x25519_priv = [0u8; 32];
-    x25519_priv.copy_from_slice(&stored[..32]);
+    x25519_priv.copy_from_slice(&stored[1..33]);
     let derived = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(x25519_priv));
     assert_eq!(derived.as_bytes(), &info.x25519_ephemeral_public_key);
 }

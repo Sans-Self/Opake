@@ -186,13 +186,16 @@ fn unwrap_key_hybrid(
     let x25519_shared = x25519_secret.diffie_hellman(&ephemeral_public);
 
     // ── ML-KEM-768 decapsulation ──
-    let mlkem_sk_array: [u8; super::ML_KEM_SK_LEN] = *keys.ml_kem;
-    let mlkem_sk: MlKem768PrivateKey = MlKem768PrivateKey::from(mlkem_sk_array);
+    let mlkem_sk_array: Zeroizing<[u8; super::ML_KEM_SK_LEN]> =
+        Zeroizing::new(*keys.ml_kem);
+    let mlkem_sk: MlKem768PrivateKey = MlKem768PrivateKey::from(*mlkem_sk_array);
     let mlkem_ct: MlKem768Ciphertext = MlKem768Ciphertext::from(mlkem_ct_arr);
     let mlkem_shared = mlkem768::decapsulate(&mlkem_sk, &mlkem_ct);
-    let mlkem_shared_bytes: [u8; ML_KEM_SS_LEN] = (*mlkem_shared.as_ref())
-        .try_into()
-        .map_err(|_| Error::Decryption("ML-KEM-768 shared secret had wrong size".into()))?;
+    let mlkem_shared_bytes: Zeroizing<[u8; ML_KEM_SS_LEN]> = Zeroizing::new(
+        (*mlkem_shared.as_ref())
+            .try_into()
+            .map_err(|_| Error::Decryption("ML-KEM-768 shared secret had wrong size".into()))?,
+    );
 
     let salt = hybrid_salt(&eph_pub, recipient_x25519_pub.as_bytes(), &mlkem_ct_arr);
     let wrapping_key = derive_hybrid_wrapping_key(

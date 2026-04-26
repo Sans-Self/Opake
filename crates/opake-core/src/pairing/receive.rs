@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use zeroize::Zeroizing;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
@@ -14,14 +15,13 @@ use crate::records::{
 use crate::storage::{Identity, Storage};
 
 use super::cleanup::cleanup_pair_records;
+use super::request::PAIR_STATE_VERSION;
 
 /// X25519 private-key length (the classical half of the pair-state blob).
 const X25519_PRIV_LEN: usize = 32;
 
-/// Combined size of the pair-state blob persisted by `create_pair_request`.
-///
-/// `[X25519 private key (32) || ML-KEM-768 private key (2400)]` = 2432 bytes.
-const PAIR_STATE_LEN: usize = X25519_PRIV_LEN + ML_KEM_SK_LEN;
+/// Total size of the versioned pair-state blob: `[VERSION(1) || X25519(32) || ML-KEM(2400)]`.
+const PAIR_STATE_LEN: usize = 1 + X25519_PRIV_LEN + ML_KEM_SK_LEN;
 
 /// Poll once for a pair response matching `request_rkey`.
 ///
@@ -83,16 +83,22 @@ where
             state.len()
         )));
     }
-    // Split the persisted blob back into its two halves. See
-    // `pairing::request::create_pair_request` for the matching writer.
-    let (x25519_bytes, mlkem_bytes) = state.split_at(X25519_PRIV_LEN);
-    let mut x25519_priv = [0u8; X25519_PRIV_LEN];
+    if state[0] != PAIR_STATE_VERSION {
+        return Err(Error::InvalidRecord(format!(
+            "pair state for {request_rkey} has unknown version byte: 0x{:02x}",
+            state[0]
+        )));
+    }
+    // Split the versioned blob: skip 1-byte version, then X25519(32), then ML-KEM(2400).
+    // See `pairing::request::create_pair_request` for the matching writer.
+    let (x25519_bytes, mlkem_bytes) = state[1..].split_at(X25519_PRIV_LEN);
+    let mut x25519_priv: Zeroizing<[u8; X25519_PRIV_LEN]> = Zeroizing::new([0u8; X25519_PRIV_LEN]);
     x25519_priv.copy_from_slice(x25519_bytes);
-    let mut mlkem_priv = [0u8; ML_KEM_SK_LEN];
+    let mut mlkem_priv: Zeroizing<[u8; ML_KEM_SK_LEN]> = Zeroizing::new([0u8; ML_KEM_SK_LEN]);
     mlkem_priv.copy_from_slice(mlkem_bytes);
 
     let identity =
-        decrypt_pair_response(client, did, response, &x25519_priv, &mlkem_priv).await?;
+        decrypt_pair_response(client, did, response, &*x25519_priv, &*mlkem_priv).await?;
     storage.save_identity(did, &identity).await?;
 
     // Tear-down is best-effort from the caller's perspective — the Identity
@@ -164,24 +170,44 @@ async fn decrypt_pair_response(
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await?;
     let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
-    let published_key = BASE64
+
+    let published_x25519 = BASE64
         .decode(&published.x25519_public_key.encoded)
         .map_err(|e| {
-            Error::InvalidRecord(format!("invalid base64 in published public key: {e}"))
+            Error::InvalidRecord(format!("invalid base64 in published X25519 public key: {e}"))
         })?;
-
-    let received_key = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
+    let received_x25519 = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
         Error::InvalidRecord(format!(
-            "invalid base64 in received identity public key: {e}"
+            "invalid base64 in received identity X25519 public key: {e}"
         ))
     })?;
-
-    if published_key != received_key {
+    if published_x25519 != received_x25519 {
         return Err(Error::InvalidRecord(
-            "received identity public key does not match published publicKey/self record"
-                .to_string(),
+            "received X25519 public key does not match published publicKey/self record".to_string(),
+        ));
+    }
+
+    let published_ml_kem = BASE64
+        .decode(&published.ml_kem_public_key.encoded)
+        .map_err(|e| {
+            Error::InvalidRecord(format!(
+                "invalid base64 in published ML-KEM public key: {e}"
+            ))
+        })?;
+    let received_ml_kem = BASE64.decode(&identity.ml_kem_public_key).map_err(|e| {
+        Error::InvalidRecord(format!(
+            "invalid base64 in received identity ML-KEM public key: {e}"
+        ))
+    })?;
+    if published_ml_kem != received_ml_kem {
+        return Err(Error::InvalidRecord(
+            "received ML-KEM public key does not match published publicKey/self record".to_string(),
         ));
     }
 
     Ok(identity)
 }
+
+#[cfg(test)]
+#[path = "receive_tests.rs"]
+mod tests;
