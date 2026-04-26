@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Session;
 use crate::crypto::{
-    CryptoRng, Ed25519SigningKey, RngCore, X25519DalekPublicKey, X25519DalekStaticSecret,
-    X25519PrivateKey, X25519PublicKey,
+    CryptoRng, Ed25519SigningKey, MlKemPrivateKey, MlKemPublicKey, RngCore, X25519DalekPublicKey,
+    X25519DalekStaticSecret, X25519PrivateKey, X25519PublicKey, ML_KEM_KEYGEN_RANDOMNESS_LEN,
 };
 use crate::error::Error;
 use zeroize::Zeroizing;
@@ -129,8 +129,12 @@ pub struct AccountInfo {
 /// Encryption + signing keypairs, stored as base64.
 ///
 /// `#[redact]` fields are zeroized on drop automatically (via RedactedDebug).
-/// The signing fields are optional for backward compat with old identity
-/// files. Field aliases accept both snake_case (the primary, canonical
+/// The Ed25519 signing fields are optional for backward compat with older
+/// identity files that predate Indexer auth; the ML-KEM-768 fields are
+/// required because the hybrid X25519+ML-KEM-768 KEM landed before any
+/// users existed (no migration path needed).
+///
+/// Field aliases accept both snake_case (the primary, canonical
 /// serialization) and camelCase — older identity files on disk used the
 /// camelCase form, so the migration path relies on the aliases.
 #[derive(crate::RedactedDebug, Serialize, Deserialize)]
@@ -148,6 +152,14 @@ pub struct Identity {
     /// Ed25519 signing public/verify key (base64).
     #[serde(default, alias = "verifyKey")]
     pub verify_key: Option<String>,
+    /// ML-KEM-768 public encapsulation key (base64). Hybrid X25519+ML-KEM
+    /// construction per BSI TR-02102 / ANSSI guidance.
+    #[serde(alias = "mlKemPublicKey")]
+    pub ml_kem_public_key: String,
+    /// ML-KEM-768 private decapsulation key (base64).
+    #[redact]
+    #[serde(alias = "mlKemPrivateKey")]
+    pub ml_kem_private_key: String,
 }
 
 impl Identity {
@@ -167,30 +179,25 @@ impl Identity {
         decode_optional_key_bytes(&self.verify_key, "verify_key")
     }
 
+    pub fn ml_kem_public_key_bytes(&self) -> Result<MlKemPublicKey, Error> {
+        decode_key_bytes(&self.ml_kem_public_key, "ml_kem_public_key")
+    }
+
+    pub fn ml_kem_private_key_bytes(&self) -> Result<Zeroizing<MlKemPrivateKey>, Error> {
+        decode_key_bytes(&self.ml_kem_private_key, "ml_kem_private_key").map(Zeroizing::new)
+    }
+
     /// Whether this identity has Ed25519 signing keys.
     pub fn has_signing_keys(&self) -> bool {
         self.signing_key.is_some() && self.verify_key.is_some()
     }
 
-    /// Construct from raw key bytes (e.g. from WASM where keys arrive as Uint8Array).
-    ///
-    /// Creates an identity without signing keys — those are only needed for
-    /// Indexer auth, not file operations.
-    pub fn from_raw_keys(did: &str, public_key: &[u8; 32], private_key: &[u8; 32]) -> Self {
-        Self {
-            did: did.to_string(),
-            public_key: BASE64.encode(public_key),
-            private_key: BASE64.encode(private_key),
-            signing_key: None,
-            verify_key: None,
-        }
-    }
-
-    /// Generate a new identity with random X25519 + Ed25519 keypairs.
+    /// Generate a new identity with random X25519 + Ed25519 + ML-KEM-768 keypairs.
     pub fn generate(did: &str, rng: &mut (impl CryptoRng + RngCore)) -> Self {
         let private_secret = X25519DalekStaticSecret::random_from_rng(&mut *rng);
         let public_key = X25519DalekPublicKey::from(&private_secret);
         let (signing_key, verify_key) = Self::generate_signing_keypair(rng);
+        let (ml_kem_public_key, ml_kem_private_key) = Self::generate_ml_kem_keypair(rng);
 
         Identity {
             did: did.to_string(),
@@ -198,6 +205,8 @@ impl Identity {
             private_key: BASE64.encode(private_secret.to_bytes()),
             signing_key: Some(signing_key),
             verify_key: Some(verify_key),
+            ml_kem_public_key,
+            ml_kem_private_key,
         }
     }
 
@@ -219,6 +228,18 @@ impl Identity {
         (
             BASE64.encode(signing_key.to_bytes()),
             BASE64.encode(verify_key.to_bytes()),
+        )
+    }
+
+    /// Generate a fresh ML-KEM-768 keypair using injected randomness.
+    /// Returns `(public_key_b64, private_key_b64)`.
+    fn generate_ml_kem_keypair(rng: &mut (impl CryptoRng + RngCore)) -> (String, String) {
+        let mut randomness = Zeroizing::new([0u8; ML_KEM_KEYGEN_RANDOMNESS_LEN]);
+        rng.fill_bytes(randomness.as_mut());
+        let key_pair = libcrux_ml_kem::mlkem768::generate_key_pair(*randomness);
+        (
+            BASE64.encode(key_pair.public_key().as_ref()),
+            BASE64.encode(key_pair.private_key().as_ref()),
         )
     }
 }
@@ -543,6 +564,22 @@ mod tests {
         assert!(err.to_string().contains("nobody.test"));
     }
 
+    /// Build an `Identity` for tests that need a hand-crafted struct rather
+    /// than a generated one. Defaults the ML-KEM and Ed25519 fields to
+    /// well-formed-but-meaningless bytes so individual tests can override
+    /// only the fields they actually exercise.
+    fn test_identity(did: &str, public_key: String, private_key: String) -> Identity {
+        Identity {
+            did: did.into(),
+            public_key,
+            private_key,
+            signing_key: Some(BASE64.encode([0u8; 32])),
+            verify_key: Some(BASE64.encode([0u8; 32])),
+            ml_kem_public_key: BASE64.encode([0u8; 1184]),
+            ml_kem_private_key: BASE64.encode([0u8; 2400]),
+        }
+    }
+
     #[test]
     fn identity_public_key_bytes_roundtrip() {
         let identity = Identity {
@@ -551,47 +588,47 @@ mod tests {
             private_key: BASE64.encode([2u8; 32]),
             signing_key: Some(BASE64.encode([3u8; 32])),
             verify_key: Some(BASE64.encode([4u8; 32])),
+            ml_kem_public_key: BASE64.encode([5u8; 1184]),
+            ml_kem_private_key: BASE64.encode([6u8; 2400]),
         };
         assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
         assert_eq!(*identity.private_key_bytes().unwrap(), [2u8; 32]);
         assert_eq!(identity.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(identity.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
+        assert_eq!(identity.ml_kem_public_key_bytes().unwrap(), [5u8; 1184]);
+        assert_eq!(*identity.ml_kem_private_key_bytes().unwrap(), [6u8; 2400]);
     }
 
     #[test]
     fn identity_rejects_bad_base64() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: "not!valid!base64!!!".into(),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
+        let identity = test_identity(
+            "did:plc:test",
+            "not!valid!base64!!!".into(),
+            BASE64.encode([0u8; 32]),
+        );
         assert!(identity.public_key_bytes().is_err());
     }
 
     #[test]
     fn identity_rejects_wrong_length() {
-        let identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 16]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
+        let identity = test_identity(
+            "did:plc:test",
+            BASE64.encode([0u8; 16]),
+            BASE64.encode([0u8; 32]),
+        );
         let err = identity.public_key_bytes().unwrap_err().to_string();
         assert!(err.contains("16 bytes"), "expected length in error: {err}");
     }
 
     #[test]
     fn has_signing_keys_requires_both() {
-        let mut identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([0u8; 32]),
-            private_key: BASE64.encode([0u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
+        let mut identity = test_identity(
+            "did:plc:test",
+            BASE64.encode([0u8; 32]),
+            BASE64.encode([0u8; 32]),
+        );
+        identity.signing_key = None;
+        identity.verify_key = None;
         assert!(!identity.has_signing_keys());
 
         identity.signing_key = Some(BASE64.encode([0u8; 32]));
@@ -705,13 +742,13 @@ mod tests {
 
     #[test]
     fn ensure_signing_keys_adds_when_missing() {
-        let mut identity = Identity {
-            did: "did:plc:test".into(),
-            public_key: BASE64.encode([1u8; 32]),
-            private_key: BASE64.encode([2u8; 32]),
-            signing_key: None,
-            verify_key: None,
-        };
+        let mut identity = test_identity(
+            "did:plc:test",
+            BASE64.encode([1u8; 32]),
+            BASE64.encode([2u8; 32]),
+        );
+        identity.signing_key = None;
+        identity.verify_key = None;
         assert!(!identity.has_signing_keys());
         let added = identity.ensure_signing_keys(&mut OsRng);
         assert!(added);

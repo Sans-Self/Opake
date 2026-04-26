@@ -163,6 +163,8 @@ fn derivation_is_deterministic() {
     assert_eq!(id1.private_key, id2.private_key);
     assert_eq!(id1.signing_key, id2.signing_key);
     assert_eq!(id1.verify_key, id2.verify_key);
+    assert_eq!(id1.ml_kem_public_key, id2.ml_kem_public_key);
+    assert_eq!(id1.ml_kem_private_key, id2.ml_kem_private_key);
 }
 
 #[test]
@@ -174,6 +176,8 @@ fn derivation_produces_valid_key_bytes() {
     assert!(identity.has_signing_keys());
     assert!(identity.signing_key_bytes().unwrap().is_some());
     assert!(identity.verify_key_bytes().unwrap().is_some());
+    assert_eq!(identity.ml_kem_public_key_bytes().unwrap().len(), 1184);
+    assert_eq!(identity.ml_kem_private_key_bytes().unwrap().len(), 2400);
 }
 
 #[test]
@@ -209,6 +213,8 @@ fn derived_identity_serializes_like_random() {
     assert!(json.get("private_key").is_some());
     assert!(json.get("signing_key").is_some());
     assert!(json.get("verify_key").is_some());
+    assert!(json.get("ml_kem_public_key").is_some());
+    assert!(json.get("ml_kem_private_key").is_some());
     // Mnemonic must NOT appear in serialized form.
     assert!(json.get("mnemonic").is_none());
     assert!(json.get("seed_phrase").is_none());
@@ -243,6 +249,13 @@ fn golden_vector_all_zero_entropy() {
     assert_eq!(
         identity.verify_key.as_deref(),
         Some("JsOAnxAptr3it1PIm0D5DNZdSdAsOfFmCHa2MXQg/AA=")
+    );
+    // ML-KEM-768 public key fingerprint: first 32 bytes (44 base64 chars).
+    // Anchors the hybrid-KEM derivation to a stable byte-level output;
+    // 32 bytes is enough that any drift is caught with overwhelming probability.
+    assert_eq!(
+        &identity.ml_kem_public_key[..44],
+        "zugaa5eck9IqFwgK4skuNnM0d4tpsfLNJ5c1XASw2VZh"
     );
 }
 
