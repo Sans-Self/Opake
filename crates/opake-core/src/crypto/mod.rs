@@ -54,6 +54,49 @@ const AES_KW_OVERHEAD: usize = 8;
 const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
 const CIPHERTEXT_LEN: usize = X25519_KEY_LEN + WRAPPED_KEY_LEN;
 
+// ───── Hybrid X25519 + ML-KEM-768 KEM (Phase 1 foundation) ─────────────────
+//
+// Construction aligned with BSI TR-02102 (Germany) and ANSSI guidance for
+// hybrid post-quantum key establishment. Algorithm sizes from NIST FIPS-203.
+//
+// These constants are introduced ahead of their consumers so the byte-level
+// envelope shape lives in one place. Their use sites land in Phase 2
+// (identity derivation) and Phase 3 (hybrid wrap/unwrap).
+
+/// Algorithm identifier for the hybrid wrap envelope, written into
+/// `WrappedKey.algo` once Phase 3's wrap/unwrap rewrite ships.
+#[allow(dead_code, reason = "Phase 3 wrap/unwrap consume this once they land.")]
+const HYBRID_WRAP_ALGO: &str = "x25519-mlkem768-hkdf-a256kw";
+
+/// ML-KEM-768 public key size (bytes). NIST FIPS-203 §6.1.
+pub const ML_KEM_PK_LEN: usize = 1184;
+
+/// ML-KEM-768 private key size (bytes). NIST FIPS-203 §6.2.
+pub const ML_KEM_SK_LEN: usize = 2400;
+
+/// ML-KEM-768 ciphertext size (bytes). NIST FIPS-203 §6.2.
+pub(crate) const ML_KEM_CT_LEN: usize = 1088;
+
+/// ML-KEM-768 shared-secret size (bytes). NIST FIPS-203 §6.2.
+#[allow(dead_code, reason = "Phase 3 HKDF combiner consumes this once it lands.")]
+pub(crate) const ML_KEM_SS_LEN: usize = 32;
+
+/// ML-KEM-768 KeyGen randomness: 32-byte seed `d` ‖ 32-byte implicit-rejection
+/// seed `z`. NIST FIPS-203 §7.1.
+#[allow(dead_code, reason = "Phase 2 identity derivation consumes this once it lands.")]
+pub(crate) const ML_KEM_KEYGEN_RANDOMNESS_LEN: usize = 64;
+
+/// ML-KEM-768 Encaps randomness: 32-byte message `m`. NIST FIPS-203 §7.2.
+#[allow(dead_code, reason = "Phase 3 wrap consumes this once it lands.")]
+pub(crate) const ML_KEM_ENCAP_RANDOMNESS_LEN: usize = 32;
+
+/// Hybrid wrap envelope on the wire:
+/// `[X25519 ephemeral pubkey (32) || ML-KEM-768 ciphertext (1088) || AES-KW wrapped content key (40)]`.
+#[allow(dead_code, reason = "Phase 3 wrap/unwrap consume this once they land.")]
+const HYBRID_CIPHERTEXT_LEN: usize = X25519_KEY_LEN + ML_KEM_CT_LEN + WRAPPED_KEY_LEN;
+
+// ───────────────────────────────────────────────────────────────────────────
+
 /// Wrapper that prints byte length instead of content in Debug output.
 /// Used by the `RedactedDebug` derive macro for `#[redact]` fields.
 pub struct Redacted<'a, T: ?Sized>(pub &'a T);
@@ -106,6 +149,14 @@ pub type X25519PublicKey = [u8; X25519_KEY_LEN];
 
 /// An X25519 private key: 32 raw bytes.
 pub type X25519PrivateKey = [u8; X25519_KEY_LEN];
+
+/// An ML-KEM-768 public key: 1184 raw bytes.
+pub type MlKemPublicKey = [u8; ML_KEM_PK_LEN];
+
+/// An ML-KEM-768 private key: 2400 raw bytes. Held as a raw byte array so the
+/// `Identity` struct can wrap it in `Zeroizing` / `RedactedDebug` the same way
+/// it does for X25519 secrets.
+pub type MlKemPrivateKey = [u8; ML_KEM_SK_LEN];
 
 /// A DID string paired with its X25519 public key.
 pub struct DidMember<'a> {

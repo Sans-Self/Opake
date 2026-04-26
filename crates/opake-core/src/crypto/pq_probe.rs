@@ -20,14 +20,19 @@
 //! When this file lands, the production-side migration (Phases 1+) can rely
 //! on the verified API without speculation.
 
+//! These constants are deliberately duplicated from `crypto/mod.rs` rather
+//! than imported. The probe's purpose is to verify libcrux's behavior against
+//! the FIPS-203 specification independently of whatever values our production
+//! code uses; if the two ever drifted, an import would silently make the probe
+//! pass against the drifted value.
+
 use libcrux_ml_kem::mlkem768;
 
 /// ML-KEM-768 KeyGen consumes 64 bytes of randomness: 32 for the seed `d`,
-/// 32 for the implicit-rejection seed `z`. Specified in NIST FIPS-203 §7.1.
+/// 32 for the implicit-rejection seed `z`. NIST FIPS-203 §7.1.
 const KEYGEN_RANDOMNESS_LEN: usize = 64;
 
-/// ML-KEM-768 Encaps consumes 32 bytes of randomness `m`. Specified in
-/// NIST FIPS-203 §7.2.
+/// ML-KEM-768 Encaps consumes 32 bytes of randomness `m`. NIST FIPS-203 §7.2.
 const ENCAP_RANDOMNESS_LEN: usize = 32;
 
 /// ML-KEM-768 published parameter sizes (NIST FIPS-203 §6.1 / §6.2).
