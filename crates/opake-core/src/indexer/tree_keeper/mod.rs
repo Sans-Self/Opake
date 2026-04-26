@@ -46,6 +46,20 @@ pub type WatcherCallback = Box<dyn FnMut(Option<&DirectoryTree>)>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WatcherHandle(u64);
 
+/// Cabinet-only key material. Heap-allocated via `Box` inside the
+/// `Cabinet` variant of `HeldTree` so workspace trees don't pay 2432
+/// bytes per instance for inline storage they never use — Rust enum
+/// layout uses `max(variant size)`, so inline keys would bloat every
+/// workspace `HeldTree` to cabinet-size.
+///
+/// Mirrors the zeroization pattern from `cabinet::Cabinet` so dropping
+/// the `Box` cleanly wipes both halves.
+#[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
+struct CabinetKeys {
+    x25519: X25519PrivateKey,
+    ml_kem: crate::crypto::MlKemPrivateKey,
+}
+
 /// A persistent tree for one context (cabinet or workspace).
 ///
 /// The two variants are mutually exclusive by construction: `TreeKeeper`
@@ -56,8 +70,7 @@ pub struct WatcherHandle(u64);
 enum HeldTree {
     Cabinet {
         tree: DirectoryTree,
-        x25519: X25519PrivateKey,
-        ml_kem: crate::crypto::MlKemPrivateKey,
+        keys: Box<CabinetKeys>,
     },
     Workspace {
         tree: DirectoryTree,
@@ -86,18 +99,10 @@ impl std::fmt::Debug for HeldTree {
             }
         }
     }
-}
-
-impl Drop for HeldTree {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        if let Self::Cabinet { x25519, ml_kem, .. } = self {
-            x25519.zeroize();
-            ml_kem.zeroize();
-        }
-        // Workspace: each ContentKey in group_keys has its own ZeroizeOnDrop
-        // impl (via RedactedDebug), so the HashMap's normal drop handles it.
-    }
+    // Zeroization on drop: `CabinetKeys` derives `ZeroizeOnDrop`, and
+    // `Workspace`'s `ContentKey`s zero via their own `ZeroizeOnDrop`
+    // through the `HashMap` drop. Both arms are covered without a manual
+    // `impl Drop for HeldTree`.
 }
 
 /// Which context a watcher is attached to.
@@ -155,8 +160,10 @@ impl TreeKeeper {
     ) {
         self.cabinet = Some(HeldTree::Cabinet {
             tree,
-            x25519: x25519_private_key,
-            ml_kem: ml_kem_private_key,
+            keys: Box::new(CabinetKeys {
+                x25519: x25519_private_key,
+                ml_kem: ml_kem_private_key,
+            }),
         });
     }
 
@@ -441,8 +448,11 @@ impl TreeKeeper {
         };
 
         let change = match held {
-            HeldTree::Cabinet { tree, x25519, ml_kem } => {
-                let bundle = crate::crypto::PrivateKeyBundle { x25519, ml_kem };
+            HeldTree::Cabinet { tree, keys } => {
+                let bundle = crate::crypto::PrivateKeyBundle {
+                    x25519: &keys.x25519,
+                    ml_kem: &keys.ml_kem,
+                };
                 tree.apply_directory_delta(record, &DecryptionCtx::cabinet(did, &bundle))?
             }
             HeldTree::Workspace { tree, group_keys, .. } => {
@@ -470,8 +480,11 @@ impl TreeKeeper {
 
         let did = self.did.as_str();
 
-        if let Some(HeldTree::Cabinet { tree, x25519, ml_kem }) = self.cabinet.as_mut() {
-            let bundle = crate::crypto::PrivateKeyBundle { x25519, ml_kem };
+        if let Some(HeldTree::Cabinet { tree, keys }) = self.cabinet.as_mut() {
+            let bundle = crate::crypto::PrivateKeyBundle {
+                x25519: &keys.x25519,
+                ml_kem: &keys.ml_kem,
+            };
             let change =
                 tree.apply_directory_delta(&delete_payload, &DecryptionCtx::cabinet(did, &bundle))?;
             if change.is_effective() {

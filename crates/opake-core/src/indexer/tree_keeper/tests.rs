@@ -564,20 +564,25 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
 }
 
 #[test]
-fn workspace_variant_is_smaller_than_cabinet_variant() {
-    // The Workspace variant must not carry the 2400-byte ML-KEM private key.
-    // Rust enum layout is max(variant sizes), so the enum type itself is
-    // cabinet-sized — but this test documents the *variant* size intent by
-    // verifying that a DirectoryTree + group_keys + u64 is substantially
-    // smaller than the 2400-byte key field alone.
-    //
-    // Real per-instance savings require boxing the Cabinet key material.
-    // That's a follow-up; this refactor's primary win is type-correctness:
-    // no Options, no impossible states, no destructure dance.
+fn workspace_variant_does_not_pay_for_cabinet_keys() {
+    // Cabinet's 2432 bytes of key material live behind a Box, so Rust's
+    // max(variant size) layout doesn't bloat every Workspace tree. The
+    // enum is now sized by the Workspace variant; Cabinet's key payload
+    // only allocates for the (typically one) cabinet tree per identity.
     use std::mem::size_of;
     use crate::crypto::{MlKemPrivateKey, X25519PrivateKey};
+
+    // The raw key bytes still cost what they cost — they just live on
+    // the heap inside CabinetKeys now.
     assert_eq!(size_of::<MlKemPrivateKey>(), 2400);
     assert_eq!(size_of::<X25519PrivateKey>(), 32);
-    // The Workspace variant fields (DirectoryTree + HashMap + u64) don't
-    // include any static 2400-byte allocation — confirmed by the types above.
+
+    // Cabinet inline storage would push HeldTree to >= 2432 bytes; with
+    // the Box, the enum is at most ~Workspace-sized. 2000 is a generous
+    // ceiling that still catches a regression to inline storage.
+    assert!(
+        size_of::<super::HeldTree>() < 2000,
+        "HeldTree is {} bytes — Cabinet keys may have regressed to inline storage",
+        size_of::<super::HeldTree>(),
+    );
 }
