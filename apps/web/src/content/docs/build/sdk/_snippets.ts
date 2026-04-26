@@ -510,17 +510,12 @@ const watcher = opake.watchWorkspaces((snapshot) => {
 // Stop listening when you're done.
 watcher.close();`;
 
-export const addWorkspaceMember = `// Look up the invitee's published hybrid public-key bundle first.
-// resolveIdentity returns both halves (X25519 + ML-KEM-768) plus their algos.
+export const addWorkspaceMember = `// Resolve the invitee's DID once for UI affordances, then hand it off.
+// Core handles the rest — resolves the hybrid public-key bundle inside
+// WASM, wraps the group key to it, writes the updated keyring record.
 const recipient = await opake.resolveIdentity(handle);
 
-await opake.addWorkspaceMember(
-  keyringUri,
-  recipient.did,
-  recipient.x25519PublicKey,
-  recipient.mlKemPublicKey,
-  "editor",
-);
+await opake.addWorkspaceMember(keyringUri, recipient.did, "editor");
 
 // The workspace keyring record on the owner's PDS now has an extra
 // member entry containing the group key wrapped to the invitee's

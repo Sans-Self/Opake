@@ -233,7 +233,7 @@ pub fn create_group_key(
     let group_key = super::generate_content_key(rng);
     let wrapped_keys: Result<Vec<_>, _> = members
         .iter()
-        .map(|m| wrap_key(&group_key, &m.public_keys(), m.did, rng))
+        .map(|m| wrap_key(&group_key, &m.keys, m.did, rng))
         .collect();
     Ok((group_key, wrapped_keys?))
 }

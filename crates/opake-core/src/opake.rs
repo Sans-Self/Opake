@@ -22,7 +22,7 @@
 use crate::atproto;
 use crate::cabinet::Cabinet;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{ContentKey, CryptoRng, DidMember, OwnedPrivateKeys, RngCore};
+use crate::crypto::{ContentKey, CryptoRng, DidMember, OwnedPrivateKeys, PublicKeyBundle, RngCore};
 use crate::error::Error;
 use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
@@ -776,8 +776,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                             .iter()
                             .map(|(d, x_pk, mlkem_pk)| crypto::DidMember {
                                 did: d.as_str(),
-                                x25519_public_key: x_pk,
-                                ml_kem_public_key: mlkem_pk,
+                                keys: crypto::PublicKeyBundle {
+                                    x25519: x_pk,
+                                    ml_kem: mlkem_pk,
+                                },
                             })
                             .collect();
 
@@ -1087,22 +1089,33 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Add a member to a workspace.
     ///
+    /// Resolves the member's hybrid public-key bundle internally from the
+    /// DID, mirroring the proposal-application path. Callers (including
+    /// the WASM binding) only need to pass the DID — fewer byte arrays
+    /// crossing the boundary, one resolution path.
+    ///
     /// Owner: applies directly. Non-owner manager: creates a keyringUpdate
-    /// proposal carrying the new member's DID and public-key hint. The
-    /// proposal record carries only the X25519 half; the owner resolves the
-    /// member's full hybrid identity from their published `publicKey/self`
-    /// record before re-wrapping the group key.
+    /// proposal carrying the new member's DID. The owner re-resolves and
+    /// re-wraps when applying.
     pub async fn add_workspace_member(
         &mut self,
         keyring_uri: &str,
         key: &ContentKey,
         member_did: &str,
-        member_public_keys: crate::crypto::PublicKeyBundle<'_>,
         role: Role,
     ) -> Result<MutationOutcome, Error> {
         let owner_did = atproto::parse_at_uri(keyring_uri)?.authority.to_string();
         let is_owner = owner_did == self.did();
         let now = self.now();
+
+        // Resolve the member's hybrid bundle from their published
+        // publicKey/self record. This is the same path the proposal
+        // application code takes, so owner + non-owner stay symmetric.
+        let resolved = self.resolve_identity(member_did).await?;
+        let member_public_keys = PublicKeyBundle {
+            x25519: &resolved.x25519_public_key,
+            ml_kem: &resolved.ml_kem_public_key,
+        };
 
         if is_owner {
             keyrings::add_member(
@@ -1195,8 +1208,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 .enumerate()
                 .map(|(i, did)| DidMember {
                     did,
-                    x25519_public_key: &remaining_pubkeys[i].0,
-                    ml_kem_public_key: &remaining_pubkeys[i].1,
+                    keys: PublicKeyBundle {
+                        x25519: &remaining_pubkeys[i].0,
+                        ml_kem: &remaining_pubkeys[i].1,
+                    },
                 })
                 .collect();
 

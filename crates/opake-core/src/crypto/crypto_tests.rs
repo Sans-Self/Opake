@@ -245,13 +245,17 @@ fn create_group_key_wraps_to_all_members() {
     let members = vec![
         DidMember {
             did: "did:plc:alice",
-            x25519_public_key: &alice.x25519_pub,
-            ml_kem_public_key: &alice.ml_kem_pub,
+            keys: PublicKeyBundle {
+                x25519: &alice.x25519_pub,
+                ml_kem: &alice.ml_kem_pub,
+            },
         },
         DidMember {
             did: "did:plc:bob",
-            x25519_public_key: &bob.x25519_pub,
-            ml_kem_public_key: &bob.ml_kem_pub,
+            keys: PublicKeyBundle {
+                x25519: &bob.x25519_pub,
+                ml_kem: &bob.ml_kem_pub,
+            },
         },
     ];
 

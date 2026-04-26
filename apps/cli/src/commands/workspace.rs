@@ -159,20 +159,14 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
     let mut opake = ctx.opake().await?;
     let workspace = opake.resolve_workspace(&args.workspace).await?;
 
+    // Pre-resolve for the user-facing display string. Core re-resolves
+    // internally (single source of truth for the bundle) — the CLI-side
+    // call is just for the success-line handle, not for crypto.
     let transport = ReqwestTransport::new();
     let resolved = resolve::resolve_identity(&transport, &ctx.pds_url, &args.member).await?;
 
     opake
-        .add_workspace_member(
-            &workspace.uri,
-            &workspace.key,
-            &resolved.did,
-            opake_core::crypto::PublicKeyBundle {
-                x25519: &resolved.x25519_public_key,
-                ml_kem: &resolved.ml_kem_public_key,
-            },
-            args.role,
-        )
+        .add_workspace_member(&workspace.uri, &workspace.key, &resolved.did, args.role)
         .await?;
 
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
@@ -251,8 +245,10 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
         .enumerate()
         .map(|(i, did)| DidMember {
             did,
-            x25519_public_key: &remaining_pubkeys[i].0,
-            ml_kem_public_key: &remaining_pubkeys[i].1,
+            keys: opake_core::crypto::PublicKeyBundle {
+                x25519: &remaining_pubkeys[i].0,
+                ml_kem: &remaining_pubkeys[i].1,
+            },
         })
         .collect();
 

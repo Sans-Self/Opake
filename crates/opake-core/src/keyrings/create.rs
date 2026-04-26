@@ -31,8 +31,10 @@ pub async fn create_keyring(
     trace!("generating group key for keyring {:?}", params.name);
     let members = [crypto::DidMember {
         did: params.owner_did,
-        x25519_public_key: params.owner_x25519_public_key,
-        ml_kem_public_key: params.owner_ml_kem_public_key,
+        keys: crypto::PublicKeyBundle {
+            x25519: params.owner_x25519_public_key,
+            ml_kem: params.owner_ml_kem_public_key,
+        },
     }];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, rng)?;
 

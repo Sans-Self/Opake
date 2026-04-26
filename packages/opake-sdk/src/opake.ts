@@ -617,15 +617,14 @@ export class Opake {
   addWorkspaceMember(
     keyringUri: string,
     memberDid: string,
-    memberX25519PublicKey: Uint8Array,
-    memberMlKemPublicKey: Uint8Array,
     role: WorkspaceRole,
   ): Promise<MutationResult> {
+    // Core resolves the recipient's hybrid public-key bundle internally
+    // — fewer byte arrays crossing the WASM boundary, single resolution
+    // path on owner + non-owner branches.
     return this.requireContext().addWorkspaceMember(
       keyringUri,
       memberDid,
-      memberX25519PublicKey,
-      memberMlKemPublicKey,
       role,
     ) as Promise<MutationResult>;
   }

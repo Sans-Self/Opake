@@ -21,23 +21,24 @@ pub struct WorkspaceAdmin<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> 
 impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> WorkspaceAdmin<'a, T, R, S> {
     /// Add a member to the workspace.
     ///
-    /// Wraps the group key to the new member's hybrid public-key bundle and
-    /// writes the updated keyring record. Only the workspace owner can call
-    /// this.
-    pub async fn add_member(
-        &mut self,
-        member_did: &str,
-        member_public_keys: PublicKeyBundle<'_>,
-        role: Role,
-    ) -> Result<(), Error> {
+    /// Resolves the member's hybrid public-key bundle internally from the
+    /// DID, wraps the group key to it, and writes the updated keyring
+    /// record. Only the workspace owner can call this. Mirrors
+    /// `Opake::add_workspace_member`'s DID-only surface.
+    pub async fn add_member(&mut self, member_did: &str, role: Role) -> Result<(), Error> {
         let now = self.opake.now();
+        let resolved = self.opake.resolve_identity(member_did).await?;
+        let bundle = PublicKeyBundle {
+            x25519: &resolved.x25519_public_key,
+            ml_kem: &resolved.ml_kem_public_key,
+        };
         keyrings::add_member(
             &mut self.opake.client,
             &keyrings::AddMemberParams {
                 keyring_uri: &self.workspace.uri,
                 group_key: &self.workspace.key,
                 new_member_did: member_did,
-                new_member_public_keys: member_public_keys,
+                new_member_public_keys: bundle,
                 role,
                 modified_at: &now,
             },

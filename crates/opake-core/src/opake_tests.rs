@@ -168,13 +168,17 @@ fn two_member_keyring_with_real_crypto(
     let members = [
         DidMember {
             did: OWNER_DID,
-            x25519_public_key: owner_pubkey,
-            ml_kem_public_key: owner_mlkem_pubkey,
+            keys: crypto::PublicKeyBundle {
+                x25519: owner_pubkey,
+                ml_kem: owner_mlkem_pubkey,
+            },
         },
         DidMember {
             did: BOB_DID,
-            x25519_public_key: bob_pubkey,
-            ml_kem_public_key: bob_mlkem_pubkey,
+            keys: crypto::PublicKeyBundle {
+                x25519: bob_pubkey,
+                ml_kem: bob_mlkem_pubkey,
+            },
         },
     ];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, &mut OsRng).unwrap();

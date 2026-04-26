@@ -221,21 +221,14 @@ impl OwnedPrivateKeys {
     }
 }
 
-/// A DID string paired with both halves of its hybrid encryption public key.
+/// A DID string paired with its hybrid encryption public-key bundle.
+///
+/// Re-uses `PublicKeyBundle` for the key halves so adding a third KEM
+/// half later means touching one struct, not two. The `keys` field is
+/// the same view `wrap_key` consumes — no per-member adapter call.
 pub struct DidMember<'a> {
     pub did: &'a str,
-    pub x25519_public_key: &'a X25519PublicKey,
-    pub ml_kem_public_key: &'a MlKemPublicKey,
-}
-
-impl<'a> DidMember<'a> {
-    /// Borrow the member's public-key halves as a bundle.
-    pub fn public_keys(&self) -> PublicKeyBundle<'a> {
-        PublicKeyBundle {
-            x25519: self.x25519_public_key,
-            ml_kem: self.ml_kem_public_key,
-        }
-    }
+    pub keys: PublicKeyBundle<'a>,
 }
 
 /// An ephemeral hybrid keypair for one-time key exchanges (e.g. device pairing).
