@@ -131,7 +131,7 @@ describe("pair request cleanup", () => {
       wrappedKey: {
         did: "did:plc:alice",
         ciphertext: { $bytes: "AAAA" },
-        algo: "x25519-hkdf-a256kw",
+        algo: "x25519-mlkem768-hkdf-a256kw",
       },
       ciphertext: { $bytes: "BBBB" },
       nonce: { $bytes: "CCCC" },
@@ -168,7 +168,7 @@ describe("stale grant healing", () => {
       wrappedKey: {
         did: "did:plc:bob",
         ciphertext: { $bytes: "AAAA" },
-        algo: "x25519-hkdf-a256kw",
+        algo: "x25519-mlkem768-hkdf-a256kw",
       },
       encryptedMetadata: {
         ciphertext: { $bytes: "BBBB" },
@@ -214,7 +214,7 @@ describe("stale grant healing", () => {
       wrappedKey: {
         did: "did:plc:bob",
         ciphertext: { $bytes: "AAAA" },
-        algo: "x25519-hkdf-a256kw",
+        algo: "x25519-mlkem768-hkdf-a256kw",
       },
       encryptedMetadata: {
         ciphertext: { $bytes: "BBBB" },

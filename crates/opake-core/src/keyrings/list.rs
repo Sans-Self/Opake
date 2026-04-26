@@ -59,7 +59,7 @@ mod tests {
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
-                    algo: "x25519-hkdf-a256kw".into(),
+                    algo: "x25519-mlkem768-hkdf-a256kw".into(),
                 },
                 role: Role::Manager,
             })

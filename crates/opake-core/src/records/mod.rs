@@ -185,7 +185,7 @@ mod tests {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw".into(),
             }],
         });
         let encrypted_metadata = EncryptedMetadata {
@@ -253,7 +253,7 @@ mod tests {
                 "wrappedKey": {
                     "did": "did:plc:test",
                     "ciphertext": { "$bytes": "AAAA" },
-                    "algo": "x25519-hkdf-a256kw",
+                    "algo": "x25519-mlkem768-hkdf-a256kw",
                 },
                 "role": "manager",
             }],
@@ -279,7 +279,7 @@ mod tests {
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
-                    algo: "x25519-hkdf-a256kw".into(),
+                    algo: "x25519-mlkem768-hkdf-a256kw".into(),
                 },
                 role: Role::Manager,
             }],

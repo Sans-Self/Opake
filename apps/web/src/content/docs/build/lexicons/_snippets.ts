@@ -5,15 +5,15 @@
 export const wrappedKeyShape = `{
   "did": "did:plc:alice...",         // recipient DID
   "ciphertext": "<bytes>",            // content key, encrypted to their pubkey
-  "algo": "x25519-hkdf-a256kw"
+  "algo": "x25519-mlkem768-hkdf-a256kw"
 }`;
 
 export const encryptionEnvelopeShape = `{
   "algo": "aes-256-gcm",
   "nonce": "<12-byte IV>",
   "keys": [                           // one wrapped copy per recipient
-    { "did": "did:plc:alice", "ciphertext": "...", "algo": "x25519-hkdf-a256kw" },
-    { "did": "did:plc:bob",   "ciphertext": "...", "algo": "x25519-hkdf-a256kw" }
+    { "did": "did:plc:alice", "ciphertext": "...", "algo": "x25519-mlkem768-hkdf-a256kw" },
+    { "did": "did:plc:bob",   "ciphertext": "...", "algo": "x25519-mlkem768-hkdf-a256kw" }
   ]
 }`;
 
@@ -71,7 +71,7 @@ export const grantRecordShape = `{
   "wrappedKey": {
     "did": "did:plc:bob",
     "ciphertext": "<content key, re-wrapped to Bob>",
-    "algo": "x25519-hkdf-a256kw"
+    "algo": "x25519-mlkem768-hkdf-a256kw"
   },
   "createdAt": "2026-04-24T10:05:00Z"
 }`;

@@ -55,10 +55,10 @@ as shared refs.
 
 <CodeBlock language="json" title="wrappedKey" code={wrappedKeyShape} />
 
-A symmetric key encrypted to a specific recipient's X25519 public key. `algo` is
-`x25519-hkdf-a256kw` — ephemeral-sender Diffie-Hellman, HKDF-derived KEK, AES-KeyWrap
-over the content key. `ciphertext` is `[32-byte ephemeral pubkey || 40-byte wrapped
-key]`.
+A symmetric key encrypted to a specific recipient's hybrid public key. `algo` is
+`x25519-mlkem768-hkdf-a256kw` — X25519 + ML-KEM-768 combined via HKDF, AES-KeyWrap
+over the content key (BSI TR-02102 / ANSSI hybrid construction). `ciphertext` is
+`[32-byte X25519 pubkey || 1088-byte ML-KEM ciphertext || 40-byte wrapped key]`.
 
 ### `encryptionEnvelope`
 

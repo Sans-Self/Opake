@@ -27,7 +27,7 @@ sequenceDiagram
     PDS-->>Opake: blob ref { $link, size }
 
     Opake->>Crypto: wrap_key(K, owner_pubkey, owner_did)
-    Crypto-->>Opake: wrappedKey (x25519-hkdf-a256kw)
+    Crypto-->>Opake: wrappedKey (x25519-mlkem768-hkdf-a256kw)
 
     Opake->>Crypto: encrypt_metadata(K, {name, mimeType, size, tags, ...})
     Crypto-->>Opake: encryptedMetadata { ciphertext, nonce }

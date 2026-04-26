@@ -12,7 +12,7 @@ fn pair_response_roundtrips_through_json() {
             ciphertext: AtBytes {
                 encoded: "AAAA".into(),
             },
-            algo: "x25519-hkdf-a256kw".into(),
+            algo: "x25519-mlkem768-hkdf-a256kw".into(),
         },
         ciphertext: AtBytes {
             encoded: "BBBB".into(),
@@ -30,7 +30,7 @@ fn pair_response_roundtrips_through_json() {
     assert_eq!(parsed.opake_version, SCHEMA_VERSION);
     assert_eq!(parsed.request, record.request);
     assert_eq!(parsed.wrapped_key.did, "did:plc:test");
-    assert_eq!(parsed.wrapped_key.algo, "x25519-hkdf-a256kw");
+    assert_eq!(parsed.wrapped_key.algo, "x25519-mlkem768-hkdf-a256kw");
     assert_eq!(parsed.algo, "aes-256-gcm");
     assert_eq!(parsed.created_at, "2026-03-06T12:00:00Z");
 }
@@ -45,7 +45,7 @@ fn pair_response_uses_atbytes_wire_format() {
             ciphertext: AtBytes {
                 encoded: "AAAA".into(),
             },
-            algo: "x25519-hkdf-a256kw".into(),
+            algo: "x25519-mlkem768-hkdf-a256kw".into(),
         },
         ciphertext: AtBytes {
             encoded: "BBBB".into(),

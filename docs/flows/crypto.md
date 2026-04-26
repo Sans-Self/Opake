@@ -1,23 +1,28 @@
 # Encryption Primitives
 
-## Key Wrapping (x25519-hkdf-a256kw)
+## Key Wrapping (x25519-mlkem768-hkdf-a256kw)
 
-How a symmetric content key gets wrapped to a recipient's X25519 public key. This is the core crypto operation behind both direct encryption and grant creation.
+How a symmetric content key gets wrapped to a recipient's hybrid public key (X25519 + ML-KEM-768). Defends against harvest-now-decrypt-later per BSI TR-02102 / ANSSI guidance. Both KEM outputs are combined via HKDF before use as a KEK.
 
 ```mermaid
 flowchart LR
     subgraph Wrap ["wrap_key()"]
         direction TB
-        EphKey["Generate ephemeral<br/>X25519 keypair"] --> ECDH
-        RecipPub["Recipient's<br/>X25519 public key"] --> ECDH
-        ECDH["X25519 ECDH<br/>shared secret"] --> HKDF
-        HKDF["HKDF-SHA256<br/>info = 'opake-v1-x25519-hkdf-a256kw-{did}'"] --> KEK
+        EphX["Ephemeral X25519<br/>keypair"] --> ECDH
+        RecipX["Recipient<br/>X25519 pubkey"] --> ECDH
+        ECDH["X25519 shared secret"] --> HKDF
+
+        EphML["Ephemeral ML-KEM-768<br/>encapsulation"] --> MLSec
+        RecipML["Recipient<br/>ML-KEM-768 pubkey"] --> EphML
+        MLSec["ML-KEM-768 shared secret"] --> HKDF
+
+        HKDF["HKDF-SHA256<br/>info = 'opake-v1-x25519-mlkem768-hkdf-a256kw-{did}'"] --> KEK
         KEK["256-bit key<br/>encryption key"] --> AESKW
         ContentKey["Content key K<br/>(AES-256)"] --> AESKW
         AESKW["AES-256-KW"] --> Ciphertext
     end
 
-    Ciphertext["wrappedKey.ciphertext:<br/>[32B ephemeral pubkey ‖ 40B wrapped key]"]
+    Ciphertext["wrappedKey.ciphertext:<br/>[32B X25519 pubkey ‖ 1088B ML-KEM ct ‖ 40B wrapped key]"]
 
     style Wrap fill:#1a1a2e,color:#eee
     style Ciphertext fill:#16213e,color:#eee
