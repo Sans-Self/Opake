@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{decrypt_blob, unwrap_key, EncryptedPayload, X25519PrivateKey};
+use crate::crypto::{decrypt_blob, unwrap_key_x25519_only, EncryptedPayload, X25519PrivateKey};
 use crate::error::Error;
 use crate::records::{
     PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION,
@@ -112,7 +112,9 @@ async fn decrypt_pair_response(
     response: &PairResponse,
     ephemeral_private_key: &X25519PrivateKey,
 ) -> Result<Identity, Error> {
-    let content_key = unwrap_key(&response.wrapped_key, ephemeral_private_key)?;
+    // Pair-flow legacy envelope: see `wrap_key_x25519_only` in
+    // `crypto::key_wrapping`. Phase 3.5 will hybridize this path.
+    let content_key = unwrap_key_x25519_only(&response.wrapped_key, ephemeral_private_key)?;
 
     let ciphertext = BASE64.decode(&response.ciphertext.encoded).map_err(|e| {
         Error::Decryption(format!("invalid base64 in pair response ciphertext: {e}"))

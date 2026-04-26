@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::*;
-use crate::crypto::{CryptoRng, RngCore, X25519PrivateKey};
+use crate::crypto::{CryptoRng, RngCore};
 
 fn sample_entry(uri: &str, rotation: u64) -> WorkspaceEntry {
     WorkspaceEntry {
@@ -229,13 +229,13 @@ fn make_member_json(
     role: crate::records::Role,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> serde_json::Value {
-    use crate::crypto::{generate_content_key, wrap_key, X25519DalekStaticSecret};
+    use crate::crypto::{generate_content_key, wrap_key};
     use crate::records::KeyringMember;
+    use crate::test_utils::TestKeys;
 
-    let secret = X25519DalekStaticSecret::random_from_rng(&mut *rng);
-    let public = crate::crypto::X25519DalekPublicKey::from(&secret);
+    let keys = TestKeys::generate(did);
     let gk = generate_content_key(rng);
-    let wrapped = wrap_key(&gk, public.as_bytes(), did, rng).unwrap();
+    let wrapped = wrap_key(&gk, &keys.public_keys(), did, rng).unwrap();
     serde_json::to_value(KeyringMember {
         wrapped_key: wrapped,
         role,
@@ -248,13 +248,14 @@ fn make_member_json(
 /// visible in the sidebar and reconciles on the next SSE event.
 #[test]
 fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
-    use crate::crypto::{OsRng, X25519DalekStaticSecret};
+    use crate::crypto::OsRng;
+    use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
     let member_json = make_member_json("did:plc:alice", crate::records::Role::Manager, &mut rng);
 
-    // Completely different private key — unwrap will fail.
-    let wrong_key: X25519PrivateKey = X25519DalekStaticSecret::random_from_rng(rng).to_bytes();
+    // Completely different keypair — unwrap will fail.
+    let wrong_keys = TestKeys::generate("did:plc:alice");
 
     let entry = try_build_entry(
         "at://did:plc:alice/app.opake.keyring/abc",
@@ -264,7 +265,7 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
         None,
         None,
         "did:plc:alice",
-        &wrong_key,
+        &wrong_keys.private_keys(),
     );
 
     let entry = entry.expect("unwrap failure must return Some, not None");
@@ -288,12 +289,12 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
 #[test]
 fn try_build_entry_non_member_returns_none() {
     use crate::crypto::OsRng;
+    use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
     // alice is a member; bob is the caller.
     let member_json = make_member_json("did:plc:alice", crate::records::Role::Manager, &mut rng);
-    let bobs_key: X25519PrivateKey =
-        crate::crypto::X25519DalekStaticSecret::random_from_rng(rng).to_bytes();
+    let bob = TestKeys::generate("did:plc:bob");
 
     let result = try_build_entry(
         "at://did:plc:alice/app.opake.keyring/abc",
@@ -303,7 +304,7 @@ fn try_build_entry_non_member_returns_none() {
         None,
         None,
         "did:plc:bob",
-        &bobs_key,
+        &bob.private_keys(),
     );
 
     assert!(result.is_none(), "non-member DID must return None");

@@ -91,8 +91,10 @@ mod tests {
         setup_account(&storage, did);
         let identity = Identity {
             did: did.into(),
-            public_key: BASE64.encode([1u8; 32]),
-            private_key: BASE64.encode([2u8; 32]),
+            x25519_public_key: BASE64.encode([1u8; 32]),
+            x25519_private_key: BASE64.encode([2u8; 32]),
+            ml_kem_public_key: BASE64.encode([5u8; 1184]),
+            ml_kem_private_key: BASE64.encode([6u8; 2400]),
             signing_key: Some(BASE64.encode([3u8; 32])),
             verify_key: Some(BASE64.encode([4u8; 32])),
         };
@@ -100,13 +102,17 @@ mod tests {
 
         let loaded = load_identity(&storage, did).unwrap();
         assert_eq!(loaded.did, identity.did);
-        assert_eq!(loaded.public_key, identity.public_key);
-        assert_eq!(loaded.private_key, identity.private_key);
+        assert_eq!(loaded.x25519_public_key, identity.x25519_public_key);
+        assert_eq!(loaded.x25519_private_key, identity.x25519_private_key);
+        assert_eq!(loaded.ml_kem_public_key, identity.ml_kem_public_key);
+        assert_eq!(loaded.ml_kem_private_key, identity.ml_kem_private_key);
         assert_eq!(loaded.signing_key, identity.signing_key);
         assert_eq!(loaded.verify_key, identity.verify_key);
 
         assert_eq!(loaded.x25519_public_key_bytes().unwrap(), [1u8; 32]);
         assert_eq!(*loaded.x25519_private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(loaded.ml_kem_public_key_bytes().unwrap(), [5u8; 1184]);
+        assert_eq!(*loaded.ml_kem_private_key_bytes().unwrap(), [6u8; 2400]);
         assert_eq!(loaded.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(loaded.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
     }
@@ -130,21 +136,26 @@ mod tests {
         let loaded = load_and_migrate(&storage, did, &mut OsRng)
             .unwrap()
             .expect("should find existing identity");
-        assert_eq!(loaded.public_key, saved.public_key);
-        assert_eq!(loaded.private_key, saved.private_key);
+        assert_eq!(loaded.x25519_public_key, saved.x25519_public_key);
+        assert_eq!(loaded.x25519_private_key, saved.x25519_private_key);
     }
 
     #[test]
-    fn load_and_migrate_adds_signing_keys_to_old_format() {
+    fn load_and_migrate_adds_signing_keys_to_phase_2_format() {
         let (_dir, storage) = test_storage();
         let did = "did:plc:legacy";
         setup_account(&storage, did);
 
-        // Write an old-format identity (no signing keys) with correct permissions.
+        // Write a phase-2 identity (X25519 + ML-KEM but no signing keys).
+        // Pre-Phase-2 identities (X25519-only) are no longer loadable —
+        // ML-KEM-768 keys are required by the hybrid KEM, and there is
+        // no install base to migrate from.
         let old_identity = serde_json::json!({
             "did": did,
-            "publicKey": BASE64.encode([1u8; 32]),
-            "privateKey": BASE64.encode([2u8; 32]),
+            "x25519_public_key": BASE64.encode([1u8; 32]),
+            "x25519_private_key": BASE64.encode([2u8; 32]),
+            "ml_kem_public_key": BASE64.encode([5u8; 1184]),
+            "ml_kem_private_key": BASE64.encode([6u8; 2400]),
         });
         storage.ensure_account_dir(did).unwrap();
         FileStorage::write_sensitive_file(
@@ -157,9 +168,11 @@ mod tests {
             .unwrap()
             .expect("should load and migrate");
         assert!(identity.has_signing_keys());
-        // X25519 keys preserved.
+        // X25519 + ML-KEM keys preserved.
         assert_eq!(identity.x25519_public_key_bytes().unwrap(), [1u8; 32]);
         assert_eq!(*identity.x25519_private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(identity.ml_kem_public_key_bytes().unwrap(), [5u8; 1184]);
+        assert_eq!(*identity.ml_kem_private_key_bytes().unwrap(), [6u8; 2400]);
 
         // Re-load should have signing keys persisted.
         let reloaded = load_identity(&storage, did).unwrap();

@@ -37,7 +37,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{self, KeyringMetadata, X25519PrivateKey};
+use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
 use crate::records::{EncryptedMetadata, KeyringMember};
 
 // ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ pub fn try_build_entry(
     encrypted_metadata: Option<&serde_json::Value>,
     created_at: Option<&str>,
     my_did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<WorkspaceEntry> {
     // Parse member records. Anything that doesn't round-trip through the
     // `KeyringMember` shape is dropped — matches the existing
@@ -286,7 +286,7 @@ pub fn try_build_entry(
     // method lives on the generic `impl<T, R, S> Opake<T, R, S>` block,
     // so calling it as a free function would require naming dummy
     // generics. The logic is two lines; duplicating avoids the dance.
-    let group_key = match crypto::unwrap_key(&my_member.wrapped_key, private_key) {
+    let group_key = match crypto::unwrap_key(&my_member.wrapped_key, private_keys) {
         Ok(k) => k,
         Err(_) => {
             // Unwrap failed — corrupt data or wrong key material.
@@ -339,7 +339,7 @@ pub fn try_build_entry(
 pub fn try_build_entry_from_indexer_keyring(
     keyring: &crate::indexer::IndexerKeyring,
     my_did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<WorkspaceEntry> {
     try_build_entry(
         &keyring.uri,
@@ -349,7 +349,7 @@ pub fn try_build_entry_from_indexer_keyring(
         keyring.encrypted_metadata.as_ref(),
         keyring.created_at.as_deref(),
         my_did,
-        private_key,
+        private_keys,
     )
 }
 
@@ -363,7 +363,7 @@ pub fn try_build_entry_from_indexer_keyring(
 pub fn try_build_entry_from_sse_record(
     record: &crate::indexer::sse::events::SseKeyringRecord,
     my_did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<WorkspaceEntry> {
     try_build_entry(
         &record.uri,
@@ -373,7 +373,7 @@ pub fn try_build_entry_from_sse_record(
         record.encrypted_metadata.as_ref(),
         record.created_at.as_deref(),
         my_did,
-        private_key,
+        private_keys,
     )
 }
 

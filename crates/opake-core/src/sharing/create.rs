@@ -1,7 +1,7 @@
 use log::trace;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PublicKeyBundle, RngCore};
 use crate::error::Error;
 use crate::records::Grant;
 
@@ -11,7 +11,7 @@ pub struct GrantParams<'a> {
     pub document_uri: &'a str,
     pub recipient_did: &'a str,
     pub content_key: &'a ContentKey,
-    pub recipient_public_key: &'a X25519PublicKey,
+    pub recipient_public_keys: PublicKeyBundle<'a>,
     pub permissions: &'a str,
     pub note: Option<&'a str>,
     pub created_at: &'a str,
@@ -27,7 +27,7 @@ pub async fn create_grant(
     trace!("wrapping content key for {}", params.recipient_did);
     let wrapped_key = crypto::wrap_key(
         params.content_key,
-        params.recipient_public_key,
+        &params.recipient_public_keys,
         params.recipient_did,
         rng,
     )?;
@@ -56,7 +56,7 @@ mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::crypto::{generate_content_key, OsRng};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{MockTransport, TestKeys};
 
     const TEST_DID: &str = "did:plc:owner";
 
@@ -91,14 +91,13 @@ mod tests {
         let mut client = mock_client(mock.clone());
         let content_key = generate_content_key(&mut OsRng);
 
-        let recipient_secret = crate::crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-        let recipient_public = crate::crypto::X25519DalekPublicKey::from(&recipient_secret);
+        let recipient = TestKeys::generate("did:plc:recipient");
 
         let params = GrantParams {
             document_uri: "at://did:plc:owner/app.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
-            recipient_public_key: recipient_public.as_bytes(),
+            recipient_public_keys: recipient.public_keys(),
             permissions: "read",
             note: Some("here you go"),
             created_at: "2026-03-01T12:00:00Z",
@@ -140,14 +139,13 @@ mod tests {
         let mut client = mock_client(mock.clone());
         let content_key = generate_content_key(&mut OsRng);
 
-        let recipient_secret = crate::crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-        let recipient_public = crate::crypto::X25519DalekPublicKey::from(&recipient_secret);
+        let recipient = TestKeys::generate("did:plc:recipient");
 
         let params = GrantParams {
             document_uri: "at://did:plc:owner/app.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
-            recipient_public_key: recipient_public.as_bytes(),
+            recipient_public_keys: recipient.public_keys(),
             permissions: "read",
             note: None,
             created_at: "2026-03-01T12:00:00Z",
@@ -163,7 +161,7 @@ mod tests {
         if let RequestBody::Json(v) = record {
             let grant: Grant = serde_json::from_value(v["record"].clone()).unwrap();
             let unwrapped =
-                crypto::unwrap_key(&grant.wrapped_key, &recipient_secret.to_bytes()).unwrap();
+                crypto::unwrap_key(&grant.wrapped_key, &recipient.private_keys()).unwrap();
             assert_eq!(unwrapped.0, content_key.0);
         }
     }

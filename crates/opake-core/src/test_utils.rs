@@ -3,9 +3,71 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use zeroize::Zeroizing;
+
 use crate::client::{HttpRequest, HttpResponse, Transport};
+use crate::crypto::{
+    MlKemPrivateKey, MlKemPublicKey, OsRng, PrivateKeyBundle, PublicKeyBundle, X25519PrivateKey,
+    X25519PublicKey,
+};
 use crate::error::Error;
 use crate::records::{AtBytes, EncryptedMetadata};
+use crate::storage::Identity;
+
+/// Owned hybrid keypair material for tests.
+///
+/// Tests that previously used a single X25519 keypair via `test_keypair()`
+/// can now hold one of these and borrow `public_keys()` / `private_keys()`
+/// to construct the bundle views that wrap/unwrap require.
+pub struct TestKeys {
+    pub identity: Identity,
+    pub x25519_pub: X25519PublicKey,
+    pub x25519_priv: Zeroizing<X25519PrivateKey>,
+    pub ml_kem_pub: MlKemPublicKey,
+    pub ml_kem_priv: Zeroizing<MlKemPrivateKey>,
+}
+
+impl TestKeys {
+    /// Generate a fresh hybrid identity, decoded for direct borrowing.
+    pub fn generate(did: &str) -> Self {
+        let identity = Identity::generate(did, &mut OsRng);
+        let x25519_pub = identity
+            .x25519_public_key_bytes()
+            .expect("test identity must have valid x25519 public key");
+        let x25519_priv = identity
+            .x25519_private_key_bytes()
+            .expect("test identity must have valid x25519 private key");
+        let ml_kem_pub = identity
+            .ml_kem_public_key_bytes()
+            .expect("test identity must have valid ml-kem public key");
+        let ml_kem_priv = identity
+            .ml_kem_private_key_bytes()
+            .expect("test identity must have valid ml-kem private key");
+        Self {
+            identity,
+            x25519_pub,
+            x25519_priv,
+            ml_kem_pub,
+            ml_kem_priv,
+        }
+    }
+
+    /// Borrow into a `PublicKeyBundle` view.
+    pub fn public_keys(&self) -> PublicKeyBundle<'_> {
+        PublicKeyBundle {
+            x25519: &self.x25519_pub,
+            ml_kem: &self.ml_kem_pub,
+        }
+    }
+
+    /// Borrow into a `PrivateKeyBundle` view.
+    pub fn private_keys(&self) -> PrivateKeyBundle<'_> {
+        PrivateKeyBundle {
+            x25519: &self.x25519_priv,
+            ml_kem: &self.ml_kem_priv,
+        }
+    }
+}
 
 /// A no-op encrypted metadata value for tests that don't exercise decryption.
 pub fn dummy_encrypted_metadata() -> EncryptedMetadata {

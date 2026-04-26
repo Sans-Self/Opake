@@ -109,15 +109,19 @@ fn pending_share(recipient: &str, created_at: &str) -> PendingShare {
     )
 }
 
-// A zero private key — never reaches crypto in these tests (we never
-// get past the resolve step or TTL check to fetch_content_key).
-static DUMMY_PRIVATE_KEY: crate::crypto::X25519PrivateKey = [0u8; 32];
+// All-zero hybrid private keys — never reaches crypto in these tests (we
+// never get past the resolve step or TTL check to fetch_content_key).
+static DUMMY_X25519_PRIVATE_KEY: crate::crypto::X25519PrivateKey = [0u8; 32];
+static DUMMY_ML_KEM_PRIVATE_KEY: crate::crypto::MlKemPrivateKey = [0u8; 2400];
 
 fn base_retry_params(now: i64) -> RetryParams<'static> {
     RetryParams {
         caller_pds_url: "https://pds.test",
         owner_did: OWNER_DID,
-        owner_private_key: &DUMMY_PRIVATE_KEY,
+        owner_private_keys: crate::crypto::PrivateKeyBundle {
+            x25519: &DUMMY_X25519_PRIVATE_KEY,
+            ml_kem: &DUMMY_ML_KEM_PRIVATE_KEY,
+        },
         now,
         ttl_seconds: DEFAULT_PENDING_SHARE_TTL_SECONDS,
     }

@@ -603,7 +603,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     fn decrypt_tree(&self, tree: &mut DirectoryTree) -> Result<(), Error> {
         match &self.context {
             FileContext::Cabinet(cabinet) => {
-                tree.decrypt_names(&cabinet.did, &cabinet.private_key);
+                tree.decrypt_names(&cabinet.did, &cabinet.private_keys());
             }
             FileContext::Workspace(ws) => {
                 let root_uri = ws.root_directory_uri();
@@ -612,8 +612,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let mut group_keys = HashMap::new();
                 group_keys.insert(ws.uri.clone(), ws.key.clone());
 
-                let private_key = self.opake.identity().x25519_private_key_bytes()?;
-                tree.decrypt_names_with_group_keys(&self.opake.did, &private_key, &group_keys);
+                let identity = self.opake.identity();
+                let x25519_private = identity.x25519_private_key_bytes()?;
+                let ml_kem_private = identity.ml_kem_private_key_bytes()?;
+                let private_keys = crate::crypto::PrivateKeyBundle {
+                    x25519: &x25519_private,
+                    ml_kem: &ml_kem_private,
+                };
+                tree.decrypt_names_with_group_keys(
+                    &self.opake.did,
+                    &private_keys,
+                    &group_keys,
+                );
             }
         }
         Ok(())
@@ -631,16 +641,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         tree: &DirectoryTree,
     ) -> Result<HashMap<String, String>, Error> {
-        let (did, private_key, group_key) = self.decryption_params()?;
+        let keys = self.decryption_keys()?;
         let mut names = HashMap::new();
 
         for uri in tree.document_uris_in_subtree() {
             match self
                 .resolve_single_document_metadata(
                     &uri,
-                    &did,
-                    &private_key,
-                    group_key.as_ref().map(|k| k as &crypto::ContentKey),
+                    &keys.did,
+                    &keys.private_keys(),
+                    keys.group_key.as_ref(),
                 )
                 .await
             {
@@ -775,7 +785,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         }
 
         // Resolve document names lazily — fetch one at a time, stop on match
-        let (did, private_key, group_key) = self.decryption_params()?;
+        let keys = self.decryption_keys()?;
         let entries = tree.entries_for(directory_uri).unwrap_or(&[]);
         let doc_uris: Vec<String> = entries
             .iter()
@@ -789,9 +799,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             let meta = self
                 .resolve_single_document_metadata(
                     uri,
-                    &did,
-                    &private_key,
-                    group_key.as_ref().map(|k| k as &crypto::ContentKey),
+                    &keys.did,
+                    &keys.private_keys(),
+                    keys.group_key.as_ref(),
                 )
                 .await;
 
@@ -836,16 +846,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         name: &str,
         doc_uris: &[String],
     ) -> Result<ResolvedPath, Error> {
-        let (did, private_key, group_key) = self.decryption_params()?;
+        let keys = self.decryption_keys()?;
         let mut matches = Vec::new();
 
         for uri in doc_uris {
             let meta = self
                 .resolve_single_document_metadata(
                     uri,
-                    &did,
-                    &private_key,
-                    group_key.as_ref().map(|k| k as &crypto::ContentKey),
+                    &keys.did,
+                    &keys.private_keys(),
+                    keys.group_key.as_ref(),
                 )
                 .await;
 
@@ -880,7 +890,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         tree: &DirectoryTree,
         directory_uri: &str,
     ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
-        let (did, private_key, group_key) = self.decryption_params()?;
+        let keys = self.decryption_keys()?;
         let mut result = HashMap::new();
 
         let entries = tree.entries_for(directory_uri).unwrap_or(&[]);
@@ -891,9 +901,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             match self
                 .resolve_single_document_metadata(
                     uri,
-                    &did,
-                    &private_key,
-                    group_key.as_ref().map(|k| k as &crypto::ContentKey),
+                    &keys.did,
+                    &keys.private_keys(),
+                    keys.group_key.as_ref(),
                 )
                 .await
             {
@@ -918,15 +928,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         uris: &[&str],
     ) -> Result<HashMap<String, super::types::ResolvedDocumentMetadata>, Error> {
-        let (did, private_key, group_key) = self.decryption_params()?;
+        let keys = self.decryption_keys()?;
         let mut result = HashMap::new();
         for uri in uris {
             match self
                 .resolve_single_document_metadata(
                     uri,
-                    &did,
-                    &private_key,
-                    group_key.as_ref().map(|k| k as &crypto::ContentKey),
+                    &keys.did,
+                    &keys.private_keys(),
+                    keys.group_key.as_ref(),
                 )
                 .await
             {
@@ -946,7 +956,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         uri: &str,
         did: &str,
-        private_key: &crypto::X25519PrivateKey,
+        private_keys: &crypto::PrivateKeyBundle<'_>,
         group_key: Option<&crypto::ContentKey>,
     ) -> Result<Option<super::types::ResolvedDocumentMetadata>, Error> {
         // Cache-first: check local document cache before hitting PDS
@@ -998,7 +1008,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             Encryption::Direct(direct) => {
                 let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
                 match wrapped {
-                    Some(w) => crypto::unwrap_key(w, private_key)?,
+                    Some(w) => crypto::unwrap_key(w, private_keys)?,
                     None => return Ok(None),
                 }
             }

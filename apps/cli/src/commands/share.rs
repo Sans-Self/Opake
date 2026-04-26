@@ -44,7 +44,10 @@ impl Execute for NewShareCommand {
                     .share(
                         &uri,
                         &recipient.did,
-                        &recipient.x25519_public_key,
+                        opake_core::crypto::PublicKeyBundle {
+                            x25519: &recipient.x25519_public_key,
+                            ml_kem: &recipient.ml_kem_public_key,
+                        },
                         "read",
                         self.note.as_deref(),
                     )

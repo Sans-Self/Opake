@@ -124,11 +124,12 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
         return Ok(None);
     }
 
-    let private_key = opake.identity().x25519_private_key_bytes()?;
+    let private_keys = opake.identity().owned_private_keys()?;
     let did = opake.did();
+    let bundle = private_keys.bundle();
 
     for kr in &keyrings {
-        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &private_key)
+        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &bundle)
             .unwrap_or_else(|| "<encrypted>".into());
         let role_tag = if kr.owner_did == did {
             ""
@@ -166,7 +167,10 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
             &workspace.uri,
             &workspace.key,
             &resolved.did,
-            &resolved.x25519_public_key,
+            opake_core::crypto::PublicKeyBundle {
+                x25519: &resolved.x25519_public_key,
+                ml_kem: &resolved.ml_kem_public_key,
+            },
             args.role,
         )
         .await?;

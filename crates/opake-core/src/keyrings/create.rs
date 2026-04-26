@@ -69,9 +69,9 @@ pub async fn create_keyring(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey};
+    use crate::crypto::OsRng;
     use crate::records::Keyring;
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{MockTransport, TestKeys};
 
     const TEST_DID: &str = "did:plc:owner";
 
@@ -83,19 +83,6 @@ mod tests {
             refresh_jwt: "test-refresh".into(),
         });
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
-    }
-
-    fn test_pubkey() -> (X25519PublicKey, X25519PrivateKey) {
-        let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-        let public = X25519DalekPublicKey::from(&secret);
-        (public.to_bytes(), secret.to_bytes())
-    }
-
-    /// Stand-in 1184-byte ML-KEM-768 public key for keyring-creation tests.
-    /// We don't exercise hybrid wrap here yet (Phase 3a is plumbing only),
-    /// so any well-formed-length blob suffices for compile + flow tests.
-    fn test_mlkem_pubkey() -> MlKemPublicKey {
-        [0xABu8; 1184]
     }
 
     fn create_record_response(uri: &str) -> HttpResponse {
@@ -112,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path() {
-        let (pubkey, privkey) = test_pubkey();
+        let owner = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         let uri = format!("at://{TEST_DID}/app.opake.keyring/tid123");
         mock.enqueue(create_record_response(&uri));
@@ -122,8 +109,8 @@ mod tests {
             name: "family-photos",
             description: None,
             owner_did: TEST_DID,
-            owner_x25519_public_key: &pubkey,
-            owner_ml_kem_public_key: &test_mlkem_pubkey(),
+            owner_x25519_public_key: &owner.x25519_pub,
+            owner_ml_kem_public_key: &owner.ml_kem_pub,
             created_at: "2026-03-01T00:00:00Z",
         };
 
@@ -148,8 +135,11 @@ mod tests {
                 assert_eq!(record.members[0].wrapped_key.did, TEST_DID);
 
                 // Verify the wrapped group key is unwrappable
-                let unwrapped =
-                    crypto::unwrap_key(&record.members[0].wrapped_key, &privkey).unwrap();
+                let unwrapped = crypto::unwrap_key(
+                    &record.members[0].wrapped_key,
+                    &owner.private_keys(),
+                )
+                .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
             }
             _ => panic!("expected JSON body"),
@@ -158,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn pds_error_propagates() {
-        let (pubkey, _) = test_pubkey();
+        let owner = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
@@ -171,8 +161,8 @@ mod tests {
             name: "broken",
             description: None,
             owner_did: TEST_DID,
-            owner_x25519_public_key: &pubkey,
-            owner_ml_kem_public_key: &test_mlkem_pubkey(),
+            owner_x25519_public_key: &owner.x25519_pub,
+            owner_ml_kem_public_key: &owner.ml_kem_pub,
             created_at: "2026-03-01T00:00:00Z",
         };
 

@@ -15,7 +15,7 @@ pub use create::{create_keyring, CreateKeyringParams};
 pub use list::{list_keyrings, KeyringEntry};
 pub use remove_member::remove_member;
 
-use crate::crypto::{self, KeyringMetadata, X25519PrivateKey};
+use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
 
 pub const KEYRING_COLLECTION: &str = "app.opake.keyring";
 
@@ -64,7 +64,7 @@ pub fn decrypt_keyring_name_from_record(
 pub fn decrypt_indexer_keyring_name(
     keyring: &crate::indexer::IndexerKeyring,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<String> {
     let members: Vec<crate::records::KeyringMember> = keyring
         .members
@@ -72,7 +72,7 @@ pub fn decrypt_indexer_keyring_name(
         .filter_map(|v| serde_json::from_value(v.clone()).ok())
         .collect();
     let member = members.iter().find(|m| m.did() == did)?;
-    let group_key = crypto::unwrap_key(&member.wrapped_key, private_key).ok()?;
+    let group_key = crypto::unwrap_key(&member.wrapped_key, private_keys).ok()?;
     let encrypted_metadata: crate::records::EncryptedMetadata =
         serde_json::from_value(keyring.encrypted_metadata.clone()?).ok()?;
     let metadata: KeyringMetadata =
@@ -87,33 +87,25 @@ pub fn decrypt_indexer_keyring_name(
 #[cfg(test)]
 mod indexer_keyring_tests {
     use super::*;
-    use crate::crypto::{
-        generate_content_key, wrap_key, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret,
-        X25519PrivateKey, X25519PublicKey,
-    };
+    use crate::crypto::{generate_content_key, wrap_key, OsRng};
     use crate::indexer::IndexerKeyring;
     use crate::records::KeyringMember;
+    use crate::test_utils::TestKeys;
 
-    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-        let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-        let public = X25519DalekPublicKey::from(&secret);
-        (public.to_bytes(), secret.to_bytes())
-    }
-
-    /// Build an `IndexerKeyring` with real crypto: a group key wrapped to
-    /// `member_did`'s public key and a `KeyringMetadata { name }` encrypted
-    /// under the group key. Returns the keyring plus the caller's private
-    /// key so tests can attempt decryption.
+    /// Build an `IndexerKeyring` with real hybrid crypto: a group key wrapped
+    /// to `member`'s public-key bundle and a `KeyringMetadata { name }`
+    /// encrypted under the group key. Returns the keyring plus the caller's
+    /// owned hybrid keys so tests can attempt decryption.
     fn fixture(
         name: &str,
         owner_did: &str,
+        member: &TestKeys,
         member_did: &str,
         uri: &str,
-    ) -> (IndexerKeyring, X25519PrivateKey) {
-        let (member_pubkey, member_privkey) = test_keypair();
+    ) -> IndexerKeyring {
         let group_key = generate_content_key(&mut OsRng);
-        let wrapped =
-            wrap_key(&group_key, &member_pubkey, member_did, &mut OsRng).expect("wrap_key");
+        let wrapped = wrap_key(&group_key, &member.public_keys(), member_did, &mut OsRng)
+            .expect("wrap_key");
         let encrypted = crypto::encrypt_metadata(
             &group_key,
             &KeyringMetadata {
@@ -126,93 +118,105 @@ mod indexer_keyring_tests {
         )
         .expect("encrypt_metadata");
 
-        let member = KeyringMember {
+        let member_record = KeyringMember {
             wrapped_key: wrapped,
             role: crate::records::Role::Editor,
         };
 
-        let keyring = IndexerKeyring {
+        IndexerKeyring {
             uri: uri.into(),
             owner_did: owner_did.into(),
             rotation: 0,
-            members: vec![serde_json::to_value(&member).unwrap()],
+            members: vec![serde_json::to_value(&member_record).unwrap()],
             encrypted_metadata: Some(serde_json::to_value(&encrypted).unwrap()),
             created_at: Some("2026-04-14T00:00:00Z".into()),
             indexed_at: Some("2026-04-14T00:00:00Z".into()),
-        };
-
-        (keyring, member_privkey)
+        }
     }
 
     #[test]
     fn decrypts_name_for_member() {
         let member_did = "did:plc:member";
-        let (keyring, privkey) = fixture(
+        let member = TestKeys::generate(member_did);
+        let keyring = fixture(
             "family-photos",
             "did:plc:owner",
+            &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
         assert_eq!(name.as_deref(), Some("family-photos"));
     }
 
     #[test]
     fn returns_none_when_not_a_member() {
         let member_did = "did:plc:member";
-        let (keyring, _member_privkey) = fixture(
+        let member = TestKeys::generate(member_did);
+        let keyring = fixture(
             "family-photos",
             "did:plc:owner",
+            &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
 
-        // A DID not present in the members list — we use an unrelated keypair
+        // A DID not present in the members list — we use unrelated keys
         // so that even if the DID matched, unwrap_key would fail.
-        let (_, stranger_privkey) = test_keypair();
-        let name = decrypt_indexer_keyring_name(&keyring, "did:plc:stranger", &stranger_privkey);
+        let stranger = TestKeys::generate("did:plc:stranger");
+        let name = decrypt_indexer_keyring_name(
+            &keyring,
+            "did:plc:stranger",
+            &stranger.private_keys(),
+        );
         assert!(name.is_none());
     }
 
     #[test]
     fn returns_none_when_wrong_private_key() {
         let member_did = "did:plc:member";
-        let (keyring, _correct_privkey) = fixture(
+        let member = TestKeys::generate(member_did);
+        let keyring = fixture(
             "family-photos",
             "did:plc:owner",
+            &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
 
         // DID matches a member entry, but we unwrap with the wrong private key
         // — simulates an identity mismatch or corrupted local storage.
-        let (_, wrong_privkey) = test_keypair();
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &wrong_privkey);
+        let wrong = TestKeys::generate(member_did);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &wrong.private_keys());
         assert!(name.is_none());
     }
 
     #[test]
     fn returns_none_when_encrypted_metadata_missing() {
         let member_did = "did:plc:member";
-        let (mut keyring, privkey) = fixture(
+        let member = TestKeys::generate(member_did);
+        let mut keyring = fixture(
             "family-photos",
             "did:plc:owner",
+            &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
         keyring.encrypted_metadata = None;
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
         assert!(name.is_none());
     }
 
     #[test]
     fn returns_none_when_member_json_wrong_shape() {
         let member_did = "did:plc:member";
-        let (mut keyring, privkey) = fixture(
+        let member = TestKeys::generate(member_did);
+        let mut keyring = fixture(
             "family-photos",
             "did:plc:owner",
+            &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
@@ -221,7 +225,7 @@ mod indexer_keyring_tests {
         // it silently and no member matches the DID.
         keyring.members = vec![serde_json::json!({"garbage": true})];
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &privkey);
+        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
         assert!(name.is_none());
     }
 }

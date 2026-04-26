@@ -201,7 +201,7 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let private_key = opake.identity().x25519_private_key_bytes().map_err(wasm_err)?;
+        let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
         let keyrings = opake
@@ -214,13 +214,12 @@ impl WasmOpakeHandle {
         // helper so this path and the SSE event path produce identical
         // WorkspaceEntry values — any shape divergence between them
         // would cause spurious watcher re-fires after SSE echoes.
+        let bundle = private_keys.bundle();
         let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = keyrings
             .iter()
             .filter_map(|kr| {
                 opake_core::indexer::workspace_keeper::try_build_entry_from_indexer_keyring(
-                    kr,
-                    &did,
-                    &private_key,
+                    kr, &did, &bundle,
                 )
             })
             .collect();
@@ -239,13 +238,15 @@ impl WasmOpakeHandle {
     }
 
     /// Add a member to a workspace. Resolves the keyring + group key
-    /// internally so the key never crosses the WASM/JS boundary.
+    /// internally so the key never crosses the WASM/JS boundary. Both halves
+    /// of the new member's hybrid public key are passed as raw byte slices.
     #[wasm_bindgen(js_name = addWorkspaceMember)]
     pub async fn add_workspace_member(
         &self,
         keyring_uri: &str,
         member_did: &str,
-        member_public_key: &[u8],
+        member_x25519_public_key: &[u8],
+        member_ml_kem_public_key: &[u8],
         role: &str,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
@@ -253,10 +254,17 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let pubkey = pub_key_from_slice(member_public_key)?;
+        let x25519_pub = pub_key_from_slice(member_x25519_public_key)?;
+        let ml_kem_pub: opake_core::crypto::MlKemPublicKey = member_ml_kem_public_key
+            .try_into()
+            .map_err(|_| JsError::new("ML-KEM-768 public key must be 1184 bytes"))?;
+        let bundle = opake_core::crypto::PublicKeyBundle {
+            x25519: &x25519_pub,
+            ml_kem: &ml_kem_pub,
+        };
         let role = parse_role(role)?;
         let outcome = opake
-            .add_workspace_member(keyring_uri, &ws.key, member_did, &pubkey, role)
+            .add_workspace_member(keyring_uri, &ws.key, member_did, bundle, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {

@@ -57,9 +57,9 @@ impl RecordingSink {
 
 fn cabinet_keeper() -> TreeKeeper {
     let mut keeper = TreeKeeper::new(TEST_DID);
-    let (_, private_key) = test_keypair();
+    let kp = test_keypair();
     let tree = DirectoryTree::from_records(std::iter::empty());
-    keeper.install_cabinet_tree(tree, private_key);
+    keeper.install_cabinet_tree(tree, kp.x25519_private, kp.ml_kem_private);
     keeper
 }
 
@@ -138,8 +138,12 @@ fn cold_start_drops_events_for_missing_context() {
 #[test]
 fn watch_workspace_scoped_events_only() {
     let mut keeper = TreeKeeper::new(TEST_DID);
-    let (_, private_key) = test_keypair();
-    keeper.install_cabinet_tree(DirectoryTree::from_records(std::iter::empty()), private_key);
+    let kp = test_keypair();
+    keeper.install_cabinet_tree(
+        DirectoryTree::from_records(std::iter::empty()),
+        kp.x25519_private,
+        kp.ml_kem_private,
+    );
 
     let cabinet_sink = RecordingSink::new();
     let ws_sink = RecordingSink::new();
@@ -483,7 +487,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
         },
         &DecryptionCtx {
             did: TEST_DID,
-            private_key: None,
+            private_keys: None,
             group_keys: &std::collections::HashMap::new(),
         },
     )

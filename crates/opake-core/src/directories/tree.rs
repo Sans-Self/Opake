@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use log::trace;
 
 use crate::atproto;
-use crate::crypto::{self, ContentKey, DirectoryMetadata, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, DirectoryMetadata, PrivateKeyBundle};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
 use crate::indexer::sse::events::SseDirectoryRecord;
@@ -69,23 +69,23 @@ impl TreeChange {
 
 /// Decryption context for applying SSE events to an in-memory tree.
 ///
-/// Provides the keys needed to decrypt directory names. Cabinet trees
-/// use `private_key` for direct key wrapping; workspace trees use
-/// `group_keys` (keyring URI → unwrapped content key) for keyring
-/// wrapping. Trees can hold directories of either kind, so both fields
-/// may be needed on the same context.
+/// Provides the keys needed to decrypt directory names. Cabinet trees use
+/// `private_keys` (the caller's hybrid bundle) for direct key wrapping;
+/// workspace trees use `group_keys` (keyring URI → unwrapped content key)
+/// for keyring wrapping. Trees can hold directories of either kind, so both
+/// fields may be needed on the same context.
 #[derive(Debug)]
 pub struct DecryptionCtx<'a> {
     pub did: &'a str,
-    pub private_key: Option<&'a X25519PrivateKey>,
+    pub private_keys: Option<&'a PrivateKeyBundle<'a>>,
     pub group_keys: &'a HashMap<String, ContentKey>,
 }
 
 impl<'a> DecryptionCtx<'a> {
-    pub fn cabinet(did: &'a str, private_key: &'a X25519PrivateKey) -> Self {
+    pub fn cabinet(did: &'a str, private_keys: &'a PrivateKeyBundle<'a>) -> Self {
         Self {
             did,
-            private_key: Some(private_key),
+            private_keys: Some(private_keys),
             group_keys: EMPTY_GROUP_KEYS.get_or_init(HashMap::new),
         }
     }
@@ -93,7 +93,7 @@ impl<'a> DecryptionCtx<'a> {
     pub fn workspace(did: &'a str, group_keys: &'a HashMap<String, ContentKey>) -> Self {
         Self {
             did,
-            private_key: None,
+            private_keys: None,
             group_keys,
         }
     }
@@ -219,8 +219,8 @@ impl DirectoryTree {
     /// then decrypts the metadata to recover the real name. Directories
     /// whose keys can't be unwrapped (wrong DID, keyring not available)
     /// get a fallback name of "?".
-    pub fn decrypt_names(&mut self, did: &str, private_key: &X25519PrivateKey) {
-        self.decrypt_names_with_group_keys(did, private_key, &HashMap::new());
+    pub fn decrypt_names(&mut self, did: &str, private_keys: &PrivateKeyBundle<'_>) {
+        self.decrypt_names_with_group_keys(did, private_keys, &HashMap::new());
     }
 
     /// Decrypt all directory names in-place, with group key support.
@@ -230,7 +230,7 @@ impl DirectoryTree {
     pub fn decrypt_names_with_group_keys(
         &mut self,
         did: &str,
-        private_key: &X25519PrivateKey,
+        private_keys: &PrivateKeyBundle<'_>,
         group_keys: &HashMap<String, crypto::ContentKey>,
     ) {
         for info in self.directories.values_mut() {
@@ -238,7 +238,7 @@ impl DirectoryTree {
                 KeyWrapping::Direct(direct) => {
                     let wrapped = direct.keys.iter().find(|k| k.did == did);
                     match wrapped {
-                        Some(w) => crypto::unwrap_key(w, private_key).ok(),
+                        Some(w) => crypto::unwrap_key(w, private_keys).ok(),
                         None => None,
                     }
                 }
@@ -971,8 +971,8 @@ fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Opti
     let content_key = match &info.key_wrapping {
         KeyWrapping::Direct(direct) => {
             let wrapped = direct.keys.iter().find(|k| k.did == ctx.did)?;
-            let private_key = ctx.private_key?;
-            crypto::unwrap_key(wrapped, private_key).ok()?
+            let private_keys = ctx.private_keys?;
+            crypto::unwrap_key(wrapped, private_keys).ok()?
         }
         KeyWrapping::Keyring(kr) => {
             let keyring_uri = &kr.keyring_ref.keyring;

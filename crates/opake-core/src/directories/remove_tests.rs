@@ -71,8 +71,8 @@ async fn setup_simple(
 
     let mut client = mock_client(mock.clone());
     let mut tree = DirectoryTree::load(&mut client).await.unwrap();
-    let (_, private_key) = test_keypair();
-    tree.decrypt_names(TEST_DID, &private_key);
+    let kp = test_keypair();
+    tree.decrypt_names(TEST_DID, &kp.private_keys());
     (client, tree)
 }
 
@@ -103,8 +103,8 @@ async fn setup_nested(
 
     let mut client = mock_client(mock.clone());
     let mut tree = DirectoryTree::load(&mut client).await.unwrap();
-    let (_, private_key) = test_keypair();
-    tree.decrypt_names(TEST_DID, &private_key);
+    let kp = test_keypair();
+    tree.decrypt_names(TEST_DID, &kp.private_keys());
     (client, tree)
 }
 
@@ -183,8 +183,8 @@ async fn remove_empty_directory() {
 
     let mut client = mock_client(mock.clone());
     let mut tree = DirectoryTree::load(&mut client).await.unwrap();
-    let (_, private_key) = test_keypair();
-    tree.decrypt_names(TEST_DID, &private_key);
+    let kp = test_keypair();
+    tree.decrypt_names(TEST_DID, &kp.private_keys());
 
     let mut resolver = MockNameResolver::new(&[]);
     let resolved = tree.resolve(&mut resolver, "Empty").await.unwrap();

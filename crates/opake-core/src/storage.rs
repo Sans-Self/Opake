@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Session;
 use crate::crypto::{
-    CryptoRng, Ed25519SigningKey, MlKemPrivateKey, MlKemPublicKey, RngCore, X25519DalekPublicKey,
-    X25519DalekStaticSecret, X25519PrivateKey, X25519PublicKey, ML_KEM_KEYGEN_RANDOMNESS_LEN,
+    CryptoRng, Ed25519SigningKey, MlKemPrivateKey, MlKemPublicKey, OwnedPrivateKeys,
+    OwnedPublicKeys, RngCore, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey,
+    X25519PublicKey, ML_KEM_KEYGEN_RANDOMNESS_LEN,
 };
 use crate::error::Error;
 use zeroize::Zeroizing;
@@ -182,6 +183,29 @@ impl Identity {
 
     pub fn ml_kem_private_key_bytes(&self) -> Result<Zeroizing<MlKemPrivateKey>, Error> {
         decode_key_bytes(&self.ml_kem_private_key, "ml_kem_private_key").map(Zeroizing::new)
+    }
+
+    /// Decode both halves of the hybrid public key into one owned struct.
+    ///
+    /// Use the returned struct's `bundle()` accessor to borrow into the
+    /// `PublicKeyBundle<'_>` form that `wrap_key` and friends require.
+    pub fn owned_public_keys(&self) -> Result<OwnedPublicKeys, Error> {
+        Ok(OwnedPublicKeys {
+            x25519: self.x25519_public_key_bytes()?,
+            ml_kem: self.ml_kem_public_key_bytes()?,
+        })
+    }
+
+    /// Decode both halves of the hybrid private key into one owned struct.
+    ///
+    /// Both halves zeroize on drop. Use the returned struct's `bundle()`
+    /// accessor to borrow into the `PrivateKeyBundle<'_>` form that
+    /// `unwrap_key` and friends require.
+    pub fn owned_private_keys(&self) -> Result<OwnedPrivateKeys, Error> {
+        Ok(OwnedPrivateKeys {
+            x25519: self.x25519_private_key_bytes()?,
+            ml_kem: self.ml_kem_private_key_bytes()?,
+        })
     }
 
     /// Whether this identity has Ed25519 signing keys.

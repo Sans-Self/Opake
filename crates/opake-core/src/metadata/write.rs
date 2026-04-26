@@ -1,7 +1,7 @@
 use log::trace;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, RngCore, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, PrivateKeyBundle, RngCore};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
 
@@ -13,16 +13,17 @@ use super::read::fetch_document_metadata;
 /// The `mutator` receives a mutable reference to the decrypted metadata
 /// and can modify any fields. After mutation, the metadata is re-encrypted
 /// with a fresh nonce and the record is updated on the PDS.
+#[allow(clippy::too_many_arguments)]
 pub async fn update_document_metadata(
     client: &mut XrpcClient<impl Transport>,
     uri: &str,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     group_key: Option<&ContentKey>,
     rng: &mut (impl CryptoRng + RngCore),
     mutator: impl FnOnce(&mut DocumentMetadata),
 ) -> Result<DocumentMetadata, Error> {
-    let result = fetch_document_metadata(client, uri, did, private_key, group_key).await?;
+    let result = fetch_document_metadata(client, uri, did, private_keys, group_key).await?;
     let mut metadata = result.metadata;
     let mut doc = result.document;
 

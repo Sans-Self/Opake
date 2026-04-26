@@ -1,10 +1,8 @@
 use super::*;
 use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-use crate::crypto::{
-    self, OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey, X25519PublicKey,
-};
+use crate::crypto::{self, OsRng};
 use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey};
-use crate::test_utils::MockTransport;
+use crate::test_utils::{MockTransport, TestKeys};
 
 const TEST_DID: &str = "did:plc:owner";
 const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
@@ -19,17 +17,7 @@ fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
     XrpcClient::with_session(mock, "https://pds.test".into(), session)
 }
 
-fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-    let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let public = X25519DalekPublicKey::from(&secret);
-    (public.to_bytes(), secret.to_bytes())
-}
-
 fn two_member_keyring() -> (Keyring, ContentKey) {
-    let _members_keys = [
-        (TEST_DID, &test_keypair().0),
-        ("did:plc:bob", &test_keypair().0),
-    ];
     // We need a real group key so remove_member can decrypt metadata
     let group_key = crypto::generate_content_key(&mut OsRng);
     let metadata = crypto::KeyringMetadata {
@@ -47,7 +35,7 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw".into(),
             },
             role: Role::Manager,
         },
@@ -57,7 +45,7 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
                 ciphertext: AtBytes {
                     encoded: "BBBB".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw".into(),
             },
             role: Role::Manager,
         },
@@ -100,17 +88,16 @@ fn put_record_response() -> HttpResponse {
 #[tokio::test]
 async fn happy_path_removes_and_rotates() {
     let (keyring, old_group_key) = two_member_keyring();
-    let (owner_pubkey, owner_privkey) = test_keypair();
+    let owner = TestKeys::generate(TEST_DID);
 
     let mock = MockTransport::new();
     mock.enqueue(get_record_response(&keyring));
     mock.enqueue(put_record_response());
 
-    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        x25519_public_key: &owner_pubkey,
-        ml_kem_public_key: &owner_mlkem,
+        x25519_public_key: &owner.x25519_pub,
+        ml_kem_public_key: &owner.ml_kem_pub,
     }];
 
     let mut client = mock_client(mock.clone());
@@ -149,7 +136,8 @@ async fn happy_path_removes_and_rotates() {
 
             // Owner can unwrap the new group key
             let unwrapped =
-                crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_privkey).unwrap();
+                crypto::unwrap_key(&updated.members[0].wrapped_key, &owner.private_keys())
+                    .unwrap();
             assert_eq!(unwrapped.0, new_group_key.0);
         }
         _ => panic!("expected JSON body"),
@@ -158,15 +146,14 @@ async fn happy_path_removes_and_rotates() {
 
 #[tokio::test]
 async fn rejects_non_owner() {
-    let (owner_pubkey, _) = test_keypair();
+    let owner = TestKeys::generate(TEST_DID);
     let group_key = crypto::generate_content_key(&mut OsRng);
 
     let mock = MockTransport::new();
-    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        x25519_public_key: &owner_pubkey,
-        ml_kem_public_key: &owner_mlkem,
+        x25519_public_key: &owner.x25519_pub,
+        ml_kem_public_key: &owner.ml_kem_pub,
     }];
 
     let mut client = mock_client(mock);
@@ -191,16 +178,15 @@ async fn rejects_non_owner() {
 #[tokio::test]
 async fn rejects_nonexistent_member() {
     let (keyring, old_group_key) = two_member_keyring();
-    let (owner_pubkey, _) = test_keypair();
+    let owner = TestKeys::generate(TEST_DID);
 
     let mock = MockTransport::new();
     mock.enqueue(get_record_response(&keyring));
 
-    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        x25519_public_key: &owner_pubkey,
-        ml_kem_public_key: &owner_mlkem,
+        x25519_public_key: &owner.x25519_pub,
+        ml_kem_public_key: &owner.ml_kem_pub,
     }];
 
     let mut client = mock_client(mock);

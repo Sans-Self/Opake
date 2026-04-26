@@ -1,10 +1,10 @@
 use super::*;
 use crate::client::HttpResponse;
-use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret};
+use crate::crypto::OsRng;
 use crate::records::{
     AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringMember, KeyringRef, Role, WrappedKey,
 };
-use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
+use crate::test_utils::{dummy_encrypted_metadata, MockTransport, TestKeys};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 const OWNER_DID: &str = "did:plc:owner";
@@ -66,15 +66,17 @@ struct KeyringFixture {
 
 fn create_keyring_fixture(
     plaintext: &[u8],
-    owner_pubkey: &[u8; 32],
-    member_pubkey: &[u8; 32],
+    owner_keys: &TestKeys,
+    member_keys: &TestKeys,
 ) -> KeyringFixture {
     let rng = &mut OsRng;
 
     // Generate group key and wrap to owner + member
     let group_key = crypto::generate_content_key(rng);
-    let owner_wrapped_gk = crypto::wrap_key(&group_key, owner_pubkey, OWNER_DID, rng).unwrap();
-    let member_wrapped_gk = crypto::wrap_key(&group_key, member_pubkey, MEMBER_DID, rng).unwrap();
+    let owner_wrapped_gk =
+        crypto::wrap_key(&group_key, &owner_keys.public_keys(), OWNER_DID, rng).unwrap();
+    let member_wrapped_gk =
+        crypto::wrap_key(&group_key, &member_keys.public_keys(), MEMBER_DID, rng).unwrap();
 
     // Generate content key, encrypt blob, wrap CK under group key
     let content_key = crypto::generate_content_key(rng);
@@ -153,25 +155,13 @@ fn keyring_record(fixture: &KeyringFixture) -> Keyring {
     )
 }
 
-fn member_keypair() -> ([u8; 32], [u8; 32]) {
-    let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let public = X25519DalekPublicKey::from(&secret);
-    (*public.as_bytes(), secret.to_bytes())
-}
-
-fn owner_keypair() -> ([u8; 32], [u8; 32]) {
-    let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let public = X25519DalekPublicKey::from(&secret);
-    (*public.as_bytes(), secret.to_bytes())
-}
-
 #[tokio::test]
 async fn roundtrip() {
-    let (owner_pub, _) = owner_keypair();
-    let (member_pub, member_priv) = member_keypair();
+    let owner = TestKeys::generate(OWNER_DID);
+    let member = TestKeys::generate(MEMBER_DID);
 
     let plaintext = b"shared keyring content";
-    let fixture = create_keyring_fixture(plaintext, &owner_pub, &member_pub);
+    let fixture = create_keyring_fixture(plaintext, &owner, &member);
     let doc = keyring_document(&fixture);
     let keyring = keyring_record(&fixture);
 
@@ -181,9 +171,10 @@ async fn roundtrip() {
     mock.enqueue(record_response(KR_URI, &keyring));
     mock.enqueue(blob_response(&fixture.ciphertext));
 
-    let result = download_from_keyring_member(&mock, MEMBER_DID, &member_priv, DOC_URI)
-        .await
-        .unwrap();
+    let result =
+        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
+            .await
+            .unwrap();
 
     assert_eq!(result.filename, "keyring-file.txt");
     assert_eq!(result.plaintext, plaintext);
@@ -201,10 +192,11 @@ async fn roundtrip() {
 #[tokio::test]
 async fn rejects_non_document_uri() {
     let mock = MockTransport::new();
+    let outsider = TestKeys::generate(MEMBER_DID);
     let err = download_from_keyring_member(
         &mock,
         MEMBER_DID,
-        &[0u8; 32],
+        &outsider.private_keys(),
         "at://did:plc:x/app.opake.grant/abc",
     )
     .await
@@ -217,12 +209,13 @@ async fn rejects_non_document_uri() {
 
 #[tokio::test]
 async fn rejects_direct_encrypted_document() {
-    let (member_pub, member_priv) = member_keypair();
+    let member = TestKeys::generate(MEMBER_DID);
 
     // Build a direct-encrypted document (not keyring)
     let content_key = crypto::generate_content_key(&mut OsRng);
     let payload = crypto::encrypt_blob(&content_key, b"data", &mut OsRng).unwrap();
-    let wrapped = crypto::wrap_key(&content_key, &member_pub, MEMBER_DID, &mut OsRng).unwrap();
+    let wrapped =
+        crypto::wrap_key(&content_key, &member.public_keys(), MEMBER_DID, &mut OsRng).unwrap();
 
     let metadata = crypto::DocumentMetadata {
         name: "direct-file.txt".into(),
@@ -259,9 +252,10 @@ async fn rejects_direct_encrypted_document() {
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
 
-    let err = download_from_keyring_member(&mock, MEMBER_DID, &member_priv, DOC_URI)
-        .await
-        .unwrap_err();
+    let err =
+        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
+            .await
+            .unwrap_err();
     assert!(
         err.to_string().contains("direct encryption"),
         "expected direct encryption error, got: {err}"
@@ -270,11 +264,11 @@ async fn rejects_direct_encrypted_document() {
 
 #[tokio::test]
 async fn rejects_non_member() {
-    let (owner_pub, _) = owner_keypair();
-    let (member_pub, _) = member_keypair();
-    let (_, outsider_priv) = member_keypair();
+    let owner = TestKeys::generate(OWNER_DID);
+    let member = TestKeys::generate(MEMBER_DID);
+    let outsider = TestKeys::generate("did:plc:outsider");
 
-    let fixture = create_keyring_fixture(b"secret", &owner_pub, &member_pub);
+    let fixture = create_keyring_fixture(b"secret", &owner, &member);
     let doc = keyring_document(&fixture);
     let keyring = keyring_record(&fixture);
 
@@ -283,9 +277,14 @@ async fn rejects_non_member() {
     mock.enqueue(record_response(DOC_URI, &doc));
     mock.enqueue(record_response(KR_URI, &keyring));
 
-    let err = download_from_keyring_member(&mock, "did:plc:outsider", &outsider_priv, DOC_URI)
-        .await
-        .unwrap_err();
+    let err = download_from_keyring_member(
+        &mock,
+        "did:plc:outsider",
+        &outsider.private_keys(),
+        DOC_URI,
+    )
+    .await
+    .unwrap_err();
     assert!(
         err.to_string().contains("not a member"),
         "expected member error, got: {err}"
@@ -294,11 +293,11 @@ async fn rejects_non_member() {
 
 #[tokio::test]
 async fn returns_group_key_for_caching() {
-    let (owner_pub, _) = owner_keypair();
-    let (member_pub, member_priv) = member_keypair();
+    let owner = TestKeys::generate(OWNER_DID);
+    let member = TestKeys::generate(MEMBER_DID);
 
     let plaintext = b"cache test content";
-    let fixture = create_keyring_fixture(plaintext, &owner_pub, &member_pub);
+    let fixture = create_keyring_fixture(plaintext, &owner, &member);
 
     // Save the original group key bytes for comparison
     let original_gk_bytes = fixture.group_key.0;
@@ -312,9 +311,10 @@ async fn returns_group_key_for_caching() {
     mock.enqueue(record_response(KR_URI, &keyring));
     mock.enqueue(blob_response(&fixture.ciphertext));
 
-    let result = download_from_keyring_member(&mock, MEMBER_DID, &member_priv, DOC_URI)
-        .await
-        .unwrap();
+    let result =
+        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
+            .await
+            .unwrap();
 
     // The returned group key should match what was used to wrap content keys
     assert_eq!(result.group_key.0, original_gk_bytes);
@@ -340,11 +340,11 @@ async fn returns_group_key_for_caching() {
 
 #[tokio::test]
 async fn download_from_previous_rotation_via_history() {
-    let (owner_pub, _) = owner_keypair();
-    let (member_pub, member_priv) = member_keypair();
+    let owner = TestKeys::generate(OWNER_DID);
+    let member = TestKeys::generate(MEMBER_DID);
 
     let plaintext = b"pre-rotation content";
-    let fixture = create_keyring_fixture(plaintext, &owner_pub, &member_pub);
+    let fixture = create_keyring_fixture(plaintext, &owner, &member);
 
     // Document was uploaded at rotation 0
     let doc = keyring_document_at_rotation(&fixture, 0);
@@ -380,9 +380,10 @@ async fn download_from_previous_rotation_via_history() {
     mock.enqueue(record_response(KR_URI, &keyring));
     mock.enqueue(blob_response(&fixture.ciphertext));
 
-    let result = download_from_keyring_member(&mock, MEMBER_DID, &member_priv, DOC_URI)
-        .await
-        .unwrap();
+    let result =
+        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
+            .await
+            .unwrap();
 
     assert_eq!(result.plaintext, plaintext);
     assert_eq!(result.rotation, 1); // returns current keyring rotation for caching
@@ -390,11 +391,11 @@ async fn download_from_previous_rotation_via_history() {
 
 #[tokio::test]
 async fn rejects_member_not_present_at_historical_rotation() {
-    let (owner_pub, _) = owner_keypair();
-    let (member_pub, _) = member_keypair();
-    let (_, outsider_priv) = member_keypair();
+    let owner = TestKeys::generate(OWNER_DID);
+    let member = TestKeys::generate(MEMBER_DID);
+    let outsider = TestKeys::generate("did:plc:outsider");
 
-    let fixture = create_keyring_fixture(b"data", &owner_pub, &member_pub);
+    let fixture = create_keyring_fixture(b"data", &owner, &member);
 
     // Document encrypted at rotation 0
     let doc = keyring_document_at_rotation(&fixture, 0);
@@ -421,9 +422,14 @@ async fn rejects_member_not_present_at_historical_rotation() {
     mock.enqueue(record_response(DOC_URI, &doc));
     mock.enqueue(record_response(KR_URI, &keyring));
 
-    let err = download_from_keyring_member(&mock, "did:plc:outsider", &outsider_priv, DOC_URI)
-        .await
-        .unwrap_err();
+    let err = download_from_keyring_member(
+        &mock,
+        "did:plc:outsider",
+        &outsider.private_keys(),
+        DOC_URI,
+    )
+    .await
+    .unwrap_err();
     assert!(
         err.to_string().contains("not a member"),
         "expected member error, got: {err}"

@@ -7,13 +7,22 @@
 // to prevent documentation drift.
 //
 // This module handles AES-256-GCM content encryption and asymmetric key
-// wrapping (x25519-hkdf-a256kw). It intentionally has no I/O — it takes
-// bytes in and returns bytes out. The calling layer (CLI or WASM) handles
-// reading/writing files and talking to the PDS.
+// wrapping. The default wrap is the hybrid X25519 + ML-KEM-768 KEM
+// (`x25519-mlkem768-hkdf-a256kw`) — defends against harvest-now-decrypt-later
+// per BSI TR-02102 (Germany) and ANSSI (France) guidance for hybrid
+// post-quantum key establishment.
 //
-// Randomness is injected via CryptoRng + RngCore parameters so the module
-// stays platform-agnostic — native callers pass OsRng, WASM callers pass
-// a crypto.getRandomValues()-backed RNG.
+// A pair-flow-only legacy helper retains the original `x25519-hkdf-a256kw`
+// envelope. It exists because device pairing wraps an Identity to a fresh
+// ephemeral X25519 keypair before the recipient has a published ML-KEM
+// public key — there is nothing to bind a hybrid construction to. Phase 3.5
+// will deprecate it by hybridizing the pair flow (see CLAUDE.md).
+//
+// The module has no I/O — it takes bytes in and returns bytes out. The
+// calling layer (CLI or WASM) handles reading/writing files and talking
+// to the PDS. Randomness is injected via CryptoRng + RngCore parameters
+// so the module stays platform-agnostic — native callers pass OsRng,
+// WASM callers pass a crypto.getRandomValues()-backed RNG.
 
 mod content;
 mod key_wrapping;
@@ -35,7 +44,9 @@ pub use x25519_dalek::{
 
 // Re-export all public items at the `crypto::` level.
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
-pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
+pub use key_wrapping::{
+    create_group_key, unwrap_key, unwrap_key_x25519_only, wrap_key, wrap_key_x25519_only,
+};
 pub use keyring_wrapping::{unwrap_content_key_from_keyring, wrap_content_key_for_keyring};
 pub use metadata::{
     decrypt_metadata, encrypt_metadata, DirectoryMetadata, DocumentMetadata, GrantMetadata,
@@ -46,27 +57,28 @@ pub use mnemonic::{
     parse_mnemonic_grid, Mnemonic,
 };
 
-const WRAP_ALGO: &str = "x25519-hkdf-a256kw";
 const CONTENT_KEY_LEN: usize = 32;
 pub const AES_GCM_NONCE_LEN: usize = 12;
 const X25519_KEY_LEN: usize = 32;
 const AES_KW_OVERHEAD: usize = 8;
 const WRAPPED_KEY_LEN: usize = CONTENT_KEY_LEN + AES_KW_OVERHEAD;
-const CIPHERTEXT_LEN: usize = X25519_KEY_LEN + WRAPPED_KEY_LEN;
 
-// ───── Hybrid X25519 + ML-KEM-768 KEM (Phase 1 foundation) ─────────────────
+/// Pair-flow legacy envelope: `[X25519 ephemeral pub (32) || AES-KW wrapped content key (40)]`.
+/// See `wrap_key_x25519_only` / `unwrap_key_x25519_only`.
+const X25519_ONLY_CIPHERTEXT_LEN: usize = X25519_KEY_LEN + WRAPPED_KEY_LEN;
+
+/// Algorithm identifier for the pair-flow legacy envelope. The default wrap
+/// uses [`HYBRID_WRAP_ALGO`].
+const X25519_ONLY_WRAP_ALGO: &str = "x25519-hkdf-a256kw";
+
+// ───── Hybrid X25519 + ML-KEM-768 KEM ──────────────────────────────────────
 //
 // Construction aligned with BSI TR-02102 (Germany) and ANSSI guidance for
 // hybrid post-quantum key establishment. Algorithm sizes from NIST FIPS-203.
-//
-// These constants are introduced ahead of their consumers so the byte-level
-// envelope shape lives in one place. Their use sites land in Phase 2
-// (identity derivation) and Phase 3 (hybrid wrap/unwrap).
 
-/// Algorithm identifier for the hybrid wrap envelope, written into
-/// `WrappedKey.algo` once Phase 3's wrap/unwrap rewrite ships.
-#[allow(dead_code, reason = "Phase 3 wrap/unwrap consume this once they land.")]
-const HYBRID_WRAP_ALGO: &str = "x25519-mlkem768-hkdf-a256kw";
+/// Algorithm identifier for the default hybrid wrap envelope, written into
+/// `WrappedKey.algo`.
+pub const HYBRID_WRAP_ALGO: &str = "x25519-mlkem768-hkdf-a256kw";
 
 /// ML-KEM-768 public key size (bytes). NIST FIPS-203 §6.1.
 pub const ML_KEM_PK_LEN: usize = 1184;
@@ -78,22 +90,18 @@ pub const ML_KEM_SK_LEN: usize = 2400;
 pub(crate) const ML_KEM_CT_LEN: usize = 1088;
 
 /// ML-KEM-768 shared-secret size (bytes). NIST FIPS-203 §6.2.
-#[allow(dead_code, reason = "Phase 3 HKDF combiner consumes this once it lands.")]
 pub(crate) const ML_KEM_SS_LEN: usize = 32;
 
 /// ML-KEM-768 KeyGen randomness: 32-byte seed `d` ‖ 32-byte implicit-rejection
 /// seed `z`. NIST FIPS-203 §7.1.
-#[allow(dead_code, reason = "Phase 2 identity derivation consumes this once it lands.")]
 pub(crate) const ML_KEM_KEYGEN_RANDOMNESS_LEN: usize = 64;
 
 /// ML-KEM-768 Encaps randomness: 32-byte message `m`. NIST FIPS-203 §7.2.
-#[allow(dead_code, reason = "Phase 3 wrap consumes this once it lands.")]
 pub(crate) const ML_KEM_ENCAP_RANDOMNESS_LEN: usize = 32;
 
 /// Hybrid wrap envelope on the wire:
 /// `[X25519 ephemeral pubkey (32) || ML-KEM-768 ciphertext (1088) || AES-KW wrapped content key (40)]`.
-#[allow(dead_code, reason = "Phase 3 wrap/unwrap consume this once they land.")]
-const HYBRID_CIPHERTEXT_LEN: usize = X25519_KEY_LEN + ML_KEM_CT_LEN + WRAPPED_KEY_LEN;
+pub(crate) const HYBRID_CIPHERTEXT_LEN: usize = X25519_KEY_LEN + ML_KEM_CT_LEN + WRAPPED_KEY_LEN;
 
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -158,11 +166,91 @@ pub type MlKemPublicKey = [u8; ML_KEM_PK_LEN];
 /// it does for X25519 secrets.
 pub type MlKemPrivateKey = [u8; ML_KEM_SK_LEN];
 
+/// A borrowed view of a recipient's hybrid public-key material.
+///
+/// Used by `wrap_key` and `create_group_key` so the per-call argument list
+/// does not grow with every additional KEM half.
+#[derive(Debug)]
+pub struct PublicKeyBundle<'a> {
+    pub x25519: &'a X25519PublicKey,
+    pub ml_kem: &'a MlKemPublicKey,
+}
+
+/// A borrowed view of one's own hybrid private-key material.
+///
+/// The `'a` lifetime is the lifetime of whichever struct owns the key bytes
+/// — `Cabinet`, `Identity`, or the `DecryptionKeys` helper. Holding raw
+/// references avoids copying the 2400-byte ML-KEM private key around the
+/// stack on every wrap/unwrap call.
+///
+/// Manual `Debug` impl elides the raw key bytes — both halves print as their
+/// length only, matching the `Redacted` convention.
+pub struct PrivateKeyBundle<'a> {
+    pub x25519: &'a X25519PrivateKey,
+    pub ml_kem: &'a MlKemPrivateKey,
+}
+
+impl std::fmt::Debug for PrivateKeyBundle<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrivateKeyBundle")
+            .field("x25519", &Redacted(self.x25519))
+            .field("ml_kem", &Redacted(self.ml_kem))
+            .finish()
+    }
+}
+
+/// Owned hybrid public-key material, decoded from the encoded base64
+/// representation kept in `Identity`.
+///
+/// Hold one of these on the stack to keep the underlying key bytes alive
+/// while a `PublicKeyBundle<'_>` view borrows into it.
+pub struct OwnedPublicKeys {
+    pub x25519: X25519PublicKey,
+    pub ml_kem: MlKemPublicKey,
+}
+
+impl OwnedPublicKeys {
+    pub fn bundle(&self) -> PublicKeyBundle<'_> {
+        PublicKeyBundle {
+            x25519: &self.x25519,
+            ml_kem: &self.ml_kem,
+        }
+    }
+}
+
+/// Owned hybrid private-key material, zeroized on drop.
+///
+/// Returned by `Identity::owned_private_keys()` so callers do not have to
+/// rebind two locals every time they need a `PrivateKeyBundle<'_>` view.
+pub struct OwnedPrivateKeys {
+    pub x25519: zeroize::Zeroizing<X25519PrivateKey>,
+    pub ml_kem: zeroize::Zeroizing<MlKemPrivateKey>,
+}
+
+impl OwnedPrivateKeys {
+    pub fn bundle(&self) -> PrivateKeyBundle<'_> {
+        PrivateKeyBundle {
+            x25519: &self.x25519,
+            ml_kem: &self.ml_kem,
+        }
+    }
+}
+
 /// A DID string paired with both halves of its hybrid encryption public key.
 pub struct DidMember<'a> {
     pub did: &'a str,
     pub x25519_public_key: &'a X25519PublicKey,
     pub ml_kem_public_key: &'a MlKemPublicKey,
+}
+
+impl<'a> DidMember<'a> {
+    /// Borrow the member's public-key halves as a bundle.
+    pub fn public_keys(&self) -> PublicKeyBundle<'a> {
+        PublicKeyBundle {
+            x25519: self.x25519_public_key,
+            ml_kem: self.ml_kem_public_key,
+        }
+    }
 }
 
 /// An ephemeral X25519 keypair for one-time key exchanges (e.g. device pairing).
@@ -191,11 +279,12 @@ pub struct EncryptedPayload {
     pub nonce: [u8; AES_GCM_NONCE_LEN],
 }
 
-/// HKDF info string for domain separation — includes schema version and
-/// recipient DID so a version bump or different recipient produces different
-/// derived keys from the same shared secret.
-fn hkdf_info(recipient_did: &str) -> Vec<u8> {
-    format!("opake-v{SCHEMA_VERSION}-{WRAP_ALGO}-{recipient_did}").into_bytes()
+/// HKDF info string for domain separation — includes schema version,
+/// algorithm identifier, and recipient DID so a version bump, algorithm
+/// switch, or different recipient produces different derived keys from
+/// the same shared secret.
+fn hkdf_info(algo: &str, recipient_did: &str) -> Vec<u8> {
+    format!("opake-v{SCHEMA_VERSION}-{algo}-{recipient_did}").into_bytes()
 }
 
 #[cfg(test)]

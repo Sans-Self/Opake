@@ -4,7 +4,8 @@ use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
     ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
-    KeyringMetadata, OsRng, X25519PrivateKey, X25519PublicKey,
+    KeyringMetadata, MlKemPrivateKey, MlKemPublicKey, OsRng, PrivateKeyBundle, PublicKeyBundle,
+    X25519PrivateKey, X25519PublicKey,
 };
 use opake_core::directories::{DirectoryTree, EntryKind};
 use opake_core::records::{Directory, WrappedKey};
@@ -101,29 +102,54 @@ pub fn decrypt_blob(key: &[u8], ciphertext: &[u8], nonce: &[u8]) -> Result<Vec<u
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Hybrid wrap export. Both halves of the recipient's public key flow as
+/// raw byte slices from JS — the WASM side reconstructs the typed bundle
+/// before calling into core. JS callers get this only as a low-level
+/// escape hatch; the production path goes through `Opake`/`FileManager`,
+/// which keep the keys inside core.
 #[wasm_bindgen(js_name = wrapKey)]
 pub fn wrap_key(
     content_key: &[u8],
-    recipient_pub_key: &[u8],
+    recipient_x25519_pub_key: &[u8],
+    recipient_ml_kem_pub_key: &[u8],
     recipient_did: &str,
 ) -> Result<JsValue, JsError> {
     let content_key = content_key_from_slice(content_key)?;
-    let pub_key: &X25519PublicKey = recipient_pub_key
+    let x25519_pub: &X25519PublicKey = recipient_x25519_pub_key
         .try_into()
-        .map_err(|_| JsError::new("recipient public key must be exactly 32 bytes"))?;
-    let wrapped = opake_core::crypto::wrap_key(&content_key, pub_key, recipient_did, &mut OsRng)
+        .map_err(|_| JsError::new("recipient X25519 public key must be exactly 32 bytes"))?;
+    let ml_kem_pub: &MlKemPublicKey = recipient_ml_kem_pub_key
+        .try_into()
+        .map_err(|_| JsError::new("recipient ML-KEM-768 public key must be exactly 1184 bytes"))?;
+    let bundle = PublicKeyBundle {
+        x25519: x25519_pub,
+        ml_kem: ml_kem_pub,
+    };
+    let wrapped = opake_core::crypto::wrap_key(&content_key, &bundle, recipient_did, &mut OsRng)
         .map_err(|e| JsError::new(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&wrapped).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Hybrid unwrap export. See `wrap_key` for the security caveat.
 #[wasm_bindgen(js_name = unwrapKey)]
-pub fn unwrap_key(wrapped_key_js: JsValue, private_key: &[u8]) -> Result<Vec<u8>, JsError> {
+pub fn unwrap_key(
+    wrapped_key_js: JsValue,
+    x25519_private_key: &[u8],
+    ml_kem_private_key: &[u8],
+) -> Result<Vec<u8>, JsError> {
     let wrapped: WrappedKey =
         serde_wasm_bindgen::from_value(wrapped_key_js).map_err(|e| JsError::new(&e.to_string()))?;
-    let priv_key: &X25519PrivateKey = private_key
+    let x25519_priv: &X25519PrivateKey = x25519_private_key
         .try_into()
-        .map_err(|_| JsError::new("private key must be exactly 32 bytes"))?;
-    let content_key = opake_core::crypto::unwrap_key(&wrapped, priv_key)
+        .map_err(|_| JsError::new("X25519 private key must be exactly 32 bytes"))?;
+    let ml_kem_priv: &MlKemPrivateKey = ml_kem_private_key
+        .try_into()
+        .map_err(|_| JsError::new("ML-KEM-768 private key must be exactly 2400 bytes"))?;
+    let bundle = PrivateKeyBundle {
+        x25519: x25519_priv,
+        ml_kem: ml_kem_priv,
+    };
+    let content_key = opake_core::crypto::unwrap_key(&wrapped, &bundle)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(content_key.0.to_vec())
 }
@@ -540,7 +566,8 @@ impl DirectoryTreeHandle {
     pub fn new(
         records_js: JsValue,
         did: &str,
-        private_key: &[u8],
+        x25519_private_key: &[u8],
+        ml_kem_private_key: &[u8],
     ) -> Result<DirectoryTreeHandle, JsError> {
         let inputs: Vec<DirectoryRecordInput> =
             serde_wasm_bindgen::from_value(records_js).map_err(|e| JsError::new(&e.to_string()))?;
@@ -548,10 +575,14 @@ impl DirectoryTreeHandle {
         let records = inputs.into_iter().map(|r| (r.uri, r.value));
         let mut tree = DirectoryTree::from_records(records);
 
-        let priv_key: &X25519PrivateKey = private_key
+        let x25519: &X25519PrivateKey = x25519_private_key
             .try_into()
-            .map_err(|_| JsError::new("private key must be exactly 32 bytes"))?;
-        tree.decrypt_names(did, priv_key);
+            .map_err(|_| JsError::new("X25519 private key must be exactly 32 bytes"))?;
+        let ml_kem: &MlKemPrivateKey = ml_kem_private_key
+            .try_into()
+            .map_err(|_| JsError::new("ML-KEM-768 private key must be exactly 2400 bytes"))?;
+        let bundle = PrivateKeyBundle { x25519, ml_kem };
+        tree.decrypt_names(did, &bundle);
 
         Ok(Self { inner: tree })
     }
@@ -678,16 +709,21 @@ impl DirectoryTreeHandle {
 pub fn build_workspace_directory_tree(
     records_js: JsValue,
     did: &str,
-    private_key: &[u8],
+    x25519_private_key: &[u8],
+    ml_kem_private_key: &[u8],
     keys_js: JsValue,
     keyring_uri: &str,
 ) -> Result<JsValue, JsError> {
     let inputs: Vec<DirectoryRecordInput> =
         serde_wasm_bindgen::from_value(records_js).map_err(|e| JsError::new(&e.to_string()))?;
 
-    let priv_key: &X25519PrivateKey = private_key
+    let x25519: &X25519PrivateKey = x25519_private_key
         .try_into()
-        .map_err(|_| JsError::new("private key must be exactly 32 bytes"))?;
+        .map_err(|_| JsError::new("X25519 private key must be exactly 32 bytes"))?;
+    let ml_kem: &MlKemPrivateKey = ml_kem_private_key
+        .try_into()
+        .map_err(|_| JsError::new("ML-KEM-768 private key must be exactly 2400 bytes"))?;
+    let priv_bundle = PrivateKeyBundle { x25519, ml_kem };
 
     let raw_map: HashMap<String, Vec<u8>> =
         serde_wasm_bindgen::from_value(keys_js).map_err(|e| JsError::new(&e.to_string()))?;
@@ -708,7 +744,7 @@ pub fn build_workspace_directory_tree(
     let ws_root_uri = opake_core::directories::workspace_root_directory_uri(did, keyring_uri);
     tree.set_root(&ws_root_uri);
 
-    tree.decrypt_names_with_group_keys(did, priv_key, &keys);
+    tree.decrypt_names_with_group_keys(did, &priv_bundle, &keys);
 
     // Build parent index (O(n) instead of O(n²) find_parent per dir)
     let mut parent_index: HashMap<String, String> = HashMap::new();

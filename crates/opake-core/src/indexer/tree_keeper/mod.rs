@@ -50,10 +50,16 @@ pub struct WatcherHandle(u64);
 #[derive(crate::RedactedDebug)]
 struct HeldTree {
     tree: DirectoryTree,
-    /// For cabinet trees: the private X25519 key for direct key unwrapping.
+    /// For cabinet trees: the X25519 half of the hybrid private key.
     /// For workspace trees: None.
     #[redact]
-    private_key: Option<X25519PrivateKey>,
+    x25519_private_key: Option<X25519PrivateKey>,
+    /// For cabinet trees: the ML-KEM-768 half of the hybrid private key.
+    /// For workspace trees: None. Stored alongside the X25519 half so a
+    /// `PrivateKeyBundle<'_>` view can be borrowed at decrypt time without
+    /// re-decoding from the surrounding `Identity`.
+    #[redact]
+    ml_kem_private_key: Option<crate::crypto::MlKemPrivateKey>,
     /// For workspace trees: single-entry map of keyring URI → group key.
     /// For cabinet trees: empty.
     group_keys: HashMap<String, ContentKey>,
@@ -63,6 +69,7 @@ struct HeldTree {
     /// can be invalidated before the stale plaintext leaks into the UI.
     rotation: u64,
 }
+
 
 /// Which context a watcher is attached to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -111,10 +118,16 @@ impl TreeKeeper {
     // -- Tree installation (called after the initial load) --
 
     /// Install a cabinet tree. Replaces any previously-installed cabinet.
-    pub fn install_cabinet_tree(&mut self, tree: DirectoryTree, private_key: X25519PrivateKey) {
+    pub fn install_cabinet_tree(
+        &mut self,
+        tree: DirectoryTree,
+        x25519_private_key: X25519PrivateKey,
+        ml_kem_private_key: crate::crypto::MlKemPrivateKey,
+    ) {
         self.cabinet = Some(HeldTree {
             tree,
-            private_key: Some(private_key),
+            x25519_private_key: Some(x25519_private_key),
+            ml_kem_private_key: Some(ml_kem_private_key),
             group_keys: HashMap::new(),
             rotation: 0,
         });
@@ -137,7 +150,8 @@ impl TreeKeeper {
             keyring_uri,
             HeldTree {
                 tree,
-                private_key: None,
+                x25519_private_key: None,
+                ml_kem_private_key: None,
                 group_keys,
                 rotation,
             },
@@ -394,13 +408,21 @@ impl TreeKeeper {
 
         let HeldTree {
             tree,
-            private_key,
+            x25519_private_key,
+            ml_kem_private_key,
             group_keys,
             ..
         } = held;
+        let private_keys = match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
+            (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
+                x25519: x,
+                ml_kem: m,
+            }),
+            _ => None,
+        };
         let ctx = DecryptionCtx {
             did,
-            private_key: private_key.as_ref(),
+            private_keys: private_keys.as_ref(),
             group_keys,
         };
         let change = tree.apply_directory_delta(record, &ctx)?;
@@ -428,13 +450,21 @@ impl TreeKeeper {
         if let Some(held) = self.cabinet.as_mut() {
             let HeldTree {
                 tree,
-                private_key,
+                x25519_private_key,
+                ml_kem_private_key,
                 group_keys,
                 ..
             } = held;
+            let private_keys = match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
+                (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
+                    x25519: x,
+                    ml_kem: m,
+                }),
+                _ => None,
+            };
             let ctx = DecryptionCtx {
                 did,
-                private_key: private_key.as_ref(),
+                private_keys: private_keys.as_ref(),
                 group_keys,
             };
             let change = tree.apply_directory_delta(&delete_payload, &ctx)?;
@@ -453,13 +483,22 @@ impl TreeKeeper {
                 };
                 let HeldTree {
                     tree,
-                    private_key,
+                    x25519_private_key,
+                    ml_kem_private_key,
                     group_keys,
                     ..
                 } = held;
+                let private_keys =
+                    match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
+                        (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
+                            x25519: x,
+                            ml_kem: m,
+                        }),
+                        _ => None,
+                    };
                 let ctx = DecryptionCtx {
                     did,
-                    private_key: private_key.as_ref(),
+                    private_keys: private_keys.as_ref(),
                     group_keys,
                 };
                 tree.apply_directory_delta(&delete_payload, &ctx)?

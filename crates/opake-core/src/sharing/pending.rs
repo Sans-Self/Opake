@@ -11,7 +11,7 @@ use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::{list_collection, time, Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, RngCore, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PrivateKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
 use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
@@ -116,7 +116,7 @@ pub async fn cancel_pending_share(
 pub struct RetryParams<'a> {
     pub caller_pds_url: &'a str,
     pub owner_did: &'a str,
-    pub owner_private_key: &'a X25519PrivateKey,
+    pub owner_private_keys: PrivateKeyBundle<'a>,
     pub now: i64,
     pub ttl_seconds: i64,
 }
@@ -242,7 +242,7 @@ pub async fn retry_pending_shares(
                 match documents::fetch_content_key(
                     client,
                     params.owner_did,
-                    params.owner_private_key,
+                    &params.owner_private_keys,
                     &entry.document,
                 )
                 .await
@@ -301,7 +301,10 @@ pub async fn retry_pending_shares(
             document_uri: &entry.document,
             recipient_did: &recipient.did,
             content_key: &content_key,
-            recipient_public_key: &recipient.x25519_public_key,
+            recipient_public_keys: crate::crypto::PublicKeyBundle {
+                x25519: &recipient.x25519_public_key,
+                ml_kem: &recipient.ml_kem_public_key,
+            },
             permissions: metadata.permissions.as_deref().unwrap_or("read"),
             note: metadata.note.as_deref(),
             created_at: &entry.created_at,

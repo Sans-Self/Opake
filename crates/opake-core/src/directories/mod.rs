@@ -50,12 +50,12 @@ pub fn workspace_root_directory_uri(did: &str, keyring_uri: &str) -> String {
 /// Build a direct key wrapping envelope for a directory.
 ///
 /// Generates a fresh content key, encrypts the metadata, and wraps the key
-/// to the owner's public key. Returns the pair needed by `create_directory`
-/// and `get_or_create_root`.
+/// to the owner's hybrid public-key bundle. Returns the pair needed by
+/// `create_directory` and `get_or_create_root`.
 pub(crate) fn encrypt_directory_envelope(
     name: &str,
     owner_did: &str,
-    owner_pubkey: &crate::crypto::X25519PublicKey,
+    owner_public_keys: &crate::crypto::PublicKeyBundle<'_>,
     rng: &mut (impl crate::crypto::CryptoRng + crate::crypto::RngCore),
 ) -> Result<
     (
@@ -74,7 +74,7 @@ pub(crate) fn encrypt_directory_envelope(
         description: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, rng)?;
-    let wrapped_key = crypto::wrap_key(&content_key, owner_pubkey, owner_did, rng)?;
+    let wrapped_key = crypto::wrap_key(&content_key, owner_public_keys, owner_did, rng)?;
 
     let key_wrapping = KeyWrapping::Direct(DirectKeyWrapping {
         keys: vec![wrapped_key],
@@ -136,20 +136,66 @@ pub(crate) mod tests {
 
     pub const TEST_DID: &str = "did:plc:test";
 
-    /// A fixed keypair for deterministic test encryption.
-    /// Always returns the same key pair so `decrypt_names()` can unwrap
-    /// any directory produced by `dummy_directory()`.
-    pub fn test_keypair() -> (crypto::X25519PublicKey, crypto::X25519PrivateKey) {
-        const SEED: [u8; 32] = [42u8; 32];
-        let secret = crypto::X25519DalekStaticSecret::from(SEED);
-        let public = crypto::X25519DalekPublicKey::from(&secret);
-        (*public.as_bytes(), secret.to_bytes())
+    /// A fixed hybrid keypair for deterministic test encryption.
+    ///
+    /// Both halves derive from constant seeds so `decrypt_names()` can unwrap
+    /// any directory produced by `dummy_directory()`. ML-KEM-768 keygen is
+    /// deterministic given a 64-byte seed (FIPS-203 §7.1).
+    pub fn test_keypair() -> TestHybridKeypair {
+        const X25519_SEED: [u8; 32] = [42u8; 32];
+        const MLKEM_SEED: [u8; 64] = [42u8; 64];
+
+        let x25519_secret = crypto::X25519DalekStaticSecret::from(X25519_SEED);
+        let x25519_public = crypto::X25519DalekPublicKey::from(&x25519_secret);
+
+        let mlkem_keypair = libcrux_ml_kem::mlkem768::generate_key_pair(MLKEM_SEED);
+        let mlkem_public_bytes: [u8; 1184] = (*mlkem_keypair.public_key().as_ref())
+            .try_into()
+            .expect("ML-KEM-768 public key is 1184 bytes per FIPS-203 §6.1");
+        let mlkem_private_bytes: [u8; 2400] = (*mlkem_keypair.private_key().as_ref())
+            .try_into()
+            .expect("ML-KEM-768 private key is 2400 bytes per FIPS-203 §6.2");
+
+        TestHybridKeypair {
+            x25519_public: *x25519_public.as_bytes(),
+            x25519_private: x25519_secret.to_bytes(),
+            ml_kem_public: mlkem_public_bytes,
+            ml_kem_private: mlkem_private_bytes,
+        }
+    }
+
+    /// Owned hybrid keypair for the directory tests.
+    ///
+    /// Local to this module — production callers borrow from `Identity` or
+    /// `Cabinet` instead, but the directory tests need stable bytes that
+    /// outlive the surrounding test fixtures.
+    pub struct TestHybridKeypair {
+        pub x25519_public: crypto::X25519PublicKey,
+        pub x25519_private: crypto::X25519PrivateKey,
+        pub ml_kem_public: crypto::MlKemPublicKey,
+        pub ml_kem_private: crypto::MlKemPrivateKey,
+    }
+
+    impl TestHybridKeypair {
+        pub fn public_keys(&self) -> crypto::PublicKeyBundle<'_> {
+            crypto::PublicKeyBundle {
+                x25519: &self.x25519_public,
+                ml_kem: &self.ml_kem_public,
+            }
+        }
+
+        pub fn private_keys(&self) -> crypto::PrivateKeyBundle<'_> {
+            crypto::PrivateKeyBundle {
+                x25519: &self.x25519_private,
+                ml_kem: &self.ml_kem_private,
+            }
+        }
     }
 
     /// Build a dummy encrypted directory for tests.
     fn encrypt_dummy_directory(name: &str) -> (KeyWrapping, crate::records::EncryptedMetadata) {
-        let (pubkey, _) = test_keypair();
-        encrypt_directory_envelope(name, TEST_DID, &pubkey, &mut OsRng).unwrap()
+        let kp = test_keypair();
+        encrypt_directory_envelope(name, TEST_DID, &kp.public_keys(), &mut OsRng).unwrap()
     }
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {

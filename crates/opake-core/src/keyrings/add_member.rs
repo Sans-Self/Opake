@@ -2,7 +2,7 @@ use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, PublicKeyBundle, RngCore};
 use crate::error::Error;
 use crate::records::{self, Keyring, KeyringMember, Role};
 
@@ -13,7 +13,7 @@ pub struct AddMemberParams<'a> {
     pub keyring_uri: &'a str,
     pub group_key: &'a ContentKey,
     pub new_member_did: &'a str,
-    pub new_member_public_key: &'a X25519PublicKey,
+    pub new_member_public_keys: PublicKeyBundle<'a>,
     pub role: Role,
     pub modified_at: &'a str,
 }
@@ -63,7 +63,7 @@ pub async fn add_member(
     );
     let wrapped = crypto::wrap_key(
         params.group_key,
-        params.new_member_public_key,
+        &params.new_member_public_keys,
         params.new_member_did,
         rng,
     )?;
@@ -85,9 +85,9 @@ pub async fn add_member(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-    use crate::crypto::{OsRng, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey};
+    use crate::crypto::OsRng;
     use crate::records::{AtBytes, Keyring, KeyringMember, WrappedKey, SCHEMA_VERSION};
-    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport, TestKeys};
 
     const TEST_DID: &str = "did:plc:owner";
     const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
@@ -102,12 +102,6 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-        let secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-        let public = X25519DalekPublicKey::from(&secret);
-        (public.to_bytes(), secret.to_bytes())
-    }
-
     fn existing_keyring(owner_did: &str) -> Keyring {
         Keyring {
             opake_version: SCHEMA_VERSION,
@@ -119,7 +113,7 @@ mod tests {
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
-                    algo: "x25519-hkdf-a256kw".into(),
+                    algo: "x25519-mlkem768-hkdf-a256kw".into(),
                 },
                 role: Role::Manager,
             }],
@@ -159,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn happy_path() {
         let keyring = existing_keyring(TEST_DID);
-        let (new_pubkey, new_privkey) = test_keypair();
+        let new_member = TestKeys::generate("did:plc:newmember");
         let group_key = crypto::generate_content_key(&mut OsRng);
 
         let mock = MockTransport::new();
@@ -171,7 +165,7 @@ mod tests {
             keyring_uri: KEYRING_URI,
             group_key: &group_key,
             new_member_did: "did:plc:newmember",
-            new_member_public_key: &new_pubkey,
+            new_member_public_keys: new_member.public_keys(),
             role: Role::Editor,
             modified_at: "2026-03-01T12:00:00Z",
         };
@@ -192,8 +186,11 @@ mod tests {
                 assert!(updated.modified_at.is_some());
 
                 // Verify new member can unwrap the group key
-                let unwrapped =
-                    crypto::unwrap_key(&updated.members[1].wrapped_key, &new_privkey).unwrap();
+                let unwrapped = crypto::unwrap_key(
+                    &updated.members[1].wrapped_key,
+                    &new_member.private_keys(),
+                )
+                .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
             }
             _ => panic!("expected JSON body"),
@@ -203,7 +200,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_duplicate_member() {
         let keyring = existing_keyring(TEST_DID);
-        let (owner_pubkey, _) = test_keypair();
+        let owner = TestKeys::generate(TEST_DID);
         let group_key = crypto::generate_content_key(&mut OsRng);
 
         let mock = MockTransport::new();
@@ -214,7 +211,7 @@ mod tests {
             keyring_uri: KEYRING_URI,
             group_key: &group_key,
             new_member_did: TEST_DID,
-            new_member_public_key: &owner_pubkey,
+            new_member_public_keys: owner.public_keys(),
             role: Role::Editor,
             modified_at: "2026-03-01T12:00:00Z",
         };
@@ -227,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_non_owner() {
-        let (pubkey, _) = test_keypair();
+        let new_member = TestKeys::generate("did:plc:newmember");
         let group_key = crypto::generate_content_key(&mut OsRng);
 
         let mock = MockTransport::new();
@@ -237,7 +234,7 @@ mod tests {
             keyring_uri: "at://did:plc:someone-else/app.opake.keyring/kr1",
             group_key: &group_key,
             new_member_did: "did:plc:newmember",
-            new_member_public_key: &pubkey,
+            new_member_public_keys: new_member.public_keys(),
             role: Role::Editor,
             modified_at: "2026-03-01T12:00:00Z",
         };
@@ -255,7 +252,7 @@ mod tests {
     async fn rejects_future_version() {
         let mut keyring = existing_keyring(TEST_DID);
         keyring.opake_version = SCHEMA_VERSION + 1;
-        let (pubkey, _) = test_keypair();
+        let new_member = TestKeys::generate("did:plc:new");
         let group_key = crypto::generate_content_key(&mut OsRng);
 
         let mock = MockTransport::new();
@@ -266,7 +263,7 @@ mod tests {
             keyring_uri: KEYRING_URI,
             group_key: &group_key,
             new_member_did: "did:plc:new",
-            new_member_public_key: &pubkey,
+            new_member_public_keys: new_member.public_keys(),
             role: Role::Editor,
             modified_at: "2026-03-01T12:00:00Z",
         };

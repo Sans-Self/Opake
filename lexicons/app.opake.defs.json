@@ -14,13 +14,14 @@
         },
         "ciphertext": {
           "type": "bytes",
-          "description": "The symmetric key, encrypted to the DID's public key. Base64-encoded in JSON.",
-          "maxLength": 512
+          "description": "The symmetric key, encrypted to the DID's public key. Base64-encoded in JSON. The hybrid wrap envelope is 32 + 1088 + 40 = 1160 bytes; the legacy x25519-only envelope (pair flow) is 32 + 40 = 72 bytes.",
+          "maxLength": 2048
         },
         "algo": {
           "type": "string",
-          "description": "Asymmetric algorithm used for key wrapping.",
+          "description": "Asymmetric algorithm used for key wrapping. Default is the hybrid X25519 + ML-KEM-768 KEM (BSI TR-02102 / ANSSI guidance). The x25519-only variant is retained for the device-pairing flow until that flow is hybridized.",
           "knownValues": [
+            "x25519-mlkem768-hkdf-a256kw",
             "x25519-hkdf-a256kw"
           ]
         }

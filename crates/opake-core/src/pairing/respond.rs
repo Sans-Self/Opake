@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use crate::atproto::AtBytes;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{
-    encrypt_blob, generate_content_key, wrap_key, CryptoRng, RngCore, X25519PublicKey,
+    encrypt_blob, generate_content_key, wrap_key_x25519_only, CryptoRng, RngCore, X25519PublicKey,
 };
 use crate::error::Error;
 use crate::records::{PairResponse, PAIR_RESPONSE_COLLECTION, SCHEMA_VERSION};
@@ -26,7 +26,10 @@ pub async fn respond_to_pair_request(
 
     // Wrap the content key to the ephemeral public key. The DID field in
     // the WrappedKey is the identity's DID — it identifies who is sending.
-    let wrapped = wrap_key(&content_key, ephemeral_public_key, &identity.did, rng)?;
+    // Pair flow stays X25519-only until the recipient has published their
+    // ML-KEM public key (Phase 3.5 will hybridize it).
+    let wrapped =
+        wrap_key_x25519_only(&content_key, ephemeral_public_key, &identity.did, rng)?;
 
     let record = PairResponse {
         opake_version: SCHEMA_VERSION,

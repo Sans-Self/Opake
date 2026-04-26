@@ -22,7 +22,7 @@
 use crate::atproto;
 use crate::cabinet::Cabinet;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{ContentKey, CryptoRng, DidMember, RngCore, X25519PublicKey};
+use crate::crypto::{ContentKey, CryptoRng, DidMember, RngCore};
 use crate::error::Error;
 use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
@@ -265,13 +265,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
+        let private_keys = identity.owned_private_keys()?;
 
         let keyrings = self.discover_member_keyrings().await?;
         let matches: Vec<String> = keyrings
             .iter()
             .filter(|kr| {
-                keyrings::decrypt_indexer_keyring_name(kr, &self.did, &private_key).as_deref()
+                keyrings::decrypt_indexer_keyring_name(kr, &self.did, &private_keys.bundle())
+                    .as_deref()
                     == Some(name)
             })
             .map(|kr| kr.uri.clone())
@@ -304,13 +305,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         if at_uri.authority == self.did {
             // Own keyring — fetch with authenticated client
             let identity = &self.identity;
-            let private_key = identity.x25519_private_key_bytes()?;
+            let private_keys = identity.owned_private_keys()?;
             let entry = self
                 .client
                 .get_record(&self.did, &at_uri.collection, &at_uri.rkey)
                 .await?;
             let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-            let group_key = Self::unwrap_workspace_key(&keyring.members, &self.did, &private_key)?;
+            let group_key =
+                Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
             let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
                 .unwrap_or_default();
             Ok(Workspace::from_keyring(
@@ -334,7 +336,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// workspaces where the caller is a member but not the owner.
     pub async fn resolve_foreign_workspace(&self, keyring_uri: &str) -> Result<Workspace, Error> {
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
+        let private_keys = identity.owned_private_keys()?;
         let at_uri = crate::atproto::parse_at_uri(keyring_uri)?;
         let owner_did = &at_uri.authority;
 
@@ -354,7 +356,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         .await?;
 
         let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-        let group_key = Self::unwrap_workspace_key(&keyring.members, &self.did, &private_key)?;
+        let group_key =
+            Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
 
         // Decrypt metadata for the workspace name
         let name =
@@ -510,11 +513,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let indexer_keyrings = self.discover_member_keyrings().await?;
         log::trace!("sync: found {} workspaces", indexer_keyrings.len());
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
+        let private_keys = identity.owned_private_keys()?;
 
         let mut results = Vec::with_capacity(indexer_keyrings.len());
         for kr in &indexer_keyrings {
-            results.push(self.sync_single_workspace(kr, &private_key).await);
+            results.push(self.sync_single_workspace(kr, &private_keys.bundle()).await);
         }
 
         self.auto_persist_session().await?;
@@ -535,8 +538,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let Some(kr) = target else { return Ok(None) };
 
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
-        let result = self.sync_single_workspace(kr, &private_key).await;
+        let private_keys = identity.owned_private_keys()?;
+        let result = self
+            .sync_single_workspace(kr, &private_keys.bundle())
+            .await;
         self.auto_persist_session().await?;
         Ok(Some(result))
     }
@@ -548,7 +553,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     async fn sync_single_workspace(
         &mut self,
         kr: &crate::indexer::IndexerKeyring,
-        private_key: &crate::crypto::X25519PrivateKey,
+        private_keys: &crate::crypto::PrivateKeyBundle<'_>,
     ) -> crate::indexer::daemon::WorkspaceSyncResult {
         use crate::indexer::daemon::WorkspaceSyncResult;
 
@@ -561,7 +566,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect();
 
-        let group_key = match Self::unwrap_workspace_key(&members, &self.did, private_key) {
+        let group_key = match Self::unwrap_workspace_key(&members, &self.did, private_keys) {
             Ok(k) => k,
             Err(e) => {
                 return WorkspaceSyncResult {
@@ -665,7 +670,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<usize, Error> {
         use crate::crypto;
         use crate::records::{self, keyring_update};
-        use base64::Engine;
 
         let at_uri = atproto::parse_at_uri(keyring_uri)?;
         let entry = self
@@ -679,8 +683,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // Mutable because removeMember/leave rotates the key — subsequent proposals
         // must use the rotated key.
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
-        let mut group_key = Self::unwrap_workspace_key(&keyring.members, &self.did, &private_key)?;
+        let private_keys = identity.owned_private_keys()?;
+        let mut group_key =
+            Self::unwrap_workspace_key(&keyring.members, &self.did, &private_keys.bundle())?;
 
         let mut applied = 0;
 
@@ -693,16 +698,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                     if keyring.members.iter().any(|m| m.did() == did) {
                         continue;
                     }
-                    let Some(ref pk_b64) = p.member_public_key else {
-                        continue;
-                    };
-                    let pk_bytes = match base64::engine::general_purpose::STANDARD.decode(pk_b64) {
-                        Ok(b) => b,
-                        Err(_) => continue,
-                    };
-                    let pubkey: crypto::X25519PublicKey = match pk_bytes.try_into() {
-                        Ok(k) => k,
-                        Err(_) => continue,
+                    // The proposal carries only the proposer's X25519 hint; we
+                    // resolve the new member's full hybrid identity from their
+                    // published `app.opake.publicKey/self` record so the wrap
+                    // covers both halves of the KEM.
+                    let resolved = match self.resolve_identity(did).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            log::warn!("keyring-sync: cannot resolve identity for {did}: {e}");
+                            continue;
+                        }
                     };
                     let role = p
                         .role
@@ -710,7 +715,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                         .and_then(|r| r.parse::<records::Role>().ok())
                         .unwrap_or(records::Role::Editor);
 
-                    let wrapped = crypto::wrap_key(&group_key, &pubkey, did, &mut self.rng)?;
+                    let recipient_bundle = crypto::PublicKeyBundle {
+                        x25519: &resolved.x25519_public_key,
+                        ml_kem: &resolved.ml_kem_public_key,
+                    };
+                    let wrapped =
+                        crypto::wrap_key(&group_key, &recipient_bundle, did, &mut self.rng)?;
                     keyring.members.push(records::KeyringMember {
                         wrapped_key: wrapped,
                         role,
@@ -1065,13 +1075,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Add a member to a workspace.
     ///
     /// Owner: applies directly. Non-owner manager: creates a keyringUpdate
-    /// proposal carrying the new member's DID and public key.
+    /// proposal carrying the new member's DID and public-key hint. The
+    /// proposal record carries only the X25519 half; the owner resolves the
+    /// member's full hybrid identity from their published `publicKey/self`
+    /// record before re-wrapping the group key.
     pub async fn add_workspace_member(
         &mut self,
         keyring_uri: &str,
         key: &ContentKey,
         member_did: &str,
-        member_public_key: &X25519PublicKey,
+        member_public_keys: crate::crypto::PublicKeyBundle<'_>,
         role: Role,
     ) -> Result<MutationOutcome, Error> {
         let owner_did = atproto::parse_at_uri(keyring_uri)?.authority.to_string();
@@ -1085,7 +1098,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                     keyring_uri,
                     group_key: key,
                     new_member_did: member_did,
-                    new_member_public_key: member_public_key,
+                    new_member_public_keys: member_public_keys,
                     role,
                     modified_at: &now,
                 },
@@ -1098,7 +1111,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             let update = KeyringUpdateRecord::add_member(
                 keyring_uri.to_string(),
                 member_did.to_string(),
-                member_public_key.to_vec(),
+                member_public_keys.x25519.to_vec(),
                 role.to_string(),
                 now,
             );
@@ -1408,9 +1421,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// The grant and document live on the owner's PDS. All fetches are
     /// unauthenticated public endpoint calls. Returns `(filename, plaintext)`.
     pub async fn download_from_grant(&self, grant_uri: &str) -> Result<(String, Vec<u8>), Error> {
-        let private_key = self.identity.x25519_private_key_bytes()?;
-        crate::documents::download_from_grant(self.client.transport(), &private_key, grant_uri)
-            .await
+        let private_keys = self.identity.owned_private_keys()?;
+        crate::documents::download_from_grant(
+            self.client.transport(),
+            &private_keys.bundle(),
+            grant_uri,
+        )
+        .await
     }
 
     /// Resolve an incoming grant's document metadata without downloading the blob.
@@ -1421,22 +1438,26 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &self,
         grant_uri: &str,
     ) -> Result<(String, crate::crypto::DocumentMetadata), Error> {
-        let private_key = self.identity.x25519_private_key_bytes()?;
-        crate::documents::resolve_grant_metadata(self.client.transport(), &private_key, grant_uri)
-            .await
+        let private_keys = self.identity.owned_private_keys()?;
+        crate::documents::resolve_grant_metadata(
+            self.client.transport(),
+            &private_keys.bundle(),
+            grant_uri,
+        )
+        .await
     }
 
     /// Unwrap a workspace key from keyring member data (pure crypto, no network).
     pub fn unwrap_workspace_key(
         members: &[crate::records::KeyringMember],
         did: &str,
-        private_key: &crate::crypto::X25519PrivateKey,
+        private_keys: &crate::crypto::PrivateKeyBundle<'_>,
     ) -> Result<ContentKey, Error> {
         let member = members
             .iter()
             .find(|m| m.did() == did)
             .ok_or_else(|| Error::NotFound(format!("no member entry for DID {did}")))?;
-        crate::crypto::unwrap_key(&member.wrapped_key, private_key)
+        crate::crypto::unwrap_key(&member.wrapped_key, private_keys)
     }
 
     // -- Indexer helpers --
@@ -1564,13 +1585,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         resolver_transport: &impl Transport,
     ) -> Result<crate::sharing::RetryResult, Error> {
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
+        let private_keys = identity.owned_private_keys()?;
         let now = crate::client::time::unix_now();
         let pds_url = self.client.base_url().to_owned();
         let params = crate::sharing::RetryParams {
             caller_pds_url: &pds_url,
             owner_did: &self.did,
-            owner_private_key: &private_key,
+            owner_private_keys: private_keys.bundle(),
             now,
             ttl_seconds: crate::sharing::DEFAULT_PENDING_SHARE_TTL_SECONDS,
         };
@@ -1654,11 +1675,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         document_uri: &str,
     ) -> Result<crate::documents::KeyringDownloadResult, Error> {
         let identity = &self.identity;
-        let private_key = identity.x25519_private_key_bytes()?;
+        let private_keys = identity.owned_private_keys()?;
         crate::documents::download_from_keyring_member(
             self.client.transport(),
             &self.did,
-            &private_key,
+            &private_keys.bundle(),
             document_uri,
         )
         .await
