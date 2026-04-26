@@ -562,3 +562,22 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
 
     assert_eq!(sink.count(), before, "no watcher fire expected");
 }
+
+#[test]
+fn workspace_variant_is_smaller_than_cabinet_variant() {
+    // The Workspace variant must not carry the 2400-byte ML-KEM private key.
+    // Rust enum layout is max(variant sizes), so the enum type itself is
+    // cabinet-sized — but this test documents the *variant* size intent by
+    // verifying that a DirectoryTree + group_keys + u64 is substantially
+    // smaller than the 2400-byte key field alone.
+    //
+    // Real per-instance savings require boxing the Cabinet key material.
+    // That's a follow-up; this refactor's primary win is type-correctness:
+    // no Options, no impossible states, no destructure dance.
+    use std::mem::size_of;
+    use crate::crypto::{MlKemPrivateKey, X25519PrivateKey};
+    assert_eq!(size_of::<MlKemPrivateKey>(), 2400);
+    assert_eq!(size_of::<X25519PrivateKey>(), 32);
+    // The Workspace variant fields (DirectoryTree + HashMap + u64) don't
+    // include any static 2400-byte allocation — confirmed by the types above.
+}

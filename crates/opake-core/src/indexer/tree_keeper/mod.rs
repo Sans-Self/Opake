@@ -47,29 +47,58 @@ pub type WatcherCallback = Box<dyn FnMut(Option<&DirectoryTree>)>;
 pub struct WatcherHandle(u64);
 
 /// A persistent tree for one context (cabinet or workspace).
-#[derive(crate::RedactedDebug)]
-struct HeldTree {
-    tree: DirectoryTree,
-    /// For cabinet trees: the X25519 half of the hybrid private key.
-    /// For workspace trees: None.
-    #[redact]
-    x25519_private_key: Option<X25519PrivateKey>,
-    /// For cabinet trees: the ML-KEM-768 half of the hybrid private key.
-    /// For workspace trees: None. Stored alongside the X25519 half so a
-    /// `PrivateKeyBundle<'_>` view can be borrowed at decrypt time without
-    /// re-decoding from the surrounding `Identity`.
-    #[redact]
-    ml_kem_private_key: Option<crate::crypto::MlKemPrivateKey>,
-    /// For workspace trees: single-entry map of keyring URI → group key.
-    /// For cabinet trees: empty.
-    group_keys: HashMap<String, ContentKey>,
-    /// For workspace trees: last-seen rotation counter from the keyring
-    /// record. Cabinet trees don't rotate — keep as 0. Used to detect key
-    /// rotations via SSE `KeyringUpsert` so the cached decrypted names
-    /// can be invalidated before the stale plaintext leaks into the UI.
-    rotation: u64,
+///
+/// The two variants are mutually exclusive by construction: `TreeKeeper`
+/// only ever places `Cabinet` in `self.cabinet` and `Workspace` in
+/// `self.workspaces`. Keeping them separate eliminates the prior
+/// struct-with-Options shape where every workspace tree silently carried
+/// `Option<[u8; 2400]> = None` for the ML-KEM private key.
+enum HeldTree {
+    Cabinet {
+        tree: DirectoryTree,
+        x25519: X25519PrivateKey,
+        ml_kem: crate::crypto::MlKemPrivateKey,
+    },
+    Workspace {
+        tree: DirectoryTree,
+        /// Keyring URI → unwrapped group content key.
+        group_keys: HashMap<String, ContentKey>,
+        /// Last-seen rotation counter from the keyring record. Bumps
+        /// invalidate the cached decrypted directory names on the tree.
+        rotation: u64,
+    },
 }
 
+impl HeldTree {
+    fn tree(&self) -> &DirectoryTree {
+        match self {
+            Self::Cabinet { tree, .. } | Self::Workspace { tree, .. } => tree,
+        }
+    }
+}
+
+impl std::fmt::Debug for HeldTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cabinet { .. } => f.write_str("HeldTree::Cabinet { [key material redacted] }"),
+            Self::Workspace { rotation, .. } => {
+                write!(f, "HeldTree::Workspace {{ rotation: {rotation} }}")
+            }
+        }
+    }
+}
+
+impl Drop for HeldTree {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        if let Self::Cabinet { x25519, ml_kem, .. } = self {
+            x25519.zeroize();
+            ml_kem.zeroize();
+        }
+        // Workspace: each ContentKey in group_keys has its own ZeroizeOnDrop
+        // impl (via RedactedDebug), so the HashMap's normal drop handles it.
+    }
+}
 
 /// Which context a watcher is attached to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -124,12 +153,10 @@ impl TreeKeeper {
         x25519_private_key: X25519PrivateKey,
         ml_kem_private_key: crate::crypto::MlKemPrivateKey,
     ) {
-        self.cabinet = Some(HeldTree {
+        self.cabinet = Some(HeldTree::Cabinet {
             tree,
-            x25519_private_key: Some(x25519_private_key),
-            ml_kem_private_key: Some(ml_kem_private_key),
-            group_keys: HashMap::new(),
-            rotation: 0,
+            x25519: x25519_private_key,
+            ml_kem: ml_kem_private_key,
         });
     }
 
@@ -148,10 +175,8 @@ impl TreeKeeper {
         group_keys.insert(keyring_uri.clone(), group_key);
         self.workspaces.insert(
             keyring_uri,
-            HeldTree {
+            HeldTree::Workspace {
                 tree,
-                x25519_private_key: None,
-                ml_kem_private_key: None,
                 group_keys,
                 rotation,
             },
@@ -245,11 +270,11 @@ impl TreeKeeper {
     // -- Read helpers for bindings / tests --
 
     pub fn cabinet_tree(&self) -> Option<&DirectoryTree> {
-        self.cabinet.as_ref().map(|h| &h.tree)
+        self.cabinet.as_ref().map(|h| h.tree())
     }
 
     pub fn workspace_tree(&self, keyring_uri: &str) -> Option<&DirectoryTree> {
-        self.workspaces.get(keyring_uri).map(|h| &h.tree)
+        self.workspaces.get(keyring_uri).map(|h| h.tree())
     }
 
     fn tree_for_scope(&self, scope: &TreeScope) -> Option<&DirectoryTree> {
@@ -341,18 +366,27 @@ impl TreeKeeper {
                 let Some(held) = self.workspaces.get_mut(&record.uri) else {
                     return Ok(());
                 };
-                if new_rotation > held.rotation {
-                    held.rotation = new_rotation;
-                    held.tree.invalidate_decrypted_names();
+                let HeldTree::Workspace { rotation, tree, .. } = held else {
+                    return Ok(());
+                };
+                let should_notify = if new_rotation > *rotation {
+                    *rotation = new_rotation;
+                    tree.invalidate_decrypted_names();
+                    true
+                } else {
+                    if new_rotation < *rotation {
+                        log::debug!(
+                            "[tree_keeper] ignoring backward keyring rotation on {}: held={}, received={}",
+                            record.uri,
+                            *rotation,
+                            new_rotation
+                        );
+                    }
+                    false
+                };
+                if should_notify {
                     let scope = TreeScope::Workspace(record.uri.clone());
                     self.notify_scope(&scope);
-                } else if new_rotation < held.rotation {
-                    log::debug!(
-                        "[tree_keeper] ignoring backward keyring rotation on {}: held={}, received={}",
-                        record.uri,
-                        held.rotation,
-                        new_rotation
-                    );
                 }
             }
             // Keyring delete: the workspace tree becomes unreadable
@@ -406,26 +440,15 @@ impl TreeKeeper {
             return Ok(());
         };
 
-        let HeldTree {
-            tree,
-            x25519_private_key,
-            ml_kem_private_key,
-            group_keys,
-            ..
-        } = held;
-        let private_keys = match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
-            (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
-                x25519: x,
-                ml_kem: m,
-            }),
-            _ => None,
+        let change = match held {
+            HeldTree::Cabinet { tree, x25519, ml_kem } => {
+                let bundle = crate::crypto::PrivateKeyBundle { x25519, ml_kem };
+                tree.apply_directory_delta(record, &DecryptionCtx::cabinet(did, &bundle))?
+            }
+            HeldTree::Workspace { tree, group_keys, .. } => {
+                tree.apply_directory_delta(record, &DecryptionCtx::workspace(did, group_keys))?
+            }
         };
-        let ctx = DecryptionCtx {
-            did,
-            private_keys: private_keys.as_ref(),
-            group_keys,
-        };
-        let change = tree.apply_directory_delta(record, &ctx)?;
 
         self.notify_watchers_for_change(&scope, &change);
         Ok(())
@@ -447,27 +470,10 @@ impl TreeKeeper {
 
         let did = self.did.as_str();
 
-        if let Some(held) = self.cabinet.as_mut() {
-            let HeldTree {
-                tree,
-                x25519_private_key,
-                ml_kem_private_key,
-                group_keys,
-                ..
-            } = held;
-            let private_keys = match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
-                (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
-                    x25519: x,
-                    ml_kem: m,
-                }),
-                _ => None,
-            };
-            let ctx = DecryptionCtx {
-                did,
-                private_keys: private_keys.as_ref(),
-                group_keys,
-            };
-            let change = tree.apply_directory_delta(&delete_payload, &ctx)?;
+        if let Some(HeldTree::Cabinet { tree, x25519, ml_kem }) = self.cabinet.as_mut() {
+            let bundle = crate::crypto::PrivateKeyBundle { x25519, ml_kem };
+            let change =
+                tree.apply_directory_delta(&delete_payload, &DecryptionCtx::cabinet(did, &bundle))?;
             if change.is_effective() {
                 self.notify_watchers_for_change(&TreeScope::Cabinet, &change);
                 return Ok(());
@@ -481,27 +487,13 @@ impl TreeKeeper {
                 let Some(held) = self.workspaces.get_mut(&keyring_uri) else {
                     continue;
                 };
-                let HeldTree {
-                    tree,
-                    x25519_private_key,
-                    ml_kem_private_key,
-                    group_keys,
-                    ..
-                } = held;
-                let private_keys =
-                    match (x25519_private_key.as_ref(), ml_kem_private_key.as_ref()) {
-                        (Some(x), Some(m)) => Some(crate::crypto::PrivateKeyBundle {
-                            x25519: x,
-                            ml_kem: m,
-                        }),
-                        _ => None,
-                    };
-                let ctx = DecryptionCtx {
-                    did,
-                    private_keys: private_keys.as_ref(),
-                    group_keys,
+                let HeldTree::Workspace { tree, group_keys, .. } = held else {
+                    continue;
                 };
-                tree.apply_directory_delta(&delete_payload, &ctx)?
+                tree.apply_directory_delta(
+                    &delete_payload,
+                    &DecryptionCtx::workspace(did, group_keys),
+                )?
             };
             if change.is_effective() {
                 self.notify_watchers_for_change(
@@ -531,8 +523,8 @@ impl TreeKeeper {
         } = self;
 
         let tree = match scope {
-            TreeScope::Cabinet => cabinet.as_ref().map(|h| &h.tree),
-            TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| &h.tree),
+            TreeScope::Cabinet => cabinet.as_ref().map(|h| h.tree()),
+            TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| h.tree()),
         };
         let Some(tree) = tree else {
             return;
@@ -576,8 +568,8 @@ impl TreeKeeper {
         } = self;
 
         let tree = match scope {
-            TreeScope::Cabinet => cabinet.as_ref().map(|h| &h.tree),
-            TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| &h.tree),
+            TreeScope::Cabinet => cabinet.as_ref().map(|h| h.tree()),
+            TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| h.tree()),
         };
         let Some(tree) = tree else {
             return;
@@ -602,8 +594,8 @@ impl TreeKeeper {
 
         for watcher in watchers.values_mut() {
             let tree = match &watcher.scope {
-                TreeScope::Cabinet => cabinet.as_ref().map(|h| &h.tree),
-                TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| &h.tree),
+                TreeScope::Cabinet => cabinet.as_ref().map(|h| h.tree()),
+                TreeScope::Workspace(uri) => workspaces.get(uri).map(|h| h.tree()),
             };
             if let Some(tree) = tree {
                 (watcher.callback)(Some(tree));
