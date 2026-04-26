@@ -61,25 +61,34 @@ Every file is encrypted before it leaves your machine. The PDS stores opaque cip
 
 ### Hybrid Encryption
 
-Same pattern as git-crypt: symmetric content encryption + asymmetric key wrapping.
+Same pattern as git-crypt: symmetric content encryption + asymmetric key wrapping. The asymmetric half is itself *hybrid* — classical X25519 combined with post-quantum ML-KEM-768.
 
 ```
 plaintext file
   → AES-256-GCM with random content key K → ciphertext blob
-  → X25519-HKDF-A256KW wraps K to owner's public key → wrappedKey in document record
+  → x25519-mlkem768-hkdf-a256kw wraps K to recipient's hybrid pubkey bundle → wrappedKey in document record
 ```
 
 **Content encryption** (AES-256-GCM) — fast, handles arbitrary-size data. A random 256-bit key and 96-bit nonce are generated per file.
 
-**Key wrapping** (x25519-hkdf-a256kw) — wraps the 256-bit content key to a recipient's X25519 public key. Uses ephemeral ECDH + HKDF-SHA256 + AES-256-KW. The wrapped key ciphertext is `[32-byte ephemeral pubkey ‖ 40-byte AES-KW output]`.
+**Key wrapping** (`x25519-mlkem768-hkdf-a256kw`) — wraps the 256-bit content key to a recipient's hybrid public-key bundle (X25519 + ML-KEM-768). Construction:
 
-The algorithm name `x25519-hkdf-a256kw` is intentionally distinct from JWE's `ECDH-ES+A256KW` — we use HKDF-SHA256, not JWE's Concat KDF. The HKDF info string includes the schema version for domain separation: `opake-v1-x25519-hkdf-a256kw-{did}`.
+1. Ephemeral X25519 ECDH between sender and recipient → `x25519_shared` (32 bytes)
+2. ML-KEM-768 Encaps to recipient's KEM public key → `(ml_kem_ct, ml_kem_shared)` (1088 + 32 bytes)
+3. HKDF-SHA256 combiner: `salt = eph_pub ‖ recipient_x25519_pub ‖ ml_kem_ct`, `ikm = x25519_shared ‖ ml_kem_shared`, `info = "opake-v1-x25519-mlkem768-hkdf-a256kw-{recipient_did}"` → 32-byte AES-KW key
+4. AES-256-KW wraps the content key → 40 bytes
+
+The wire envelope is `[X25519 ephemeral pubkey (32) ‖ ML-KEM-768 ciphertext (1088) ‖ AES-KW wrapped (40)]` = 1160 bytes total.
+
+The combiner's salt commits to the entire transcript (both halves of the public input + the ML-KEM ciphertext). An attacker who can flip or substitute the post-quantum half — say, by compromising ML-KEM and trying to redirect the wrap — breaks the AES-KW integrity check at the recipient. This is the splice-resistance property from [Bindel-Brendel-Fischlin-Goncalves-Stebila (PQCrypto 2019)](https://eprint.iacr.org/2018/903).
+
+The construction follows BSI TR-02102 (Germany) and ANSSI (France) guidance for hybrid post-quantum key establishment. ML-KEM-768 byte sizes follow [NIST FIPS-203](https://csrc.nist.gov/pubs/fips/203/final). Library: [`libcrux-ml-kem`](https://github.com/cryspen/libcrux), formally verified in F\*.
 
 ### Two Sharing Modes
 
-**Direct encryption** — the content key is wrapped individually to each authorized DID. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
+**Direct encryption** — the content key is wrapped individually to each authorized DID's hybrid public-key bundle. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
 
-**Keyring encryption (workspaces)** — a named group has a shared group key (GK), wrapped to each member's X25519 public key with a role (manager, editor, viewer). The keyring has a canonical `owner` DID. Documents have their content key wrapped under GK (AES-256-KW) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members. Editors propose changes via `documentUpdate` records on their own PDS; the owner applies them. Membership changes go through `keyringUpdate` proposals (action types: `addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`, and `leave` for opt-outs).
+**Keyring encryption (workspaces)** — a named group has a shared group key (GK), hybrid-wrapped to each member's `PublicKeyBundle` with a role (manager, editor, viewer). The keyring has a canonical `owner` DID. Documents have their content key wrapped under GK (AES-256-KW, no post-quantum needed — symmetric) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members. Editors propose changes via `documentUpdate` records on their own PDS; the owner applies them. Membership changes go through `keyringUpdate` proposals (action types: `addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`, and `leave` for opt-outs).
 
 **Workspace directories** — workspace folder hierarchies reuse `app.opake.directory` with `keyringKeyWrapping` (content key wrapped under the group key). Directories live on the owner's PDS only — members read them via public fetches. The workspace root uses a deterministic rkey (`ws-{keyring_rkey}`). Non-owner members propose structural changes (add/move/rename/delete entries) via `directoryUpdate` records on their own PDS; the owner's daemon applies them. Directories use `KeyWrapping` instead of the document `Encryption` type — no `algo`/`nonce` since directories have no blob.
 
@@ -91,25 +100,29 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 
 AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.publicKey/self` singleton records on each user's PDS containing:
 
-- **X25519 encryption public key** — used for key wrapping (sharing)
+- **X25519 encryption public key** — classical half of the hybrid wrap
+- **ML-KEM-768 encapsulation public key** — post-quantum half of the hybrid wrap
 - **Ed25519 signing public key** — used for Indexer authentication
 
-Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. Both keys are published automatically on every `opake login` via an idempotent `putRecord`.
+Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. All three keys are published automatically on every `opake login` via an idempotent `putRecord`. The `app.opake.publicKey` lexicon requires both encryption halves; a record missing either fails validation and the consumer rejects it.
 
 ## Identity Derivation
 
-Identity keypairs are deterministically derived from a BIP-39 mnemonic (24 words / 256-bit entropy). The same phrase always produces the same keys.
+Identity keypairs are deterministically derived from a BIP-39 mnemonic (24 words / 256-bit entropy). The same phrase always produces the same X25519, ML-KEM-768, and Ed25519 keys.
 
 ```
 256 bits entropy (CSPRNG)
   → BIP-39 encode → 24-word mnemonic
   → PBKDF2-HMAC-SHA512 (2048 rounds, salt = "mnemonic")
   → 512-bit master seed
-  → HKDF-SHA256 (info = "opake-v1-x25519-identity")  → X25519 private key
-  → HKDF-SHA256 (info = "opake-v1-ed25519-signing")   → Ed25519 signing key
+  → HKDF-SHA256 (info = "opake-v1-x25519-identity")    → 32-byte X25519 private key
+  → HKDF-SHA256 (info = "opake-v1-mlkem768-keygen")    → 64-byte seed for ML-KEM keygen (FIPS-203 §7.1)
+  → HKDF-SHA256 (info = "opake-v1-ed25519-signing")    → 32-byte Ed25519 signing key
 ```
 
-The PBKDF2 salt is `"mnemonic"` per the [BIP-39 specification](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#from-mnemonic-to-seed) — security comes from the 256-bit entropy, not the salt. The HKDF info strings include the schema version for domain separation, consistent with the key wrapping convention.
+The PBKDF2 salt is `"mnemonic"` per the [BIP-39 specification](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#from-mnemonic-to-seed) — security comes from the 256-bit entropy, not the salt. Each HKDF info string carries the schema version for domain separation, so a future version bump produces different keys from the same mnemonic without touching the BIP-39 layer.
+
+ML-KEM-768 KeyGen is itself deterministic given a 64-byte randomness seed, so the entire identity (all three keypairs) is reproducible from the mnemonic alone — verified by the `derive_kat_pinned` regression test in `crypto/mnemonic_tests.rs`.
 
 The mnemonic is shown once at first login and never stored. Recovery is via `opake recover` (CLI) or the "Use your recovery phrase" flow (web). See [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) for sequence diagrams.
 
@@ -125,13 +138,15 @@ erDiagram
     ACCOUNT ||--|| IDENTITY : "derived from seed phrase"
 
     IDENTITY {
-        bytes x25519_private "decrypts wrapped keys"
+        bytes x25519_private "classical half of hybrid wrap"
+        bytes ml_kem_private "post-quantum half of hybrid wrap (2400 bytes)"
         bytes ed25519_signing "Indexer auth"
         string seed_phrase "24-word BIP-39 (not stored)"
     }
 
     PUBLICKEY {
-        bytes public_key "X25519 (published on PDS)"
+        bytes x25519_public_key "classical half (published on PDS)"
+        bytes ml_kem_public_key "post-quantum half (1184 bytes, published on PDS)"
         bytes signing_key "Ed25519 (published on PDS)"
     }
 ```
@@ -220,7 +235,7 @@ opake-core exposes a domain-driven API through three types:
   - **Maintenance:** `heal_stale_grants`, `purge_collection`
   - **Low-level:** `create_record`, `get_record`
 
-  The new-device side of pairing runs *before* an Identity exists, so it is exposed as free functions in `crate::pairing` — `create_pair_request`, `try_complete_pair`, `cancel_pair_request` — which take `&S: Storage` and `did` directly. The ephemeral X25519 private key is persisted via `Storage::save_pair_state` and never crosses the WASM/JS boundary; the resulting Identity is written to Storage by `try_complete_pair` on success, at which point the standard `Opake::for_account` path succeeds.
+  The new-device side of pairing runs *before* an Identity exists, so it is exposed as free functions in `crate::pairing` — `create_pair_request`, `try_complete_pair`, `cancel_pair_request` — which take `&S: Storage` and `did` directly. The ephemeral private bundle (X25519 + ML-KEM-768, 32 + 2400 = 2432 bytes concatenated) is persisted via `Storage::save_pair_state` and never crosses the WASM/JS boundary; the resulting Identity is written to Storage by `try_complete_pair` on success, at which point the standard `Opake::for_account` path succeeds.
 
 - **`FileManager<'a, T, R, S>`** — Borrows `&'a mut Opake` and `&'a FileContext`. Unified file operations for both cabinet (personal) and workspace (shared) contexts, dispatching internally based on `FileContext`. All mutations use `applyWrites` for atomicity — no ghost documents or dangling directory references on partial failure. Path-based methods: `upload_at`, `download_at`, `create_directory_at`, `resolve_entry`, `resolve_document_names`, `resolve_document_names_in`, `resolve_document_metadata_in`, `read_metadata`, `delete_recursive`, `create_record`. Also: `load_tree`, `update_metadata`, `update_content`, `fetch_content_key`, `move_entry`, `share`, `revoke_share`, `list_shares`.
 

@@ -24,14 +24,14 @@ The file is then encrypted using **AES-256-GCM**. This algorithm is fast and han
 
 We have the encrypted file, but how do we store the `Content Key` so that _only you_ can decrypt it later? We wrap it.
 
-Your Opake identity consists of an **X25519** keypair. We take the `Content Key` and wrap it to your X25519 public key using a scheme called `x25519-hkdf-a256kw`.
+Your Opake identity consists of a **hybrid keypair**: an X25519 half (classical, fast, well-understood) and an ML-KEM-768 half (post-quantum, lattice-based). We wrap the `Content Key` to both halves at once using a scheme called `x25519-mlkem768-hkdf-a256kw`.
 
-1. We generate an ephemeral X25519 keypair.
-2. We perform an ECDH key agreement with your public key.
-3. We derive a wrapping key using HKDF-SHA256.
-4. We wrap the `Content Key` using AES-256-KW.
+1. We generate an ephemeral X25519 keypair and run ECDH against your X25519 public key → 32-byte shared secret.
+2. We run ML-KEM-768 Encaps against your post-quantum public key → 32-byte shared secret + a 1088-byte ciphertext.
+3. We feed both shared secrets into HKDF-SHA256, with the entire transcript (both ephemeral pubkeys and the ML-KEM ciphertext) committed in the salt — so an adversary who tries to flip the post-quantum half breaks the integrity check.
+4. We wrap the `Content Key` using AES-256-KW with the resulting 32-byte key.
 
-The result is a `WrappedKey`. This lockbox is safe to store publicly while being streamed through the AT Protocol firehose because it can only be opened by your private X25519 key.
+The result is a `WrappedKey` — a 1160-byte envelope: `[X25519 ephemeral pub (32) ‖ ML-KEM ciphertext (1088) ‖ AES-KW wrapped (40)]`. This lockbox is safe to store publicly while being streamed through the AT Protocol firehose: opening it requires breaking *both* X25519 *and* ML-KEM-768.
 
 <SequenceDiagram
   code={uploadFlow}
@@ -39,20 +39,28 @@ The result is a `WrappedKey`. This lockbox is safe to store publicly while being
 />
 
 <Callout type="info">
-  **A Note on JWE:** We intentionally avoided the JSON Web Encryption (JWE) standard. Our specific
-  HKDF info string (`opake-v1-x25519-hkdf-a256kw-{did}`) provides strict domain separation,
-  preventing replay attacks across different users or protocol versions.
+  **Why hybrid?** A future quantum computer could in principle break X25519, but ML-KEM-768 is
+  designed to resist that attack. The combined construction is at least as strong as either
+  half — breaking the wrap requires breaking both. This is the [BSI TR-02102](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr02102/tr02102_node.html) and ANSSI recommended posture for transitional security: assume the post-quantum primitive may
+  have undiscovered weaknesses, and let the classical half catch any failure.
 </Callout>
 
 ## Influences
 
 Opake's primitives and patterns come from a few specific places:
 
-- **Signal Protocol** — Curve25519 (X25519) for identity and key wrapping. Used here for the
-  same reasons Signal picked it: fast, well-understood, resistant to many side-channel attacks.
+- **Signal Protocol** — Curve25519 (X25519) for the classical half of identity. Used here for
+  the same reasons Signal picked it: fast, well-understood, resistant to many side-channel
+  attacks.
+- **ML-KEM-768 (NIST FIPS-203)** — the post-quantum KEM standardized by NIST in 2024. Built on
+  Module-LWE; expected to remain secure against quantum attacks. Implementation:
+  [`libcrux-ml-kem`](https://github.com/cryspen/libcrux), formally verified in F\*.
 - **[age](https://github.com/FiloSottile/age)** — the file-for-recipients model (one content key,
   wrapped to each recipient's public key) is borrowed directly. Same "static" encryption —
   nothing to keep in sync between sessions.
+- **[Bindel-Brendel-Fischlin-Goncalves-Stebila (PQCrypto 2019)](https://eprint.iacr.org/2018/903)**
+  — the splice-resistance argument for the HKDF combiner. Including the full transcript in the
+  salt means a flipped post-quantum half can't redirect the wrap to a different content key.
 - **[Noise Protocol Framework](http://noiseprotocol.org/)** — Opake isn't a messaging protocol,
   but the underlying composition (Diffie-Hellman + HKDF + AEAD) is the Noise recipe.
 
@@ -81,37 +89,40 @@ audited primitive.
    intentional cost: unnoticeable on a legitimate login, meaningful when an attacker is trying
    to run billions of guesses.
 
-3. **HKDF-SHA256 → two keys.** The 512-bit master seed is fed through HKDF-SHA256 twice, with
+3. **HKDF-SHA256 → three keys.** The 512-bit master seed is fed through HKDF-SHA256 three times, with
    different `info` strings:
 
-   - `opake-v1-x25519-identity` → X25519 private key (encryption + key wrapping)
-   - `opake-v1-ed25519-signing` → Ed25519 signing key (indexer authentication + record
+   - `opake-v1-x25519-identity` → 32-byte X25519 private key (classical half of key wrapping)
+   - `opake-v1-mlkem768-keygen` → 64-byte seed for ML-KEM-768 keygen (post-quantum half)
+   - `opake-v1-ed25519-signing` → 32-byte Ed25519 signing key (indexer authentication + record
      signing)
 
    The `info` strings provide **domain separation**: even with the same master seed, you can't
-   substitute one key for the other, and a future schema version (`opake-v2-...`) produces
-   cleanly independent keys from the same words.
+   substitute one key for another, and a future schema version (`opake-v2-...`) produces
+   cleanly independent keys from the same words. ML-KEM-768 keygen is itself deterministic
+   given a 64-byte randomness seed, so the entire identity is reproducible from the mnemonic.
 
 The pipeline is **deterministic**: same 24 words, same master seed, same X25519 and Ed25519
 keys, every time, on every device. That's what makes seed-phrase recovery possible.
 
 <SequenceDiagram
   code={derivationFlow}
-  caption="The derivation pipeline: 24 words turn into two independent keypairs via a slow KDF and two domain-separated HKDF applications."
+  caption="The derivation pipeline: 24 words turn into three independent keypairs via a slow KDF and three domain-separated HKDF applications."
 />
 
 The PBKDF2 salt is the fixed string `"mnemonic"` per the BIP-39 specification. Security rests
 on the 256-bit entropy of the words themselves, which is already enough randomness to make
 per-user salting redundant.
 
-### The two keys, and what they do
+### The three keys, and what they do
 
 | Key | Purpose |
 |-----|---------|
-| **X25519 keypair** | Encryption. The private half unwraps content keys sent to you. The public half is published on your PDS so others can wrap content keys to you. |
-| **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and (eventually) record envelopes. The public half is published alongside the X25519 key so services can verify signatures. |
+| **X25519 keypair** | Classical half of encryption. The private half participates in ECDH to unwrap content keys sent to you. The public half is published on your PDS so others can wrap to you. |
+| **ML-KEM-768 keypair** | Post-quantum half of encryption. The private half decapsulates the post-quantum component of every wrapped key. The 1184-byte public half is published on your PDS alongside the X25519 key. |
+| **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and (eventually) record envelopes. The public half is published alongside the encryption keys so services can verify signatures. |
 
-Both public halves live in a single `app.opake.publicKey/self` record on your PDS — a
+All three public halves live in a single `app.opake.publicKey/self` record on your PDS — a
 singleton, republished on every login so it stays current.
 
 ## Where Are My Keys Stored?
