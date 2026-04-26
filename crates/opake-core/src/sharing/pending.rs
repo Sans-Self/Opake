@@ -301,7 +301,7 @@ pub async fn retry_pending_shares(
             document_uri: &entry.document,
             recipient_did: &recipient.did,
             content_key: &content_key,
-            recipient_public_key: &recipient.public_key,
+            recipient_public_key: &recipient.x25519_public_key,
             permissions: metadata.permissions.as_deref().unwrap_or("read"),
             note: metadata.note.as_deref(),
             created_at: &entry.created_at,

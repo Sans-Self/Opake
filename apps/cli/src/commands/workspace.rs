@@ -124,7 +124,7 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
         return Ok(None);
     }
 
-    let private_key = opake.identity().private_key_bytes()?;
+    let private_key = opake.identity().x25519_private_key_bytes()?;
     let did = opake.did();
 
     for kr in &keyrings {
@@ -166,7 +166,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
             &workspace.uri,
             &workspace.key,
             &resolved.did,
-            &resolved.public_key,
+            &resolved.x25519_public_key,
             args.role,
         )
         .await?;
@@ -240,14 +240,15 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     let mut remaining_pubkeys = Vec::new();
     for did in &remaining_dids {
         let identity = opake.resolve_identity(did).await?;
-        remaining_pubkeys.push(identity.public_key);
+        remaining_pubkeys.push((identity.x25519_public_key, identity.ml_kem_public_key));
     }
     let remaining_keys: Vec<DidMember<'_>> = remaining_dids
         .iter()
         .enumerate()
         .map(|(i, did)| DidMember {
             did,
-            public_key: &remaining_pubkeys[i],
+            x25519_public_key: &remaining_pubkeys[i].0,
+            ml_kem_public_key: &remaining_pubkeys[i].1,
         })
         .collect();
 

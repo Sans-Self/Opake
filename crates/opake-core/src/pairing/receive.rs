@@ -140,11 +140,13 @@ async fn decrypt_pair_response(
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await?;
     let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
-    let published_key = BASE64.decode(&published.public_key.encoded).map_err(|e| {
-        Error::InvalidRecord(format!("invalid base64 in published public key: {e}"))
-    })?;
+    let published_key = BASE64
+        .decode(&published.x25519_public_key.encoded)
+        .map_err(|e| {
+            Error::InvalidRecord(format!("invalid base64 in published public key: {e}"))
+        })?;
 
-    let received_key = BASE64.decode(&identity.public_key).map_err(|e| {
+    let received_key = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
         Error::InvalidRecord(format!(
             "invalid base64 in received identity public key: {e}"
         ))

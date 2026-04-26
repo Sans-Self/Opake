@@ -53,7 +53,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
             FileContext::Workspace(ws) => {
                 let doc_authority = atproto::parse_at_uri(document_uri)?.authority;
-                let private_key = self.opake.identity().private_key_bytes()?;
+                let private_key = self.opake.identity().x25519_private_key_bytes()?;
 
                 if doc_authority == self.opake.did {
                     let (filename, plaintext) = documents::download_with_group_key(

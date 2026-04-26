@@ -106,9 +106,11 @@ async fn happy_path_removes_and_rotates() {
     mock.enqueue(get_record_response(&keyring));
     mock.enqueue(put_record_response());
 
+    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        public_key: &owner_pubkey,
+        x25519_public_key: &owner_pubkey,
+        ml_kem_public_key: &owner_mlkem,
     }];
 
     let mut client = mock_client(mock.clone());
@@ -160,9 +162,11 @@ async fn rejects_non_owner() {
     let group_key = crypto::generate_content_key(&mut OsRng);
 
     let mock = MockTransport::new();
+    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        public_key: &owner_pubkey,
+        x25519_public_key: &owner_pubkey,
+        ml_kem_public_key: &owner_mlkem,
     }];
 
     let mut client = mock_client(mock);
@@ -192,9 +196,11 @@ async fn rejects_nonexistent_member() {
     let mock = MockTransport::new();
     mock.enqueue(get_record_response(&keyring));
 
+    let owner_mlkem = [0xAAu8; 1184];
     let remaining = [crypto::DidMember {
         did: TEST_DID,
-        public_key: &owner_pubkey,
+        x25519_public_key: &owner_pubkey,
+        ml_kem_public_key: &owner_mlkem,
     }];
 
     let mut client = mock_client(mock);

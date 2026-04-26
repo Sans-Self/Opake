@@ -149,14 +149,21 @@ fn create_group_key_wraps_to_all_members() {
     let (priv_a, pub_a) = test_keypair();
     let (priv_b, pub_b) = test_keypair();
 
+    // Phase 3a plumbing: DidMember carries an ML-KEM-768 pubkey alongside the
+    // X25519 one. `create_group_key` doesn't read it yet (Phase 3b switches the
+    // wrap construction); a stable bogus value satisfies the type-system here.
+    let mlkem_alice = [0xA1u8; 1184];
+    let mlkem_bob = [0xB2u8; 1184];
     let members = vec![
         DidMember {
             did: "did:plc:alice",
-            public_key: pub_a.as_bytes(),
+            x25519_public_key: pub_a.as_bytes(),
+            ml_kem_public_key: &mlkem_alice,
         },
         DidMember {
             did: "did:plc:bob",
-            public_key: pub_b.as_bytes(),
+            x25519_public_key: pub_b.as_bytes(),
+            ml_kem_public_key: &mlkem_bob,
         },
     ];
 

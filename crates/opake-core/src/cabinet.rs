@@ -26,8 +26,8 @@ impl Cabinet {
     pub fn from_identity(identity: &Identity) -> Result<Self, Error> {
         Ok(Self {
             did: identity.did.clone(),
-            public_key: identity.public_key_bytes()?,
-            private_key: *identity.private_key_bytes()?,
+            public_key: identity.x25519_public_key_bytes()?,
+            private_key: *identity.x25519_private_key_bytes()?,
         })
     }
 

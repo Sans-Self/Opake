@@ -63,12 +63,12 @@ pub fn derive_identity_from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Identity
 
     Identity {
         did: did.to_string(),
-        public_key: BASE64.encode(x25519_public.as_bytes()),
-        private_key: BASE64.encode(x25519_secret.to_bytes()),
-        signing_key: Some(BASE64.encode(ed25519_signing.to_bytes())),
-        verify_key: Some(BASE64.encode(ed25519_verifying.to_bytes())),
+        x25519_public_key: BASE64.encode(x25519_public.as_bytes()),
+        x25519_private_key: BASE64.encode(x25519_secret.to_bytes()),
         ml_kem_public_key: BASE64.encode(mlkem_keypair.public_key().as_ref()),
         ml_kem_private_key: BASE64.encode(mlkem_keypair.private_key().as_ref()),
+        signing_key: Some(BASE64.encode(ed25519_signing.to_bytes())),
+        verify_key: Some(BASE64.encode(ed25519_verifying.to_bytes())),
     }
 }
 

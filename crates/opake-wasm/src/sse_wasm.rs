@@ -270,7 +270,7 @@ impl WasmFileManagerHandle {
         match scope {
             TreeInstall::Cabinet => {
                 let guard = self.opake.lock().await;
-                let private_key = *guard.identity().private_key_bytes().map_err(wasm_err)?;
+                let private_key = *guard.identity().x25519_private_key_bytes().map_err(wasm_err)?;
                 drop(guard);
 
                 let mut keeper = self.tree_keeper.lock().await;
@@ -626,7 +626,7 @@ async fn apply_keyring_to_workspace_keeper(
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
-                let private_key = match guard.identity().private_key_bytes() {
+                let private_key = match guard.identity().x25519_private_key_bytes() {
                     Ok(pk) => pk,
                     Err(e) => {
                         log::warn!("[sse] workspace upsert: private_key_bytes failed: {e}");

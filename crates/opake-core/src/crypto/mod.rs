@@ -158,10 +158,11 @@ pub type MlKemPublicKey = [u8; ML_KEM_PK_LEN];
 /// it does for X25519 secrets.
 pub type MlKemPrivateKey = [u8; ML_KEM_SK_LEN];
 
-/// A DID string paired with its X25519 public key.
+/// A DID string paired with both halves of its hybrid encryption public key.
 pub struct DidMember<'a> {
     pub did: &'a str,
-    pub public_key: &'a X25519PublicKey,
+    pub x25519_public_key: &'a X25519PublicKey,
+    pub ml_kem_public_key: &'a MlKemPublicKey,
 }
 
 /// An ephemeral X25519 keypair for one-time key exchanges (e.g. device pairing).

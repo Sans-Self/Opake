@@ -121,32 +121,61 @@ mod tests {
         assert!(check_version(u32::MAX).is_err());
     }
 
+    /// 1184-byte ML-KEM-768 public key for record-construction tests. The
+    /// bytes are arbitrary — these tests don't exercise hybrid wrap, only
+    /// the wire-format / serde shape.
+    fn dummy_ml_kem_pubkey() -> [u8; 1184] {
+        [0x42u8; 1184]
+    }
+
     #[test]
     fn public_key_record_new_sets_defaults() {
-        let record = PublicKeyRecord::new(&[42u8; 32], "2026-03-01T00:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[42u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T00:00:00Z",
+        );
         assert_eq!(record.opake_version, SCHEMA_VERSION);
-        assert_eq!(record.algo, "x25519");
+        assert_eq!(record.x25519_algo, "x25519");
+        assert_eq!(record.ml_kem_algo, "ml-kem-768");
         assert_eq!(record.created_at, "2026-03-01T00:00:00Z");
     }
 
     #[test]
     fn public_key_record_roundtrips_through_json() {
-        let record = PublicKeyRecord::new(&[7u8; 32], "2026-03-01T12:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[7u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T12:00:00Z",
+        );
         let json = serde_json::to_string(&record).unwrap();
         let parsed: PublicKeyRecord = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.opake_version, record.opake_version);
-        assert_eq!(parsed.public_key.encoded, record.public_key.encoded);
-        assert_eq!(parsed.algo, "x25519");
+        assert_eq!(
+            parsed.x25519_public_key.encoded,
+            record.x25519_public_key.encoded
+        );
+        assert_eq!(parsed.x25519_algo, "x25519");
+        assert_eq!(
+            parsed.ml_kem_public_key.encoded,
+            record.ml_kem_public_key.encoded
+        );
+        assert_eq!(parsed.ml_kem_algo, "ml-kem-768");
         assert_eq!(parsed.created_at, "2026-03-01T12:00:00Z");
     }
 
     #[test]
     fn public_key_record_uses_atbytes_wire_format() {
-        let record = PublicKeyRecord::new(&[1u8; 32], "2026-03-01T00:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[1u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T00:00:00Z",
+        );
         let json = serde_json::to_value(&record).unwrap();
         // atproto $bytes convention: { "$bytes": "<base64>" }
-        assert!(json["publicKey"]["$bytes"].is_string());
+        assert!(json["x25519PublicKey"]["$bytes"].is_string());
+        assert!(json["mlKemPublicKey"]["$bytes"].is_string());
     }
 
     fn dummy_encrypted_directory(created_at: &str) -> Directory {

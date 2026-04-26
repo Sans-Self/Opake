@@ -25,8 +25,14 @@ impl Execute for ResolveCommand {
         }
         println!("  DID:        {}", identity.did);
         println!("  PDS:        {}", identity.pds_url);
-        println!("  Public key: {}", BASE64.encode(identity.public_key));
-        println!("  Algorithm:  {}", identity.algo);
+        println!("  X25519:     {}", BASE64.encode(identity.x25519_public_key));
+        println!("  X25519 algo: {}", identity.x25519_algo);
+        println!(
+            "  ML-KEM-768: {}…  ({} bytes)",
+            BASE64.encode(&identity.ml_kem_public_key[..32]),
+            identity.ml_kem_public_key.len()
+        );
+        println!("  ML-KEM algo: {}", identity.ml_kem_algo);
 
         Ok(None)
     }

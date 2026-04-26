@@ -201,7 +201,7 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let private_key = opake.identity().private_key_bytes().map_err(wasm_err)?;
+        let private_key = opake.identity().x25519_private_key_bytes().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
         let keyrings = opake
@@ -699,21 +699,27 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct R {
             did: String,
             handle: Option<String>,
             pds_url: String,
             #[serde(with = "crate::wasm_util::serde_bytes")]
-            public_key: Vec<u8>,
-            algo: String,
+            x25519_public_key: Vec<u8>,
+            x25519_algo: String,
+            #[serde(with = "crate::wasm_util::serde_bytes")]
+            ml_kem_public_key: Vec<u8>,
+            ml_kem_algo: String,
         }
 
         to_js(&R {
             did: resolved.did,
             handle: resolved.handle,
             pds_url: resolved.pds_url,
-            public_key: resolved.public_key.to_vec(),
-            algo: resolved.algo,
+            x25519_public_key: resolved.x25519_public_key.to_vec(),
+            x25519_algo: resolved.x25519_algo,
+            ml_kem_public_key: resolved.ml_kem_public_key.to_vec(),
+            ml_kem_algo: resolved.ml_kem_algo,
         })
     }
 

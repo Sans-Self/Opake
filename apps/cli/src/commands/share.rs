@@ -44,7 +44,7 @@ impl Execute for NewShareCommand {
                     .share(
                         &uri,
                         &recipient.did,
-                        &recipient.public_key,
+                        &recipient.x25519_public_key,
                         "read",
                         self.note.as_deref(),
                     )

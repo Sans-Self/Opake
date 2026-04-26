@@ -1,7 +1,9 @@
 use log::trace;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore, X25519PublicKey};
+use crate::crypto::{
+    self, ContentKey, CryptoRng, KeyringMetadata, MlKemPublicKey, RngCore, X25519PublicKey,
+};
 use crate::error::Error;
 use crate::records::{Keyring, KeyringMember, Role};
 
@@ -12,7 +14,8 @@ pub struct CreateKeyringParams<'a> {
     pub name: &'a str,
     pub description: Option<&'a str>,
     pub owner_did: &'a str,
-    pub owner_public_key: &'a X25519PublicKey,
+    pub owner_x25519_public_key: &'a X25519PublicKey,
+    pub owner_ml_kem_public_key: &'a MlKemPublicKey,
     pub created_at: &'a str,
 }
 
@@ -28,7 +31,8 @@ pub async fn create_keyring(
     trace!("generating group key for keyring {:?}", params.name);
     let members = [crypto::DidMember {
         did: params.owner_did,
-        public_key: params.owner_public_key,
+        x25519_public_key: params.owner_x25519_public_key,
+        ml_kem_public_key: params.owner_ml_kem_public_key,
     }];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, rng)?;
 
@@ -87,6 +91,13 @@ mod tests {
         (public.to_bytes(), secret.to_bytes())
     }
 
+    /// Stand-in 1184-byte ML-KEM-768 public key for keyring-creation tests.
+    /// We don't exercise hybrid wrap here yet (Phase 3a is plumbing only),
+    /// so any well-formed-length blob suffices for compile + flow tests.
+    fn test_mlkem_pubkey() -> MlKemPublicKey {
+        [0xABu8; 1184]
+    }
+
     fn create_record_response(uri: &str) -> HttpResponse {
         HttpResponse {
             status: 200,
@@ -111,7 +122,8 @@ mod tests {
             name: "family-photos",
             description: None,
             owner_did: TEST_DID,
-            owner_public_key: &pubkey,
+            owner_x25519_public_key: &pubkey,
+            owner_ml_kem_public_key: &test_mlkem_pubkey(),
             created_at: "2026-03-01T00:00:00Z",
         };
 
@@ -159,7 +171,8 @@ mod tests {
             name: "broken",
             description: None,
             owner_did: TEST_DID,
-            owner_public_key: &pubkey,
+            owner_x25519_public_key: &pubkey,
+            owner_ml_kem_public_key: &test_mlkem_pubkey(),
             created_at: "2026-03-01T00:00:00Z",
         };
 

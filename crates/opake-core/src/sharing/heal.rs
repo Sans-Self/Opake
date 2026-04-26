@@ -126,7 +126,7 @@ async fn resolve_and_check_key(
         Ok(record_entry) => {
             // Verify it's actually a valid public key (parseable, 32 bytes)
             let record: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
-            let key_bytes = record.public_key.decode()?;
+            let key_bytes = record.x25519_public_key.decode()?;
             let _: X25519PublicKey = key_bytes
                 .as_slice()
                 .try_into()

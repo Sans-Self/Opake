@@ -130,21 +130,26 @@ pub struct AccountInfo {
 ///
 /// `#[redact]` fields are zeroized on drop automatically (via RedactedDebug).
 /// The Ed25519 signing fields are optional for backward compat with older
-/// identity files that predate Indexer auth; the ML-KEM-768 fields are
-/// required because the hybrid X25519+ML-KEM-768 KEM landed before any
-/// users existed (no migration path needed).
+/// identity files that predate Indexer auth; the X25519 and ML-KEM-768
+/// fields are required.
 ///
-/// Field aliases accept both snake_case (the primary, canonical
-/// serialization) and camelCase — older identity files on disk used the
-/// camelCase form, so the migration path relies on the aliases.
+/// Naming follows the wire-format convention: each encryption keypair is
+/// prefixed with its algorithm name (`x25519_*`, `ml_kem_*`) so future
+/// additions slot into the same shape.
 #[derive(crate::RedactedDebug, Serialize, Deserialize)]
 pub struct Identity {
     pub did: String,
-    #[serde(alias = "publicKey")]
-    pub public_key: String,
+    /// X25519 public key (base64). Classical half of the hybrid KEM.
+    pub x25519_public_key: String,
+    /// X25519 private key (base64). Classical half of the hybrid KEM.
     #[redact]
-    #[serde(alias = "privateKey")]
-    pub private_key: String,
+    pub x25519_private_key: String,
+    /// ML-KEM-768 public encapsulation key (base64). Post-quantum half
+    /// of the hybrid KEM, per BSI TR-02102 / ANSSI guidance.
+    pub ml_kem_public_key: String,
+    /// ML-KEM-768 private decapsulation key (base64).
+    #[redact]
+    pub ml_kem_private_key: String,
     /// Ed25519 signing secret key (base64).
     #[serde(default, alias = "signingKey")]
     #[redact]
@@ -152,23 +157,15 @@ pub struct Identity {
     /// Ed25519 signing public/verify key (base64).
     #[serde(default, alias = "verifyKey")]
     pub verify_key: Option<String>,
-    /// ML-KEM-768 public encapsulation key (base64). Hybrid X25519+ML-KEM
-    /// construction per BSI TR-02102 / ANSSI guidance.
-    #[serde(alias = "mlKemPublicKey")]
-    pub ml_kem_public_key: String,
-    /// ML-KEM-768 private decapsulation key (base64).
-    #[redact]
-    #[serde(alias = "mlKemPrivateKey")]
-    pub ml_kem_private_key: String,
 }
 
 impl Identity {
-    pub fn public_key_bytes(&self) -> Result<X25519PublicKey, Error> {
-        decode_key_bytes(&self.public_key, "public_key")
+    pub fn x25519_public_key_bytes(&self) -> Result<X25519PublicKey, Error> {
+        decode_key_bytes(&self.x25519_public_key, "x25519_public_key")
     }
 
-    pub fn private_key_bytes(&self) -> Result<Zeroizing<X25519PrivateKey>, Error> {
-        decode_key_bytes(&self.private_key, "private_key").map(Zeroizing::new)
+    pub fn x25519_private_key_bytes(&self) -> Result<Zeroizing<X25519PrivateKey>, Error> {
+        decode_key_bytes(&self.x25519_private_key, "x25519_private_key").map(Zeroizing::new)
     }
 
     pub fn signing_key_bytes(&self) -> Result<Option<Ed25519SecretKey>, Error> {
@@ -194,19 +191,19 @@ impl Identity {
 
     /// Generate a new identity with random X25519 + Ed25519 + ML-KEM-768 keypairs.
     pub fn generate(did: &str, rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let private_secret = X25519DalekStaticSecret::random_from_rng(&mut *rng);
-        let public_key = X25519DalekPublicKey::from(&private_secret);
+        let x25519_private = X25519DalekStaticSecret::random_from_rng(&mut *rng);
+        let x25519_public = X25519DalekPublicKey::from(&x25519_private);
         let (signing_key, verify_key) = Self::generate_signing_keypair(rng);
         let (ml_kem_public_key, ml_kem_private_key) = Self::generate_ml_kem_keypair(rng);
 
         Identity {
             did: did.to_string(),
-            public_key: BASE64.encode(public_key.as_bytes()),
-            private_key: BASE64.encode(private_secret.to_bytes()),
-            signing_key: Some(signing_key),
-            verify_key: Some(verify_key),
+            x25519_public_key: BASE64.encode(x25519_public.as_bytes()),
+            x25519_private_key: BASE64.encode(x25519_private.to_bytes()),
             ml_kem_public_key,
             ml_kem_private_key,
+            signing_key: Some(signing_key),
+            verify_key: Some(verify_key),
         }
     }
 
@@ -568,15 +565,15 @@ mod tests {
     /// than a generated one. Defaults the ML-KEM and Ed25519 fields to
     /// well-formed-but-meaningless bytes so individual tests can override
     /// only the fields they actually exercise.
-    fn test_identity(did: &str, public_key: String, private_key: String) -> Identity {
+    fn test_identity(did: &str, x25519_public_key: String, x25519_private_key: String) -> Identity {
         Identity {
             did: did.into(),
-            public_key,
-            private_key,
-            signing_key: Some(BASE64.encode([0u8; 32])),
-            verify_key: Some(BASE64.encode([0u8; 32])),
+            x25519_public_key,
+            x25519_private_key,
             ml_kem_public_key: BASE64.encode([0u8; 1184]),
             ml_kem_private_key: BASE64.encode([0u8; 2400]),
+            signing_key: Some(BASE64.encode([0u8; 32])),
+            verify_key: Some(BASE64.encode([0u8; 32])),
         }
     }
 
@@ -584,15 +581,15 @@ mod tests {
     fn identity_public_key_bytes_roundtrip() {
         let identity = Identity {
             did: "did:plc:test".into(),
-            public_key: BASE64.encode([1u8; 32]),
-            private_key: BASE64.encode([2u8; 32]),
-            signing_key: Some(BASE64.encode([3u8; 32])),
-            verify_key: Some(BASE64.encode([4u8; 32])),
+            x25519_public_key: BASE64.encode([1u8; 32]),
+            x25519_private_key: BASE64.encode([2u8; 32]),
             ml_kem_public_key: BASE64.encode([5u8; 1184]),
             ml_kem_private_key: BASE64.encode([6u8; 2400]),
+            signing_key: Some(BASE64.encode([3u8; 32])),
+            verify_key: Some(BASE64.encode([4u8; 32])),
         };
-        assert_eq!(identity.public_key_bytes().unwrap(), [1u8; 32]);
-        assert_eq!(*identity.private_key_bytes().unwrap(), [2u8; 32]);
+        assert_eq!(identity.x25519_public_key_bytes().unwrap(), [1u8; 32]);
+        assert_eq!(*identity.x25519_private_key_bytes().unwrap(), [2u8; 32]);
         assert_eq!(identity.signing_key_bytes().unwrap().unwrap(), [3u8; 32]);
         assert_eq!(identity.verify_key_bytes().unwrap().unwrap(), [4u8; 32]);
         assert_eq!(identity.ml_kem_public_key_bytes().unwrap(), [5u8; 1184]);
@@ -606,7 +603,7 @@ mod tests {
             "not!valid!base64!!!".into(),
             BASE64.encode([0u8; 32]),
         );
-        assert!(identity.public_key_bytes().is_err());
+        assert!(identity.x25519_public_key_bytes().is_err());
     }
 
     #[test]
@@ -616,7 +613,7 @@ mod tests {
             BASE64.encode([0u8; 16]),
             BASE64.encode([0u8; 32]),
         );
-        let err = identity.public_key_bytes().unwrap_err().to_string();
+        let err = identity.x25519_public_key_bytes().unwrap_err().to_string();
         assert!(err.contains("16 bytes"), "expected length in error: {err}");
     }
 
@@ -728,8 +725,8 @@ mod tests {
     fn generate_produces_valid_identity() {
         let identity = Identity::generate("did:plc:test", &mut OsRng);
         assert_eq!(identity.did, "did:plc:test");
-        assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
-        assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
+        assert_eq!(identity.x25519_public_key_bytes().unwrap().len(), 32);
+        assert_eq!(identity.x25519_private_key_bytes().unwrap().len(), 32);
     }
 
     #[test]

@@ -162,14 +162,20 @@ fn two_member_keyring_with_real_crypto(
     owner_pubkey: &crypto::X25519PublicKey,
     bob_pubkey: &crypto::X25519PublicKey,
 ) -> (Keyring, crypto::ContentKey) {
+    // Phase 3a plumbing: ML-KEM pubkey threaded through DidMember; not yet
+    // read by `create_group_key` (Phase 3b switches to hybrid wrap).
+    let owner_mlkem = [0xC1u8; 1184];
+    let bob_mlkem = [0xC2u8; 1184];
     let members = [
         DidMember {
             did: OWNER_DID,
-            public_key: owner_pubkey,
+            x25519_public_key: owner_pubkey,
+            ml_kem_public_key: &owner_mlkem,
         },
         DidMember {
             did: BOB_DID,
-            public_key: bob_pubkey,
+            x25519_public_key: bob_pubkey,
+            ml_kem_public_key: &bob_mlkem,
         },
     ];
     let (group_key, wrapped_keys) = crypto::create_group_key(&members, &mut OsRng).unwrap();
@@ -222,17 +228,22 @@ fn did_document_response(did: &str, pds_url: &str) -> HttpResponse {
     }))
 }
 
-/// Mock response for a public key record fetch.
+/// Mock response for a public key record fetch. Includes a stable bogus
+/// ML-KEM-768 pubkey alongside the X25519 one so the wire-format requires-
+/// both-fields contract is satisfied (Phase 3a plumbing).
 fn public_key_record_response(did: &str, pubkey: &crypto::X25519PublicKey) -> HttpResponse {
     use base64::Engine;
     let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pubkey);
+    let mlkem_b64 = base64::engine::general_purpose::STANDARD.encode([0xEEu8; 1184]);
     json_response(&serde_json::json!({
         "uri": format!("at://{did}/app.opake.publicKey/self"),
         "cid": "bafypubkey",
         "value": {
             "opakeVersion": 1,
-            "publicKey": { "$bytes": pk_b64 },
-            "algo": "x25519-hkdf-a256kw",
+            "x25519PublicKey": { "$bytes": pk_b64 },
+            "x25519Algo": "x25519",
+            "mlKemPublicKey": { "$bytes": mlkem_b64 },
+            "mlKemAlgo": "ml-kem-768",
             "createdAt": "2026-01-01T00:00:00Z",
         },
     }))
@@ -249,7 +260,7 @@ fn put_record_response() -> HttpResponse {
 #[test]
 fn keyring_roundtrips_through_json_value() {
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
     let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
     let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();
 
@@ -270,8 +281,8 @@ fn keyring_roundtrips_through_json_value() {
 async fn apply_keyring_proposals_rotates_key_on_remove_member() {
     // Generate real keypairs
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
-    let owner_privkey = owner_identity.private_key_bytes().unwrap();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
+    let owner_privkey = owner_identity.x25519_private_key_bytes().unwrap();
 
     let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
     let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();
@@ -359,8 +370,8 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
 #[tokio::test]
 async fn apply_keyring_proposals_rotates_key_on_leave() {
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
-    let owner_privkey = owner_identity.private_key_bytes().unwrap();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
+    let owner_privkey = owner_identity.x25519_private_key_bytes().unwrap();
 
     let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
     let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();

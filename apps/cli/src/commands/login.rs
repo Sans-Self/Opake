@@ -201,11 +201,13 @@ pub async fn ensure_identity_and_publish(
         }
     };
 
-    let public_key_bytes = identity.public_key_bytes()?;
+    let public_key_bytes = identity.x25519_public_key_bytes()?;
+    let ml_kem_public_key_bytes = identity.ml_kem_public_key_bytes()?;
     let verify_key_bytes = identity.verify_key_bytes()?;
     opake_core::resolve::publish_public_key(
         client,
         &public_key_bytes,
+        &ml_kem_public_key_bytes,
         verify_key_bytes.as_ref(),
         &Utc::now().to_rfc3339(),
     )

@@ -102,6 +102,10 @@ pub fn unwrap_key(
 }
 
 /// Generate a random group key for a keyring, then wrap it to each member's public key.
+///
+/// In Phase 3a `wrap_key` still uses X25519-only encryption — `m.ml_kem_public_key`
+/// is plumbed through the `DidMember` type but not yet read. Phase 3b switches
+/// `wrap_key` to the hybrid construction at which point both halves get used.
 pub fn create_group_key(
     members: &[DidMember],
     rng: &mut (impl CryptoRng + RngCore),
@@ -109,7 +113,7 @@ pub fn create_group_key(
     let group_key = super::generate_content_key(rng);
     let wrapped_keys: Result<Vec<_>, _> = members
         .iter()
-        .map(|m| wrap_key(&group_key, m.public_key, m.did, rng))
+        .map(|m| wrap_key(&group_key, m.x25519_public_key, m.did, rng))
         .collect();
     Ok((group_key, wrapped_keys?))
 }

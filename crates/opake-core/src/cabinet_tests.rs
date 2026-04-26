@@ -8,8 +8,8 @@ fn from_identity_decodes_keys() {
     let cabinet = Cabinet::from_identity(&identity).unwrap();
 
     assert_eq!(cabinet.did, "did:plc:test");
-    assert_eq!(cabinet.public_key, identity.public_key_bytes().unwrap());
-    assert_eq!(cabinet.private_key, *identity.private_key_bytes().unwrap());
+    assert_eq!(cabinet.public_key, identity.x25519_public_key_bytes().unwrap());
+    assert_eq!(cabinet.private_key, *identity.x25519_private_key_bytes().unwrap());
 }
 
 #[test]
