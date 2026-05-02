@@ -234,16 +234,20 @@ function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps
             {status === "resolving" ? (
               <span className="text-text-faint italic">Resolving…</span>
             ) : status === "error" ? (
-              <span className="text-error" title={error}>
-                Could not decrypt metadata
-              </span>
+              <span className="text-error">Could not decrypt metadata</span>
             ) : (
               displayName
             )}
           </div>
-          <div className="text-text-faint truncate text-[11px]">
-            from {ownerLabel} · {formatDate(grant.createdAt)}
-          </div>
+          {status === "error" && error ? (
+            <div className="text-error/70 truncate text-[11px]" title={error}>
+              {error}
+            </div>
+          ) : (
+            <div className="text-text-faint truncate text-[11px]">
+              from {ownerLabel} · {formatDate(grant.createdAt)}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
