@@ -34,6 +34,7 @@ export { useCreateWorkspace } from "./hooks/use-create-workspace";
 // Sharing hooks
 export { useInbox } from "./hooks/use-inbox";
 export { useShares } from "./hooks/use-shares";
+export { useAllShares } from "./hooks/use-all-shares";
 export { useShareFile, useRevokeShare } from "./hooks/use-share-mutations";
 export { usePendingShares, useCancelPendingShare } from "./hooks/use-pending-shares";
 

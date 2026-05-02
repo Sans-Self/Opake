@@ -12,6 +12,7 @@ import {
   GearIcon,
 } from "@phosphor-icons/react";
 import {
+  useAllShares,
   useCreateDirectory,
   useDelete,
   useDeleteDirectory,
@@ -139,10 +140,20 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const currentDirectoryUri = resolvedDirectoryUri;
   const { data: metadata } = useDirectoryMetadata(keyringUri, currentDirectoryUri);
 
+  // Workspace sharing is keyring-based, not grant-based — only fetch the
+  // outgoing-grants list in cabinet contexts. The hook gates internally
+  // on `enabled` would be cleaner but reuses the same query key as
+  // `useShares(uri)`, so we just skip the call here entirely.
+  const { data: allShares } = useAllShares();
+  const sharedUris = useMemo(() => {
+    if (context.kind !== "cabinet" || !allShares) return new Set<string>();
+    return new Set(allShares.map((g) => g.document));
+  }, [context.kind, allShares]);
+
   const items = useMemo(() => {
     if (!snapshot || !currentDirectoryUri) return [];
-    return snapshotToFileItems(currentDirectoryUri, snapshot, metadata ?? {});
-  }, [snapshot, currentDirectoryUri, metadata]);
+    return snapshotToFileItems(currentDirectoryUri, snapshot, metadata ?? {}, sharedUris);
+  }, [snapshot, currentDirectoryUri, metadata, sharedUris]);
 
   const ancestors = useMemo(
     () => (snapshot ? ancestorsOf(snapshot, currentDirectoryUri) : []),

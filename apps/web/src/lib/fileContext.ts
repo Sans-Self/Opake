@@ -26,11 +26,18 @@ export interface MetadataChanges {
  * tree snapshot; document names / sizes / dates come from the decrypted
  * metadata map. Documents without metadata render as "[Encrypted]" placeholders
  * so the tree structure is visible before the metadata round-trip returns.
+ *
+ * `sharedUris` is the set of document URIs the caller has at least one
+ * outgoing grant for. Items in the set render with the "shared" badge
+ * instead of "private". Pass an empty set (or omit) when share state
+ * isn't available — workspace contexts skip this since their sharing
+ * model is keyring-based, not per-doc grants.
  */
 export function snapshotToFileItems(
   directoryUri: string,
   snapshot: DirectoryTreeSnapshot,
   metadata: Readonly<Record<string, DocumentMetadata>>,
+  sharedUris: ReadonlySet<string> = new Set(),
 ): readonly FileItem[] {
   const dir = snapshot.directories[directoryUri];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
@@ -56,6 +63,7 @@ export function snapshotToFileItems(
       };
     }
 
+    const status = sharedUris.has(entry.uri) ? ("shared" as const) : ("private" as const);
     const meta = metadata[entry.uri] as DocumentMetadata | undefined;
     if (meta) {
       return {
@@ -66,7 +74,7 @@ export function snapshotToFileItems(
         fileType: mimeTypeToFileType(meta.mimeType),
         mimeType: meta.mimeType,
         encrypted: true,
-        status: "private" as const,
+        status,
         size: formatFileSize(meta.size),
         modified: meta.modifiedAt
           ? formatRelativeDate(meta.modifiedAt)
@@ -85,7 +93,7 @@ export function snapshotToFileItems(
       name: "[Encrypted]",
       kind: "file" as const,
       encrypted: true,
-      status: "private" as const,
+      status,
       modified: "",
       decrypted: false,
       tags: [],
