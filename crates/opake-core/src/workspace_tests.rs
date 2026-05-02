@@ -12,6 +12,7 @@ fn from_keyring_preserves_fields() {
         "did:plc:owner".into(),
         gk,
         3,
+        Vec::new(),
     );
 
     assert_eq!(
@@ -34,6 +35,7 @@ fn root_rkey_derives_from_keyring_uri() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     assert_eq!(ws.root_rkey(), "ws-abc123");
@@ -49,6 +51,7 @@ fn root_directory_uri_is_deterministic() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     assert_eq!(

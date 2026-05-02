@@ -323,6 +323,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             )?;
             let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
                 .unwrap_or_default();
+            let historical_keys = crate::workspace::derive_historical_keys(
+                &keyring,
+                &self.did,
+                keyring_uri,
+                &private_keys.bundle(),
+            );
             Ok(Workspace::from_keyring(
                 keyring_uri.to_string(),
                 name,
@@ -330,6 +336,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 self.did.clone(),
                 group_key,
                 keyring.rotation,
+                historical_keys,
             ))
         } else {
             // Foreign keyring — resolve via public PDS endpoint
@@ -374,6 +381,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let name =
             keyrings::decrypt_keyring_name_from_record(&keyring, &group_key).unwrap_or_default();
 
+        let historical_keys = crate::workspace::derive_historical_keys(
+            &keyring,
+            &self.did,
+            keyring_uri,
+            &private_keys.bundle(),
+        );
+
         Ok(Workspace::from_keyring(
             keyring_uri.to_string(),
             name,
@@ -381,6 +395,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             owner_did.to_string(),
             group_key,
             keyring.rotation,
+            historical_keys,
         ))
     }
 
@@ -603,6 +618,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             }
         };
 
+        // Indexer DTO doesn't carry `keyHistory`; the daemon-driven sync
+        // path builds the workspace without historical keys. That's fine
+        // for proposal cleanup / apply, which doesn't decrypt content
+        // older than the current rotation. If a sync caller later needs
+        // to decrypt rotation-mismatched documents, fetch the full
+        // keyring record and rebuild via `resolve_workspace_by_uri`.
         let workspace = crate::workspace::Workspace::from_keyring(
             kr.uri.clone(),
             String::new(),
@@ -610,6 +631,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             kr.owner_did.clone(),
             group_key,
             kr.rotation,
+            Vec::new(),
         );
         let ctx = crate::manager::FileContext::Workspace(workspace);
         let mut mgr = self.file_manager(&ctx);
@@ -1234,6 +1256,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 })
                 .collect();
 
+            let private_keys = self.private_keys_from_cache();
+            let historical_keys = crate::workspace::derive_historical_keys(
+                &keyring,
+                &self.did,
+                keyring_uri,
+                &private_keys.bundle(),
+            );
             let workspace = Workspace {
                 uri: keyring_uri.to_string(),
                 name: String::new(),
@@ -1241,6 +1270,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 owner_did,
                 key: group_key.clone(),
                 rotation: keyring.rotation,
+                historical_keys,
             };
             let mut admin = self.workspace_admin(&workspace);
             let result = admin.remove_member(member_did, &remaining_keys).await?;

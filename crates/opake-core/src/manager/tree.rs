@@ -645,15 +645,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let mut names = HashMap::new();
 
         for uri in tree.document_uris_in_subtree() {
-            match self
-                .resolve_single_document_metadata(
-                    &uri,
-                    &keys.did,
-                    &keys.private_keys(),
-                    keys.group_key.as_ref(),
-                )
-                .await
-            {
+            match self.resolve_single_document_metadata(&uri, &keys).await {
                 Ok(Some(meta)) => {
                     names.insert(uri, meta.name);
                 }
@@ -796,14 +788,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let mut first_match: Option<String> = None;
 
         for uri in &doc_uris {
-            let meta = self
-                .resolve_single_document_metadata(
-                    uri,
-                    &keys.did,
-                    &keys.private_keys(),
-                    keys.group_key.as_ref(),
-                )
-                .await;
+            let meta = self.resolve_single_document_metadata(uri, &keys).await;
 
             let doc_name = match meta {
                 Ok(Some(m)) => m.name,
@@ -850,14 +835,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let mut matches = Vec::new();
 
         for uri in doc_uris {
-            let meta = self
-                .resolve_single_document_metadata(
-                    uri,
-                    &keys.did,
-                    &keys.private_keys(),
-                    keys.group_key.as_ref(),
-                )
-                .await;
+            let meta = self.resolve_single_document_metadata(uri, &keys).await;
 
             if let Ok(Some(m)) = meta {
                 if m.name == name {
@@ -899,12 +877,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 continue;
             }
             match self
-                .resolve_single_document_metadata(
-                    uri,
-                    &keys.did,
-                    &keys.private_keys(),
-                    keys.group_key.as_ref(),
-                )
+                .resolve_single_document_metadata(uri, &keys)
                 .await
             {
                 Ok(Some(metadata)) => {
@@ -932,12 +905,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let mut result = HashMap::new();
         for uri in uris {
             match self
-                .resolve_single_document_metadata(
-                    uri,
-                    &keys.did,
-                    &keys.private_keys(),
-                    keys.group_key.as_ref(),
-                )
+                .resolve_single_document_metadata(uri, &keys)
                 .await
             {
                 Ok(Some(metadata)) => {
@@ -955,10 +923,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     async fn resolve_single_document_metadata(
         &mut self,
         uri: &str,
-        did: &str,
-        private_keys: &crypto::PrivateKeyBundle<'_>,
-        group_key: Option<&crypto::ContentKey>,
+        keys: &super::editor::DecryptionKeys,
     ) -> Result<Option<super::types::ResolvedDocumentMetadata>, Error> {
+        let did = keys.did.as_str();
+        let private_keys = &keys.private_keys();
         // Cache-first: check local document cache before hitting PDS
         let doc_scope = doc_scope_key(self.context);
         let cached = self
@@ -1017,8 +985,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 }
             }
             Encryption::Keyring(kr_enc) => {
-                let gk = group_key.ok_or_else(|| {
-                    Error::KeyWrap("no group key for keyring-encrypted document".into())
+                let doc_rotation = kr_enc.keyring_ref.rotation;
+                let gk = keys.group_key_for_rotation(doc_rotation).ok_or_else(|| {
+                    Error::KeyWrap(format!(
+                        "no group key for keyring-encrypted document at rotation {doc_rotation}"
+                    ))
                 })?;
                 let wrapped_bytes = kr_enc
                     .keyring_ref

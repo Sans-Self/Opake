@@ -63,6 +63,7 @@ fn workspace_file_manager_non_owner() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();
@@ -84,6 +85,7 @@ fn workspace_owner_is_detected() {
         "did:plc:test".into(), // Same as the identity DID
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();
@@ -103,6 +105,7 @@ fn workspace_admin_preserves_workspace() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();

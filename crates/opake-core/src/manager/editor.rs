@@ -29,7 +29,14 @@ pub(crate) struct DecryptionKeys {
     pub did: String,
     pub x25519_private_key: Zeroizing<X25519PrivateKey>,
     pub ml_kem_private_key: Zeroizing<MlKemPrivateKey>,
+    /// Group key at the current rotation. `None` for cabinet contexts.
     pub group_key: Option<ContentKey>,
+    /// Current keyring rotation. `0` and ignored when `group_key` is `None`.
+    pub current_rotation: u64,
+    /// Historical group keys (rotation → key) for previous rotations the
+    /// caller had access to. Empty for cabinet contexts and workspaces
+    /// that have never rotated.
+    pub historical_keys: Vec<crate::workspace::HistoricalKey>,
 }
 
 impl DecryptionKeys {
@@ -39,6 +46,19 @@ impl DecryptionKeys {
             x25519: &self.x25519_private_key,
             ml_kem: &self.ml_kem_private_key,
         }
+    }
+
+    /// Resolve the group key for a specific rotation. Returns `None` when
+    /// the context has no group key (cabinet) or the rotation is unknown.
+    pub fn group_key_for_rotation(&self, rotation: u64) -> Option<&ContentKey> {
+        let current = self.group_key.as_ref()?;
+        if rotation == self.current_rotation {
+            return Some(current);
+        }
+        self.historical_keys
+            .iter()
+            .find(|h| h.rotation == rotation)
+            .map(|h| &h.key)
     }
 }
 
@@ -133,12 +153,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 x25519_private_key: Zeroizing::new(cabinet.x25519_private_key),
                 ml_kem_private_key: Zeroizing::new(cabinet.ml_kem_private_key),
                 group_key: None,
+                current_rotation: 0,
+                historical_keys: Vec::new(),
             }),
             FileContext::Workspace(ws) => Ok(DecryptionKeys {
                 did: self.opake.did.clone(),
                 x25519_private_key: Zeroizing::new(*self.opake.cached_private_keys.x25519),
                 ml_kem_private_key: Zeroizing::new(*self.opake.cached_private_keys.ml_kem),
                 group_key: Some(ws.key.clone()),
+                current_rotation: ws.rotation,
+                historical_keys: ws.historical_keys.clone(),
             }),
         }
     }
