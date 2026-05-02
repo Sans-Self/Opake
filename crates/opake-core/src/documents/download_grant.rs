@@ -118,7 +118,7 @@ pub(crate) async fn resolve_grant_metadata(
     transport: &impl Transport,
     private_keys: &PrivateKeyBundle<'_>,
     grant_uri: &str,
-) -> Result<(String, crypto::DocumentMetadata), Error> {
+) -> Result<(String, crypto::DocumentMetadata, String, Option<String>), Error> {
     let grant_at = atproto::parse_at_uri(grant_uri)?;
     if grant_at.collection != GRANT_COLLECTION {
         return Err(Error::InvalidRecord(format!(
@@ -164,7 +164,7 @@ pub(crate) async fn resolve_grant_metadata(
 
     let name = resolve_document_name(&doc, &content_key)?;
     let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
-    Ok((name, metadata))
+    Ok((name, metadata, doc.created_at, doc.modified_at))
 }
 
 #[cfg(test)]

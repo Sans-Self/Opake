@@ -730,18 +730,24 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = resolveGrantMetadata)]
     pub async fn resolve_grant_metadata(&self, grant_uri: &str) -> Result<JsValue, JsError> {
         let opake = self.opake().await?;
-        let (name, metadata) = opake
+        let (name, metadata, created_at, modified_at) = opake
             .resolve_grant_metadata(grant_uri)
             .await
             .map_err(wasm_err)?;
 
+        let resolved =
+            opake_core::manager::ResolvedDocumentMetadata::from_parts(metadata, created_at, modified_at);
+
         #[derive(serde::Serialize)]
         struct R {
             name: String,
-            metadata: opake_core::crypto::DocumentMetadata,
+            metadata: opake_core::manager::ResolvedDocumentMetadata,
         }
 
-        to_js(&R { name, metadata })
+        to_js(&R {
+            name,
+            metadata: resolved,
+        })
     }
 
     /// Proactively refresh the OAuth token if it's close to expiry.

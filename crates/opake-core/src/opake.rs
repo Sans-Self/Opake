@@ -1480,11 +1480,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Resolve an incoming grant's document metadata without downloading the blob.
     ///
     /// Cross-PDS — fetches grant + document records from the owner's PDS,
-    /// unwraps the content key, decrypts metadata. Returns `(filename, metadata)`.
+    /// unwraps the content key, decrypts metadata. Returns
+    /// `(filename, metadata, createdAt, modifiedAt)` where the timestamps
+    /// come from the document record (not the encrypted blob).
     pub async fn resolve_grant_metadata(
         &self,
         grant_uri: &str,
-    ) -> Result<(String, crate::crypto::DocumentMetadata), Error> {
+    ) -> Result<(String, crate::crypto::DocumentMetadata, String, Option<String>), Error> {
         let private_keys = self.private_keys_from_cache();
         crate::documents::resolve_grant_metadata(
             self.client.transport(),
