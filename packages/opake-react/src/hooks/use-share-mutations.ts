@@ -38,7 +38,8 @@ export function useShareFile() {
           await fm.share(
             input.documentUri,
             recipient.did,
-            recipient.publicKey,
+            recipient.x25519PublicKey,
+            recipient.mlKemPublicKey,
             "read",
             input.note,
           );
