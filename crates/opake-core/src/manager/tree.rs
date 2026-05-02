@@ -610,7 +610,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tree.set_root(&root_uri);
 
                 let mut group_keys = HashMap::new();
-                group_keys.insert(ws.uri.clone(), ws.key.clone());
+                group_keys.insert(ws.uri.clone(), ws.group_keys());
 
                 let identity = self.opake.identity();
                 let x25519_private = identity.x25519_private_key_bytes()?;

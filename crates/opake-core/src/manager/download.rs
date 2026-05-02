@@ -66,7 +66,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         &mut self.opake.client,
                         &self.opake.did,
                         &private_keys,
-                        Some(&ws.key),
+                        Some(ws.group_keys()),
                         document_uri,
                     )
                     .await?;

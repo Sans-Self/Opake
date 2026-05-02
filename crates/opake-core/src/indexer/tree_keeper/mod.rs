@@ -74,11 +74,15 @@ enum HeldTree {
     },
     Workspace {
         tree: DirectoryTree,
-        /// Keyring URI → unwrapped group content key.
-        group_keys: HashMap<String, ContentKey>,
+        /// Current rotation's group key.
+        group_key: ContentKey,
         /// Last-seen rotation counter from the keyring record. Bumps
         /// invalidate the cached decrypted directory names on the tree.
         rotation: u64,
+        /// Group keys for previous rotations the caller had access to.
+        /// Lets SSE-driven directory deltas decrypt records that were
+        /// encrypted before the latest rotation.
+        historical_keys: Vec<crate::workspace::HistoricalKey>,
     },
 }
 
@@ -169,23 +173,24 @@ impl TreeKeeper {
 
     /// Install a workspace tree. Replaces any previously-installed tree
     /// for the same keyring URI. `group_key` is the unwrapped content
-    /// key for the workspace's keyring; `rotation` seeds the counter
-    /// used to detect subsequent key rotations via SSE events.
+    /// key at the current rotation; `historical_keys` covers any older
+    /// rotations the caller had access to so SSE-driven directory
+    /// deltas can decrypt records encrypted under previous keys.
     pub fn install_workspace_tree(
         &mut self,
         keyring_uri: String,
         tree: DirectoryTree,
         group_key: ContentKey,
         rotation: u64,
+        historical_keys: Vec<crate::workspace::HistoricalKey>,
     ) {
-        let mut group_keys = HashMap::new();
-        group_keys.insert(keyring_uri.clone(), group_key);
         self.workspaces.insert(
             keyring_uri,
             HeldTree::Workspace {
                 tree,
-                group_keys,
+                group_key,
                 rotation,
+                historical_keys,
             },
         );
     }
@@ -455,8 +460,24 @@ impl TreeKeeper {
                 };
                 tree.apply_directory_delta(record, &DecryptionCtx::cabinet(did, &bundle))?
             }
-            HeldTree::Workspace { tree, group_keys, .. } => {
-                tree.apply_directory_delta(record, &DecryptionCtx::workspace(did, group_keys))?
+            HeldTree::Workspace {
+                tree,
+                group_key,
+                rotation,
+                historical_keys,
+            } => {
+                let view = crate::workspace::GroupKeys {
+                    current_rotation: *rotation,
+                    current: group_key,
+                    historical: historical_keys,
+                };
+                let mut keys_map = HashMap::new();
+                let keyring_uri = match &scope {
+                    TreeScope::Workspace(uri) => uri.clone(),
+                    _ => unreachable!("workspace HeldTree always implies Workspace scope"),
+                };
+                keys_map.insert(keyring_uri, view);
+                tree.apply_directory_delta(record, &DecryptionCtx::workspace(did, &keys_map))?
             }
         };
 
@@ -500,12 +521,25 @@ impl TreeKeeper {
                 let Some(held) = self.workspaces.get_mut(&keyring_uri) else {
                     continue;
                 };
-                let HeldTree::Workspace { tree, group_keys, .. } = held else {
+                let HeldTree::Workspace {
+                    tree,
+                    group_key,
+                    rotation,
+                    historical_keys,
+                } = held
+                else {
                     continue;
                 };
+                let view = crate::workspace::GroupKeys {
+                    current_rotation: *rotation,
+                    current: group_key,
+                    historical: historical_keys,
+                };
+                let mut keys_map = HashMap::new();
+                keys_map.insert(keyring_uri.clone(), view);
                 tree.apply_directory_delta(
                     &delete_payload,
-                    &DecryptionCtx::workspace(did, group_keys),
+                    &DecryptionCtx::workspace(did, &keys_map),
                 )?
             };
             if change.is_effective() {

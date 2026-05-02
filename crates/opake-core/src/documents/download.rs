@@ -48,14 +48,16 @@ pub(super) fn decrypt_with_envelope(
 /// Unwrap a content key from a document's encryption metadata.
 ///
 /// For direct encryption: unwrap using the caller's hybrid private-key bundle.
-/// For keyring encryption: unwrap using the group key (caller must provide it
-/// via `group_key`). Pass `None` for direct-only documents.
+/// For keyring encryption: pick the right rotation's group key from `keys`
+/// based on the document's `keyringRef.rotation`, then unwrap. A document
+/// uploaded before the keyring rotated still references its original
+/// rotation; supplying only the current group key would AES-KW-fail.
 fn unwrap_document_key(
     doc: &Document,
     did: &str,
     document_uri: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
 ) -> Result<ContentKey, Error> {
     match &doc.encryption {
         Encryption::Direct(direct) => {
@@ -76,10 +78,16 @@ fn unwrap_document_key(
             )
         }
         Encryption::Keyring(kr_enc) => {
-            let gk = group_key.ok_or_else(|| {
+            let keys = keys.ok_or_else(|| {
                 Error::InvalidRecord(
                     "document uses keyring encryption but no group key provided".into(),
                 )
+            })?;
+            let doc_rotation = kr_enc.keyring_ref.rotation;
+            let gk = keys.for_rotation(doc_rotation).ok_or_else(|| {
+                Error::InvalidRecord(format!(
+                    "no group key available for rotation {doc_rotation}"
+                ))
             })?;
             let wrapped_bytes = kr_enc
                 .keyring_ref
@@ -112,30 +120,30 @@ pub async fn fetch_content_key(
     fetch_content_key_with_group_key(client, did, private_keys, None, uri).await
 }
 
-/// Fetch a document's content key, with optional group key for keyring-encrypted docs.
+/// Fetch a document's content key, with optional group keys for keyring-encrypted docs.
 pub async fn fetch_content_key_with_group_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<ContentKey, Error> {
-    let (content_key, _doc) =
-        fetch_document_and_key(client, did, private_keys, group_key, uri).await?;
+    let (content_key, _doc) = fetch_document_and_key(client, did, private_keys, keys, uri).await?;
     Ok(content_key)
 }
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
 ///
-/// When `group_key` is `None` and the document uses keyring encryption,
-/// auto-resolves the group key by fetching the keyring and unwrapping the
-/// caller's member entry. This lets the cabinet download path handle
-/// workspace documents transparently.
+/// When `keys` is `None` and the document uses keyring encryption, auto-
+/// resolves group keys by fetching the keyring and unwrapping the caller's
+/// member entry — including any historical entries — so the cabinet download
+/// path can read workspace documents at any rotation. The doc's
+/// `keyringRef.rotation` selects the right key.
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<(ContentKey, Document), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
@@ -149,37 +157,58 @@ async fn fetch_document_and_key(
     records::check_version(doc.opake_version)?;
 
     trace!("unwrapping content key");
-    let resolved_group_key = match (&doc.encryption, group_key) {
-        (Encryption::Keyring(kr_enc), None) => {
-            trace!(
-                "auto-resolving group key from keyring {}",
-                kr_enc.keyring_ref.keyring
-            );
-            let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-            let kr_entry = client
-                .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
-                .await?;
-            let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
-            let member = keyring
-                .members
-                .iter()
-                .find(|m| m.did() == did)
-                .ok_or_else(|| {
-                    Error::NotFound(format!("no member entry for DID {did} in keyring"))
-                })?;
-            Some(crypto::unwrap_key(
-                &member.wrapped_key,
-                private_keys,
-                &crypto::WrapContext::Keyring {
-                    uri: &kr_enc.keyring_ref.keyring,
-                },
-            )?)
-        }
-        _ => None,
+
+    // Auto-resolve group keys from the keyring when the caller didn't
+    // provide them — typical for the cabinet path reaching into a
+    // workspace doc. Owned outside the match so the borrowed `GroupKeys`
+    // view below outlives the unwrap.
+    let auto: Option<(ContentKey, u64, Vec<crate::workspace::HistoricalKey>)> =
+        match (&doc.encryption, &keys) {
+            (Encryption::Keyring(kr_enc), None) => {
+                trace!(
+                    "auto-resolving group keys from keyring {}",
+                    kr_enc.keyring_ref.keyring
+                );
+                let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
+                let kr_entry = client
+                    .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
+                    .await?;
+                let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
+                let member = keyring
+                    .members
+                    .iter()
+                    .find(|m| m.did() == did)
+                    .ok_or_else(|| {
+                        Error::NotFound(format!("no member entry for DID {did} in keyring"))
+                    })?;
+                let current = crypto::unwrap_key(
+                    &member.wrapped_key,
+                    private_keys,
+                    &crypto::WrapContext::Keyring {
+                        uri: &kr_enc.keyring_ref.keyring,
+                    },
+                )?;
+                let historical = crate::workspace::derive_historical_keys(
+                    &keyring,
+                    did,
+                    &kr_enc.keyring_ref.keyring,
+                    private_keys,
+                );
+                Some((current, keyring.rotation, historical))
+            }
+            _ => None,
+        };
+
+    let effective_keys = match &auto {
+        Some((current, rotation, historical)) => Some(crate::workspace::GroupKeys {
+            current_rotation: *rotation,
+            current,
+            historical,
+        }),
+        None => keys,
     };
 
-    let effective_group_key = resolved_group_key.as_ref().or(group_key);
-    let content_key = unwrap_document_key(&doc, did, uri, private_keys, effective_group_key)?;
+    let content_key = unwrap_document_key(&doc, did, uri, private_keys, effective_keys)?;
 
     Ok((content_key, doc))
 }
@@ -198,17 +227,16 @@ pub async fn download(
     download_with_group_key(client, did, private_keys, None, uri).await
 }
 
-/// Download with an optional group key for keyring-encrypted documents.
+/// Download with optional group keys for keyring-encrypted documents.
 pub async fn download_with_group_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
-    let (content_key, doc) =
-        fetch_document_and_key(client, did, private_keys, group_key, uri).await?;
+    let (content_key, doc) = fetch_document_and_key(client, did, private_keys, keys, uri).await?;
     let nonce = encryption_nonce(&doc)?;
 
     trace!(

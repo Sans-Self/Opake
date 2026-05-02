@@ -17,14 +17,15 @@ pub struct DocumentMetadataResult {
 /// Fetch a document record, unwrap the content key, and decrypt its metadata.
 ///
 /// For direct-encrypted documents, the caller's hybrid private-key bundle is
-/// used directly. For keyring-encrypted documents, `group_key` must be
-/// provided (from the local keyring cache).
+/// used directly. For keyring-encrypted documents, `keys` must include a
+/// group key for the rotation the document was encrypted under — passing
+/// only the current group key fails for older docs.
 pub async fn fetch_document_metadata(
     client: &mut XrpcClient<impl Transport>,
     uri: &str,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
 ) -> Result<DocumentMetadataResult, Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
 
@@ -36,7 +37,7 @@ pub async fn fetch_document_metadata(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.opake_version)?;
 
-    let content_key = unwrap_content_key(&doc, did, uri, private_keys, group_key)?;
+    let content_key = unwrap_content_key(&doc, did, uri, private_keys, keys)?;
 
     let metadata: DocumentMetadata =
         crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
@@ -55,7 +56,7 @@ fn unwrap_content_key(
     did: &str,
     document_uri: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
 ) -> Result<ContentKey, Error> {
     match &doc.encryption {
         Encryption::Direct(direct) => {
@@ -76,10 +77,16 @@ fn unwrap_content_key(
             )
         }
         Encryption::Keyring(kr_enc) => {
-            let gk = group_key.ok_or_else(|| {
+            let keys = keys.ok_or_else(|| {
                 Error::InvalidRecord(
                     "document uses keyring encryption but no group key provided".into(),
                 )
+            })?;
+            let doc_rotation = kr_enc.keyring_ref.rotation;
+            let gk = keys.for_rotation(doc_rotation).ok_or_else(|| {
+                Error::InvalidRecord(format!(
+                    "no group key available for rotation {doc_rotation}"
+                ))
             })?;
             let wrapped_bytes = kr_enc
                 .keyring_ref

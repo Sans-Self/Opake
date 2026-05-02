@@ -520,8 +520,14 @@ fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
     let mut tree = DirectoryTree::from_records(records);
     let kp = test_keypair();
 
+    let historical: Vec<crate::workspace::HistoricalKey> = Vec::new();
+    let view = crate::workspace::GroupKeys {
+        current_rotation: 0,
+        current: &group_key,
+        historical: &historical,
+    };
     let mut group_keys = HashMap::new();
-    group_keys.insert(keyring_uri.to_string(), group_key);
+    group_keys.insert(keyring_uri.to_string(), view);
 
     tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
 
@@ -556,8 +562,14 @@ fn decrypt_names_with_group_keys_handles_mixed_encryption() {
     let mut tree = DirectoryTree::from_records(records);
     let kp = test_keypair();
 
+    let historical: Vec<crate::workspace::HistoricalKey> = Vec::new();
+    let view = crate::workspace::GroupKeys {
+        current_rotation: 0,
+        current: &group_key,
+        historical: &historical,
+    };
     let mut group_keys = HashMap::new();
-    group_keys.insert(keyring_uri.to_string(), group_key);
+    group_keys.insert(keyring_uri.to_string(), view);
 
     tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
 

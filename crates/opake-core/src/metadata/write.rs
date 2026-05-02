@@ -1,7 +1,7 @@
 use log::trace;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, PrivateKeyBundle, RngCore};
+use crate::crypto::{self, CryptoRng, DocumentMetadata, PrivateKeyBundle, RngCore};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
 
@@ -19,11 +19,11 @@ pub async fn update_document_metadata(
     uri: &str,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-    group_key: Option<&ContentKey>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     rng: &mut (impl CryptoRng + RngCore),
     mutator: impl FnOnce(&mut DocumentMetadata),
 ) -> Result<DocumentMetadata, Error> {
-    let result = fetch_document_metadata(client, uri, did, private_keys, group_key).await?;
+    let result = fetch_document_metadata(client, uri, did, private_keys, keys).await?;
     let mut metadata = result.metadata;
     let mut doc = result.document;
 

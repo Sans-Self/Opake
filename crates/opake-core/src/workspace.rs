@@ -13,7 +13,7 @@ use crate::records::Keyring;
 
 /// One historical group key, retained so documents encrypted under a
 /// previous rotation can still be decrypted after the keyring rotates.
-#[derive(Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
+#[derive(Clone, Debug, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct HistoricalKey {
     #[zeroize(skip)]
     pub rotation: u64,
@@ -117,7 +117,7 @@ impl Workspace {
 /// Used by leaf decryption functions that need to pick the right group
 /// key based on a document's `keyringRef.rotation` — passing a single
 /// `&ContentKey` is wrong when the document predates the current rotation.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct GroupKeys<'a> {
     pub current_rotation: u64,
     pub current: &'a ContentKey,

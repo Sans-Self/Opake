@@ -438,8 +438,8 @@ impl WasmFileManagerHandle {
         let (mut opake, ctx) = self.parts().await?;
         let did = opake.did().to_owned();
         let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
-        let group_key = match ctx {
-            FileContext::Workspace(ref ws) => Some(ws.key.clone()),
+        let group_keys = match &ctx {
+            FileContext::Workspace(ws) => Some(ws.group_keys()),
             FileContext::Cabinet(_) => None,
         };
         let result = opake_core::metadata::fetch_document_metadata(
@@ -447,7 +447,7 @@ impl WasmFileManagerHandle {
             document_uri,
             &did,
             &private_keys.bundle(),
-            group_key.as_ref(),
+            group_keys,
         )
         .await
         .map_err(wasm_err)?;

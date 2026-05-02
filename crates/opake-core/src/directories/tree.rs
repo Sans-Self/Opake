@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use log::trace;
 
 use crate::atproto;
-use crate::crypto::{self, ContentKey, DirectoryMetadata, PrivateKeyBundle};
+use crate::crypto::{self, DirectoryMetadata, PrivateKeyBundle};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
 use crate::indexer::sse::events::SseDirectoryRecord;
@@ -71,14 +71,14 @@ impl TreeChange {
 ///
 /// Provides the keys needed to decrypt directory names. Cabinet trees use
 /// `private_keys` (the caller's hybrid bundle) for direct key wrapping;
-/// workspace trees use `group_keys` (keyring URI → unwrapped content key)
+/// workspace trees use `group_keys` (keyring URI → rotation-aware key view)
 /// for keyring wrapping. Trees can hold directories of either kind, so both
 /// fields may be needed on the same context.
 #[derive(Debug)]
 pub struct DecryptionCtx<'a> {
     pub did: &'a str,
     pub private_keys: Option<&'a PrivateKeyBundle<'a>>,
-    pub group_keys: &'a HashMap<String, ContentKey>,
+    pub group_keys: &'a HashMap<String, crate::workspace::GroupKeys<'a>>,
 }
 
 impl<'a> DecryptionCtx<'a> {
@@ -90,7 +90,10 @@ impl<'a> DecryptionCtx<'a> {
         }
     }
 
-    pub fn workspace(did: &'a str, group_keys: &'a HashMap<String, ContentKey>) -> Self {
+    pub fn workspace(
+        did: &'a str,
+        group_keys: &'a HashMap<String, crate::workspace::GroupKeys<'a>>,
+    ) -> Self {
         Self {
             did,
             private_keys: None,
@@ -99,7 +102,7 @@ impl<'a> DecryptionCtx<'a> {
     }
 }
 
-static EMPTY_GROUP_KEYS: std::sync::OnceLock<HashMap<String, ContentKey>> =
+static EMPTY_GROUP_KEYS: std::sync::OnceLock<HashMap<String, crate::workspace::GroupKeys<'static>>> =
     std::sync::OnceLock::new();
 
 #[derive(Debug, Clone)]
@@ -223,15 +226,17 @@ impl DirectoryTree {
         self.decrypt_names_with_group_keys(did, private_keys, &HashMap::new());
     }
 
-    /// Decrypt all directory names in-place, with group key support.
+    /// Decrypt all directory names in-place, with rotation-aware group key
+    /// support.
     ///
-    /// Like [`decrypt_names`], but also handles keyring-encrypted directories
-    /// using the provided group key map (keyring URI → group key).
+    /// `group_keys` maps keyring URI → all group keys the caller had access
+    /// to (current + historical). For each keyring-encrypted directory, the
+    /// rotation embedded in `keyringRef.rotation` selects the right key.
     pub fn decrypt_names_with_group_keys(
         &mut self,
         did: &str,
         private_keys: &PrivateKeyBundle<'_>,
-        group_keys: &HashMap<String, crypto::ContentKey>,
+        group_keys: &HashMap<String, crate::workspace::GroupKeys<'_>>,
     ) {
         for info in self.directories.values_mut() {
             let content_key = match &info.key_wrapping {
@@ -249,7 +254,9 @@ impl DirectoryTree {
                 }
                 KeyWrapping::Keyring(kr) => {
                     let keyring_uri = &kr.keyring_ref.keyring;
-                    group_keys.get(keyring_uri).and_then(|gk| {
+                    let dir_rotation = kr.keyring_ref.rotation;
+                    group_keys.get(keyring_uri).and_then(|keys| {
+                        let gk = keys.for_rotation(dir_rotation)?;
                         let wrapped_bytes = kr.keyring_ref.wrapped_content_key.decode().ok()?;
                         crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk).ok()
                     })
@@ -981,7 +988,9 @@ fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Opti
         }
         KeyWrapping::Keyring(kr) => {
             let keyring_uri = &kr.keyring_ref.keyring;
-            let group_key = ctx.group_keys.get(keyring_uri)?;
+            let dir_rotation = kr.keyring_ref.rotation;
+            let keys = ctx.group_keys.get(keyring_uri)?;
+            let group_key = keys.for_rotation(dir_rotation)?;
             let wrapped_bytes = kr.keyring_ref.wrapped_content_key.decode().ok()?;
             crypto::unwrap_content_key_from_keyring(&wrapped_bytes, group_key).ok()?
         }

@@ -267,12 +267,14 @@ fn uninstall_all_drains_every_scope() {
         DirectoryTree::from_records(std::iter::empty()),
         group_key_a,
         0,
+        Vec::new(),
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         group_key_b,
         0,
+        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -365,12 +367,14 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([0u8; 32]),
         0,
+        Vec::new(),
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([1u8; 32]),
         0,
+        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -497,7 +501,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     let before = tree.directory_name(WS_ROOT_URI).map(str::to_owned);
     assert!(before.is_some());
 
-    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1);
+    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1, Vec::new());
 
     let sink = RecordingSink::new();
     keeper.watch_workspace(WS_URI.into(), WS_ROOT_URI.into(), sink.callback());
@@ -538,6 +542,7 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([7u8; 32]),
         5,
+        Vec::new(),
     );
 
     let sink = RecordingSink::new();

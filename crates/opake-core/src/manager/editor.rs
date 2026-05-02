@@ -60,6 +60,18 @@ impl DecryptionKeys {
             .find(|h| h.rotation == rotation)
             .map(|h| &h.key)
     }
+
+    /// Borrowed view over current + historical group keys, suitable for
+    /// passing into rotation-aware unwrap helpers. Returns `None` for
+    /// cabinet contexts (no group key).
+    pub fn group_keys(&self) -> Option<crate::workspace::GroupKeys<'_>> {
+        let current = self.group_key.as_ref()?;
+        Some(crate::workspace::GroupKeys {
+            current_rotation: self.current_rotation,
+            current,
+            historical: &self.historical_keys,
+        })
+    }
 }
 
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
@@ -71,7 +83,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             document_uri,
             &keys.did,
             &keys.private_keys(),
-            keys.group_key.as_ref(),
+            keys.group_keys(),
         )
         .await?;
         Ok(result.metadata)
@@ -93,7 +105,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             document_uri,
             &keys.did,
             &keys.private_keys(),
-            keys.group_key.as_ref(),
+            keys.group_keys(),
             &mut self.opake.rng,
             mutator,
         )
@@ -117,7 +129,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             document_uri,
             &keys.did,
             &keys.private_keys(),
-            keys.group_key.as_ref(),
+            keys.group_keys(),
             new_plaintext,
             &now,
             &mut self.opake.rng,
@@ -136,7 +148,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             &mut self.opake.client,
             &keys.did,
             &keys.private_keys(),
-            keys.group_key.as_ref(),
+            keys.group_keys(),
             document_uri,
         )
         .await
