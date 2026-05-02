@@ -4,6 +4,7 @@ import { useFileManager } from "@opake/react";
 import type { FileManager, GrantEntry } from "@opake/sdk";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 import { toastError, toastSuccess } from "@/stores/toast";
+import { formatShortDate } from "@/lib/format";
 
 // Module-level cache so repeated dialog opens don't each issue a full
 // `listShares` round-trip. Invalidated after any revoke so the next open
@@ -139,7 +140,7 @@ export const ShareManagementDialog = forwardRef<ShareManagementDialogHandle, obj
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="text-ui text-base-content truncate">{grant.recipient}</span>
                     <span className="text-caption text-text-faint">
-                      shared {formatDate(grant.createdAt)}
+                      shared {formatShortDate(grant.createdAt, "recently")}
                     </span>
                   </div>
                   <button
@@ -174,10 +175,3 @@ export const ShareManagementDialog = forwardRef<ShareManagementDialogHandle, obj
     );
   },
 );
-
-function formatDate(iso: string): string {
-  if (!iso) return "recently";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "recently";
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
