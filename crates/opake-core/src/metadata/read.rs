@@ -2,7 +2,7 @@ use log::trace;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, DocumentMetadata, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, DocumentMetadata, PrivateKeyBundle};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption};
 
@@ -16,14 +16,14 @@ pub struct DocumentMetadataResult {
 
 /// Fetch a document record, unwrap the content key, and decrypt its metadata.
 ///
-/// For direct-encrypted documents, the caller's private key is used directly.
-/// For keyring-encrypted documents, `group_key` must be provided (from the
-/// local keyring cache).
+/// For direct-encrypted documents, the caller's hybrid private-key bundle is
+/// used directly. For keyring-encrypted documents, `group_key` must be
+/// provided (from the local keyring cache).
 pub async fn fetch_document_metadata(
     client: &mut XrpcClient<impl Transport>,
     uri: &str,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     group_key: Option<&ContentKey>,
 ) -> Result<DocumentMetadataResult, Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
@@ -36,7 +36,7 @@ pub async fn fetch_document_metadata(
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.opake_version)?;
 
-    let content_key = unwrap_content_key(&doc, did, private_key, group_key)?;
+    let content_key = unwrap_content_key(&doc, did, uri, private_keys, group_key)?;
 
     let metadata: DocumentMetadata =
         crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
@@ -53,7 +53,8 @@ pub async fn fetch_document_metadata(
 fn unwrap_content_key(
     doc: &Document,
     did: &str,
-    private_key: &X25519PrivateKey,
+    document_uri: &str,
+    private_keys: &PrivateKeyBundle<'_>,
     group_key: Option<&ContentKey>,
 ) -> Result<ContentKey, Error> {
     match &doc.encryption {
@@ -68,7 +69,11 @@ fn unwrap_content_key(
                         "no wrapped key for DID ({did}) — you may not have access"
                     ))
                 })?;
-            crypto::unwrap_key(wrapped, private_key)
+            crypto::unwrap_key(
+                wrapped,
+                private_keys,
+                &crypto::WrapContext::Document { uri: document_uri },
+            )
         }
         Encryption::Keyring(kr_enc) => {
             let gk = group_key.ok_or_else(|| {

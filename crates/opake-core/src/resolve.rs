@@ -13,7 +13,18 @@ use crate::client::{
 
 /// Public Bluesky API — used for handle resolution when no PDS is known yet.
 const BSKY_PUBLIC_API: &str = "https://public.api.bsky.app";
-use crate::crypto::X25519PublicKey;
+
+/// The only X25519 algorithm we understand on a published public-key record.
+/// Any other string is rejected at resolve time.
+const EXPECTED_X25519_ALGO: &str = "x25519";
+
+/// The only ML-KEM algorithm we understand. Bogus values like
+/// `"ml-kem-512"` slip past byte-length validation but fail
+/// `mlkem768::validate_public_key` later — better to reject upfront with a
+/// clear "wrong algorithm" error than turn this into a DoS at wrap time.
+const EXPECTED_ML_KEM_ALGO: &str = "ml-kem-768";
+
+use crate::crypto::{MlKemPublicKey, X25519PublicKey, ML_KEM_PK_LEN};
 use crate::error::Error;
 use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
@@ -21,13 +32,19 @@ use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RK
 pub type Ed25519PublicKeyBytes = [u8; 32];
 
 /// Everything we learn about a remote user during resolution.
+///
+/// Carries both halves of the hybrid KEM public key. The X25519 half is in
+/// `x25519_public_key`; the ML-KEM-768 half is in `ml_kem_public_key`. Both
+/// are required — every published `app.opake.publicKey` record includes them.
 #[derive(Debug, Clone)]
 pub struct ResolvedIdentity {
     pub did: String,
     pub handle: Option<String>,
     pub pds_url: String,
-    pub public_key: X25519PublicKey,
-    pub algo: String,
+    pub x25519_public_key: X25519PublicKey,
+    pub x25519_algo: String,
+    pub ml_kem_public_key: MlKemPublicKey,
+    pub ml_kem_algo: String,
     /// Ed25519 signing key — present if the user has published one.
     pub signing_key: Option<Ed25519PublicKeyBytes>,
 }
@@ -158,17 +175,50 @@ pub async fn resolve_identity(
     let record: PublicKeyRecord = serde_json::from_value(entry.value)?;
     records::check_version(record.opake_version)?;
 
-    // Step 6: Decode and validate public key bytes
-    let key_bytes = record
-        .public_key
-        .decode()
-        .map_err(|e| Error::InvalidRecord(format!("invalid public key: {e}")))?;
+    // Step 5b: Enforce algo strings before decoding bytes. A bogus
+    // algo + matching length would otherwise sneak through here and
+    // fail later at `wrap_key`'s `validate_public_key`, surfacing as
+    // a generic crypto error instead of a clear "wrong algorithm" one.
+    if record.x25519_algo != EXPECTED_X25519_ALGO {
+        return Err(Error::InvalidRecord(format!(
+            "unsupported X25519 algo: expected {EXPECTED_X25519_ALGO}, got {}",
+            record.x25519_algo
+        )));
+    }
+    if record.ml_kem_algo != EXPECTED_ML_KEM_ALGO {
+        return Err(Error::InvalidRecord(format!(
+            "unsupported ML-KEM algo: expected {EXPECTED_ML_KEM_ALGO}, got {}",
+            record.ml_kem_algo
+        )));
+    }
 
-    let public_key: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
-        Error::InvalidRecord(format!("public key is {} bytes, expected 32", v.len()))
+    // Step 6: Decode and validate the X25519 public key.
+    let key_bytes = record
+        .x25519_public_key
+        .decode()
+        .map_err(|e| Error::InvalidRecord(format!("invalid X25519 public key: {e}")))?;
+    let x25519_public_key: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
+        Error::InvalidRecord(format!(
+            "X25519 public key is {} bytes, expected 32",
+            v.len()
+        ))
     })?;
 
-    // Step 7: Decode optional signing key
+    // Step 7: Decode and validate the ML-KEM-768 public key. FIPS-203
+    // validation (`mlkem768::validate_public_key`) happens later, at the
+    // wrap call sites — here we only confirm the byte length is correct.
+    let mlkem_bytes = record
+        .ml_kem_public_key
+        .decode()
+        .map_err(|e| Error::InvalidRecord(format!("invalid ML-KEM public key: {e}")))?;
+    let ml_kem_public_key: MlKemPublicKey = mlkem_bytes.try_into().map_err(|v: Vec<u8>| {
+        Error::InvalidRecord(format!(
+            "ML-KEM public key is {} bytes, expected {ML_KEM_PK_LEN}",
+            v.len()
+        ))
+    })?;
+
+    // Step 8: Decode optional signing key.
     let signing_key = match record.signing_key {
         Some(ref sk) => {
             let sk_bytes = sk
@@ -186,25 +236,35 @@ pub async fn resolve_identity(
         did,
         handle,
         pds_url,
-        public_key,
-        algo: record.algo,
+        x25519_public_key,
+        x25519_algo: record.x25519_algo,
+        ml_kem_public_key,
+        ml_kem_algo: record.ml_kem_algo,
         signing_key,
     })
 }
 
 /// Publish (upsert) the user's encryption + signing public keys to their PDS.
 ///
-/// Called on every login — `putRecord` is idempotent, so this is always
-/// one request regardless of whether the record already exists.
+/// Writes both halves of the hybrid encryption KEM (X25519 + ML-KEM-768)
+/// plus the optional Ed25519 signing key. Called on every login —
+/// `putRecord` is idempotent, so this is always one request regardless of
+/// whether the record already exists.
 pub async fn publish_public_key(
     client: &mut XrpcClient<impl Transport>,
-    public_key: &X25519PublicKey,
+    x25519_public_key: &X25519PublicKey,
+    ml_kem_public_key: &MlKemPublicKey,
     signing_key: Option<&Ed25519PublicKeyBytes>,
     created_at: &str,
 ) -> Result<String, Error> {
     let record = match signing_key {
-        Some(sk) => PublicKeyRecord::with_signing_key(public_key, sk, created_at),
-        None => PublicKeyRecord::new(public_key, created_at),
+        Some(sk) => PublicKeyRecord::with_signing_key(
+            x25519_public_key,
+            ml_kem_public_key,
+            sk,
+            created_at,
+        ),
+        None => PublicKeyRecord::new(x25519_public_key, ml_kem_public_key, created_at),
     };
     let result = client
         .put_record(PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY, &record)
@@ -240,8 +300,20 @@ mod tests {
         .to_string()
     }
 
+    /// 1184-byte ML-KEM-768 public key full of the same byte. Real
+    /// resolvers would reject this at `validate_public_key` (it's not a
+    /// valid lattice element), but for resolution-flow tests we only care
+    /// that the bytes round-trip the wire format correctly.
+    fn dummy_ml_kem_pubkey(byte: u8) -> Vec<u8> {
+        vec![byte; 1184]
+    }
+
     fn public_key_record_json(public_key: &X25519PublicKey) -> String {
-        let record = PublicKeyRecord::new(public_key, "2026-03-01T00:00:00Z");
+        let record = PublicKeyRecord::new(
+            public_key,
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-03-01T00:00:00Z",
+        );
         let entry = serde_json::json!({
             "uri": "at://did:plc:target/app.opake.publicKey/self",
             "cid": "bafyrecord",
@@ -285,7 +357,7 @@ mod tests {
         assert_eq!(result.did, "did:plc:target");
         assert_eq!(result.handle.as_deref(), Some("alice.test"));
         assert_eq!(result.pds_url, "https://pds.alice.example.com");
-        assert_eq!(result.public_key, pubkey);
+        assert_eq!(result.x25519_public_key, pubkey);
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 3);
@@ -317,8 +389,9 @@ mod tests {
         assert_eq!(result.did, "did:plc:target");
         assert_eq!(result.handle.as_deref(), Some("alice.test"));
         assert_eq!(result.pds_url, "https://pds.alice.example.com");
-        assert_eq!(result.public_key, pubkey);
-        assert_eq!(result.algo, "x25519");
+        assert_eq!(result.x25519_public_key, pubkey);
+        assert_eq!(result.x25519_algo, "x25519");
+        assert_eq!(result.ml_kem_algo, "ml-kem-768");
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 4);
@@ -347,7 +420,7 @@ mod tests {
 
         assert_eq!(result.did, "did:plc:bob");
         assert_eq!(result.handle.as_deref(), Some("bob.test"));
-        assert_eq!(result.public_key, pubkey);
+        assert_eq!(result.x25519_public_key, pubkey);
 
         assert_eq!(mock.requests().len(), 2);
     }
@@ -383,7 +456,11 @@ mod tests {
             "https://pds.future",
         )));
 
-        let mut record = PublicKeyRecord::new(&[1u8; 32], "2026-03-01T00:00:00Z");
+        let mut record = PublicKeyRecord::new(
+            &[1u8; 32],
+            &dummy_ml_kem_pubkey(0xCC),
+            "2026-03-01T00:00:00Z",
+        );
         record.opake_version = SCHEMA_VERSION + 1;
         let entry = serde_json::json!({
             "uri": "at://did:plc:future/app.opake.publicKey/self",
@@ -418,9 +495,11 @@ mod tests {
         let mut client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
 
         let signing_key = [88u8; 32];
+        let mlkem_pubkey: MlKemPublicKey = [0xDDu8; 1184];
         let uri = publish_public_key(
             &mut client,
             &pubkey,
+            &mlkem_pubkey,
             Some(&signing_key),
             "2026-03-01T12:00:00Z",
         )
@@ -600,5 +679,76 @@ mod tests {
             .await
             .unwrap();
         assert!(result.handle.is_none());
+    }
+
+    /// A bogus `ml_kem_algo` like `"ml-kem-512"` paired with 1184 bytes of
+    /// junk would slip past byte-length validation and fail later inside
+    /// `wrap_key`'s `validate_public_key` call. Resolving should reject it
+    /// upfront with a clear "wrong algorithm" error instead.
+    #[tokio::test]
+    async fn resolve_rejects_wrong_ml_kem_algo() {
+        let mock = MockTransport::new();
+        let pubkey = [42u8; 32];
+
+        mock.enqueue(success(&did_document_json(
+            "did:plc:target",
+            "alice.test",
+            "https://pds.alice.example.com",
+        )));
+
+        // Build a public-key record with a bogus algo string.
+        let mut record = PublicKeyRecord::new(
+            &pubkey,
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-03-01T00:00:00Z",
+        );
+        record.ml_kem_algo = "ml-kem-512".to_string();
+        let entry = serde_json::json!({
+            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "cid": "bafyrecord",
+            "value": record,
+        });
+        mock.enqueue(success(&entry.to_string()));
+
+        let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("ml-kem-512") && msg.contains("ml-kem-768")),
+            "expected InvalidRecord with both algo strings, got: {err:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_wrong_x25519_algo() {
+        let mock = MockTransport::new();
+        let pubkey = [42u8; 32];
+
+        mock.enqueue(success(&did_document_json(
+            "did:plc:target",
+            "alice.test",
+            "https://pds.alice.example.com",
+        )));
+
+        let mut record = PublicKeyRecord::new(
+            &pubkey,
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-03-01T00:00:00Z",
+        );
+        record.x25519_algo = "x448".to_string();
+        let entry = serde_json::json!({
+            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "cid": "bafyrecord",
+            "value": record,
+        });
+        mock.enqueue(success(&entry.to_string()));
+
+        let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("x448") && msg.contains("x25519")),
+            "expected InvalidRecord with both algo strings, got: {err:?}",
+        );
     }
 }

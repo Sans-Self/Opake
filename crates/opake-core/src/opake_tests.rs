@@ -1,9 +1,6 @@
 use super::*;
 use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-use crate::crypto::{
-    self, generate_content_key, DidMember, KeyringMetadata, OsRng, X25519DalekPublicKey,
-    X25519DalekStaticSecret,
-};
+use crate::crypto::{self, generate_content_key, DidMember, KeyringMetadata, OsRng};
 use crate::indexer::KeyringProposal;
 use crate::records::{keyring_update, Keyring, KeyringMember};
 use crate::storage::{Identity, NoopStorage};
@@ -25,6 +22,7 @@ fn make_test_opake() -> Opake<MockTransport, OsRng, NoopStorage> {
         NoopStorage,
         test_now_micros,
     )
+    .unwrap()
 }
 
 #[test]
@@ -65,6 +63,7 @@ fn workspace_file_manager_non_owner() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();
@@ -86,6 +85,7 @@ fn workspace_owner_is_detected() {
         "did:plc:test".into(), // Same as the identity DID
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();
@@ -105,6 +105,7 @@ fn workspace_admin_preserves_workspace() {
         "did:plc:owner".into(),
         gk,
         1,
+        Vec::new(),
     );
 
     let mut opake = make_test_opake();
@@ -154,25 +155,37 @@ fn make_owner_opake(
         NoopStorage,
         test_now_micros,
     )
+    .unwrap()
 }
 
-/// Build a 2-member keyring (owner + bob) with real crypto. Returns the
-/// keyring, the group key, and the owner's private key (for later unwrap).
+/// Build a 2-member keyring (owner + bob) with real hybrid crypto. Both
+/// X25519 and ML-KEM-768 halves of each member's pubkey are wired through
+/// `create_group_key` so the resulting wrapped keys can be unwrapped by the
+/// matching `Identity` in the surrounding test.
 fn two_member_keyring_with_real_crypto(
     owner_pubkey: &crypto::X25519PublicKey,
+    owner_mlkem_pubkey: &crypto::MlKemPublicKey,
     bob_pubkey: &crypto::X25519PublicKey,
+    bob_mlkem_pubkey: &crypto::MlKemPublicKey,
 ) -> (Keyring, crypto::ContentKey) {
     let members = [
         DidMember {
             did: OWNER_DID,
-            public_key: owner_pubkey,
+            keys: crypto::PublicKeyBundle {
+                x25519: owner_pubkey,
+                ml_kem: owner_mlkem_pubkey,
+            },
         },
         DidMember {
             did: BOB_DID,
-            public_key: bob_pubkey,
+            keys: crypto::PublicKeyBundle {
+                x25519: bob_pubkey,
+                ml_kem: bob_mlkem_pubkey,
+            },
         },
     ];
-    let (group_key, wrapped_keys) = crypto::create_group_key(&members, &mut OsRng).unwrap();
+    let (group_key, wrapped_keys) =
+        crypto::create_group_key(&members, KEYRING_URI, &mut OsRng).unwrap();
 
     let metadata = KeyringMetadata {
         name: "Test Workspace".into(),
@@ -222,17 +235,26 @@ fn did_document_response(did: &str, pds_url: &str) -> HttpResponse {
     }))
 }
 
-/// Mock response for a public key record fetch.
-fn public_key_record_response(did: &str, pubkey: &crypto::X25519PublicKey) -> HttpResponse {
+/// Mock response for a public key record fetch. Carries both halves of
+/// the recipient's hybrid public key so the apply path can re-wrap the
+/// rotated group key correctly.
+fn public_key_record_response(
+    did: &str,
+    pubkey: &crypto::X25519PublicKey,
+    mlkem_pubkey: &crypto::MlKemPublicKey,
+) -> HttpResponse {
     use base64::Engine;
     let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pubkey);
+    let mlkem_b64 = base64::engine::general_purpose::STANDARD.encode(mlkem_pubkey);
     json_response(&serde_json::json!({
         "uri": format!("at://{did}/app.opake.publicKey/self"),
         "cid": "bafypubkey",
         "value": {
             "opakeVersion": 1,
-            "publicKey": { "$bytes": pk_b64 },
-            "algo": "x25519-hkdf-a256kw",
+            "x25519PublicKey": { "$bytes": pk_b64 },
+            "x25519Algo": "x25519",
+            "mlKemPublicKey": { "$bytes": mlkem_b64 },
+            "mlKemAlgo": "ml-kem-768",
             "createdAt": "2026-01-01T00:00:00Z",
         },
     }))
@@ -249,11 +271,18 @@ fn put_record_response() -> HttpResponse {
 #[test]
 fn keyring_roundtrips_through_json_value() {
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
-    let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
+    let owner_mlkem_pubkey = owner_identity.ml_kem_public_key_bytes().unwrap();
+    let bob_identity = Identity::generate(BOB_DID, &mut OsRng);
+    let bob_pubkey = bob_identity.x25519_public_key_bytes().unwrap();
+    let bob_mlkem_pubkey = bob_identity.ml_kem_public_key_bytes().unwrap();
 
-    let (keyring, _gk) = two_member_keyring_with_real_crypto(&owner_pubkey, &bob_pubkey);
+    let (keyring, _gk) = two_member_keyring_with_real_crypto(
+        &owner_pubkey,
+        &owner_mlkem_pubkey,
+        &bob_pubkey,
+        &bob_mlkem_pubkey,
+    );
 
     // Serialize to Value and back
     let value = serde_json::to_value(&keyring).unwrap();
@@ -268,23 +297,30 @@ fn keyring_roundtrips_through_json_value() {
 
 #[tokio::test]
 async fn apply_keyring_proposals_rotates_key_on_remove_member() {
-    // Generate real keypairs
+    // Generate real keypairs for both members
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
-    let owner_privkey = owner_identity.private_key_bytes().unwrap();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
+    let owner_mlkem_pubkey = owner_identity.ml_kem_public_key_bytes().unwrap();
+    let owner_private_keys = owner_identity.owned_private_keys().unwrap();
 
-    let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();
+    let bob_identity = Identity::generate(BOB_DID, &mut OsRng);
+    let bob_pubkey = bob_identity.x25519_public_key_bytes().unwrap();
+    let bob_mlkem_pubkey = bob_identity.ml_kem_public_key_bytes().unwrap();
 
     // Build keyring with real wrapped keys
-    let (keyring, original_group_key) =
-        two_member_keyring_with_real_crypto(&owner_pubkey, &bob_pubkey);
+    let (keyring, original_group_key) = two_member_keyring_with_real_crypto(
+        &owner_pubkey,
+        &owner_mlkem_pubkey,
+        &bob_pubkey,
+        &bob_mlkem_pubkey,
+    );
 
     // Sanity: owner can unwrap the group key
     let unwrapped = Opake::<MockTransport, OsRng, NoopStorage>::unwrap_workspace_key(
         &keyring.members,
         OWNER_DID,
-        &owner_privkey,
+        KEYRING_URI,
+        &owner_private_keys.bundle(),
     )
     .unwrap();
     assert_eq!(unwrapped.0, original_group_key.0);
@@ -297,7 +333,11 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
     let mock = MockTransport::new();
     mock.enqueue(keyring_get_record_response(&keyring));
     mock.enqueue(did_document_response(OWNER_DID, "https://pds.owner.test"));
-    mock.enqueue(public_key_record_response(OWNER_DID, &owner_pubkey));
+    mock.enqueue(public_key_record_response(
+        OWNER_DID,
+        &owner_pubkey,
+        &owner_mlkem_pubkey,
+    ));
     mock.enqueue(put_record_response());
 
     let mut opake = make_owner_opake(mock.clone(), owner_identity);
@@ -345,7 +385,12 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
     assert_eq!(updated.key_history[0].members[0].wrapped_key.did, OWNER_DID);
 
     // Owner can unwrap the NEW group key
-    let new_key = crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_privkey).unwrap();
+    let new_key = crypto::unwrap_key(
+        &updated.members[0].wrapped_key,
+        &owner_private_keys.bundle(),
+        &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+    )
+    .unwrap();
     // New key should differ from original (rotation happened)
     assert_ne!(new_key.0, original_group_key.0);
 
@@ -359,18 +404,29 @@ async fn apply_keyring_proposals_rotates_key_on_remove_member() {
 #[tokio::test]
 async fn apply_keyring_proposals_rotates_key_on_leave() {
     let owner_identity = Identity::generate(OWNER_DID, &mut OsRng);
-    let owner_pubkey = owner_identity.public_key_bytes().unwrap();
-    let owner_privkey = owner_identity.private_key_bytes().unwrap();
+    let owner_pubkey = owner_identity.x25519_public_key_bytes().unwrap();
+    let owner_mlkem_pubkey = owner_identity.ml_kem_public_key_bytes().unwrap();
+    let owner_private_keys = owner_identity.owned_private_keys().unwrap();
 
-    let bob_secret = X25519DalekStaticSecret::random_from_rng(OsRng);
-    let bob_pubkey: crypto::X25519PublicKey = X25519DalekPublicKey::from(&bob_secret).to_bytes();
+    let bob_identity = Identity::generate(BOB_DID, &mut OsRng);
+    let bob_pubkey = bob_identity.x25519_public_key_bytes().unwrap();
+    let bob_mlkem_pubkey = bob_identity.ml_kem_public_key_bytes().unwrap();
 
-    let (keyring, _original_key) = two_member_keyring_with_real_crypto(&owner_pubkey, &bob_pubkey);
+    let (keyring, _original_key) = two_member_keyring_with_real_crypto(
+        &owner_pubkey,
+        &owner_mlkem_pubkey,
+        &bob_pubkey,
+        &bob_mlkem_pubkey,
+    );
 
     let mock = MockTransport::new();
     mock.enqueue(keyring_get_record_response(&keyring));
     mock.enqueue(did_document_response(OWNER_DID, "https://pds.owner.test"));
-    mock.enqueue(public_key_record_response(OWNER_DID, &owner_pubkey));
+    mock.enqueue(public_key_record_response(
+        OWNER_DID,
+        &owner_pubkey,
+        &owner_mlkem_pubkey,
+    ));
     mock.enqueue(put_record_response());
 
     let mut opake = make_owner_opake(mock.clone(), owner_identity);
@@ -405,7 +461,12 @@ async fn apply_keyring_proposals_rotates_key_on_leave() {
     assert_eq!(updated.key_history.len(), 1);
 
     // Owner can still unwrap
-    let new_key = crypto::unwrap_key(&updated.members[0].wrapped_key, &owner_privkey).unwrap();
+    let new_key = crypto::unwrap_key(
+        &updated.members[0].wrapped_key,
+        &owner_private_keys.bundle(),
+        &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+    )
+    .unwrap();
     let metadata: KeyringMetadata =
         crypto::decrypt_metadata(&new_key, &updated.encrypted_metadata).unwrap();
     assert_eq!(metadata.name, "Test Workspace");

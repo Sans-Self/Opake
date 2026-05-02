@@ -4,8 +4,9 @@
 //   mnemonic (24 words)
 //     → PBKDF2-HMAC-SHA512(password=words, salt="mnemonic", rounds=2048)
 //     → 512-bit master seed
-//     → HKDF-SHA256(info="opake-v1-x25519-identity")  → X25519 private key
-//     → HKDF-SHA256(info="opake-v1-ed25519-signing")   → Ed25519 signing key
+//     → HKDF-SHA256(info="opake-v1-x25519-identity",  L=32) → X25519 private key
+//     → HKDF-SHA256(info="opake-v1-ed25519-signing",  L=32) → Ed25519 signing key
+//     → HKDF-SHA256(info="opake-v1-mlkem768-keygen",  L=64) → ML-KEM-768 KeyGen randomness (d ‖ z)
 //
 // No RNG parameter — entirely deterministic. That's an intentional signal.
 
@@ -15,7 +16,9 @@ use sha2::{Sha256, Sha512};
 use zeroize::Zeroizing;
 
 use super::Mnemonic;
-use crate::crypto::{Ed25519SigningKey, X25519DalekPublicKey, X25519DalekStaticSecret};
+use crate::crypto::{
+    Ed25519SigningKey, X25519DalekPublicKey, X25519DalekStaticSecret, ML_KEM_KEYGEN_RANDOMNESS_LEN,
+};
 use crate::storage::Identity;
 
 const PBKDF2_ROUNDS: u32 = 2048;
@@ -27,11 +30,14 @@ const PBKDF2_SALT: &[u8] = b"mnemonic";
 
 const HKDF_INFO_X25519: &[u8] = b"opake-v1-x25519-identity";
 const HKDF_INFO_ED25519: &[u8] = b"opake-v1-ed25519-signing";
+const HKDF_INFO_MLKEM: &[u8] = b"opake-v1-mlkem768-keygen";
 
-const KEY_LEN: usize = 32;
+const X25519_KEY_LEN: usize = 32;
+const ED25519_KEY_LEN: usize = 32;
 const MASTER_SEED_LEN: usize = 64;
 
-/// Derive an `Identity` (X25519 + Ed25519 keypairs) from a validated mnemonic.
+/// Derive an `Identity` (X25519 + Ed25519 + ML-KEM-768 keypairs) from a
+/// validated mnemonic.
 ///
 /// Deterministic: the same mnemonic always produces the same keys, regardless
 /// of platform. The `did` is stored in the identity but does NOT influence
@@ -39,8 +45,13 @@ const MASTER_SEED_LEN: usize = 64;
 /// cryptographic material.
 pub fn derive_identity_from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Identity {
     let master_seed = derive_master_seed(mnemonic);
-    let x25519_raw = derive_key_material(&master_seed, HKDF_INFO_X25519);
-    let ed25519_raw = derive_key_material(&master_seed, HKDF_INFO_ED25519);
+
+    let x25519_raw: Zeroizing<[u8; X25519_KEY_LEN]> =
+        derive_key_material(&master_seed, HKDF_INFO_X25519);
+    let ed25519_raw: Zeroizing<[u8; ED25519_KEY_LEN]> =
+        derive_key_material(&master_seed, HKDF_INFO_ED25519);
+    let mlkem_randomness: Zeroizing<[u8; ML_KEM_KEYGEN_RANDOMNESS_LEN]> =
+        derive_key_material(&master_seed, HKDF_INFO_MLKEM);
 
     let x25519_secret = X25519DalekStaticSecret::from(*x25519_raw);
     let x25519_public = X25519DalekPublicKey::from(&x25519_secret);
@@ -48,10 +59,14 @@ pub fn derive_identity_from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Identity
     let ed25519_signing = Ed25519SigningKey::from_bytes(&ed25519_raw);
     let ed25519_verifying = ed25519_signing.verifying_key();
 
+    let mlkem_keypair = libcrux_ml_kem::mlkem768::generate_key_pair(*mlkem_randomness);
+
     Identity {
         did: did.to_string(),
-        public_key: BASE64.encode(x25519_public.as_bytes()),
-        private_key: BASE64.encode(x25519_secret.to_bytes()),
+        x25519_public_key: BASE64.encode(x25519_public.as_bytes()),
+        x25519_private_key: BASE64.encode(x25519_secret.to_bytes()),
+        ml_kem_public_key: BASE64.encode(mlkem_keypair.public_key().as_ref()),
+        ml_kem_private_key: BASE64.encode(mlkem_keypair.private_key().as_ref()),
         signing_key: Some(BASE64.encode(ed25519_signing.to_bytes())),
         verify_key: Some(BASE64.encode(ed25519_verifying.to_bytes())),
     }
@@ -69,13 +84,17 @@ fn derive_master_seed(mnemonic: &Mnemonic) -> Zeroizing<[u8; MASTER_SEED_LEN]> {
 }
 
 /// HKDF-SHA256 expansion from the master seed with a domain-separated info string.
-fn derive_key_material(
+///
+/// The output length `N` is determined by inference at the call site — 32 bytes
+/// for X25519 / Ed25519 keys, 64 bytes for ML-KEM-768 KeyGen randomness. HKDF
+/// over SHA-256 supports up to 8160 bytes of output; we're well below that.
+fn derive_key_material<const N: usize>(
     master_seed: &[u8; MASTER_SEED_LEN],
     info: &[u8],
-) -> Zeroizing<[u8; KEY_LEN]> {
+) -> Zeroizing<[u8; N]> {
     let hkdf = Hkdf::<Sha256>::new(None, master_seed);
-    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    let mut key = Zeroizing::new([0u8; N]);
     hkdf.expand(info, key.as_mut())
-        .expect("32 bytes is always valid for HKDF-SHA256 output");
+        .expect("output length within HKDF-SHA256 limit (8160 bytes)");
     key
 }

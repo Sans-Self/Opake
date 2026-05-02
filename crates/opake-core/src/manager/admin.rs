@@ -5,7 +5,7 @@
 // not its files.
 
 use crate::client::Transport;
-use crate::crypto::{ContentKey, CryptoRng, DidMember, RngCore, X25519PublicKey};
+use crate::crypto::{ContentKey, CryptoRng, DidMember, PublicKeyBundle, RngCore};
 use crate::error::Error;
 use crate::keyrings;
 use crate::opake::Opake;
@@ -21,22 +21,24 @@ pub struct WorkspaceAdmin<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> 
 impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> WorkspaceAdmin<'a, T, R, S> {
     /// Add a member to the workspace.
     ///
-    /// Wraps the group key to the new member's public key and writes the
-    /// updated keyring record. Only the workspace owner can call this.
-    pub async fn add_member(
-        &mut self,
-        member_did: &str,
-        member_public_key: &X25519PublicKey,
-        role: Role,
-    ) -> Result<(), Error> {
+    /// Resolves the member's hybrid public-key bundle internally from the
+    /// DID, wraps the group key to it, and writes the updated keyring
+    /// record. Only the workspace owner can call this. Mirrors
+    /// `Opake::add_workspace_member`'s DID-only surface.
+    pub async fn add_member(&mut self, member_did: &str, role: Role) -> Result<(), Error> {
         let now = self.opake.now();
+        let resolved = self.opake.resolve_identity(member_did).await?;
+        let bundle = PublicKeyBundle {
+            x25519: &resolved.x25519_public_key,
+            ml_kem: &resolved.ml_kem_public_key,
+        };
         keyrings::add_member(
             &mut self.opake.client,
             &keyrings::AddMemberParams {
                 keyring_uri: &self.workspace.uri,
                 group_key: &self.workspace.key,
                 new_member_did: member_did,
-                new_member_public_key: member_public_key,
+                new_member_public_keys: bundle,
                 role,
                 modified_at: &now,
             },

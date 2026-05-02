@@ -1,19 +1,13 @@
 use super::*;
 use crate::client::{HttpResponse, RequestBody};
-use crate::crypto::{self, OsRng, X25519PrivateKey, X25519PublicKey};
+use crate::crypto::{self, OsRng};
 use crate::records::{
     AtBytes, BlobRef, CidLink, DirectEncryption, Document, EncryptionEnvelope, WrappedKey,
 };
-use crate::test_utils::MockTransport;
+use crate::test_utils::{MockTransport, TestKeys};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use super::super::tests::{mock_client, TEST_DID, TEST_URI};
-
-fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-    let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-    let public = crypto::X25519DalekPublicKey::from(&secret);
-    (public.to_bytes(), secret.to_bytes())
-}
 
 struct EncryptedFixture {
     ciphertext: Vec<u8>,
@@ -22,11 +16,18 @@ struct EncryptedFixture {
     content_key: crypto::ContentKey,
 }
 
-fn encrypt_fixture(plaintext: &[u8], public_key: &X25519PublicKey) -> EncryptedFixture {
+fn encrypt_fixture(plaintext: &[u8], keys: &TestKeys) -> EncryptedFixture {
     let rng = &mut OsRng;
     let content_key = crypto::generate_content_key(rng);
     let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
-    let wrapped_key = crypto::wrap_key(&content_key, public_key, TEST_DID, rng).unwrap();
+    let wrapped_key = crypto::wrap_key(
+        &content_key,
+        &keys.public_keys(),
+        TEST_DID,
+        &crypto::WrapContext::Document { uri: TEST_URI },
+        rng,
+    )
+    .unwrap();
     EncryptedFixture {
         ciphertext: payload.ciphertext,
         nonce: payload.nonce,
@@ -116,9 +117,9 @@ fn put_record_response() -> HttpResponse {
 
 #[tokio::test]
 async fn happy_path() {
-    let (public_key, private_key) = test_keypair();
+    let keys = TestKeys::generate(TEST_DID);
     let original = b"# Hello";
-    let fixture = encrypt_fixture(original, &public_key);
+    let fixture = encrypt_fixture(original, &keys);
     let doc = document_from_fixture(&fixture, "hello.md");
 
     let mock = MockTransport::new();
@@ -134,7 +135,7 @@ async fn happy_path() {
         &mut client,
         TEST_URI,
         TEST_DID,
-        &private_key,
+        &keys.private_keys(),
         None,
         b"# Hello, updated!",
         "2026-03-18T12:00:00Z",
@@ -178,8 +179,8 @@ async fn happy_path() {
 
 #[tokio::test]
 async fn preserves_encryption_keys() {
-    let (public_key, private_key) = test_keypair();
-    let fixture = encrypt_fixture(b"original", &public_key);
+    let keys = TestKeys::generate(TEST_DID);
+    let fixture = encrypt_fixture(b"original", &keys);
     let doc = document_from_fixture(&fixture, "test.md");
 
     // Capture the original wrapped key ciphertext.
@@ -198,7 +199,7 @@ async fn preserves_encryption_keys() {
         &mut client,
         TEST_URI,
         TEST_DID,
-        &private_key,
+        &keys.private_keys(),
         None,
         b"updated",
         "2026-03-18T12:00:00Z",
@@ -223,8 +224,8 @@ async fn preserves_encryption_keys() {
 
 #[tokio::test]
 async fn updates_metadata_size() {
-    let (public_key, private_key) = test_keypair();
-    let fixture = encrypt_fixture(b"short", &public_key);
+    let keys = TestKeys::generate(TEST_DID);
+    let fixture = encrypt_fixture(b"short", &keys);
     let doc = document_from_fixture(&fixture, "size-test.md");
 
     let mock = MockTransport::new();
@@ -238,7 +239,7 @@ async fn updates_metadata_size() {
         &mut client,
         TEST_URI,
         TEST_DID,
-        &private_key,
+        &keys.private_keys(),
         None,
         new_content,
         "2026-03-18T12:00:00Z",
@@ -264,8 +265,8 @@ async fn updates_metadata_size() {
 
 #[tokio::test]
 async fn changes_encryption_nonce() {
-    let (public_key, private_key) = test_keypair();
-    let fixture = encrypt_fixture(b"original", &public_key);
+    let keys = TestKeys::generate(TEST_DID);
+    let fixture = encrypt_fixture(b"original", &keys);
     let doc = document_from_fixture(&fixture, "nonce-test.md");
     let original_nonce = BASE64.encode(fixture.nonce);
 
@@ -279,7 +280,7 @@ async fn changes_encryption_nonce() {
         &mut client,
         TEST_URI,
         TEST_DID,
-        &private_key,
+        &keys.private_keys(),
         None,
         b"updated content",
         "2026-03-18T12:00:00Z",
@@ -306,7 +307,7 @@ async fn changes_encryption_nonce() {
 
 #[tokio::test]
 async fn rejects_oversized_blob() {
-    let (_, private_key) = test_keypair();
+    let keys = TestKeys::generate(TEST_DID);
     let mock = MockTransport::new();
     let mut client = mock_client(mock);
 
@@ -315,7 +316,7 @@ async fn rejects_oversized_blob() {
         &mut client,
         TEST_URI,
         TEST_DID,
-        &private_key,
+        &keys.private_keys(),
         None,
         &oversized,
         "2026-03-18T12:00:00Z",

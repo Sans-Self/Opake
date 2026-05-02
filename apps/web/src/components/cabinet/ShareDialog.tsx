@@ -69,7 +69,13 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         setStatus("sharing");
 
         // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        await fileManager.share(documentUri, resolved.did, resolved.publicKey, "read");
+        await fileManager.share(
+          documentUri,
+          resolved.did,
+          resolved.x25519PublicKey,
+          resolved.mlKemPublicKey,
+          "read",
+        );
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
           await fileManager.createPendingShare(documentUri, recipient, "read", null);

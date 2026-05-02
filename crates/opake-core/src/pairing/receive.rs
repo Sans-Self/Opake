@@ -1,8 +1,12 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use zeroize::Zeroizing;
 
 use crate::atproto;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{decrypt_blob, unwrap_key, EncryptedPayload, X25519PrivateKey};
+use crate::crypto::{
+    decrypt_blob, unwrap_key, EncryptedPayload, MlKemPrivateKey, PrivateKeyBundle,
+    X25519PrivateKey, ML_KEM_SK_LEN,
+};
 use crate::error::Error;
 use crate::records::{
     PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION,
@@ -11,6 +15,13 @@ use crate::records::{
 use crate::storage::{Identity, Storage};
 
 use super::cleanup::cleanup_pair_records;
+use super::request::PAIR_STATE_VERSION;
+
+/// X25519 private-key length (the classical half of the pair-state blob).
+const X25519_PRIV_LEN: usize = 32;
+
+/// Total size of the versioned pair-state blob: `[VERSION(1) || X25519(32) || ML-KEM(2400)]`.
+const PAIR_STATE_LEN: usize = 1 + X25519_PRIV_LEN + ML_KEM_SK_LEN;
 
 /// Poll once for a pair response matching `request_rkey`.
 ///
@@ -65,15 +76,29 @@ where
     T: Transport,
     S: Storage,
 {
-    let privkey_bytes = storage.load_pair_state(did, request_rkey).await?;
-    let privkey: X25519PrivateKey = privkey_bytes.as_slice().try_into().map_err(|_| {
-        Error::InvalidRecord(format!(
-            "pair state for {request_rkey} has wrong length: expected 32 bytes, got {}",
-            privkey_bytes.len()
-        ))
-    })?;
+    let state = storage.load_pair_state(did, request_rkey).await?;
+    if state.len() != PAIR_STATE_LEN {
+        return Err(Error::InvalidRecord(format!(
+            "pair state for {request_rkey} has wrong length: expected {PAIR_STATE_LEN} bytes, got {}",
+            state.len()
+        )));
+    }
+    if state[0] != PAIR_STATE_VERSION {
+        return Err(Error::InvalidRecord(format!(
+            "pair state for {request_rkey} has unknown version byte: 0x{:02x}",
+            state[0]
+        )));
+    }
+    // Split the versioned blob: skip 1-byte version, then X25519(32), then ML-KEM(2400).
+    // See `pairing::request::create_pair_request` for the matching writer.
+    let (x25519_bytes, mlkem_bytes) = state[1..].split_at(X25519_PRIV_LEN);
+    let mut x25519_priv: Zeroizing<[u8; X25519_PRIV_LEN]> = Zeroizing::new([0u8; X25519_PRIV_LEN]);
+    x25519_priv.copy_from_slice(x25519_bytes);
+    let mut mlkem_priv: Zeroizing<[u8; ML_KEM_SK_LEN]> = Zeroizing::new([0u8; ML_KEM_SK_LEN]);
+    mlkem_priv.copy_from_slice(mlkem_bytes);
 
-    let identity = decrypt_pair_response(client, did, response, &privkey).await?;
+    let identity =
+        decrypt_pair_response(client, did, response, &*x25519_priv, &*mlkem_priv).await?;
     storage.save_identity(did, &identity).await?;
 
     // Tear-down is best-effort from the caller's perspective — the Identity
@@ -110,9 +135,18 @@ async fn decrypt_pair_response(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     response: &PairResponse,
-    ephemeral_private_key: &X25519PrivateKey,
+    ephemeral_x25519_private_key: &X25519PrivateKey,
+    ephemeral_ml_kem_private_key: &MlKemPrivateKey,
 ) -> Result<Identity, Error> {
-    let content_key = unwrap_key(&response.wrapped_key, ephemeral_private_key)?;
+    let bundle = PrivateKeyBundle {
+        x25519: ephemeral_x25519_private_key,
+        ml_kem: ephemeral_ml_kem_private_key,
+    };
+    let content_key = unwrap_key(
+        &response.wrapped_key,
+        &bundle,
+        &crate::crypto::WrapContext::PairResponse,
+    )?;
 
     let ciphertext = BASE64.decode(&response.ciphertext.encoded).map_err(|e| {
         Error::Decryption(format!("invalid base64 in pair response ciphertext: {e}"))
@@ -140,22 +174,44 @@ async fn decrypt_pair_response(
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await?;
     let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
-    let published_key = BASE64.decode(&published.public_key.encoded).map_err(|e| {
-        Error::InvalidRecord(format!("invalid base64 in published public key: {e}"))
-    })?;
 
-    let received_key = BASE64.decode(&identity.public_key).map_err(|e| {
+    let published_x25519 = BASE64
+        .decode(&published.x25519_public_key.encoded)
+        .map_err(|e| {
+            Error::InvalidRecord(format!("invalid base64 in published X25519 public key: {e}"))
+        })?;
+    let received_x25519 = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
         Error::InvalidRecord(format!(
-            "invalid base64 in received identity public key: {e}"
+            "invalid base64 in received identity X25519 public key: {e}"
         ))
     })?;
-
-    if published_key != received_key {
+    if published_x25519 != received_x25519 {
         return Err(Error::InvalidRecord(
-            "received identity public key does not match published publicKey/self record"
-                .to_string(),
+            "received X25519 public key does not match published publicKey/self record".to_string(),
+        ));
+    }
+
+    let published_ml_kem = BASE64
+        .decode(&published.ml_kem_public_key.encoded)
+        .map_err(|e| {
+            Error::InvalidRecord(format!(
+                "invalid base64 in published ML-KEM public key: {e}"
+            ))
+        })?;
+    let received_ml_kem = BASE64.decode(&identity.ml_kem_public_key).map_err(|e| {
+        Error::InvalidRecord(format!(
+            "invalid base64 in received identity ML-KEM public key: {e}"
+        ))
+    })?;
+    if published_ml_kem != received_ml_kem {
+        return Err(Error::InvalidRecord(
+            "received ML-KEM public key does not match published publicKey/self record".to_string(),
         ));
     }
 
     Ok(identity)
 }
+
+#[cfg(test)]
+#[path = "receive_tests.rs"]
+mod tests;

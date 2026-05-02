@@ -1,29 +1,46 @@
 {
   "lexicon": 1,
   "id": "app.opake.publicKey",
-  "description": "X25519 encryption public key for an Opake user. Singleton record (rkey: 'self') published on the user's PDS to enable key discovery for sharing.",
+  "description": "Public encryption keys for an Opake user. Singleton record (rkey: 'self') published on the user's PDS to enable key discovery for sharing. Carries both an X25519 key and an ML-KEM-768 key for the hybrid post-quantum KEM construction (BSI TR-02102 / ANSSI guidance for hybrid PQ key establishment).",
   "defs": {
     "main": {
       "type": "record",
       "key": "literal:self",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "publicKey", "algo", "createdAt"],
+        "required": [
+          "opakeVersion",
+          "x25519PublicKey",
+          "x25519Algo",
+          "mlKemPublicKey",
+          "mlKemAlgo",
+          "createdAt"
+        ],
         "properties": {
           "opakeVersion": {
             "type": "integer",
             "minimum": 1,
             "description": "Schema version for forward compatibility."
           },
-          "publicKey": {
+          "x25519PublicKey": {
             "type": "bytes",
             "maxLength": 32,
-            "description": "Raw X25519 public key bytes."
+            "description": "Raw X25519 public key bytes (classical half of the hybrid KEM)."
           },
-          "algo": {
+          "x25519Algo": {
             "type": "string",
             "knownValues": ["x25519"],
-            "description": "Key algorithm identifier."
+            "description": "Algorithm identifier for the classical encryption key."
+          },
+          "mlKemPublicKey": {
+            "type": "bytes",
+            "maxLength": 1184,
+            "description": "Raw ML-KEM-768 public encapsulation key bytes (post-quantum half of the hybrid KEM)."
+          },
+          "mlKemAlgo": {
+            "type": "string",
+            "knownValues": ["ml-kem-768"],
+            "description": "Algorithm identifier for the post-quantum encapsulation key."
           },
           "signingKey": {
             "type": "bytes",
@@ -38,7 +55,7 @@
           "createdAt": {
             "type": "string",
             "format": "datetime",
-            "description": "When the key was created."
+            "description": "When the keys were created."
           }
         }
       }

@@ -204,16 +204,23 @@ async function resolveIdentityState(
 ): Promise<IdentityState> {
   const localIdentity = await storage.loadIdentity(did).catch(() => null);
 
-  if (!localIdentity && !remote?.publicKey) return { status: "none" };
+  if (!localIdentity && !remote?.x25519PublicKey) return { status: "none" };
   if (!localIdentity) return { status: "remote_only" };
-  if (!remote?.publicKey) return { status: "fresh" };
+  if (!remote?.x25519PublicKey) return { status: "fresh" };
 
-  const localKeyBytes = base64ToUint8Array(localIdentity.public_key);
-  const keysMatch =
-    localKeyBytes.length === remote.publicKey.length &&
-    localKeyBytes.every((b, i) => b === remote.publicKey[i]);
+  // Both halves of the hybrid bundle are tied to the same mnemonic, so a
+  // mismatch on either half indicates the local identity belongs to a
+  // different recovery — surface as a conflict either way.
+  const localX25519 = base64ToUint8Array(localIdentity.x25519_public_key);
+  const localMlKem = base64ToUint8Array(localIdentity.ml_kem_public_key);
+  const x25519Match =
+    localX25519.length === remote.x25519PublicKey.length &&
+    localX25519.every((b, i) => b === remote.x25519PublicKey[i]);
+  const mlKemMatch =
+    localMlKem.length === remote.mlKemPublicKey.length &&
+    localMlKem.every((b, i) => b === remote.mlKemPublicKey[i]);
 
-  return keysMatch ? { status: "ready" } : { status: "conflict" };
+  return x25519Match && mlKemMatch ? { status: "ready" } : { status: "conflict" };
 }
 
 /**
@@ -234,8 +241,13 @@ async function resolveIdentityStateWithoutOpake(
   const hasRemoteKey = await probeRemotePublicKey(pdsUrl, did);
   // `resolveIdentityState` handles the local-identity lookup + match logic;
   // pass a minimal remote shape reflecting only whether a key exists.
+  // The empty-bytes sentinels are never byte-compared — `resolveIdentityState`
+  // overrides any conflict to `remote_only` when no local identity exists.
   const remote: ResolvedIdentity | null = hasRemoteKey
-    ? ({ publicKey: new Uint8Array(0) } as ResolvedIdentity)
+    ? ({
+        x25519PublicKey: new Uint8Array(0),
+        mlKemPublicKey: new Uint8Array(0),
+      } as ResolvedIdentity)
     : null;
   const state = await resolveIdentityState(storage, did, remote);
   // With no local identity, `resolveIdentityState` returns `remote_only` for

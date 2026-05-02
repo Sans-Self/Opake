@@ -107,10 +107,10 @@ async fn check_published_key_mismatch(
             let published_key: PublicKeyRecord = serde_json::from_value(record.value)
                 .context("failed to parse published public key record")?;
             let published_bytes = published_key
-                .public_key
+                .x25519_public_key
                 .decode()
                 .map_err(|e| anyhow::anyhow!("invalid published key: {e}"))?;
-            let derived_bytes = derived.public_key_bytes()?;
+            let derived_bytes = derived.x25519_public_key_bytes()?;
             Ok(published_bytes != derived_bytes)
         }
         Err(opake_core::error::Error::NotFound(_)) => Ok(false),

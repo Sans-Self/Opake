@@ -20,7 +20,7 @@ defmodule OpakeIndexer.Jetstream.EventTest do
           "createdAt" => "2026-03-01T12:00:00Z",
           "wrappedKey" => %{
             "$bytes" => "AAAA",
-            "algo" => "x25519-hkdf-a256kw"
+            "algo" => "x25519-mlkem768-hkdf-a256kw-v2"
           },
           "encryptedMetadata" => %{
             "ciphertext" => "AAAA",
@@ -48,7 +48,7 @@ defmodule OpakeIndexer.Jetstream.EventTest do
               "wrappedKey" => %{
                 "did" => "did:plc:alice",
                 "ciphertext" => %{"$bytes" => "AAAA"},
-                "algo" => "x25519-hkdf-a256kw"
+                "algo" => "x25519-mlkem768-hkdf-a256kw-v2"
               },
               "role" => "manager"
             },
@@ -56,7 +56,7 @@ defmodule OpakeIndexer.Jetstream.EventTest do
               "wrappedKey" => %{
                 "did" => "did:plc:bob",
                 "ciphertext" => %{"$bytes" => "BBBB"},
-                "algo" => "x25519-hkdf-a256kw"
+                "algo" => "x25519-mlkem768-hkdf-a256kw-v2"
               },
               "role" => "editor"
             }

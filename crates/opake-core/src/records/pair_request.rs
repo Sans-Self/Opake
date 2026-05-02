@@ -5,27 +5,42 @@ use crate::atproto::AtBytes;
 
 pub const PAIR_REQUEST_COLLECTION: &str = "app.opake.pairRequest";
 
-/// A device pairing request. The new device publishes its ephemeral public key
-/// so the existing device can wrap the identity for secure transfer.
+/// Algorithm identifier for the pair-request ephemeral key bundle. Mirrors
+/// the `knownValues` entry in `lexicons/app.opake.pairRequest.json`.
+pub const PAIR_REQUEST_ALGO: &str = "x25519-mlkem768";
+
+/// A device pairing request.
+///
+/// The new device publishes its ephemeral hybrid (X25519 + ML-KEM-768)
+/// public-key bundle so the existing device can wrap the identity under
+/// the same post-quantum construction the rest of the system uses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairRequest {
     #[serde(default = "default_version")]
     pub opake_version: u32,
-    pub ephemeral_key: AtBytes,
+    pub x25519_ephemeral_key: AtBytes,
+    pub ml_kem_ephemeral_key: AtBytes,
     pub algo: String,
     pub created_at: String,
 }
 
 impl PairRequest {
-    pub fn new(ephemeral_key_bytes: &[u8], created_at: &str) -> Self {
+    pub fn new(
+        x25519_ephemeral_key_bytes: &[u8],
+        ml_kem_ephemeral_key_bytes: &[u8],
+        created_at: &str,
+    ) -> Self {
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
         Self {
             opake_version: SCHEMA_VERSION,
-            ephemeral_key: AtBytes {
-                encoded: BASE64.encode(ephemeral_key_bytes),
+            x25519_ephemeral_key: AtBytes {
+                encoded: BASE64.encode(x25519_ephemeral_key_bytes),
             },
-            algo: "x25519".into(),
+            ml_kem_ephemeral_key: AtBytes {
+                encoded: BASE64.encode(ml_kem_ephemeral_key_bytes),
+            },
+            algo: PAIR_REQUEST_ALGO.into(),
             created_at: created_at.into(),
         }
     }

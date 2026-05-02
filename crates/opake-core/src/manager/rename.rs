@@ -47,7 +47,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .ok_or_else(|| {
                         Error::InvalidRecord(format!("no wrapped key for DID ({})", cabinet.did))
                     })?;
-                crypto::unwrap_key(wrapped, &cabinet.private_key)?
+                crypto::unwrap_key(wrapped, &cabinet.private_keys(), &crypto::WrapContext::Cabinet)?
             }
             KeyWrapping::Keyring(kr) => {
                 let FileContext::Workspace(ref ws) = self.context else {

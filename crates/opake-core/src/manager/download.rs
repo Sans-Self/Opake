@@ -42,7 +42,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let (filename, plaintext) = documents::download(
                     &mut self.opake.client,
                     &cabinet.did,
-                    &cabinet.private_key,
+                    &cabinet.private_keys(),
                     document_uri,
                 )
                 .await?;
@@ -53,13 +53,19 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
             FileContext::Workspace(ws) => {
                 let doc_authority = atproto::parse_at_uri(document_uri)?.authority;
-                let private_key = self.opake.identity().private_key_bytes()?;
+                let identity = self.opake.identity();
+                let x25519_private = identity.x25519_private_key_bytes()?;
+                let ml_kem_private = identity.ml_kem_private_key_bytes()?;
+                let private_keys = crate::crypto::PrivateKeyBundle {
+                    x25519: &x25519_private,
+                    ml_kem: &ml_kem_private,
+                };
 
                 if doc_authority == self.opake.did {
                     let (filename, plaintext) = documents::download_with_group_key(
                         &mut self.opake.client,
                         &self.opake.did,
-                        &private_key,
+                        &private_keys,
                         Some(&ws.key),
                         document_uri,
                     )
@@ -72,7 +78,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     let result = documents::download_from_keyring_member(
                         self.opake.client.transport(),
                         &self.opake.did,
-                        &private_key,
+                        &private_keys,
                         document_uri,
                     )
                     .await?;

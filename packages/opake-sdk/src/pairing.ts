@@ -109,12 +109,17 @@ export function listPairRequests(ctx: Ctx): Promise<readonly PendingPairRequest[
     (
       entries: readonly {
         uri: string;
-        value: { ephemeralKey: { $bytes: string }; createdAt: string };
+        value: {
+          x25519EphemeralKey: { $bytes: string };
+          mlKemEphemeralKey: { $bytes: string };
+          createdAt: string;
+        };
       }[],
     ) =>
       entries.map((e) => ({
         uri: e.uri,
-        ephemeralKey: base64ToBytes(e.value.ephemeralKey.$bytes),
+        x25519EphemeralKey: base64ToBytes(e.value.x25519EphemeralKey.$bytes),
+        mlKemEphemeralKey: base64ToBytes(e.value.mlKemEphemeralKey.$bytes),
         createdAt: e.value.createdAt,
       })),
   );
@@ -123,9 +128,14 @@ export function listPairRequests(ctx: Ctx): Promise<readonly PendingPairRequest[
 export function approvePairRequest(
   ctx: Ctx,
   requestUri: string,
-  ephemeralPublicKey: Uint8Array,
+  x25519EphemeralPublicKey: Uint8Array,
+  mlKemEphemeralPublicKey: Uint8Array,
 ): Promise<void> {
-  return ctx.approvePairRequest(requestUri, ephemeralPublicKey);
+  return ctx.approvePairRequest(
+    requestUri,
+    x25519EphemeralPublicKey,
+    mlKemEphemeralPublicKey,
+  );
 }
 
 export function cleanupExpiredPairRequests(ctx: Ctx): Promise<number> {

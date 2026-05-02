@@ -617,13 +617,14 @@ export class Opake {
   addWorkspaceMember(
     keyringUri: string,
     memberDid: string,
-    memberPublicKey: Uint8Array,
     role: WorkspaceRole,
   ): Promise<MutationResult> {
+    // Core resolves the recipient's hybrid public-key bundle internally
+    // — fewer byte arrays crossing the WASM boundary, single resolution
+    // path on owner + non-owner branches.
     return this.requireContext().addWorkspaceMember(
       keyringUri,
       memberDid,
-      memberPublicKey,
       role,
     ) as Promise<MutationResult>;
   }
@@ -1074,8 +1075,8 @@ export class Opake {
    * Must run after `Opake.startLogin` / `Opake.completeLogin` have put an
    * authenticated session in Storage but before `Opake.init` — which would
    * fail with `IdentityMissing` at this stage. The returned fingerprint
-   * (first bytes of `ephemeralPublicKey`) is for out-of-band comparison
-   * with the approving device.
+   * (first bytes of `x25519EphemeralPublicKey`) is for out-of-band
+   * comparison with the approving device.
    */
   static async createPairRequest(
     storage: import("./storage").Storage,
@@ -1116,8 +1117,17 @@ export class Opake {
   /** Approve a pair request (existing device). Encrypts and sends the identity. */
   @wrapWasmErrors
   @withTokenGuard
-  approvePairRequest(requestUri: string, ephemeralPublicKey: Uint8Array): Promise<void> {
-    return pairingApprove(this.requireContext(), requestUri, ephemeralPublicKey);
+  approvePairRequest(
+    requestUri: string,
+    x25519EphemeralPublicKey: Uint8Array,
+    mlKemEphemeralPublicKey: Uint8Array,
+  ): Promise<void> {
+    return pairingApprove(
+      this.requireContext(),
+      requestUri,
+      x25519EphemeralPublicKey,
+      mlKemEphemeralPublicKey,
+    );
   }
 
   /** Delete expired pair requests and orphaned responses. */

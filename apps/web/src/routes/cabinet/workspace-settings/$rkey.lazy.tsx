@@ -280,7 +280,9 @@ function WorkspaceSettingsPage() {
         try {
           const opake = getOpake();
           const identity = await opake.resolveIdentity(handle);
-          await opake.addWorkspaceMember(uri, identity.did, identity.publicKey, memberRole);
+          // Core resolves the bundle internally; we still pre-resolve here
+          // so the success toast can show the resolved handle.
+          await opake.addWorkspaceMember(uri, identity.did, memberRole);
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
           await refreshAfterMemberChange(uri);
         } catch (err) {

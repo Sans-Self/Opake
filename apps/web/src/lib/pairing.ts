@@ -19,7 +19,8 @@ export interface PendingPairRequest {
   readonly uri: string;
   readonly fingerprint: string;
   readonly createdAt: string;
-  readonly ephemeralKey: Uint8Array;
+  readonly x25519EphemeralKey: Uint8Array;
+  readonly mlKemEphemeralKey: Uint8Array;
 }
 
 export type { PairRequestResult };
@@ -63,15 +64,23 @@ export async function listPairRequests(maxAge: number): Promise<PendingPairReque
     .filter((rec) => Date.now() - Date.parse(rec.createdAt) < maxAge)
     .map((rec) => ({
       uri: rec.uri,
-      fingerprint: formatFingerprint(rec.ephemeralKey),
+      // X25519 half is what fingerprints — compact (32 bytes) and matches
+      // the SAS comparison shown on the new device.
+      fingerprint: formatFingerprint(rec.x25519EphemeralKey),
       createdAt: rec.createdAt,
-      ephemeralKey: rec.ephemeralKey,
+      x25519EphemeralKey: rec.x25519EphemeralKey,
+      mlKemEphemeralKey: rec.mlKemEphemeralKey,
     }));
 }
 
 export async function approvePairRequest(
   requestUri: string,
-  ephemeralPubKey: Uint8Array,
+  x25519EphemeralPubKey: Uint8Array,
+  mlKemEphemeralPubKey: Uint8Array,
 ): Promise<void> {
-  await getOpake().approvePairRequest(requestUri, ephemeralPubKey);
+  await getOpake().approvePairRequest(
+    requestUri,
+    x25519EphemeralPubKey,
+    mlKemEphemeralPubKey,
+  );
 }

@@ -18,13 +18,13 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
     wk_me = %{
       "did" => member_did,
       "ciphertext" => %{"$bytes" => "AAAA"},
-      "algo" => "x25519-hkdf-a256kw"
+      "algo" => "x25519-mlkem768-hkdf-a256kw-v2"
     }
 
     wk_other = %{
       "did" => "did:plc:other",
       "ciphertext" => %{"$bytes" => "BBBB"},
-      "algo" => "x25519-hkdf-a256kw"
+      "algo" => "x25519-mlkem768-hkdf-a256kw-v2"
     }
 
     {:ok, _} =

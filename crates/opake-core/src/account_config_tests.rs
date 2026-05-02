@@ -67,6 +67,7 @@ fn make_test_opake(mock: MockTransport) -> crate::opake::Opake<MockTransport, Os
         NoopStorage,
         || 1_700_000_000_000_000,
     )
+    .unwrap()
 }
 
 #[tokio::test]

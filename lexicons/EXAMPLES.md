@@ -2,19 +2,21 @@
 
 ## 0. Public key record (published on login)
 
-Every Opake user publishes their X25519 encryption public key as a singleton record. This is how other users discover your key when sharing files with you.
+Every Opake user publishes their hybrid encryption public key as a singleton record — both halves of the X25519 + ML-KEM-768 KEM. This is how other users discover your key when sharing files with you.
 
 ```json
 {
   "$type": "app.opake.publicKey",
   "opakeVersion": 1,
-  "publicKey": { "$bytes": "base64-encoded-32-byte-x25519-public-key" },
-  "algo": "x25519",
+  "x25519PublicKey": { "$bytes": "base64-encoded-32-byte-x25519-public-key" },
+  "x25519Algo": "x25519",
+  "mlKemPublicKey": { "$bytes": "base64-encoded-1184-byte-ml-kem-768-public-key" },
+  "mlKemAlgo": "ml-kem-768",
   "createdAt": "2026-03-01T10:00:00.000Z"
 }
 ```
 
-This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only one per account. The key is published automatically on `opake login`.
+This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only one per account. All fields are required: a record missing either half fails lexicon validation. The keys are published automatically on `opake login`.
 
 ## 1. Root directory (created on first `opake mkdir`)
 
@@ -28,8 +30,8 @@ The root directory is a singleton at rkey `self`. Directory names are always enc
     "$type": "app.opake.defs#directKeyWrapping",
     "keys": [{
       "did": "did:plc:alice123",
-      "ciphertext": { "$bytes": "kv7N...72 bytes...Q==" },
-      "algo": "x25519-hkdf-a256kw"
+      "ciphertext": { "$bytes": "kv7N...1160 bytes...Q==" },
+      "algo": "x25519-mlkem768-hkdf-a256kw-v2"
     }]
   },
   "encryptedMetadata": {
@@ -56,8 +58,8 @@ The `entries` array is an ordered list of AT-URIs pointing to documents or other
     "$type": "app.opake.defs#directKeyWrapping",
     "keys": [{
       "did": "did:plc:alice123",
-      "ciphertext": { "$bytes": "Xm4p...72 bytes...==" },
-      "algo": "x25519-hkdf-a256kw"
+      "ciphertext": { "$bytes": "Xm4p...1160 bytes...==" },
+      "algo": "x25519-mlkem768-hkdf-a256kw-v2"
     }]
   },
   "encryptedMetadata": {
@@ -145,7 +147,7 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
         {
           "did": "did:plc:alice123",
           "ciphertext": { "$bytes": "base64-wrapped-content-key-for-alice" },
-          "algo": "x25519-hkdf-a256kw"
+          "algo": "x25519-mlkem768-hkdf-a256kw-v2"
         }
       ]
     }
@@ -176,7 +178,7 @@ array only contains Alice's wrapped key — only she can decrypt.
   "wrappedKey": {
     "did": "did:plc:bob456",
     "ciphertext": { "$bytes": "base64-wrapped-content-key-for-bob" },
-    "algo": "x25519-hkdf-a256kw"
+    "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
   "permissions": "read",
   "note": "Here's the tax doc you asked about",
@@ -213,7 +215,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:alice123",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
-        "algo": "x25519-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "manager"
     },
@@ -221,7 +223,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:bob456",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
-        "algo": "x25519-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "editor"
     },
@@ -229,7 +231,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "wrappedKey": {
         "did": "did:plc:carol789",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
-        "algo": "x25519-hkdf-a256kw"
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
       "role": "viewer"
     }
@@ -297,23 +299,24 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 
 ## 6. Pair request (new device requesting identity)
 
-A new device generates an ephemeral X25519 keypair and publishes the public half. The fingerprint is displayed for visual comparison on both devices.
+A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and publishes both public halves. The X25519 fingerprint is displayed for visual comparison on both devices.
 
 ```json
 {
   "$type": "app.opake.pairRequest",
   "opakeVersion": 1,
-  "ephemeralKey": { "$bytes": "base64-encoded-32-byte-x25519-ephemeral-public-key" },
-  "algo": "x25519",
+  "x25519EphemeralKey": { "$bytes": "base64-encoded-32-byte-x25519-ephemeral-public-key" },
+  "mlKemEphemeralKey": { "$bytes": "base64-encoded-1184-byte-ml-kem-768-ephemeral-public-key" },
+  "algo": "x25519-mlkem768",
   "createdAt": "2026-03-06T14:00:00.000Z"
 }
 ```
 
-This record uses a TID rkey (multiple pending requests are possible). The existing device lists these to show pending requests. Both devices display the key fingerprint for out-of-band verification.
+This record uses a TID rkey (multiple pending requests are possible). The existing device lists these to show pending requests. Both devices display the X25519 key fingerprint for out-of-band verification — short enough to read aloud or compare on screen, long enough to make collision search infeasible.
 
 ## 7. Pair response (existing device sending identity)
 
-The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and wraps the content key to the ephemeral public key from the request.
+The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 keypairs) and wraps the content key to the ephemeral hybrid bundle from the request, using the same hybrid construction as everywhere else.
 
 ```json
 {
@@ -322,8 +325,8 @@ The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and w
   "request": "at://did:plc:alice123/app.opake.pairRequest/3kabcd",
   "wrappedKey": {
     "did": "did:plc:alice123",
-    "ciphertext": { "$bytes": "base64-content-key-wrapped-to-ephemeral-pubkey" },
-    "algo": "x25519-hkdf-a256kw"
+    "ciphertext": { "$bytes": "base64-1160-byte-hybrid-wrap-envelope" },
+    "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
   "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-identity-json" },
   "nonce": { "$bytes": "base64-encoded-12-byte-nonce" },
@@ -333,13 +336,13 @@ The existing device encrypts the full identity (X25519 + Ed25519 keypairs) and w
 ```
 
 **How the new device decrypts:**
-1. Loads the ephemeral private key from local `Storage` (keyed by DID + request rkey)
-2. Unwraps the content key using that private key
+1. Loads the ephemeral private bundle from local `Storage` (32 + 2400 bytes concatenated, keyed by DID + request rkey)
+2. Unwraps the content key via the hybrid construction (X25519 ECDH + ML-KEM-768 Decaps + HKDF combiner)
 3. Decrypts the ciphertext with the content key + nonce → identity JSON
-4. Verifies the derived public key matches the published `publicKey/self` record
+4. Verifies the embedded X25519 public key matches the sender's published `publicKey/self` record
 5. Saves the identity to disk and wipes the pair state entry
 
-Both PDS records are deleted after successful transfer. The ephemeral private key is persisted in `Storage` only between `create_pair_request` and `try_complete_pair` — it has to survive a CLI restart or browser reload while the user walks to the other device, so in-memory alone isn't sufficient. It never crosses the WASM/JS boundary.
+Both PDS records are deleted after successful transfer. The ephemeral private bundle is persisted in `Storage` only between `create_pair_request` and `try_complete_pair` — it has to survive a CLI restart or browser reload while the user walks to the other device, so in-memory alone isn't sufficient. It never crosses the WASM/JS boundary.
 
 
 ## 8. Pending share (recipient hasn't set up Opake yet)

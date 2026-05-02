@@ -4,7 +4,7 @@ use crate::atproto;
 use crate::client::{
     get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport,
 };
-use crate::crypto::{self, X25519PrivateKey};
+use crate::crypto::{self, PrivateKeyBundle};
 use crate::error::Error;
 use crate::records::{self, Document, Grant};
 use crate::sharing::GRANT_COLLECTION;
@@ -20,7 +20,7 @@ use super::download::{decrypt_with_envelope, resolve_document_name};
 /// replaced by automatic grant discovery once the `inbox` command exists.
 pub async fn download_from_grant(
     transport: &impl Transport,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     grant_uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
     let grant_at = atproto::parse_at_uri(grant_uri)?;
@@ -51,9 +51,17 @@ pub async fn download_from_grant(
     let grant: Grant = serde_json::from_value(grant_entry.value)?;
     records::check_version(grant.opake_version)?;
 
-    // Unwrap the content key from the grant
+    // Unwrap the content key from the grant. The wrap was scoped to the
+    // document URI; passing the same context here is what enforces the
+    // splice protection across record contexts.
     trace!("unwrapping content key from grant");
-    let content_key = crypto::unwrap_key(&grant.wrapped_key, private_key)?;
+    let content_key = crypto::unwrap_key(
+        &grant.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Document {
+            uri: &grant.document,
+        },
+    )?;
 
     // Fetch the document record
     let doc_at = atproto::parse_at_uri(&grant.document)?;
@@ -108,9 +116,9 @@ pub async fn download_from_grant(
 /// decryption — no blob fetch. Used for listing incoming grants.
 pub(crate) async fn resolve_grant_metadata(
     transport: &impl Transport,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     grant_uri: &str,
-) -> Result<(String, crypto::DocumentMetadata), Error> {
+) -> Result<(String, crypto::DocumentMetadata, String, Option<String>), Error> {
     let grant_at = atproto::parse_at_uri(grant_uri)?;
     if grant_at.collection != GRANT_COLLECTION {
         return Err(Error::InvalidRecord(format!(
@@ -134,7 +142,13 @@ pub(crate) async fn resolve_grant_metadata(
     let grant: Grant = serde_json::from_value(grant_entry.value)?;
     records::check_version(grant.opake_version)?;
 
-    let content_key = crypto::unwrap_key(&grant.wrapped_key, private_key)?;
+    let content_key = crypto::unwrap_key(
+        &grant.wrapped_key,
+        private_keys,
+        &crypto::WrapContext::Document {
+            uri: &grant.document,
+        },
+    )?;
 
     let doc_at = atproto::parse_at_uri(&grant.document)?;
     let doc_entry = get_record_public(
@@ -150,18 +164,18 @@ pub(crate) async fn resolve_grant_metadata(
 
     let name = resolve_document_name(&doc, &content_key)?;
     let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
-    Ok((name, metadata))
+    Ok((name, metadata, doc.created_at, doc.modified_at))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::HttpResponse;
-    use crate::crypto::{OsRng, X25519PublicKey};
+    use crate::crypto::{OsRng, PublicKeyBundle};
     use crate::records::{
         AtBytes, BlobRef, CidLink, DirectEncryption, Encryption, EncryptionEnvelope,
     };
-    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport, TestKeys};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
     const OWNER_DID: &str = "did:plc:owner";
@@ -228,15 +242,33 @@ mod tests {
         content_key: crypto::ContentKey,
     }
 
-    fn encrypt_and_wrap(plaintext: &[u8], recipient_public: &X25519PublicKey) -> GrantFixture {
+    /// Build a grant fixture: ciphertext + a wrapped copy of the content key
+    /// for the document owner (placeholder bundle, never decrypted in tests)
+    /// and a real wrapped copy for the recipient.
+    fn encrypt_and_wrap(plaintext: &[u8], recipient_keys: &TestKeys) -> GrantFixture {
         let content_key = crypto::generate_content_key(&mut OsRng);
         let payload = crypto::encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
-        let owner_wrapped =
-            crypto::wrap_key(&content_key, &[99u8; 32], OWNER_DID, &mut OsRng).unwrap();
+
+        // Owner-side wrap uses an opaque bundle the test never unwraps with.
+        // The grant flow ignores the document's own envelope, only its nonce.
+        let owner_keys = TestKeys::generate(OWNER_DID);
+        let owner_wrapped = crypto::wrap_key(
+            &content_key,
+            &owner_keys.public_keys(),
+            OWNER_DID,
+            &crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+
         let recipient_wrapped = crypto::wrap_key(
             &content_key,
-            recipient_public,
+            &PublicKeyBundle {
+                x25519: &recipient_keys.x25519_pub,
+                ml_kem: &recipient_keys.ml_kem_pub,
+            },
             "did:plc:recipient",
+            &crypto::WrapContext::Document { uri: DOC_URI },
             &mut OsRng,
         )
         .unwrap();
@@ -290,12 +322,10 @@ mod tests {
 
     #[tokio::test]
     async fn roundtrip() {
-        let recipient_secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-        let recipient_public = crypto::X25519DalekPublicKey::from(&recipient_secret);
-        let recipient_private = recipient_secret.to_bytes();
+        let recipient_keys = TestKeys::generate("did:plc:recipient");
 
         let plaintext = b"shared secret content";
-        let fixture = encrypt_and_wrap(plaintext, recipient_public.as_bytes());
+        let fixture = encrypt_and_wrap(plaintext, &recipient_keys);
 
         let doc = make_document(
             "shared-file.txt",
@@ -319,9 +349,10 @@ mod tests {
         mock.enqueue(record_response(&doc));
         mock.enqueue(blob_response(&fixture.payload.ciphertext));
 
-        let (name, decrypted) = download_from_grant(&mock, &recipient_private, GRANT_URI)
-            .await
-            .unwrap();
+        let (name, decrypted) =
+            download_from_grant(&mock, &recipient_keys.private_keys(), GRANT_URI)
+                .await
+                .unwrap();
 
         assert_eq!(name, "shared-file.txt");
         assert_eq!(decrypted, plaintext);
@@ -338,9 +369,14 @@ mod tests {
     #[tokio::test]
     async fn rejects_non_grant_uri() {
         let mock = MockTransport::new();
-        let err = download_from_grant(&mock, &[0u8; 32], "at://did:plc:x/app.opake.document/abc")
-            .await
-            .unwrap_err();
+        let keys = TestKeys::generate("did:plc:recipient");
+        let err = download_from_grant(
+            &mock,
+            &keys.private_keys(),
+            "at://did:plc:x/app.opake.document/abc",
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("grant"), "got: {err}");
     }
 }

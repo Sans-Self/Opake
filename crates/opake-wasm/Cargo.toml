@@ -26,3 +26,23 @@ futures-util = { workspace = true }
 
 # OsRng on wasm32 needs crypto.getRandomValues()
 getrandom = { version = "0.2", features = ["js"] }
+
+# wasm-pack post-process: explicit wasm-opt invocation.
+#
+# Pinning the flags here makes the post-process deterministic regardless of
+# wasm-pack version. `--enable-bulk-memory` is required because rustc's
+# WASM output uses bulk-memory ops by default — older binaryen (117, bundled
+# with wasm-pack 0.13.1) rejects them without this flag, which is why the
+# default `wasm-opt -O` invocation fails on stock wasm-pack today.
+#
+# `-Oz` is the most aggressive size-bias optimisation pass. The strip flags
+# remove debug info and producer-tool annotations that bloat the binary.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+    "-Oz",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--strip-debug",
+    "--strip-producers",
+    "--vacuum",
+]

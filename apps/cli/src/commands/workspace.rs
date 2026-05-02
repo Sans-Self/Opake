@@ -124,11 +124,12 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
         return Ok(None);
     }
 
-    let private_key = opake.identity().private_key_bytes()?;
+    let private_keys = opake.identity().owned_private_keys()?;
     let did = opake.did();
+    let bundle = private_keys.bundle();
 
     for kr in &keyrings {
-        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &private_key)
+        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &bundle)
             .unwrap_or_else(|| "<encrypted>".into());
         let role_tag = if kr.owner_did == did {
             ""
@@ -158,17 +159,14 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
     let mut opake = ctx.opake().await?;
     let workspace = opake.resolve_workspace(&args.workspace).await?;
 
+    // Pre-resolve for the user-facing display string. Core re-resolves
+    // internally (single source of truth for the bundle) — the CLI-side
+    // call is just for the success-line handle, not for crypto.
     let transport = ReqwestTransport::new();
     let resolved = resolve::resolve_identity(&transport, &ctx.pds_url, &args.member).await?;
 
     opake
-        .add_workspace_member(
-            &workspace.uri,
-            &workspace.key,
-            &resolved.did,
-            &resolved.public_key,
-            args.role,
-        )
+        .add_workspace_member(&workspace.uri, &workspace.key, &resolved.did, args.role)
         .await?;
 
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
@@ -240,14 +238,17 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     let mut remaining_pubkeys = Vec::new();
     for did in &remaining_dids {
         let identity = opake.resolve_identity(did).await?;
-        remaining_pubkeys.push(identity.public_key);
+        remaining_pubkeys.push((identity.x25519_public_key, identity.ml_kem_public_key));
     }
     let remaining_keys: Vec<DidMember<'_>> = remaining_dids
         .iter()
         .enumerate()
         .map(|(i, did)| DidMember {
             did,
-            public_key: &remaining_pubkeys[i],
+            keys: opake_core::crypto::PublicKeyBundle {
+                x25519: &remaining_pubkeys[i].0,
+                ml_kem: &remaining_pubkeys[i].1,
+            },
         })
         .collect();
 

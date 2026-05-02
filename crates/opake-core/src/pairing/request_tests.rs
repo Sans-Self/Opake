@@ -140,17 +140,20 @@ async fn create_pair_request_persists_ephemeral_privkey() {
 
     assert_eq!(info.rkey, "rk1");
     assert_eq!(info.uri, format!("at://{TEST_DID}/{PAIR_REQUEST_COLLECTION}/rk1"));
-    assert_eq!(info.ephemeral_public_key.len(), 32);
+    assert_eq!(info.x25519_ephemeral_public_key.len(), 32);
+    assert_eq!(info.ml_kem_ephemeral_public_key.len(), 1184);
 
     let stored = storage
         .load_pair_state(TEST_DID, "rk1")
         .await
         .expect("private key should be persisted");
-    assert_eq!(stored.len(), 32);
-    // The returned public key is derived from the persisted private key —
-    // verify the DH relationship explicitly so a storage roundtrip bug would
-    // surface here instead of silently at pair completion.
-    let priv_bytes: [u8; 32] = stored.as_slice().try_into().unwrap();
-    let derived = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(priv_bytes));
-    assert_eq!(derived.as_bytes(), &info.ephemeral_public_key);
+    // [VERSION(1) || X25519 priv(32) || ML-KEM priv(2400)] = 2433 bytes.
+    assert_eq!(stored.len(), 1 + 32 + 2400);
+    assert_eq!(stored[0], 0x01, "version byte must be 0x01");
+    // Verify the DH relationship on the X25519 half so a storage-roundtrip bug
+    // surfaces here rather than silently at pair completion.
+    let mut x25519_priv = [0u8; 32];
+    x25519_priv.copy_from_slice(&stored[1..33]);
+    let derived = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(x25519_priv));
+    assert_eq!(derived.as_bytes(), &info.x25519_ephemeral_public_key);
 }

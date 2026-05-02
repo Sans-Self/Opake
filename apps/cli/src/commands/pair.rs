@@ -85,7 +85,10 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
     .await?;
 
     println!("Pairing request created.");
-    println!("Fingerprint: {}", fingerprint(&info.ephemeral_public_key));
+    // Fingerprint the X25519 half — short and stable, matches what the
+    // approving device displays. The ML-KEM half is 1184 bytes; printing
+    // its fingerprint adds nothing for human comparison.
+    println!("Fingerprint: {}", fingerprint(&info.x25519_ephemeral_public_key));
     println!();
     println!("Run `opake pair approve` on your existing device.");
     println!("Waiting for response...");
@@ -121,8 +124,8 @@ async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {
             .context("failed to parse pair request record")?;
 
         let ephemeral_key_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&request.ephemeral_key.encoded)
-            .context("invalid base64 in pair request ephemeral key")?;
+            .decode(&request.x25519_ephemeral_key.encoded)
+            .context("invalid base64 in pair request X25519 ephemeral key")?;
 
         let fp = if ephemeral_key_bytes.len() == 32 {
             let arr: [u8; 32] = ephemeral_key_bytes.try_into().unwrap();
@@ -146,15 +149,22 @@ async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {
 
     let (ref request_uri, ref request) = requests[choice - 1];
 
-    let ephemeral_key_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&request.ephemeral_key.encoded)
-        .context("invalid base64 in ephemeral key")?;
-    let ephemeral_pubkey: [u8; 32] = ephemeral_key_bytes
+    let x25519_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.x25519_ephemeral_key.encoded)
+        .context("invalid base64 in X25519 ephemeral key")?;
+    let x25519_pubkey: [u8; 32] = x25519_bytes
         .try_into()
-        .map_err(|_| anyhow::anyhow!("ephemeral key must be 32 bytes"))?;
+        .map_err(|_| anyhow::anyhow!("X25519 ephemeral key must be 32 bytes"))?;
+
+    let ml_kem_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&request.ml_kem_ephemeral_key.encoded)
+        .context("invalid base64 in ML-KEM-768 ephemeral key")?;
+    let ml_kem_pubkey: [u8; 1184] = ml_kem_bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("ML-KEM-768 ephemeral key must be 1184 bytes"))?;
 
     opake
-        .approve_pair_request(request_uri, &ephemeral_pubkey)
+        .approve_pair_request(request_uri, &x25519_pubkey, &ml_kem_pubkey)
         .await?;
 
     println!("Identity sent. The other device should receive it shortly.");

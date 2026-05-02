@@ -159,21 +159,25 @@ fn derivation_is_deterministic() {
     let mnemonic = generate_mnemonic(&mut test_rng());
     let id1 = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
     let id2 = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    assert_eq!(id1.public_key, id2.public_key);
-    assert_eq!(id1.private_key, id2.private_key);
+    assert_eq!(id1.x25519_public_key, id2.x25519_public_key);
+    assert_eq!(id1.x25519_private_key, id2.x25519_private_key);
     assert_eq!(id1.signing_key, id2.signing_key);
     assert_eq!(id1.verify_key, id2.verify_key);
+    assert_eq!(id1.ml_kem_public_key, id2.ml_kem_public_key);
+    assert_eq!(id1.ml_kem_private_key, id2.ml_kem_private_key);
 }
 
 #[test]
 fn derivation_produces_valid_key_bytes() {
     let mnemonic = generate_mnemonic(&mut test_rng());
     let identity = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    assert_eq!(identity.public_key_bytes().unwrap().len(), 32);
-    assert_eq!(identity.private_key_bytes().unwrap().len(), 32);
+    assert_eq!(identity.x25519_public_key_bytes().unwrap().len(), 32);
+    assert_eq!(identity.x25519_private_key_bytes().unwrap().len(), 32);
     assert!(identity.has_signing_keys());
     assert!(identity.signing_key_bytes().unwrap().is_some());
     assert!(identity.verify_key_bytes().unwrap().is_some());
+    assert_eq!(identity.ml_kem_public_key_bytes().unwrap().len(), 1184);
+    assert_eq!(identity.ml_kem_private_key_bytes().unwrap().len(), 2400);
 }
 
 #[test]
@@ -182,8 +186,8 @@ fn derivation_did_stored_not_derived() {
     let id_a = derive_identity_from_mnemonic(&mnemonic, "did:plc:alice");
     let id_b = derive_identity_from_mnemonic(&mnemonic, "did:plc:bob");
     // Same mnemonic → same keys, regardless of DID.
-    assert_eq!(id_a.public_key, id_b.public_key);
-    assert_eq!(id_a.private_key, id_b.private_key);
+    assert_eq!(id_a.x25519_public_key, id_b.x25519_public_key);
+    assert_eq!(id_a.x25519_private_key, id_b.x25519_private_key);
     // But DIDs differ.
     assert_ne!(id_a.did, id_b.did);
 }
@@ -194,8 +198,8 @@ fn different_mnemonics_produce_different_keys() {
     let m2 = generate_mnemonic(&mut ChaCha20Rng::from_seed([1u8; 32]));
     let id1 = derive_identity_from_mnemonic(&m1, "did:plc:test");
     let id2 = derive_identity_from_mnemonic(&m2, "did:plc:test");
-    assert_ne!(id1.public_key, id2.public_key);
-    assert_ne!(id1.private_key, id2.private_key);
+    assert_ne!(id1.x25519_public_key, id2.x25519_public_key);
+    assert_ne!(id1.x25519_private_key, id2.x25519_private_key);
 }
 
 #[test]
@@ -205,8 +209,10 @@ fn derived_identity_serializes_like_random() {
     let json = serde_json::to_value(&derived).unwrap();
     // Same fields as a random identity — no extra mnemonic field leaks.
     assert!(json.get("did").is_some());
-    assert!(json.get("public_key").is_some());
-    assert!(json.get("private_key").is_some());
+    assert!(json.get("x25519_public_key").is_some());
+    assert!(json.get("x25519_private_key").is_some());
+    assert!(json.get("ml_kem_public_key").is_some());
+    assert!(json.get("ml_kem_private_key").is_some());
     assert!(json.get("signing_key").is_some());
     assert!(json.get("verify_key").is_some());
     // Mnemonic must NOT appear in serialized form.
@@ -237,12 +243,19 @@ fn golden_vector_all_zero_entropy() {
     // Pinned values. If these change, the derivation pipeline is broken and
     // existing seed-phrase-derived identities become unrecoverable.
     assert_eq!(
-        identity.public_key,
+        identity.x25519_public_key,
         "7wIIxdbJBxTSFVOVTEdCV2//rOj/uvoiahBAvx8Ka1s="
     );
     assert_eq!(
         identity.verify_key.as_deref(),
         Some("JsOAnxAptr3it1PIm0D5DNZdSdAsOfFmCHa2MXQg/AA=")
+    );
+    // ML-KEM-768 public key fingerprint: first 32 bytes (44 base64 chars).
+    // Anchors the hybrid-KEM derivation to a stable byte-level output;
+    // 32 bytes is enough that any drift is caught with overwhelming probability.
+    assert_eq!(
+        &identity.ml_kem_public_key[..44],
+        "zugaa5eck9IqFwgK4skuNnM0d4tpsfLNJ5c1XASw2VZh"
     );
 }
 
