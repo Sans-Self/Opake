@@ -15,18 +15,28 @@ const uint8Array = z.instanceof(Uint8Array);
 // Identity & resolution
 // ---------------------------------------------------------------------------
 
+// `resolveIdentity` emits camelCase via `#[serde(rename_all = "camelCase")]`
+// on the Rust DTO, so this schema reads camelCase fields directly. Both halves
+// of the recipient's hybrid public-key bundle are exposed so callers can wrap
+// to them via `share` / `addWorkspaceMember` / `approvePairRequest`.
 export const resolvedIdentitySchema = z
   .object({
     did: z.string(),
     handle: z.string().nullable(),
-    pds_url: z.string(),
-    public_key: uint8Array,
+    pdsUrl: z.string(),
+    x25519PublicKey: uint8Array,
+    x25519Algo: z.string(),
+    mlKemPublicKey: uint8Array,
+    mlKemAlgo: z.string(),
   })
   .transform((r) => ({
     did: r.did,
     handle: r.handle,
-    pdsUrl: r.pds_url,
-    publicKey: r.public_key,
+    pdsUrl: r.pdsUrl,
+    x25519PublicKey: r.x25519PublicKey,
+    x25519Algo: r.x25519Algo,
+    mlKemPublicKey: r.mlKemPublicKey,
+    mlKemAlgo: r.mlKemAlgo,
   }));
 
 export type ResolvedIdentity = z.output<typeof resolvedIdentitySchema>;
@@ -316,16 +326,22 @@ export const pendingShareEntriesSchema = z.array(pendingShareEntrySchema);
 // Pairing
 // ---------------------------------------------------------------------------
 
+// Snake_case on the wire matches the rest of the standalone-fn surface in
+// `pair_wasm.rs`. Both halves of the new device's ephemeral bundle come
+// back so callers can render symmetric fingerprints if they want; the
+// matching private keys stay inside WASM-side Storage.
 export const pairRequestResultSchema = z
   .object({
     uri: z.string(),
     rkey: z.string(),
-    ephemeral_public_key: uint8Array,
+    x25519_ephemeral_public_key: uint8Array,
+    ml_kem_ephemeral_public_key: uint8Array,
   })
   .transform((r) => ({
     uri: r.uri,
     rkey: r.rkey,
-    ephemeralPublicKey: r.ephemeral_public_key,
+    x25519EphemeralPublicKey: r.x25519_ephemeral_public_key,
+    mlKemEphemeralPublicKey: r.ml_kem_ephemeral_public_key,
   }));
 
 export type PairRequestResult = z.output<typeof pairRequestResultSchema>;

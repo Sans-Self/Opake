@@ -50,20 +50,21 @@ connection to the typo two pages back.
 
 <CodeBlock language="typescript" title="recover.ts" code={recoverFromPhrase} />
 
-One gotcha: the SDK doesn't check that the derived public key matches whatever is already
-published on the PDS's `publicKey/self` record. If the user types the wrong phrase but it's
-still a valid 24-word BIP-39 sequence, validation passes, the derived key is saved, and every
-encryption that touches existing documents fails silently later. If you want a matches-the-PDS
-check, fetch `publicKey/self` after init and compare the base64-encoded bytes against
-`identity.public_key` before you consider the recovery complete. Surfacing this as an in-SDK
-helper is on the list.
+One gotcha: the SDK doesn't check that the derived hybrid public-key bundle matches whatever
+is already published on the PDS's `publicKey/self` record. If the user types the wrong phrase
+but it's still a valid 24-word BIP-39 sequence, validation passes, the derived keys are saved,
+and every encryption that touches existing documents fails silently later. If you want a
+matches-the-PDS check, fetch `publicKey/self` after init and compare both halves of the
+published bundle against `identity.x25519_public_key` and `identity.ml_kem_public_key` before
+you consider the recovery complete. Surfacing this as an in-SDK helper is on the list.
 
 ## Pairing: the new device side
 
 The user has Opake running on another device and would rather not type 24 words. They open the
-pair flow on this new device. The SDK generates an ephemeral X25519 keypair, writes an
-`app.opake.pairRequest` record to the PDS containing the public half, and stashes the private
-half in Storage for `awaitPairCompletion` to read back later. JS never sees the private half.
+pair flow on this new device. The SDK generates an ephemeral hybrid (X25519 + ML-KEM-768)
+keypair, writes an `app.opake.pairRequest` record to the PDS containing both public halves,
+and stashes the private bundle in Storage for `awaitPairCompletion` to read back later. JS
+never sees the private halves.
 
 <CodeBlock
   language="typescript"
@@ -121,19 +122,20 @@ for you.
 
 A quick map of who holds what during pairing:
 
-- **Ephemeral X25519 private key (new device):** generated inside WASM, written straight to
-  Storage via the storage adapter, read back by WASM during `awaitPairCompletion`, wiped on
-  success or cancellation. Your JS sees the public half only, and only for fingerprint display.
+- **Ephemeral hybrid private bundle (new device):** generated inside WASM (X25519 + ML-KEM-768),
+  written straight to Storage via the storage adapter, read back by WASM during
+  `awaitPairCompletion`, wiped on success or cancellation. Your JS sees the public halves only,
+  and only for fingerprint display.
 - **The received `Identity` bundle (new device):** unwrapped inside WASM from the pair response
   body, written to Storage through the adapter, never returned to JS as an object with token
   fields populated.
 - **The existing device's identity during approval:** read from Storage into WASM, wrapped
-  under the requester's ephemeral public key inside WASM. JS signs nothing and holds no key
+  under the requester's ephemeral hybrid bundle inside WASM. JS signs nothing and holds no key
   material during this call.
 
 The only identity-shaped values your application code ever touches directly are the public
-`did`, `public_key`, and `verify_key` fields on the `Identity` type during the narrow window
-after generation, plus the `ephemeralPublicKey` return from `createPairRequest` for fingerprint
-rendering.
+`did`, `x25519_public_key`, `ml_kem_public_key`, and `verify_key` fields on the `Identity` type
+during the narrow window after generation, plus the `x25519EphemeralPublicKey` /
+`mlKemEphemeralPublicKey` returns from `createPairRequest` for fingerprint rendering.
 
 <DocsNext slug="identity" />

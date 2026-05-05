@@ -4,9 +4,11 @@ import { ArrowClockwiseIcon, DownloadSimpleIcon, ShareNetworkIcon } from "@phosp
 import type { InboxGrant, ResolvedGrantMetadata } from "@opake/sdk";
 import { useInbox } from "@opake/react";
 import { PanelShell } from "@/components/cabinet/PanelShell";
+import { OutgoingSharesSection } from "@/components/cabinet/OutgoingSharesSection";
 import { getOpake } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { triggerBrowserDownload } from "@/lib/download";
+import { formatShortDate } from "@/lib/format";
 
 const METADATA_BATCH_SIZE = 5;
 
@@ -167,46 +169,51 @@ function SharedWithMePage() {
     <div className="breadcrumbs text-ui min-w-0 flex-1 overflow-hidden">
       <ul>
         <li>
-          <span className="text-base-content font-medium">Shared with me</span>
+          <span className="text-base-content font-medium">Sharing</span>
         </li>
       </ul>
     </div>
   );
 
   return (
-    <PanelShell depth={1} breadcrumbs={breadcrumbs} footer="Incoming shares">
-      {isLoading ? (
-        <div className="hero py-16">
-          <div className="hero-content flex-col text-center">
+    <PanelShell depth={1} breadcrumbs={breadcrumbs} footer="Incoming and outgoing shares">
+      <OutgoingSharesSection />
+
+      <section className="flex flex-col">
+        <div className="border-base-300/40 flex items-center justify-between border-b px-3 py-2">
+          <h2 className="text-text-muted text-[11px] font-semibold tracking-wide uppercase">
+            Shared with you
+          </h2>
+          {!isLoading && entries.length > 0 ? (
+            <span className="text-text-faint text-[11px]">{entries.length}</span>
+          ) : null}
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center py-8">
             <span className="loading loading-spinner loading-sm" />
-            <div className="text-ui text-text-muted">Loading inbox…</div>
           </div>
-        </div>
-      ) : entries.length === 0 ? (
-        <div className="hero py-16">
-          <div className="hero-content flex-col text-center">
-            <div className="bg-accent flex size-13 items-center justify-center rounded-[14px]">
-              <ShareNetworkIcon size={22} className="text-text-faint" />
+        ) : entries.length === 0 ? (
+          <div className="flex flex-col items-center gap-1 py-6 text-center">
+            <div className="bg-accent flex size-9 items-center justify-center rounded-lg">
+              <ShareNetworkIcon size={16} className="text-text-faint" />
             </div>
-            <div className="text-ui text-text-muted">Nothing shared with you yet</div>
-            <div className="text-text-faint max-w-60 text-xs leading-relaxed">
-              Files others share with your handle show up here.
-            </div>
+            <div className="text-text-muted text-xs">Nothing shared with you yet</div>
           </div>
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-px p-3">
-          {entries.map((entry) => (
-            <SharedRow
-              key={entry.grant.uri}
-              entry={entry}
-              isDownloading={downloading === entry.grant.uri}
-              onDownload={() => void handleDownload(entry.grant.uri)}
-              onRetry={() => retryResolution(entry.grant.uri)}
-            />
-          ))}
-        </ul>
-      )}
+        ) : (
+          <ul className="flex flex-col gap-px p-3">
+            {entries.map((entry) => (
+              <SharedRow
+                key={entry.grant.uri}
+                entry={entry}
+                isDownloading={downloading === entry.grant.uri}
+                onDownload={() => void handleDownload(entry.grant.uri)}
+                onRetry={() => retryResolution(entry.grant.uri)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
     </PanelShell>
   );
 }
@@ -234,16 +241,20 @@ function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps
             {status === "resolving" ? (
               <span className="text-text-faint italic">Resolving…</span>
             ) : status === "error" ? (
-              <span className="text-error" title={error}>
-                Could not decrypt metadata
-              </span>
+              <span className="text-error">Could not decrypt metadata</span>
             ) : (
               displayName
             )}
           </div>
-          <div className="text-text-faint truncate text-[11px]">
-            from {ownerLabel} · {formatDate(grant.createdAt)}
-          </div>
+          {status === "error" && error ? (
+            <div className="text-error/70 truncate text-[11px]" title={error}>
+              {error}
+            </div>
+          ) : (
+            <div className="text-text-faint truncate text-[11px]">
+              from {ownerLabel} · {formatShortDate(grant.createdAt)}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -273,13 +284,6 @@ function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps
       </div>
     </li>
   );
-}
-
-function formatDate(iso: string): string {
-  if (!iso) return "unknown date";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "unknown date";
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 export const Route = createLazyFileRoute("/cabinet/shared")({

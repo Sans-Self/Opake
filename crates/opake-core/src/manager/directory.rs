@@ -24,7 +24,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     directories::ROOT_DIRECTORY_NAME,
                     &cabinet.did,
-                    &cabinet.public_key,
+                    &cabinet.public_keys(),
                     &mut self.opake.rng,
                 )?;
                 directories::get_or_create_root(
@@ -80,7 +80,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     name,
                     &cabinet.did,
-                    &cabinet.public_key,
+                    &cabinet.public_keys(),
                     &mut self.opake.rng,
                 )?;
                 let uri =

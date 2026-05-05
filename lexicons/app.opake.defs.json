@@ -14,14 +14,14 @@
         },
         "ciphertext": {
           "type": "bytes",
-          "description": "The symmetric key, encrypted to the DID's public key. Base64-encoded in JSON.",
-          "maxLength": 512
+          "description": "The symmetric key, encrypted to the DID's public key. Base64-encoded in JSON. The hybrid wrap envelope is 32 + 1088 + 40 = 1160 bytes.",
+          "maxLength": 2048
         },
         "algo": {
           "type": "string",
-          "description": "Asymmetric algorithm used for key wrapping.",
+          "description": "Asymmetric algorithm used for key wrapping. Hybrid X25519 + ML-KEM-768 KEM (BSI TR-02102 / ANSSI guidance).",
           "knownValues": [
-            "x25519-hkdf-a256kw"
+            "x25519-mlkem768-hkdf-a256kw-v2"
           ]
         }
       }

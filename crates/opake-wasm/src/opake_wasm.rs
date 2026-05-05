@@ -201,7 +201,7 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let private_key = opake.identity().private_key_bytes().map_err(wasm_err)?;
+        let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
         let keyrings = opake
@@ -214,13 +214,12 @@ impl WasmOpakeHandle {
         // helper so this path and the SSE event path produce identical
         // WorkspaceEntry values — any shape divergence between them
         // would cause spurious watcher re-fires after SSE echoes.
+        let bundle = private_keys.bundle();
         let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = keyrings
             .iter()
             .filter_map(|kr| {
                 opake_core::indexer::workspace_keeper::try_build_entry_from_indexer_keyring(
-                    kr,
-                    &did,
-                    &private_key,
+                    kr, &did, &bundle,
                 )
             })
             .collect();
@@ -238,14 +237,15 @@ impl WasmOpakeHandle {
         to_js(&serde_json::json!({ "keyrings": entries }))
     }
 
-    /// Add a member to a workspace. Resolves the keyring + group key
-    /// internally so the key never crosses the WASM/JS boundary.
+    /// Add a member to a workspace. Resolves both the keyring's group key
+    /// and the new member's hybrid public-key bundle internally, so neither
+    /// the group key nor recipient pubkeys cross the WASM/JS boundary as
+    /// loose byte arrays.
     #[wasm_bindgen(js_name = addWorkspaceMember)]
     pub async fn add_workspace_member(
         &self,
         keyring_uri: &str,
         member_did: &str,
-        member_public_key: &[u8],
         role: &str,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
@@ -253,10 +253,9 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let pubkey = pub_key_from_slice(member_public_key)?;
         let role = parse_role(role)?;
         let outcome = opake
-            .add_workspace_member(keyring_uri, &ws.key, member_did, &pubkey, role)
+            .add_workspace_member(keyring_uri, &ws.key, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
@@ -458,18 +457,22 @@ impl WasmOpakeHandle {
     }
 
     /// Approve a pair request from an already-authenticated device. Wraps
-    /// this device's identity to the requester's ephemeral public key and
-    /// publishes the response record.
+    /// this device's identity to the requester's ephemeral hybrid public-key
+    /// bundle and publishes the response record.
     #[wasm_bindgen(js_name = approvePairRequest)]
     pub async fn approve_pair_request(
         &self,
         request_uri: &str,
-        ephemeral_public_key: &[u8],
+        ephemeral_x25519_public_key: &[u8],
+        ephemeral_ml_kem_public_key: &[u8],
     ) -> Result<(), JsError> {
-        let pubkey = pub_key_from_slice(ephemeral_public_key)?;
+        let x25519_pubkey = pub_key_from_slice(ephemeral_x25519_public_key)?;
+        let ml_kem_pubkey: opake_core::crypto::MlKemPublicKey = ephemeral_ml_kem_public_key
+            .try_into()
+            .map_err(|_| JsError::new("ML-KEM-768 ephemeral key must be 1184 bytes"))?;
         let mut opake = self.opake().await?;
         opake
-            .approve_pair_request(request_uri, &pubkey)
+            .approve_pair_request(request_uri, &x25519_pubkey, &ml_kem_pubkey)
             .await
             .map_err(wasm_err)
     }
@@ -699,21 +702,27 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct R {
             did: String,
             handle: Option<String>,
             pds_url: String,
             #[serde(with = "crate::wasm_util::serde_bytes")]
-            public_key: Vec<u8>,
-            algo: String,
+            x25519_public_key: Vec<u8>,
+            x25519_algo: String,
+            #[serde(with = "crate::wasm_util::serde_bytes")]
+            ml_kem_public_key: Vec<u8>,
+            ml_kem_algo: String,
         }
 
         to_js(&R {
             did: resolved.did,
             handle: resolved.handle,
             pds_url: resolved.pds_url,
-            public_key: resolved.public_key.to_vec(),
-            algo: resolved.algo,
+            x25519_public_key: resolved.x25519_public_key.to_vec(),
+            x25519_algo: resolved.x25519_algo,
+            ml_kem_public_key: resolved.ml_kem_public_key.to_vec(),
+            ml_kem_algo: resolved.ml_kem_algo,
         })
     }
 
@@ -721,18 +730,24 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = resolveGrantMetadata)]
     pub async fn resolve_grant_metadata(&self, grant_uri: &str) -> Result<JsValue, JsError> {
         let opake = self.opake().await?;
-        let (name, metadata) = opake
+        let (name, metadata, created_at, modified_at) = opake
             .resolve_grant_metadata(grant_uri)
             .await
             .map_err(wasm_err)?;
 
+        let resolved =
+            opake_core::manager::ResolvedDocumentMetadata::from_parts(metadata, created_at, modified_at);
+
         #[derive(serde::Serialize)]
         struct R {
             name: String,
-            metadata: opake_core::crypto::DocumentMetadata,
+            metadata: opake_core::manager::ResolvedDocumentMetadata,
         }
 
-        to_js(&R { name, metadata })
+        to_js(&R {
+            name,
+            metadata: resolved,
+        })
     }
 
     /// Proactively refresh the OAuth token if it's close to expiry.

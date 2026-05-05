@@ -45,7 +45,7 @@ pub use invitation::{Invitation, INVITATION_COLLECTION};
 pub use invitation_acceptance::{InvitationAcceptance, INVITATION_ACCEPTANCE_COLLECTION};
 pub use keyring::{KeyHistoryEntry, Keyring};
 pub use keyring_update::{KeyringUpdate, KeyringUpdateRecord, KEYRING_UPDATE_COLLECTION};
-pub use pair_request::{PairRequest, PAIR_REQUEST_COLLECTION};
+pub use pair_request::{PairRequest, PAIR_REQUEST_ALGO, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
@@ -121,32 +121,61 @@ mod tests {
         assert!(check_version(u32::MAX).is_err());
     }
 
+    /// 1184-byte ML-KEM-768 public key for record-construction tests. The
+    /// bytes are arbitrary — these tests don't exercise hybrid wrap, only
+    /// the wire-format / serde shape.
+    fn dummy_ml_kem_pubkey() -> [u8; 1184] {
+        [0x42u8; 1184]
+    }
+
     #[test]
     fn public_key_record_new_sets_defaults() {
-        let record = PublicKeyRecord::new(&[42u8; 32], "2026-03-01T00:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[42u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T00:00:00Z",
+        );
         assert_eq!(record.opake_version, SCHEMA_VERSION);
-        assert_eq!(record.algo, "x25519");
+        assert_eq!(record.x25519_algo, "x25519");
+        assert_eq!(record.ml_kem_algo, "ml-kem-768");
         assert_eq!(record.created_at, "2026-03-01T00:00:00Z");
     }
 
     #[test]
     fn public_key_record_roundtrips_through_json() {
-        let record = PublicKeyRecord::new(&[7u8; 32], "2026-03-01T12:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[7u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T12:00:00Z",
+        );
         let json = serde_json::to_string(&record).unwrap();
         let parsed: PublicKeyRecord = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.opake_version, record.opake_version);
-        assert_eq!(parsed.public_key.encoded, record.public_key.encoded);
-        assert_eq!(parsed.algo, "x25519");
+        assert_eq!(
+            parsed.x25519_public_key.encoded,
+            record.x25519_public_key.encoded
+        );
+        assert_eq!(parsed.x25519_algo, "x25519");
+        assert_eq!(
+            parsed.ml_kem_public_key.encoded,
+            record.ml_kem_public_key.encoded
+        );
+        assert_eq!(parsed.ml_kem_algo, "ml-kem-768");
         assert_eq!(parsed.created_at, "2026-03-01T12:00:00Z");
     }
 
     #[test]
     fn public_key_record_uses_atbytes_wire_format() {
-        let record = PublicKeyRecord::new(&[1u8; 32], "2026-03-01T00:00:00Z");
+        let record = PublicKeyRecord::new(
+            &[1u8; 32],
+            &dummy_ml_kem_pubkey(),
+            "2026-03-01T00:00:00Z",
+        );
         let json = serde_json::to_value(&record).unwrap();
         // atproto $bytes convention: { "$bytes": "<base64>" }
-        assert!(json["publicKey"]["$bytes"].is_string());
+        assert!(json["x25519PublicKey"]["$bytes"].is_string());
+        assert!(json["mlKemPublicKey"]["$bytes"].is_string());
     }
 
     fn dummy_encrypted_directory(created_at: &str) -> Directory {
@@ -156,7 +185,7 @@ mod tests {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
-                algo: "x25519-hkdf-a256kw".into(),
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             }],
         });
         let encrypted_metadata = EncryptedMetadata {
@@ -224,7 +253,7 @@ mod tests {
                 "wrappedKey": {
                     "did": "did:plc:test",
                     "ciphertext": { "$bytes": "AAAA" },
-                    "algo": "x25519-hkdf-a256kw",
+                    "algo": "x25519-mlkem768-hkdf-a256kw-v2",
                 },
                 "role": "manager",
             }],
@@ -250,7 +279,7 @@ mod tests {
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
-                    algo: "x25519-hkdf-a256kw".into(),
+                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
                 role: Role::Manager,
             }],

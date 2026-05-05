@@ -77,7 +77,11 @@ function PairAcceptPage() {
       addLoading("pair-accept");
 
       try {
-        await approvePairRequest(request.uri, request.ephemeralKey);
+        await approvePairRequest(
+          request.uri,
+          request.x25519EphemeralKey,
+          request.mlKemEphemeralKey,
+        );
 
         setState({ step: "success" });
         setTimeout(() => navigate({ to: "/cabinet" }), 1500);

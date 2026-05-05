@@ -338,17 +338,25 @@ impl WasmFileManagerHandle {
         &self,
         document_uri: &str,
         recipient_did: &str,
-        recipient_public_key: &[u8],
+        recipient_x25519_public_key: &[u8],
+        recipient_ml_kem_public_key: &[u8],
         permissions: &str,
         note: Option<String>,
     ) -> Result<String, JsError> {
-        let pubkey = pub_key_from_slice(recipient_public_key)?;
+        let x25519_pub = pub_key_from_slice(recipient_x25519_public_key)?;
+        let ml_kem_pub: opake_core::crypto::MlKemPublicKey = recipient_ml_kem_public_key
+            .try_into()
+            .map_err(|_| JsError::new("recipient ML-KEM-768 public key must be 1184 bytes"))?;
+        let bundle = opake_core::crypto::PublicKeyBundle {
+            x25519: &x25519_pub,
+            ml_kem: &ml_kem_pub,
+        };
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
         mgr.share(
             document_uri,
             recipient_did,
-            &pubkey,
+            bundle,
             permissions,
             note.as_deref(),
         )
@@ -429,17 +437,17 @@ impl WasmFileManagerHandle {
     pub async fn get_document_metadata(&self, document_uri: &str) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let did = opake.did().to_owned();
-        let private_key = opake.identity().private_key_bytes().map_err(wasm_err)?;
-        let group_key = match ctx {
-            FileContext::Workspace(ref ws) => Some(ws.key.clone()),
+        let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
+        let group_keys = match &ctx {
+            FileContext::Workspace(ws) => Some(ws.group_keys()),
             FileContext::Cabinet(_) => None,
         };
         let result = opake_core::metadata::fetch_document_metadata(
             opake.client_mut(),
             document_uri,
             &did,
-            &private_key,
-            group_key.as_ref(),
+            &private_keys.bundle(),
+            group_keys,
         )
         .await
         .map_err(wasm_err)?;

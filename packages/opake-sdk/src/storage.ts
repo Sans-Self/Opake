@@ -26,11 +26,17 @@ export interface AccountEntry {
  * WARNING: This type transits through JS for IndexedDB persistence.
  * Do not log, display, or transmit these values. WASM handles all
  * crypto operations — JS only stores and loads identities.
+ *
+ * The hybrid X25519 + ML-KEM-768 KEM means each Identity holds two
+ * keypairs (classical + post-quantum). Mirrors the Rust `Identity`
+ * struct in `opake-core/src/storage.rs`.
  */
 export interface Identity {
   readonly did: string;
-  readonly public_key: string;
-  readonly private_key: string;
+  readonly x25519_public_key: string;
+  readonly x25519_private_key: string;
+  readonly ml_kem_public_key: string;
+  readonly ml_kem_private_key: string;
   readonly signing_key?: string;
   readonly verify_key?: string;
 }

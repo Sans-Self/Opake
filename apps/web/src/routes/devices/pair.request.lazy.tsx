@@ -44,7 +44,7 @@ function PairRequestPage() {
         pairInitState.current ??= createPairRequest().then((r) => ({
           rkey: r.rkey,
           uri: r.uri,
-          fingerprint: formatFingerprint(r.ephemeralPublicKey),
+          fingerprint: formatFingerprint(r.x25519EphemeralPublicKey),
         }));
         info = await pairInitState.current;
 

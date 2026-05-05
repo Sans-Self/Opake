@@ -47,7 +47,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .ok_or_else(|| {
                         Error::InvalidRecord(format!("no wrapped key for DID ({})", cabinet.did))
                     })?;
-                crypto::unwrap_key(wrapped, &cabinet.private_key)?
+                crypto::unwrap_key(wrapped, &cabinet.private_keys(), &crypto::WrapContext::Cabinet)?
             }
             KeyWrapping::Keyring(kr) => {
                 let FileContext::Workspace(ref ws) = self.context else {
@@ -55,12 +55,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         "keyring-encrypted directory in cabinet context".into(),
                     ));
                 };
+                let dir_rotation = kr.keyring_ref.rotation;
+                let group_key = ws.key_for_rotation(dir_rotation).ok_or_else(|| {
+                    Error::InvalidRecord(format!(
+                        "no group key available for rotation {dir_rotation}"
+                    ))
+                })?;
                 let wrapped_bytes = kr
                     .keyring_ref
                     .wrapped_content_key
                     .decode()
                     .map_err(|e| Error::InvalidRecord(format!("invalid wrapped key: {e}")))?;
-                crypto::unwrap_content_key_from_keyring(&wrapped_bytes, &ws.key)?
+                crypto::unwrap_content_key_from_keyring(&wrapped_bytes, group_key)?
             }
         };
 

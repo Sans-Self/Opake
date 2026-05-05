@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, RngCore, X25519PublicKey};
+use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, PublicKeyBundle, RngCore};
 use crate::error::Error;
 use crate::records::{
     AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope, KeyringEncryption,
@@ -38,7 +38,7 @@ pub struct UploadParams<'a> {
     pub filename: &'a str,
     pub mime_type: &'a str,
     pub owner_did: &'a str,
-    pub owner_pubkey: &'a X25519PublicKey,
+    pub owner_public_keys: PublicKeyBundle<'a>,
     pub description: Option<&'a str>,
     pub tags: &'a [String],
     pub created_at: &'a str,
@@ -70,7 +70,19 @@ pub async fn prepare_upload(
         .upload_blob(payload.ciphertext, "application/octet-stream")
         .await?;
 
-    let wrapped_key = crypto::wrap_key(&content_key, params.owner_pubkey, params.owner_did, rng)?;
+    // Bind the wrap to the document's URI so the owner's own envelope and
+    // any grants wrapped to the same content key share one consistent
+    // context tag (`Document { uri }`). The download / metadata-read
+    // paths unwrap with the same context.
+    let document_uri =
+        crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
+    let wrapped_key = crypto::wrap_key(
+        &content_key,
+        &params.owner_public_keys,
+        params.owner_did,
+        &crypto::WrapContext::Document { uri: &document_uri },
+        rng,
+    )?;
     let encrypted_metadata = build_encrypted_metadata(
         &content_key,
         params.filename,
@@ -193,17 +205,11 @@ async fn encrypt_and_upload(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, RequestBody};
-    use crate::crypto::{OsRng, X25519PrivateKey, X25519PublicKey};
+    use crate::crypto::OsRng;
     use crate::records::Document;
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{MockTransport, TestKeys};
 
     use super::super::tests::{mock_client, TEST_DID};
-
-    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-        let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-        let public = crypto::X25519DalekPublicKey::from(&secret);
-        (public.to_bytes(), secret.to_bytes())
-    }
 
     /// Fake uploadBlob response — the PDS returns a blob ref.
     fn upload_blob_response() -> HttpResponse {
@@ -238,14 +244,14 @@ mod tests {
     fn test_params<'a>(
         plaintext: &'a [u8],
         filename: &'a str,
-        public_key: &'a X25519PublicKey,
+        keys: &'a TestKeys,
     ) -> UploadParams<'a> {
         UploadParams {
             plaintext,
             filename,
             mime_type: "text/plain",
             owner_did: TEST_DID,
-            owner_pubkey: public_key,
+            owner_public_keys: keys.public_keys(),
             description: None,
             tags: &[],
             created_at: "2026-03-01T00:00:00Z",
@@ -254,13 +260,13 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path() {
-        let (public_key, _) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock.clone());
-        let params = test_params(b"hello world", "hello.txt", &public_key);
+        let params = test_params(b"hello world", "hello.txt", &keys);
         let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
@@ -300,7 +306,10 @@ mod tests {
                 assert_eq!(enc["envelope"]["algo"], "aes-256-gcm");
                 assert_eq!(enc["envelope"]["keys"].as_array().unwrap().len(), 1);
                 assert_eq!(enc["envelope"]["keys"][0]["did"], TEST_DID);
-                assert_eq!(enc["envelope"]["keys"][0]["algo"], "x25519-hkdf-a256kw");
+                assert_eq!(
+                    enc["envelope"]["keys"][0]["algo"],
+                    "x25519-mlkem768-hkdf-a256kw-v2"
+                );
             }
             _ => panic!("expected JSON body on createRecord request"),
         }
@@ -308,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_metadata_decrypts_to_original() {
-        let (public_key, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
@@ -319,7 +328,7 @@ mod tests {
             filename: "report.pdf",
             mime_type: "application/pdf",
             owner_did: TEST_DID,
-            owner_pubkey: &public_key,
+            owner_public_keys: keys.public_keys(),
             description: Some("Quarterly report"),
             tags: &[],
             created_at: "2026-03-01T00:00:00Z",
@@ -340,7 +349,16 @@ mod tests {
             Encryption::Direct(d) => &d.envelope,
             _ => panic!("expected direct encryption"),
         };
-        let content_key = crypto::unwrap_key(&envelope.keys[0], &private_key).unwrap();
+        // Match the upload-side context: every document wraps to its own
+        // URI so the same context unlocks both the owner's envelope and
+        // any grants wrapped from it.
+        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let content_key = crypto::unwrap_key(
+            &envelope.keys[0],
+            &keys.private_keys(),
+            &crypto::WrapContext::Document { uri: &test_uri },
+        )
+        .unwrap();
 
         // Decrypt metadata
         let metadata: crypto::DocumentMetadata =
@@ -355,12 +373,12 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_oversized_blob() {
-        let (public_key, _) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
 
         let oversized = vec![0u8; MAX_BLOB_SIZE + 1];
-        let params = test_params(&oversized, "big.bin", &public_key);
+        let params = test_params(&oversized, "big.bin", &keys);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -370,13 +388,13 @@ mod tests {
 
     #[tokio::test]
     async fn empty_file_succeeds() {
-        let (public_key, _) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(upload_blob_response());
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock);
-        let params = test_params(b"", "empty.txt", &public_key);
+        let params = test_params(b"", "empty.txt", &keys);
         let uri = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
@@ -386,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_blob_failure_propagates() {
-        let (public_key, _) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
             status: 500,
@@ -395,7 +413,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let params = test_params(b"data", "file.bin", &public_key);
+        let params = test_params(b"data", "file.bin", &keys);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -405,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_record_failure_propagates() {
-        let (public_key, _) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         mock.enqueue(upload_blob_response());
         mock.enqueue(HttpResponse {
@@ -415,7 +433,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let params = test_params(b"data", "file.bin", &public_key);
+        let params = test_params(b"data", "file.bin", &keys);
         let err = encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap_err();
@@ -425,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn roundtrip_with_download() {
-        let (public_key, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let plaintext = b"roundtrip test data";
 
         let mock = MockTransport::new();
@@ -433,7 +451,7 @@ mod tests {
         mock.enqueue(create_record_response());
 
         let mut client = mock_client(mock.clone());
-        let params = test_params(plaintext, "roundtrip.txt", &public_key);
+        let params = test_params(plaintext, "roundtrip.txt", &keys);
         encrypt_and_upload(&mut client, &params, &mut OsRng)
             .await
             .unwrap();
@@ -459,7 +477,13 @@ mod tests {
         };
 
         let wrapped = &envelope.keys[0];
-        let content_key = crypto::unwrap_key(wrapped, &private_key).unwrap();
+        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let content_key = crypto::unwrap_key(
+            wrapped,
+            &keys.private_keys(),
+            &crypto::WrapContext::Document { uri: &test_uri },
+        )
+        .unwrap();
 
         let nonce_bytes = BASE64.decode(&envelope.nonce.encoded).unwrap();
         let nonce: [u8; 12] = nonce_bytes.try_into().unwrap();

@@ -94,17 +94,19 @@ export function truncateDid(did: string): string {
   return `${prefix}${id.slice(0, 4)}…${id.slice(-3)}`;
 }
 
-/** Format an ISO date as a short locale string (e.g. "Mar 8, 2026"). */
-export function formatShortDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
+/**
+ * Format an ISO date as a short locale string (e.g. "Mar 8, 2026").
+ *
+ * `fallback` is returned for empty strings and unparseable inputs.
+ * `toLocaleDateString` does not throw on invalid dates — it returns
+ * "Invalid Date" — so the empty-string + `Number.isNaN` guards here
+ * are doing the real work, not a try/catch.
+ */
+export function formatShortDate(iso: string, fallback = "unknown date"): string {
+  if (!iso) return fallback;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fallback;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 const DOCUMENT_COLLECTION = "app.opake.document";

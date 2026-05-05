@@ -6,12 +6,13 @@
 // record is deleted.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::{list_collection, time, Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, RngCore, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PrivateKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
 use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
@@ -116,7 +117,7 @@ pub async fn cancel_pending_share(
 pub struct RetryParams<'a> {
     pub caller_pds_url: &'a str,
     pub owner_did: &'a str,
-    pub owner_private_key: &'a X25519PrivateKey,
+    pub owner_private_keys: PrivateKeyBundle<'a>,
     pub now: i64,
     pub ttl_seconds: i64,
 }
@@ -144,7 +145,9 @@ pub async fn retry_pending_shares(
     // fetches when sharing multiple documents with the same person.
     // None = NotFound (still pending), Some(Err) would be transient but we
     // use a three-state: present, NotFound, or absent (transient/unchecked).
-    let mut identity_cache: HashMap<String, Option<ResolvedIdentity>> = HashMap::new();
+    // Rc keeps the 1184-byte ML-KEM public key alive without cloning it per
+    // document when one recipient has multiple pending shares.
+    let mut identity_cache: HashMap<String, Option<Rc<ResolvedIdentity>>> = HashMap::new();
 
     // Cache content keys per document URI to avoid redundant PDS fetches +
     // crypto unwrap when multiple pending shares reference the same document.
@@ -186,7 +189,7 @@ pub async fn retry_pending_shares(
 
         // Try to resolve recipient (cached per pass)
         let recipient = match identity_cache.get(&entry.recipient) {
-            Some(Some(id)) => id.clone(),
+            Some(Some(id)) => Rc::clone(id),
             Some(None) => {
                 // Previously confirmed NotFound in this pass
                 result.still_pending += 1;
@@ -197,8 +200,9 @@ pub async fn retry_pending_shares(
                     .await
                 {
                     Ok(id) => {
-                        identity_cache.insert(entry.recipient.clone(), Some(id.clone()));
-                        id
+                        let rc = Rc::new(id);
+                        identity_cache.insert(entry.recipient.clone(), Some(Rc::clone(&rc)));
+                        rc
                     }
                     // Recipient exists but hasn't published their Opake key yet.
                     // This is exactly the condition that triggered the pending share —
@@ -242,7 +246,7 @@ pub async fn retry_pending_shares(
                 match documents::fetch_content_key(
                     client,
                     params.owner_did,
-                    params.owner_private_key,
+                    &params.owner_private_keys,
                     &entry.document,
                 )
                 .await
@@ -301,7 +305,10 @@ pub async fn retry_pending_shares(
             document_uri: &entry.document,
             recipient_did: &recipient.did,
             content_key: &content_key,
-            recipient_public_key: &recipient.public_key,
+            recipient_public_keys: crate::crypto::PublicKeyBundle {
+                x25519: &recipient.x25519_public_key,
+                ml_kem: &recipient.ml_kem_public_key,
+            },
             permissions: metadata.permissions.as_deref().unwrap_or("read"),
             note: metadata.note.as_deref(),
             created_at: &entry.created_at,

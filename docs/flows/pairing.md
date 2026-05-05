@@ -141,5 +141,5 @@ This prevents accidental key overwrites that would break encryption on the exist
 
 - **Ephemeral key exchange** — the DH keypair exists only in memory during the pairing session. No long-term secret is exposed in the PDS records.
 - **Visual SAS** — key fingerprints are displayed for comparison but not programmatically enforced. True zero-trust verification is a follow-up.
-- **Same encryption as documents** — the identity payload uses AES-256-GCM + x25519-hkdf-a256kw, the same primitives as file encryption. No new crypto.
+- **Same encryption as documents** — the identity payload uses AES-256-GCM + x25519-mlkem768-hkdf-a256kw-v2, the same primitives as file encryption. No new crypto.
 - **Record cleanup** — both pairing records are deleted after transfer. Stale request cleanup is tracked separately.

@@ -2,7 +2,7 @@ use log::trace;
 
 use crate::atproto::{self, AtBytes};
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, X25519PrivateKey};
+use crate::crypto::{self, ContentKey, PrivateKeyBundle};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption, EncryptionEnvelope};
 
@@ -47,14 +47,17 @@ pub(super) fn decrypt_with_envelope(
 
 /// Unwrap a content key from a document's encryption metadata.
 ///
-/// For direct encryption: unwrap using the caller's X25519 private key.
-/// For keyring encryption: unwrap using the group key (caller must provide it
-/// via `group_key`). Pass `None` for direct-only documents.
+/// For direct encryption: unwrap using the caller's hybrid private-key bundle.
+/// For keyring encryption: pick the right rotation's group key from `keys`
+/// based on the document's `keyringRef.rotation`, then unwrap. A document
+/// uploaded before the keyring rotated still references its original
+/// rotation; supplying only the current group key would AES-KW-fail.
 fn unwrap_document_key(
     doc: &Document,
     did: &str,
-    private_key: &X25519PrivateKey,
-    group_key: Option<&ContentKey>,
+    document_uri: &str,
+    private_keys: &PrivateKeyBundle<'_>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
 ) -> Result<ContentKey, Error> {
     match &doc.encryption {
         Encryption::Direct(direct) => {
@@ -68,13 +71,23 @@ fn unwrap_document_key(
                         "no wrapped key for DID ({did}) — you may not have access"
                     ))
                 })?;
-            crypto::unwrap_key(wrapped, private_key)
+            crypto::unwrap_key(
+                wrapped,
+                private_keys,
+                &crypto::WrapContext::Document { uri: document_uri },
+            )
         }
         Encryption::Keyring(kr_enc) => {
-            let gk = group_key.ok_or_else(|| {
+            let keys = keys.ok_or_else(|| {
                 Error::InvalidRecord(
                     "document uses keyring encryption but no group key provided".into(),
                 )
+            })?;
+            let doc_rotation = kr_enc.keyring_ref.rotation;
+            let gk = keys.for_rotation(doc_rotation).ok_or_else(|| {
+                Error::InvalidRecord(format!(
+                    "no group key available for rotation {doc_rotation}"
+                ))
             })?;
             let wrapped_bytes = kr_enc
                 .keyring_ref
@@ -101,36 +114,36 @@ fn encryption_nonce(doc: &Document) -> Result<&AtBytes, Error> {
 pub async fn fetch_content_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     uri: &str,
 ) -> Result<ContentKey, Error> {
-    fetch_content_key_with_group_key(client, did, private_key, None, uri).await
+    fetch_content_key_with_group_key(client, did, private_keys, None, uri).await
 }
 
-/// Fetch a document's content key, with optional group key for keyring-encrypted docs.
+/// Fetch a document's content key, with optional group keys for keyring-encrypted docs.
 pub async fn fetch_content_key_with_group_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &X25519PrivateKey,
-    group_key: Option<&ContentKey>,
+    private_keys: &PrivateKeyBundle<'_>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<ContentKey, Error> {
-    let (content_key, _doc) =
-        fetch_document_and_key(client, did, private_key, group_key, uri).await?;
+    let (content_key, _doc) = fetch_document_and_key(client, did, private_keys, keys, uri).await?;
     Ok(content_key)
 }
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
 ///
-/// When `group_key` is `None` and the document uses keyring encryption,
-/// auto-resolves the group key by fetching the keyring and unwrapping the
-/// caller's member entry. This lets the cabinet download path handle
-/// workspace documents transparently.
+/// When `keys` is `None` and the document uses keyring encryption, auto-
+/// resolves group keys by fetching the keyring and unwrapping the caller's
+/// member entry — including any historical entries — so the cabinet download
+/// path can read workspace documents at any rotation. The doc's
+/// `keyringRef.rotation` selects the right key.
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &X25519PrivateKey,
-    group_key: Option<&ContentKey>,
+    private_keys: &PrivateKeyBundle<'_>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<(ContentKey, Document), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
@@ -144,31 +157,58 @@ async fn fetch_document_and_key(
     records::check_version(doc.opake_version)?;
 
     trace!("unwrapping content key");
-    let resolved_group_key = match (&doc.encryption, group_key) {
-        (Encryption::Keyring(kr_enc), None) => {
-            trace!(
-                "auto-resolving group key from keyring {}",
-                kr_enc.keyring_ref.keyring
-            );
-            let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-            let kr_entry = client
-                .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
-                .await?;
-            let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
-            let member = keyring
-                .members
-                .iter()
-                .find(|m| m.did() == did)
-                .ok_or_else(|| {
-                    Error::NotFound(format!("no member entry for DID {did} in keyring"))
-                })?;
-            Some(crypto::unwrap_key(&member.wrapped_key, private_key)?)
-        }
-        _ => None,
+
+    // Auto-resolve group keys from the keyring when the caller didn't
+    // provide them — typical for the cabinet path reaching into a
+    // workspace doc. Owned outside the match so the borrowed `GroupKeys`
+    // view below outlives the unwrap.
+    let auto: Option<(ContentKey, u64, Vec<crate::workspace::HistoricalKey>)> =
+        match (&doc.encryption, &keys) {
+            (Encryption::Keyring(kr_enc), None) => {
+                trace!(
+                    "auto-resolving group keys from keyring {}",
+                    kr_enc.keyring_ref.keyring
+                );
+                let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
+                let kr_entry = client
+                    .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
+                    .await?;
+                let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
+                let member = keyring
+                    .members
+                    .iter()
+                    .find(|m| m.did() == did)
+                    .ok_or_else(|| {
+                        Error::NotFound(format!("no member entry for DID {did} in keyring"))
+                    })?;
+                let current = crypto::unwrap_key(
+                    &member.wrapped_key,
+                    private_keys,
+                    &crypto::WrapContext::Keyring {
+                        uri: &kr_enc.keyring_ref.keyring,
+                    },
+                )?;
+                let historical = crate::workspace::derive_historical_keys(
+                    &keyring,
+                    did,
+                    &kr_enc.keyring_ref.keyring,
+                    private_keys,
+                );
+                Some((current, keyring.rotation, historical))
+            }
+            _ => None,
+        };
+
+    let effective_keys = match &auto {
+        Some((current, rotation, historical)) => Some(crate::workspace::GroupKeys {
+            current_rotation: *rotation,
+            current,
+            historical,
+        }),
+        None => keys,
     };
 
-    let effective_group_key = resolved_group_key.as_ref().or(group_key);
-    let content_key = unwrap_document_key(&doc, did, private_key, effective_group_key)?;
+    let content_key = unwrap_document_key(&doc, did, uri, private_keys, effective_keys)?;
 
     Ok((content_key, doc))
 }
@@ -181,23 +221,22 @@ async fn fetch_document_and_key(
 pub async fn download(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &X25519PrivateKey,
+    private_keys: &PrivateKeyBundle<'_>,
     uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
-    download_with_group_key(client, did, private_key, None, uri).await
+    download_with_group_key(client, did, private_keys, None, uri).await
 }
 
-/// Download with an optional group key for keyring-encrypted documents.
+/// Download with optional group keys for keyring-encrypted documents.
 pub async fn download_with_group_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
-    private_key: &X25519PrivateKey,
-    group_key: Option<&ContentKey>,
+    private_keys: &PrivateKeyBundle<'_>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
-    let (content_key, doc) =
-        fetch_document_and_key(client, did, private_key, group_key, uri).await?;
+    let (content_key, doc) = fetch_document_and_key(client, did, private_keys, keys, uri).await?;
     let nonce = encryption_nonce(&doc)?;
 
     trace!(
@@ -218,18 +257,12 @@ pub async fn download_with_group_key(
 mod tests {
     use super::*;
     use crate::client::HttpResponse;
-    use crate::crypto::{OsRng, X25519PrivateKey, X25519PublicKey};
+    use crate::crypto::OsRng;
     use crate::records::{self, AtBytes, BlobRef, CidLink, DirectEncryption, EncryptionEnvelope};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{MockTransport, TestKeys};
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
     use super::super::tests::{mock_client, TEST_DID, TEST_URI};
-
-    fn test_keypair() -> (X25519PublicKey, X25519PrivateKey) {
-        let secret = crypto::X25519DalekStaticSecret::random_from_rng(OsRng);
-        let public = crypto::X25519DalekPublicKey::from(&secret);
-        (public.to_bytes(), secret.to_bytes())
-    }
 
     struct EncryptedFixture {
         ciphertext: Vec<u8>,
@@ -238,11 +271,21 @@ mod tests {
         content_key: crypto::ContentKey,
     }
 
-    fn encrypt_for_download(plaintext: &[u8], public_key: &X25519PublicKey) -> EncryptedFixture {
+    fn encrypt_for_download(plaintext: &[u8], keys: &TestKeys) -> EncryptedFixture {
         let rng = &mut OsRng;
         let content_key = crypto::generate_content_key(rng);
         let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
-        let wrapped_key = crypto::wrap_key(&content_key, public_key, TEST_DID, rng).unwrap();
+        // Test fixture wraps in the Document context bound to the test
+        // document's URI — same context the production download path
+        // expects when it unwraps.
+        let wrapped_key = crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            TEST_DID,
+            &crypto::WrapContext::Document { uri: TEST_URI },
+            rng,
+        )
+        .unwrap();
         EncryptedFixture {
             ciphertext: payload.ciphertext,
             nonce: payload.nonce,
@@ -312,9 +355,9 @@ mod tests {
 
     #[tokio::test]
     async fn roundtrip() {
-        let (public_key, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let plaintext = b"the quick brown fox jumps over the lazy dog";
-        let fixture = encrypt_for_download(plaintext, &public_key);
+        let fixture = encrypt_for_download(plaintext, &keys);
         let doc = document_from_fixture(&fixture);
 
         let mock = MockTransport::new();
@@ -322,7 +365,7 @@ mod tests {
         mock.enqueue(blob_response(&fixture.ciphertext));
 
         let mut client = mock_client(mock.clone());
-        let (name, decrypted) = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let (name, decrypted) = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap();
 
@@ -337,8 +380,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_file() {
-        let (public_key, private_key) = test_keypair();
-        let fixture = encrypt_for_download(b"", &public_key);
+        let keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"", &keys);
         let doc = document_from_fixture(&fixture);
 
         let mock = MockTransport::new();
@@ -346,7 +389,7 @@ mod tests {
         mock.enqueue(blob_response(&fixture.ciphertext));
 
         let mut client = mock_client(mock);
-        let (_, decrypted) = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let (_, decrypted) = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap();
         assert!(decrypted.is_empty());
@@ -354,15 +397,15 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_no_key_for_did() {
-        let (public_key, private_key) = test_keypair();
-        let fixture = encrypt_for_download(b"data", &public_key);
+        let keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"data", &keys);
         let doc = document_from_fixture(&fixture);
 
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download(&mut client, "did:plc:wrong", &private_key, TEST_URI)
+        let err = download(&mut client, "did:plc:wrong", &keys.private_keys(), TEST_URI)
             .await
             .unwrap_err();
         assert!(
@@ -416,12 +459,12 @@ mod tests {
             body: serde_json::to_vec(&doc_value).unwrap(),
         });
 
-        let (_, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mut client = mock_client(mock);
         // Auto-resolve attempts to fetch the keyring — fails because mock
         // has no more responses, but the error is from the keyring fetch,
         // not from a "keyring encryption not supported" rejection.
-        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap_err();
         assert!(
@@ -440,9 +483,9 @@ mod tests {
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         });
 
-        let (_, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mut client = mock_client(mock);
-        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
@@ -450,8 +493,8 @@ mod tests {
 
     #[tokio::test]
     async fn pds_500_on_blob() {
-        let (public_key, private_key) = test_keypair();
-        let fixture = encrypt_for_download(b"data", &public_key);
+        let keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"data", &keys);
         let doc = document_from_fixture(&fixture);
 
         let mock = MockTransport::new();
@@ -463,7 +506,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
@@ -471,8 +514,8 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_future_schema_version() {
-        let (public_key, private_key) = test_keypair();
-        let fixture = encrypt_for_download(b"data", &public_key);
+        let keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"data", &keys);
         let mut doc = document_from_fixture(&fixture);
         doc.opake_version = records::SCHEMA_VERSION + 1;
 
@@ -480,7 +523,7 @@ mod tests {
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download(&mut client, TEST_DID, &private_key, TEST_URI)
+        let err = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("schema version"), "got: {err}");
@@ -488,10 +531,10 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_invalid_uri() {
-        let (_, private_key) = test_keypair();
+        let keys = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let err = download(&mut client, TEST_DID, &private_key, "not-a-uri")
+        let err = download(&mut client, TEST_DID, &keys.private_keys(), "not-a-uri")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("AT-URI"), "got: {err}");
@@ -499,18 +542,23 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_private_key() {
-        let (public_key, _) = test_keypair();
-        let (_, wrong_private_key) = test_keypair();
-        let fixture = encrypt_for_download(b"secret data", &public_key);
+        let keys = TestKeys::generate(TEST_DID);
+        let wrong_keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"secret data", &keys);
         let doc = document_from_fixture(&fixture);
 
         let mock = MockTransport::new();
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download(&mut client, TEST_DID, &wrong_private_key, TEST_URI)
-            .await
-            .unwrap_err();
+        let err = download(
+            &mut client,
+            TEST_DID,
+            &wrong_keys.private_keys(),
+            TEST_URI,
+        )
+        .await
+        .unwrap_err();
         // Wrong key produces either a KeyWrap or Decryption error depending
         // on where AES-KW detects the integrity failure.
         assert!(

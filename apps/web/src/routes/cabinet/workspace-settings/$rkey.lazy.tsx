@@ -22,6 +22,7 @@ import { getOpake, useAuthStore } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { rkeyFromUri } from "@/lib/atUri";
 import { resolveMemberProfile, type MemberProfile } from "@/lib/profileResolution";
+import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
 import { toMemberEntry, type KeyringMemberEntry, type WorkspaceRole } from "@/lib/workspaceSchemas";
 import { loading } from "@/stores/app";
 
@@ -278,13 +279,21 @@ function WorkspaceSettingsPage() {
       const done = loading("add-workspace-member");
       (async () => {
         try {
-          const opake = getOpake();
-          const identity = await opake.resolveIdentity(handle);
-          await opake.addWorkspaceMember(uri, identity.did, identity.publicKey, memberRole);
+          // Pre-resolve so we can (a) show the resolved handle in the success
+          // toast and (b) distinguish RecipientNotReadyError — the recipient
+          // exists but hasn't published an Opake public key yet.
+          const identity = await resolveRecipient(handle);
+          await getOpake().addWorkspaceMember(uri, identity.did, memberRole);
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
           await refreshAfterMemberChange(uri);
         } catch (err) {
-          toastError(err instanceof Error ? err.message : "Failed to add member");
+          if (err instanceof RecipientNotReadyError) {
+            toastError(
+              `${handle} hasn't logged into Opake yet — they need to set up an encryption key before you can add them.`,
+            );
+          } else {
+            toastError(err instanceof Error ? err.message : "Failed to add member");
+          }
         } finally {
           done();
         }

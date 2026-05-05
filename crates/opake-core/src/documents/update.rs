@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use log::trace;
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, RngCore, X25519PrivateKey};
+use crate::crypto::{self, CryptoRng, PrivateKeyBundle, RngCore};
 use crate::error::Error;
 use crate::records::{AtBytes, Encryption};
 
@@ -23,8 +23,8 @@ pub async fn update_content(
     client: &mut XrpcClient<impl Transport>,
     uri: &str,
     did: &str,
-    private_key: &X25519PrivateKey,
-    group_key: Option<&ContentKey>,
+    private_keys: &PrivateKeyBundle<'_>,
+    keys: Option<crate::workspace::GroupKeys<'_>>,
     new_plaintext: &[u8],
     modified_at: &str,
     rng: &mut (impl CryptoRng + RngCore),
@@ -38,7 +38,7 @@ pub async fn update_content(
     }
 
     let result =
-        crate::metadata::fetch_document_metadata(client, uri, did, private_key, group_key).await?;
+        crate::metadata::fetch_document_metadata(client, uri, did, private_keys, keys).await?;
     let mut doc = result.document;
     let mut metadata = result.metadata;
 

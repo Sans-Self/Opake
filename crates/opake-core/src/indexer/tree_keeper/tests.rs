@@ -57,9 +57,9 @@ impl RecordingSink {
 
 fn cabinet_keeper() -> TreeKeeper {
     let mut keeper = TreeKeeper::new(TEST_DID);
-    let (_, private_key) = test_keypair();
+    let kp = test_keypair();
     let tree = DirectoryTree::from_records(std::iter::empty());
-    keeper.install_cabinet_tree(tree, private_key);
+    keeper.install_cabinet_tree(tree, kp.x25519_private, kp.ml_kem_private);
     keeper
 }
 
@@ -138,8 +138,12 @@ fn cold_start_drops_events_for_missing_context() {
 #[test]
 fn watch_workspace_scoped_events_only() {
     let mut keeper = TreeKeeper::new(TEST_DID);
-    let (_, private_key) = test_keypair();
-    keeper.install_cabinet_tree(DirectoryTree::from_records(std::iter::empty()), private_key);
+    let kp = test_keypair();
+    keeper.install_cabinet_tree(
+        DirectoryTree::from_records(std::iter::empty()),
+        kp.x25519_private,
+        kp.ml_kem_private,
+    );
 
     let cabinet_sink = RecordingSink::new();
     let ws_sink = RecordingSink::new();
@@ -263,12 +267,14 @@ fn uninstall_all_drains_every_scope() {
         DirectoryTree::from_records(std::iter::empty()),
         group_key_a,
         0,
+        Vec::new(),
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         group_key_b,
         0,
+        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -361,12 +367,14 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([0u8; 32]),
         0,
+        Vec::new(),
     );
     keeper.install_workspace_tree(
         ws_b.clone(),
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([1u8; 32]),
         0,
+        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -483,7 +491,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
         },
         &DecryptionCtx {
             did: TEST_DID,
-            private_key: None,
+            private_keys: None,
             group_keys: &std::collections::HashMap::new(),
         },
     )
@@ -493,7 +501,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     let before = tree.directory_name(WS_ROOT_URI).map(str::to_owned);
     assert!(before.is_some());
 
-    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1);
+    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1, Vec::new());
 
     let sink = RecordingSink::new();
     keeper.watch_workspace(WS_URI.into(), WS_ROOT_URI.into(), sink.callback());
@@ -534,6 +542,7 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([7u8; 32]),
         5,
+        Vec::new(),
     );
 
     let sink = RecordingSink::new();
@@ -557,4 +566,28 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
         .unwrap();
 
     assert_eq!(sink.count(), before, "no watcher fire expected");
+}
+
+#[test]
+fn workspace_variant_does_not_pay_for_cabinet_keys() {
+    // Cabinet's 2432 bytes of key material live behind a Box, so Rust's
+    // max(variant size) layout doesn't bloat every Workspace tree. The
+    // enum is now sized by the Workspace variant; Cabinet's key payload
+    // only allocates for the (typically one) cabinet tree per identity.
+    use std::mem::size_of;
+    use crate::crypto::{MlKemPrivateKey, X25519PrivateKey};
+
+    // The raw key bytes still cost what they cost — they just live on
+    // the heap inside CabinetKeys now.
+    assert_eq!(size_of::<MlKemPrivateKey>(), 2400);
+    assert_eq!(size_of::<X25519PrivateKey>(), 32);
+
+    // Cabinet inline storage would push HeldTree to >= 2432 bytes; with
+    // the Box, the enum is at most ~Workspace-sized. 2000 is a generous
+    // ceiling that still catches a regression to inline storage.
+    assert!(
+        size_of::<super::HeldTree>() < 2000,
+        "HeldTree is {} bytes — Cabinet keys may have regressed to inline storage",
+        size_of::<super::HeldTree>(),
+    );
 }

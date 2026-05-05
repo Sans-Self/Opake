@@ -158,10 +158,10 @@ sequenceDiagram
     participant DevA as Device A (existing)
 
     Note over DevB,PDS: 1. New device creates pair request
-    DevB->>DevB: Generate ephemeral X25519 keypair
-    DevB->>PDS: createRecord(pairRequest, { ephemeralKey })
-    DevB->>DevB: Persist private key to local Storage (keyed by DID+rkey)
-    DevB->>DevB: Display key fingerprint
+    DevB->>DevB: Generate ephemeral hybrid keypair (X25519 + ML-KEM-768)
+    DevB->>PDS: createRecord(pairRequest, { x25519EphemeralKey, mlKemEphemeralKey })
+    DevB->>DevB: Persist both private halves to local Storage (32 + 2400 bytes, keyed by DID+rkey)
+    DevB->>DevB: Display X25519 key fingerprint
     DevB->>DevB: Poll for pairResponse...
 
     Note over DevA,PDS: 2. Existing device approves
@@ -173,17 +173,17 @@ sequenceDiagram
     DevA->>DevA: Generate content key K
     DevA->>DevA: Serialize identity → JSON
     DevA->>DevA: Encrypt identity with K (AES-256-GCM)
-    DevA->>DevA: Wrap K to ephemeral pubkey (x25519-hkdf-a256kw)
+    DevA->>DevA: Wrap K to ephemeral hybrid bundle (x25519-mlkem768-hkdf-a256kw-v2)
     DevA->>PDS: createRecord(pairResponse, { wrappedKey, ciphertext })
 
     Note over DevB,PDS: 4. New device receives identity
     DevB->>PDS: listRecords(pairResponse)
     PDS-->>DevB: Matching response
-    DevB->>DevB: Load ephemeral private key from Storage
-    DevB->>DevB: Unwrap K with ephemeral private key
+    DevB->>DevB: Load ephemeral private bundle from Storage
+    DevB->>DevB: Unwrap K via hybrid decapsulation (X25519 + ML-KEM-768)
     DevB->>DevB: Decrypt identity JSON
     DevB->>PDS: getRecord(publicKey/self)
-    DevB->>DevB: Verify public key matches published key
+    DevB->>DevB: Verify public keys match published record
     DevB->>DevB: Save identity.json
     DevB->>DevB: Wipe pair state from Storage
 

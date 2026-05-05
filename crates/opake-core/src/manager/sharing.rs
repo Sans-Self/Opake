@@ -1,5 +1,5 @@
 use crate::client::Transport;
-use crate::crypto::{CryptoRng, RngCore, X25519PublicKey};
+use crate::crypto::{CryptoRng, PublicKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
 use crate::sharing::{self, GrantEntry, GrantParams};
@@ -12,7 +12,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Share a document with another user by creating a grant.
     ///
     /// Cabinet only. Fetches the document's content key, wraps it to the
-    /// recipient's public key, and creates a grant record.
+    /// recipient's hybrid public-key bundle, and creates a grant record.
     ///
     /// Returns the grant AT-URI.
     #[::opake_derive::signoff]
@@ -20,7 +20,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         document_uri: &str,
         recipient_did: &str,
-        recipient_public_key: &X25519PublicKey,
+        recipient_public_keys: PublicKeyBundle<'_>,
         permissions: &str,
         note: Option<&str>,
     ) -> Result<String, Error> {
@@ -35,7 +35,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let content_key = documents::fetch_content_key(
             &mut self.opake.client,
             &cabinet.did,
-            &cabinet.private_key,
+            &cabinet.private_keys(),
             document_uri,
         )
         .await?;
@@ -46,7 +46,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 document_uri,
                 recipient_did,
                 content_key: &content_key,
-                recipient_public_key,
+                recipient_public_keys,
                 permissions,
                 note,
                 created_at: &now,
@@ -93,7 +93,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let content_key = documents::fetch_content_key(
             &mut self.opake.client,
             &cabinet.did,
-            &cabinet.private_key,
+            &cabinet.private_keys(),
             document_uri,
         )
         .await?;

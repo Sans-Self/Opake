@@ -130,12 +130,21 @@ export interface WorkspaceEntry {
   readonly memberCount: number;
 }
 
-/** Resolved identity for a handle or DID. */
+/**
+ * Resolved identity for a handle or DID — both halves of the hybrid
+ * public-key bundle, plus the algo strings advertised in the recipient's
+ * `app.opake.publicKey/self` record. Pass either pubkey directly into
+ * the matching half of `share` / `addWorkspaceMember` /
+ * `approvePairRequest`.
+ */
 export interface ResolvedIdentity {
   readonly did: string;
   readonly handle: string | null;
   readonly pdsUrl: string;
-  readonly publicKey: Uint8Array;
+  readonly x25519PublicKey: Uint8Array;
+  readonly x25519Algo: string;
+  readonly mlKemPublicKey: Uint8Array;
+  readonly mlKemAlgo: string;
 }
 
 /** Result of a per-workspace sync operation (from daemon). */
@@ -151,19 +160,23 @@ export interface WorkspaceSyncResult {
 
 /** Result of creating a pair request on the new device.
  *
- * `ephemeralPublicKey` is for fingerprint display only — the matching
- * private key stays inside WASM storage and is consumed automatically
- * by `awaitPairCompletion`. */
+ * Both ephemeral pubkeys are exposed for fingerprint display. The
+ * matching private keys stay inside WASM storage and are consumed
+ * automatically by `awaitPairCompletion`. The X25519 half is
+ * traditionally what's shown in the SAS comparison UI — it's compact
+ * (32 bytes) and fingerprints cleanly. */
 export interface PairRequestResult {
   readonly uri: string;
   readonly rkey: string;
-  readonly ephemeralPublicKey: Uint8Array;
+  readonly x25519EphemeralPublicKey: Uint8Array;
+  readonly mlKemEphemeralPublicKey: Uint8Array;
 }
 
 /** A pending pair request visible to the approving device. */
 export interface PendingPairRequest {
   readonly uri: string;
-  readonly ephemeralKey: Uint8Array;
+  readonly x25519EphemeralKey: Uint8Array;
+  readonly mlKemEphemeralKey: Uint8Array;
   readonly createdAt: string;
 }
 

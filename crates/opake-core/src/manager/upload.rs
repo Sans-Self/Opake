@@ -87,7 +87,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 filename: req.filename,
                 mime_type: req.mime_type,
                 owner_did: &cabinet.did,
-                owner_pubkey: &cabinet.public_key,
+                owner_public_keys: cabinet.public_keys(),
                 description: req.description,
                 tags: req.tags,
                 created_at: now,

@@ -30,6 +30,7 @@ fn file_context_owner_did_workspace() {
         "did:plc:bob".into(),
         gk,
         1,
+        Vec::new(),
     );
     let ctx = FileContext::Workspace(ws);
 
@@ -83,7 +84,8 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,
-    );
+    )
+    .unwrap();
 
     let ctx = opake.cabinet_context().unwrap();
     let mut mgr = opake.file_manager(&ctx);
@@ -171,7 +173,8 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,
-    );
+    )
+    .unwrap();
 
     let group_key = generate_content_key(&mut OsRng);
     let workspace = Workspace::from_keyring(
@@ -181,6 +184,7 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
         DID.into(),
         group_key,
         1,
+        Vec::new(),
     );
     let ctx = FileContext::Workspace(workspace);
     let mut mgr = opake.file_manager(&ctx);
@@ -246,7 +250,8 @@ async fn workspace_non_owner_delete_emits_directory_update_proposal() {
         OsRng,
         NoopStorage,
         || 1_700_000_000_000_000,
-    );
+    )
+    .unwrap();
 
     let group_key = generate_content_key(&mut OsRng);
     let workspace = Workspace::from_keyring(
@@ -256,6 +261,7 @@ async fn workspace_non_owner_delete_emits_directory_update_proposal() {
         BOB_DID.into(),
         group_key,
         1,
+        Vec::new(),
     );
     let ctx = FileContext::Workspace(workspace);
     let mut mgr = opake.file_manager(&ctx);

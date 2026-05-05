@@ -259,26 +259,33 @@ impl WasmFileManagerHandle {
             // Extract the scope info before dropping mgr + guard.
             let scope = match context {
                 opake_core::manager::FileContext::Cabinet(_) => TreeInstall::Cabinet,
-                opake_core::manager::FileContext::Workspace(ws) => {
-                    TreeInstall::Workspace(ws.uri.clone(), ws.key.clone(), ws.rotation)
-                }
+                opake_core::manager::FileContext::Workspace(ws) => TreeInstall::Workspace(
+                    ws.uri.clone(),
+                    ws.key.clone(),
+                    ws.rotation,
+                    ws.historical_keys.clone(),
+                ),
             };
             (tree, scope)
         };
 
-        // Now install. We need the cabinet's private key for direct wrapping.
+        // Now install. We need both halves of the cabinet's hybrid private key.
         match scope {
             TreeInstall::Cabinet => {
                 let guard = self.opake.lock().await;
-                let private_key = *guard.identity().private_key_bytes().map_err(wasm_err)?;
+                let identity = guard.identity();
+                let x25519_private_key =
+                    *identity.x25519_private_key_bytes().map_err(wasm_err)?;
+                let ml_kem_private_key =
+                    *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
                 drop(guard);
 
                 let mut keeper = self.tree_keeper.lock().await;
-                keeper.install_cabinet_tree(tree, private_key);
+                keeper.install_cabinet_tree(tree, x25519_private_key, ml_kem_private_key);
             }
-            TreeInstall::Workspace(uri, key, rotation) => {
+            TreeInstall::Workspace(uri, key, rotation, historical) => {
                 let mut keeper = self.tree_keeper.lock().await;
-                keeper.install_workspace_tree(uri, tree, key, rotation);
+                keeper.install_workspace_tree(uri, tree, key, rotation, historical);
             }
         }
 
@@ -288,7 +295,12 @@ impl WasmFileManagerHandle {
 
 enum TreeInstall {
     Cabinet,
-    Workspace(String, opake_core::crypto::ContentKey, u64),
+    Workspace(
+        String,
+        opake_core::crypto::ContentKey,
+        u64,
+        Vec<opake_core::workspace::HistoricalKey>,
+    ),
 }
 
 // ---------------------------------------------------------------------------
@@ -626,14 +638,14 @@ async fn apply_keyring_to_workspace_keeper(
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
-                let private_key = match guard.identity().private_key_bytes() {
+                let private_keys = match guard.identity().owned_private_keys() {
                     Ok(pk) => pk,
                     Err(e) => {
-                        log::warn!("[sse] workspace upsert: private_key_bytes failed: {e}");
+                        log::warn!("[sse] workspace upsert: owned_private_keys failed: {e}");
                         return;
                     }
                 };
-                wk::try_build_entry_from_sse_record(record, &did, &private_key)
+                wk::try_build_entry_from_sse_record(record, &did, &private_keys.bundle())
             };
             let mut keeper = workspace_keeper_rc.lock().await;
             if !started_flag.get() {

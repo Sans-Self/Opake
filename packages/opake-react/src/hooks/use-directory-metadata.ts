@@ -1,6 +1,8 @@
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import type { DocumentMetadata } from "@opake/sdk";
 import { useFileManagerCache } from "../provider";
+import { useFileManager } from "./use-file-manager";
 import { opakeKeys } from "../keys";
 import { withFileManager } from "./use-tree-mutation";
 
@@ -23,6 +25,16 @@ import { withFileManager } from "./use-tree-mutation";
  */
 export function useDirectoryMetadata(keyringUri: string | null, directoryUri: string | null) {
   const cache = useFileManagerCache();
+  const queryClient = useQueryClient();
+  const { fileManager, isReady: fmReady } = useFileManager(keyringUri);
+
+  useEffect(() => {
+    if (!fmReady || !fileManager || directoryUri === null) return;
+    const watcher = fileManager.watchDirectory(directoryUri, () => {
+      void queryClient.invalidateQueries({ queryKey: opakeKeys.metadata(directoryUri) });
+    });
+    return () => watcher.close();
+  }, [fileManager, fmReady, directoryUri, queryClient]);
 
   return useQuery<Readonly<Record<string, DocumentMetadata>>>({
     queryKey: opakeKeys.metadata(directoryUri ?? ""),
