@@ -1,13 +1,26 @@
-import { createLazyFileRoute, Outlet } from "@tanstack/react-router";
+import { createLazyFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { OpakeLogo } from "@/components/OpakeLogo";
 import { useAppStore } from "@/stores/app";
-import { WarningIcon } from "@phosphor-icons/react";
+import { useAuthStore } from "@/stores/auth";
+import { ArrowLeftIcon, WarningIcon } from "@phosphor-icons/react";
 
 function View() {
   const { anythingLoading } = useAppStore();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const sessionActive = useAuthStore((s) => s.session.status === "active");
+  const showCabinetReturn = sessionActive && pathname.startsWith("/devices/pair/");
 
   return (
-    <div className="bg-base-300 flex min-h-screen justify-center font-sans sm:pt-32">
+    <div className="bg-base-300 relative flex min-h-screen justify-center font-sans sm:pt-32">
+      {showCabinetReturn ? (
+        <Link
+          to="/cabinet/files"
+          className="text-base-content/70 hover:text-base-content absolute top-4 left-4 flex items-center gap-1.5 text-sm transition-colors sm:top-6 sm:left-6"
+        >
+          <ArrowLeftIcon size={14} weight="bold" />
+          <span>Back to my cabinet</span>
+        </Link>
+      ) : null}
       <div className="flex w-full flex-col items-center gap-8 px-6 py-12">
         <OpakeLogo size="xl" loading={anythingLoading()} />
         <Outlet />
