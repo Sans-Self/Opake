@@ -9,10 +9,9 @@ pub const DOCUMENT_UPDATE_COLLECTION: &str = "app.opake.documentUpdate";
 pub const ACTION_UPDATE_CONTENT: &str = "updateContent";
 #[allow(dead_code)]
 pub const ACTION_UPDATE_METADATA: &str = "updateMetadata";
-#[allow(dead_code)]
-pub const ACTION_SUPERSEDE: &str = "supersede";
 
-/// A proposed update to a document, with schema version envelope.
+/// A workspace document mutation proposed by an editor or manager, with schema
+/// version envelope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentUpdateRecord {
@@ -22,7 +21,11 @@ pub struct DocumentUpdateRecord {
     pub update: DocumentUpdate,
 }
 
-/// The actual document update, discriminated by `actionType`.
+/// The actual proposal, discriminated by `actionType`. Both variants update an
+/// existing document the owner already hosts; new-document creation is
+/// handled by direct `app.opake.document` writes on the proposer's PDS plus
+/// a `directoryUpdate.addEntry` proposal to register the entry with the
+/// workspace owner's directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "actionType")]
 pub enum DocumentUpdate {
@@ -38,15 +41,6 @@ pub enum DocumentUpdate {
     UpdateMetadata {
         document: String,
         encrypted_metadata: EncryptedMetadata,
-        created_at: String,
-    },
-    /// Full replacement for adoption (blob + metadata + supersedes URI).
-    #[serde(rename = "supersede")]
-    Supersede {
-        document: String,
-        blob: BlobRef,
-        encrypted_metadata: EncryptedMetadata,
-        supersedes: String,
         created_at: String,
     },
 }
@@ -78,31 +72,27 @@ impl DocumentUpdateRecord {
             created_at,
         })
     }
-
-    pub fn supersede(
-        document: String,
-        blob: BlobRef,
-        encrypted_metadata: EncryptedMetadata,
-        supersedes: String,
-        created_at: String,
-    ) -> Self {
-        Self::new(DocumentUpdate::Supersede {
-            document,
-            blob,
-            encrypted_metadata,
-            supersedes,
-            created_at,
-        })
-    }
 }
 
 impl DocumentUpdate {
-    /// The document URI this update targets.
-    pub fn document(&self) -> &str {
+    /// The AT-URI this proposal targets for cleanup-matching purposes —
+    /// the document record whose `modifiedAt` advances past `created_at`
+    /// on apply.
+    pub fn target_record_uri(&self) -> &str {
         match self {
-            Self::UpdateContent { document, .. }
-            | Self::UpdateMetadata { document, .. }
-            | Self::Supersede { document, .. } => document,
+            Self::UpdateContent { document, .. } | Self::UpdateMetadata { document, .. } => {
+                document
+            }
+        }
+    }
+
+    /// The proposal's createdAt timestamp — used by the cleanup logic to
+    /// compare against the target record's modifiedAt.
+    pub fn created_at(&self) -> &str {
+        match self {
+            Self::UpdateContent { created_at, .. } | Self::UpdateMetadata { created_at, .. } => {
+                created_at
+            }
         }
     }
 }

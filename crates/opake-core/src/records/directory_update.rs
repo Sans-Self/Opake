@@ -179,4 +179,37 @@ impl DirectoryUpdate {
             | Self::RenameDirectory { keyring, .. } => keyring,
         }
     }
+
+    /// The directory record whose `modifiedAt` advances when this proposal is
+    /// applied. Used by editor-side cleanup to detect "my proposal has been
+    /// considered." For `MoveEntry` both source and target directories
+    /// modify on apply; either works as a cleanup signal — pick `target`
+    /// for consistency.
+    pub fn target_record_uri(&self) -> &str {
+        match self {
+            Self::AddEntry { directory, .. }
+            | Self::RemoveEntry { directory, .. }
+            | Self::DeleteDirectory { directory, .. }
+            | Self::RenameDirectory { directory, .. } => directory,
+            Self::MoveEntry {
+                target_directory, ..
+            } => target_directory,
+            Self::CreateDirectory {
+                parent_directory, ..
+            } => parent_directory,
+        }
+    }
+
+    /// The proposal's `createdAt` timestamp — used by cleanup to compare
+    /// against the target record's `modifiedAt`.
+    pub fn created_at(&self) -> &str {
+        match self {
+            Self::AddEntry { created_at, .. }
+            | Self::RemoveEntry { created_at, .. }
+            | Self::MoveEntry { created_at, .. }
+            | Self::CreateDirectory { created_at, .. }
+            | Self::DeleteDirectory { created_at, .. }
+            | Self::RenameDirectory { created_at, .. } => created_at,
+        }
+    }
 }

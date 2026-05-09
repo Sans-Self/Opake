@@ -358,26 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn document_update_supersede_roundtrips() {
-        let record = DocumentUpdateRecord::supersede(
-            "at://did:plc:test/app.opake.document/abc".into(),
-            dummy_blob_ref(),
-            dummy_encrypted_metadata(),
-            "at://did:plc:test/app.opake.document/old".into(),
-            "2026-03-21T00:00:00Z".into(),
-        );
-        let json = serde_json::to_string(&record).unwrap();
-        let parsed: DocumentUpdateRecord = serde_json::from_str(&json).unwrap();
-        match &parsed.update {
-            DocumentUpdate::Supersede { supersedes, .. } => {
-                assert_eq!(supersedes, "at://did:plc:test/app.opake.document/old");
-            }
-            _ => panic!("expected Supersede variant"),
-        }
-    }
-
-    #[test]
-    fn document_update_optional_fields_omitted() {
+    fn document_update_content_omits_metadata_field() {
         let record = DocumentUpdateRecord::update_content(
             "at://did:plc:test/app.opake.document/abc".into(),
             dummy_blob_ref(),
@@ -385,7 +366,6 @@ mod tests {
         );
         let json = serde_json::to_value(&record).unwrap();
         assert!(json.get("encryptedMetadata").is_none());
-        assert!(json.get("supersedes").is_none());
     }
 
     // -----------------------------------------------------------------------

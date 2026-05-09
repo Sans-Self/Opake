@@ -166,4 +166,23 @@ impl KeyringUpdate {
             | Self::Leave { keyring, .. } => keyring,
         }
     }
+
+    /// The record whose `modifiedAt` advances when this proposal is applied —
+    /// always the keyring itself for keyring updates.
+    pub fn target_record_uri(&self) -> &str {
+        self.keyring()
+    }
+
+    /// The proposal's `createdAt` timestamp — used by cleanup to compare
+    /// against the target keyring's `modifiedAt`.
+    pub fn created_at(&self) -> &str {
+        match self {
+            Self::Rename { created_at, .. }
+            | Self::UpdateDescription { created_at, .. }
+            | Self::AddMember { created_at, .. }
+            | Self::RemoveMember { created_at, .. }
+            | Self::UpdateRole { created_at, .. }
+            | Self::Leave { created_at, .. } => created_at,
+        }
+    }
 }
