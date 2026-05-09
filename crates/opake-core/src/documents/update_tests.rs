@@ -47,30 +47,27 @@ fn document_from_fixture(fixture: &EncryptedFixture, name: &str) -> Document {
     let encrypted_metadata =
         crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
 
-    Document {
-        visibility: Some("private".into()),
-        ..Document::new(
-            BlobRef {
-                blob_type: "blob".into(),
-                reference: CidLink {
-                    cid: "bafyoriginalblob".into(),
-                },
-                mime_type: "application/octet-stream".into(),
-                size: fixture.ciphertext.len() as u64,
+    Document::new(
+        BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink {
+                cid: "bafyoriginalblob".into(),
             },
-            Encryption::Direct(DirectEncryption {
-                envelope: EncryptionEnvelope {
-                    algo: "aes-256-gcm".into(),
-                    nonce: AtBytes {
-                        encoded: BASE64.encode(fixture.nonce),
-                    },
-                    keys: vec![fixture.wrapped_key.clone()],
+            mime_type: "application/octet-stream".into(),
+            size: fixture.ciphertext.len() as u64,
+        },
+        Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: BASE64.encode(fixture.nonce),
                 },
-            }),
-            encrypted_metadata,
-            "2026-03-01T00:00:00Z".into(),
-        )
-    }
+                keys: vec![fixture.wrapped_key.clone()],
+            },
+        }),
+        encrypted_metadata,
+        "2026-03-01T00:00:00Z".into(),
+    )
 }
 
 fn record_response(doc: &Document) -> HttpResponse {
