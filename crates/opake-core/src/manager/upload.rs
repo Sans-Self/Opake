@@ -50,8 +50,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// creates the document record + updates the target directory in a single
     /// `applyWrites` call. No ghost documents on partial failure.
     ///
-    /// For workspace members (non-owners), the document + directoryUpdate
-    /// proposal are created atomically on the member's PDS.
+    /// For workspace members (non-owners), the document lives on the member's
+    /// PDS and a `directoryUpdate.addEntry` proposal is written alongside it
+    /// for the workspace owner to apply.
     #[::opake_derive::signoff]
     pub async fn upload(&mut self, req: &UploadRequest<'_>) -> Result<UploadResult, Error> {
         let now = self.opake.now();
@@ -143,13 +144,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             self.ensure_root().await?;
         }
 
-        let FileContext::Workspace(ref ws) = self.context else {
-            unreachable!()
-        };
-
         let tid = self.opake.generate_tid();
 
-        // Upload blob first (idempotent)
         let (doc_record, _) = documents::prepare_upload_keyring(
             &mut self.opake.client,
             &documents::KeyringUploadParams {
@@ -170,12 +166,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let doc_uri = uri_with_tid(&self.opake.did, documents::DOCUMENT_COLLECTION, &tid);
 
-        let FileContext::Workspace(ref ws) = self.context else {
-            unreachable!()
-        };
-
-        // Owner: atomic create document + update directory
-        // Member: atomic create document + create directoryUpdate proposal
+        // The target directory's authority always belongs to the workspace
+        // owner — even when a member is contributing into someone else's
+        // workspace, the directory record is on the owner's PDS.
         let is_owner = crate::atproto::parse_at_uri(&target)?.authority == self.opake.did;
 
         let doc_create = ApplyWriteOp::Create {
@@ -201,6 +194,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 outcome: MutationOutcome::Applied,
             })
         } else {
+            // Member upload: doc lives on the member's own PDS; the entry
+            // gets registered with the owner's directory via a
+            // `directoryUpdate.addEntry` proposal that the owner's daemon
+            // applies. Both writes go in a single applyWrites so we don't
+            // emit a doc record without a matching proposal.
             let update = DirectoryUpdateRecord::add_entry(
                 ws.uri.clone(),
                 target,

@@ -93,23 +93,20 @@ pub async fn prepare_upload(
         rng,
     )?;
 
-    let document = Document {
-        visibility: Some("private".into()),
-        ..Document::new(
-            blob_ref,
-            Encryption::Direct(DirectEncryption {
-                envelope: EncryptionEnvelope {
-                    algo: "aes-256-gcm".into(),
-                    nonce: AtBytes {
-                        encoded: BASE64.encode(payload.nonce),
-                    },
-                    keys: vec![wrapped_key],
+    let document = Document::new(
+        blob_ref,
+        Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: BASE64.encode(payload.nonce),
                 },
-            }),
-            encrypted_metadata,
-            params.created_at.into(),
-        )
-    };
+                keys: vec![wrapped_key],
+            },
+        }),
+        encrypted_metadata,
+        params.created_at.into(),
+    );
 
     Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
@@ -148,27 +145,24 @@ pub async fn prepare_upload_keyring(
         rng,
     )?;
 
-    let document = Document {
-        visibility: Some("private".into()),
-        ..Document::new(
-            blob_ref,
-            Encryption::Keyring(KeyringEncryption {
-                keyring_ref: KeyringRef {
-                    keyring: params.keyring_uri.into(),
-                    wrapped_content_key: AtBytes {
-                        encoded: BASE64.encode(&wrapped_content_key),
-                    },
-                    rotation: params.rotation,
+    let document = Document::new(
+        blob_ref,
+        Encryption::Keyring(KeyringEncryption {
+            keyring_ref: KeyringRef {
+                keyring: params.keyring_uri.into(),
+                wrapped_content_key: AtBytes {
+                    encoded: BASE64.encode(&wrapped_content_key),
                 },
-                algo: "aes-256-gcm".into(),
-                nonce: AtBytes {
-                    encoded: BASE64.encode(payload.nonce),
-                },
-            }),
-            encrypted_metadata,
-            params.created_at.into(),
-        )
-    };
+                rotation: params.rotation,
+            },
+            algo: "aes-256-gcm".into(),
+            nonce: AtBytes {
+                encoded: BASE64.encode(payload.nonce),
+            },
+        }),
+        encrypted_metadata,
+        params.created_at.into(),
+    );
 
     Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
@@ -290,7 +284,7 @@ mod tests {
                 assert!(record.get("mimeType").is_none());
                 assert!(record.get("size").is_none());
                 assert!(record.get("tags").is_none());
-                assert_eq!(record["visibility"], "private");
+                assert!(record.get("visibility").is_none());
 
                 // Encrypted metadata is present
                 assert!(
