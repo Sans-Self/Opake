@@ -36,8 +36,6 @@ pub struct Document {
     pub blob: BlobRef,
     pub encryption: Encryption,
     pub encrypted_metadata: EncryptedMetadata,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visibility: Option<String>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
@@ -55,7 +53,6 @@ impl Document {
             blob,
             encryption,
             encrypted_metadata,
-            visibility: None,
             created_at,
             modified_at: None,
         }

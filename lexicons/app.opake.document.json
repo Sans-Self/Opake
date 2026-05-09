@@ -33,10 +33,6 @@
             "type": "ref",
             "ref": "app.opake.defs#encryptedMetadata"
           },
-          "visibility": {
-            "type": "ref",
-            "ref": "app.opake.defs#visibility"
-          },
           "createdAt": {
             "type": "string",
             "format": "datetime"

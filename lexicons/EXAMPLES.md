@@ -156,7 +156,6 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "visibility": "private",
   "createdAt": "2026-02-27T10:30:00.000Z"
 }
 ```
@@ -271,7 +270,6 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "visibility": "shared",
   "createdAt": "2026-02-20T16:45:00.000Z"
 }
 ```

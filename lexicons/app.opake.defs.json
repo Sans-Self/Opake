@@ -140,16 +140,6 @@
           "description": "Reference to the keyring whose group key protects the content key."
         }
       }
-    },
-
-    "visibility": {
-      "type": "string",
-      "description": "Hint for indexers and clients about intended visibility of the content.",
-      "knownValues": [
-        "private",
-        "shared",
-        "public"
-      ]
     }
   }
 }

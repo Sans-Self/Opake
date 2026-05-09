@@ -59,7 +59,6 @@ export const documentRecordShape = `{
     // "nonce": "<bytes>"
   },
   "encryptedMetadata": { /* see above */ },
-  "visibility": "private",
   "createdAt": "2026-04-24T10:00:00Z"
 }`;
 
