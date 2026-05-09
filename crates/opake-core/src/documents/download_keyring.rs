@@ -27,15 +27,17 @@ pub struct KeyringDownloadResult {
 
 /// Download and decrypt a keyring-encrypted document as a member.
 ///
-/// This is the cross-PDS path for keyring members: the document and keyring
-/// records live on the *owner's* PDS, not the caller's. All fetches are
-/// unauthenticated (public endpoints).
+/// This is the cross-PDS path for keyring members. In the federated workspace
+/// model the document and keyring may live on different PDSes — a member-
+/// uploaded document lives on the contributor's PDS, while the keyring
+/// always lives on the workspace owner's. Each lookup resolves the
+/// authority's PDS via DID document and uses the public XRPC endpoint.
 ///
-/// The caller provides a document URI on the owner's PDS. The function:
-/// 1. Resolves the owner's PDS from their DID
-/// 2. Fetches the document record (must be keyring-encrypted)
-/// 3. Fetches the keyring record to find the member's wrapped group key
-/// 4. Unwraps group key → unwraps content key → decrypts blob
+/// The caller provides the document URI. The function:
+/// 1. Resolves the document authority's PDS and fetches the document record.
+/// 2. Resolves the keyring authority's PDS (separately, since it may differ
+///    from the document host) and fetches the keyring.
+/// 3. Unwraps group key → unwraps content key → decrypts blob.
 pub async fn download_from_keyring_member(
     transport: &impl Transport,
     member_did: &str,
@@ -50,18 +52,20 @@ pub async fn download_from_keyring_member(
         )));
     }
 
-    // Resolve the owner's PDS from their DID
-    let owner_did = &doc_at.authority;
-    trace!("resolving PDS for owner {}", owner_did);
-    let did_doc = resolve_did_document(transport, owner_did).await?;
-    let owner_pds = pds_from_did_document(&did_doc)?;
+    // Resolve the document host's PDS — that's the authority of the doc URI,
+    // which may be the workspace owner (owner-uploaded doc) or any member
+    // (contributor-uploaded doc).
+    let doc_authority_did = &doc_at.authority;
+    trace!("resolving PDS for document host {}", doc_authority_did);
+    let doc_did_doc = resolve_did_document(transport, doc_authority_did).await?;
+    let doc_pds = pds_from_did_document(&doc_did_doc)?;
 
     // Fetch the document record
-    trace!("fetching document from {}", owner_pds);
+    trace!("fetching document from {}", doc_pds);
     let doc_entry = get_record_public(
         transport,
-        &owner_pds,
-        owner_did,
+        &doc_pds,
+        doc_authority_did,
         DOCUMENT_COLLECTION,
         &doc_at.rkey,
     )
@@ -82,12 +86,21 @@ pub async fn download_from_keyring_member(
         }
     };
 
-    // Parse keyring URI and fetch the keyring record
+    // Parse the keyring URI and resolve its authority's PDS. The keyring
+    // lives on the workspace owner's PDS, which may not match the document's
+    // host — federated uploads land docs on contributors' PDSes while the
+    // shared keyring stays with the workspace owner.
     let kr_at = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-    trace!("fetching keyring {} from {}", kr_at.rkey, owner_pds);
+    let kr_pds = if kr_at.authority == *doc_authority_did {
+        doc_pds.clone()
+    } else {
+        let kr_did_doc = resolve_did_document(transport, &kr_at.authority).await?;
+        pds_from_did_document(&kr_did_doc)?
+    };
+    trace!("fetching keyring {} from {}", kr_at.rkey, kr_pds);
     let kr_entry = get_record_public(
         transport,
-        &owner_pds,
+        &kr_pds,
         &kr_at.authority,
         KEYRING_COLLECTION,
         &kr_at.rkey,
@@ -135,14 +148,20 @@ pub async fn download_from_keyring_member(
         .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
     let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, &group_key)?;
 
-    // Fetch and decrypt the blob
+    // Fetch and decrypt the blob — co-hosted with the document record on
+    // its authority's PDS (atproto convention; CIDs are repo-scoped).
     trace!(
         "fetching blob did={} cid={}",
-        owner_did,
+        doc_authority_did,
         doc.blob.reference.cid
     );
-    let ciphertext =
-        get_blob_public(transport, &owner_pds, owner_did, &doc.blob.reference.cid).await?;
+    let ciphertext = get_blob_public(
+        transport,
+        &doc_pds,
+        doc_authority_did,
+        &doc.blob.reference.cid,
+    )
+    .await?;
 
     let plaintext = decrypt_with_nonce(&content_key, &kr_enc.nonce, ciphertext)?;
     let filename = resolve_document_name(&doc, &content_key)?;
