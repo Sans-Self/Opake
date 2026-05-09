@@ -203,7 +203,8 @@ defmodule OpakeIndexer.Jetstream.Event do
        member_entries: member_entries,
        rotation: record["rotation"],
        encrypted_metadata: record["encryptedMetadata"],
-       created_at: record["createdAt"]
+       created_at: record["createdAt"],
+       modified_at: record["modifiedAt"]
      }}
   end
 
@@ -232,7 +233,8 @@ defmodule OpakeIndexer.Jetstream.Event do
        owner_did: did,
        entries: entries,
        encrypted_metadata: encrypted_metadata,
-       key_wrapping: key_wrapping
+       key_wrapping: key_wrapping,
+       modified_at: record["modifiedAt"]
      }}
   end
 
@@ -261,7 +263,8 @@ defmodule OpakeIndexer.Jetstream.Event do
        rotation: rotation,
        encrypted_metadata: encrypted_metadata,
        encryption: encryption,
-       blob_ref: blob
+       blob_ref: blob,
+       modified_at: record["modifiedAt"]
      }}
   end
 
@@ -270,15 +273,13 @@ defmodule OpakeIndexer.Jetstream.Event do
   defp parse_document_update_upsert(uri, did, %{"record" => record})
        when is_map(record) do
     document = record["document"]
-    supersedes = record["supersedes"]
 
     if is_binary(document) do
       {:upsert_document_update,
        %{
          uri: uri,
          author_did: did,
-         document_uri: document,
-         supersedes_uri: supersedes
+         document_uri: document
        }}
     else
       :ignore

@@ -45,10 +45,12 @@ defmodule OpakeIndexer.Queries.KeyringQueries do
       rotation: attrs[:rotation] || 0,
       encrypted_metadata: attrs[:encrypted_metadata],
       created_at: attrs[:created_at],
+      modified_at: attrs[:modified_at],
       indexed_at: DateTime.utc_now()
     }
     |> Repo.insert(
-      on_conflict: {:replace, [:rotation, :encrypted_metadata, :created_at, :indexed_at]},
+      on_conflict:
+        {:replace, [:rotation, :encrypted_metadata, :created_at, :modified_at, :indexed_at]},
       conflict_target: :uri
     )
   end

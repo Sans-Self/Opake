@@ -19,6 +19,7 @@ defmodule OpakeIndexer.Schemas.Document do
     field :encrypted_metadata, :map
     field :encryption, :map
     field :blob_ref, :map
+    field :modified_at, :string
     field :deleted_at, :utc_datetime_usec
     field :indexed_at, :utc_datetime_usec
   end
@@ -34,6 +35,7 @@ defmodule OpakeIndexer.Schemas.Document do
       :encrypted_metadata,
       :encryption,
       :blob_ref,
+      :modified_at,
       :deleted_at,
       :indexed_at
     ])

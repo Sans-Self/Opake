@@ -18,6 +18,7 @@ defmodule OpakeIndexer.Schemas.Directory do
     field :entries, {:array, :string}, default: []
     field :encrypted_metadata, :map
     field :key_wrapping, :map
+    field :modified_at, :string
     field :deleted_at, :utc_datetime_usec
     field :indexed_at, :utc_datetime_usec
   end
@@ -32,6 +33,7 @@ defmodule OpakeIndexer.Schemas.Directory do
       :entries,
       :encrypted_metadata,
       :key_wrapping,
+      :modified_at,
       :deleted_at,
       :indexed_at
     ])

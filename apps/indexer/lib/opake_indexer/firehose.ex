@@ -194,6 +194,7 @@ defmodule OpakeIndexer.Firehose do
         entries: attrs.entries,
         encrypted_metadata: attrs.encrypted_metadata,
         key_wrapping: attrs.key_wrapping,
+        modified_at: attrs[:modified_at],
         deleted_at: nil,
         indexed_at: now
       })
@@ -222,6 +223,7 @@ defmodule OpakeIndexer.Firehose do
         encrypted_metadata: attrs.encrypted_metadata,
         encryption: attrs.encryption,
         blob_ref: attrs.blob_ref,
+        modified_at: attrs[:modified_at],
         deleted_at: nil,
         indexed_at: now
       })
@@ -246,7 +248,6 @@ defmodule OpakeIndexer.Firehose do
         uri: attrs.uri,
         document_uri: attrs.document_uri,
         author_did: attrs.author_did,
-        supersedes_uri: attrs.supersedes_uri,
         indexed_at: now
       })
 

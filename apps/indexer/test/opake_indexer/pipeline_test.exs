@@ -46,8 +46,7 @@ defmodule OpakeIndexer.PipelineTest do
         "collection" => "app.opake.documentUpdate",
         "rkey" => rkey,
         "record" => %{
-          "document" => document_uri,
-          "supersedes" => nil
+          "document" => document_uri
         }
       }
     })

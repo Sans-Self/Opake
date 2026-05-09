@@ -134,7 +134,6 @@ defmodule OpakeIndexerWeb.WorkspaceController do
                 uri: u.uri,
                 document_uri: u.document_uri,
                 author_did: u.author_did,
-                supersedes_uri: u.supersedes_uri,
                 indexed_at: DateTime.to_iso8601(u.indexed_at)
               }
             end)

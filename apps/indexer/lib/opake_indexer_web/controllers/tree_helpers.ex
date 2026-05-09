@@ -41,6 +41,7 @@ defmodule OpakeIndexerWeb.TreeHelpers do
     |> maybe_put(:keyring_uri, dir.keyring_uri)
     |> maybe_put(:encrypted_metadata, dir.encrypted_metadata)
     |> maybe_put(:key_wrapping, dir.key_wrapping)
+    |> maybe_put(:modified_at, dir.modified_at)
     |> maybe_put(:deleted_at, format_datetime(dir.deleted_at))
   end
 
@@ -57,6 +58,7 @@ defmodule OpakeIndexerWeb.TreeHelpers do
     |> maybe_put(:encrypted_metadata, doc.encrypted_metadata)
     |> maybe_put(:encryption, doc.encryption)
     |> maybe_put(:blob_ref, doc.blob_ref)
+    |> maybe_put(:modified_at, doc.modified_at)
     |> maybe_put(:deleted_at, format_datetime(doc.deleted_at))
   end
 
@@ -81,11 +83,10 @@ defmodule OpakeIndexerWeb.TreeHelpers do
   def format_document_proposal(update) do
     %{
       uri: update.uri,
-      document_uri: update.document_uri,
       author_did: update.author_did,
       indexed_at: format_datetime(update.indexed_at)
     }
-    |> maybe_put(:supersedes_uri, update.supersedes_uri)
+    |> maybe_put(:document_uri, update.document_uri)
   end
 
   def format_grant(grant) do

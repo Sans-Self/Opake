@@ -12,13 +12,12 @@ defmodule OpakeIndexer.Schemas.DocumentUpdate do
   schema "document_updates" do
     field :document_uri, :string
     field :author_did, :string
-    field :supersedes_uri, :string
     field :indexed_at, :utc_datetime_usec
   end
 
   def changeset(update, attrs) do
     update
-    |> cast(attrs, [:uri, :document_uri, :author_did, :supersedes_uri, :indexed_at])
+    |> cast(attrs, [:uri, :document_uri, :author_did, :indexed_at])
     |> validate_required([:uri, :document_uri, :author_did, :indexed_at])
   end
 end

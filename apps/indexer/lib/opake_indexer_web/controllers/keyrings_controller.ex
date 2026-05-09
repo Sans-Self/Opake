@@ -35,6 +35,7 @@ defmodule OpakeIndexerWeb.KeyringsController do
                   end),
                 encrypted_metadata: k.encrypted_metadata,
                 created_at: k.created_at,
+                modified_at: k.modified_at,
                 indexed_at: DateTime.to_iso8601(k.indexed_at)
               }
             end)

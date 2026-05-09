@@ -17,13 +17,22 @@ defmodule OpakeIndexer.Schemas.Keyring do
     field :rotation, :integer, default: 0
     field :encrypted_metadata, :map
     field :created_at, :string
+    field :modified_at, :string
     field :indexed_at, :utc_datetime_usec
   end
 
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(keyring, attrs) do
     keyring
-    |> cast(attrs, [:uri, :owner_did, :rotation, :encrypted_metadata, :created_at, :indexed_at])
+    |> cast(attrs, [
+      :uri,
+      :owner_did,
+      :rotation,
+      :encrypted_metadata,
+      :created_at,
+      :modified_at,
+      :indexed_at
+    ])
     |> validate_required([:uri, :owner_did, :indexed_at])
   end
 end

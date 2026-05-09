@@ -159,6 +159,7 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
     |> TreeHelpers.maybe_put(:key_wrapping, get(attrs, :key_wrapping))
+    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 
   defp format_document(attrs) do
@@ -168,12 +169,14 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
     |> TreeHelpers.maybe_put(:encryption, get(attrs, :encryption))
     |> TreeHelpers.maybe_put(:blob_ref, get(attrs, :blob_ref))
+    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 
   defp format_keyring(attrs) do
     %{uri: get(attrs, :uri), owner_did: get(attrs, :owner_did), rotation: get(attrs, :rotation), member_entries: get(attrs, :member_entries) || []}
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
     |> TreeHelpers.maybe_put(:created_at, get(attrs, :created_at))
+    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 
   # Proposal formatters — safe bracket-access versions of TreeHelpers formatters
@@ -200,8 +203,11 @@ defmodule OpakeIndexer.SSE.Broadcaster do
   end
 
   defp format_document_proposal(attrs) do
-    %{uri: get(attrs, :uri), document_uri: get(attrs, :document_uri), author_did: get(attrs, :author_did)}
+    %{
+      uri: get(attrs, :uri),
+      author_did: get(attrs, :author_did),
+      document_uri: get(attrs, :document_uri)
+    }
     |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
-    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
   end
 end
