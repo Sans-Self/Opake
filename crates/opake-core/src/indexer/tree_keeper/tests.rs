@@ -72,6 +72,7 @@ fn sse_dir_upsert(uri: &str, name: &str, entries: Vec<String>) -> SseEvent {
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
         keyring_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     })
@@ -322,6 +323,7 @@ fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
         blob_ref: None,
         keyring_uri: keyring_uri.map(str::to_owned),
         rotation: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     })
@@ -486,6 +488,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
             encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
             key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
             keyring_uri: Some(WS_URI.into()),
+            modified_at: None,
             deleted_at: None,
             indexed_at: None,
         },
@@ -516,6 +519,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
             member_entries: vec![],
             encrypted_metadata: None,
             created_at: None,
+            modified_at: None,
             indexed_at: None,
         }))
         .unwrap();
@@ -561,6 +565,7 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
             member_entries: vec![],
             encrypted_metadata: None,
             created_at: None,
+            modified_at: None,
             indexed_at: None,
         }))
         .unwrap();

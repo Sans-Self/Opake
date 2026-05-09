@@ -28,6 +28,10 @@ pub struct SseDirectoryRecord {
     /// Workspace scope. Absent for personal cabinet directories.
     #[serde(default)]
     pub keyring_uri: Option<String>,
+    /// Owner-stamped on every mutation; consumed by editor proposal
+    /// cleanup (delete proposal once `modified_at > proposal.created_at`).
+    #[serde(default)]
+    pub modified_at: Option<String>,
     #[serde(default)]
     pub deleted_at: Option<String>,
     #[serde(default)]
@@ -49,6 +53,9 @@ pub struct SseDocumentRecord {
     pub keyring_uri: Option<String>,
     #[serde(default)]
     pub rotation: Option<u64>,
+    /// Owner-stamped on every mutation; consumed by editor proposal cleanup.
+    #[serde(default)]
+    pub modified_at: Option<String>,
     #[serde(default)]
     pub deleted_at: Option<String>,
     #[serde(default)]
@@ -68,6 +75,9 @@ pub struct SseKeyringRecord {
     pub encrypted_metadata: Option<serde_json::Value>,
     #[serde(default)]
     pub created_at: Option<String>,
+    /// Owner-stamped on every mutation; consumed by editor proposal cleanup.
+    #[serde(default)]
+    pub modified_at: Option<String>,
     #[serde(default)]
     pub indexed_at: Option<String>,
 }
@@ -165,12 +175,11 @@ pub struct SseKeyringUpdate {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SseDocumentUpdate {
     pub uri: String,
+    /// AT-URI of the existing document being updated.
     pub document_uri: String,
     pub author_did: String,
     #[serde(default)]
     pub keyring_uri: Option<String>,
-    #[serde(default)]
-    pub supersedes_uri: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +221,20 @@ pub enum SseEvent {
 }
 
 impl SseEvent {
+    /// For target-record upsert events (document/directory/keyring),
+    /// return the record's URI and `modifiedAt` so the editor's
+    /// proposal-cleanup can compare against its outstanding proposals.
+    /// Returns `None` for proposal events, delete events, events
+    /// without `modified_at` set, and the synthetic Reconnect.
+    pub fn cleanup_target(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::DocumentUpsert(r) => Some((&r.document_uri, r.modified_at.as_deref()?)),
+            Self::DirectoryUpsert(r) => Some((&r.directory_uri, r.modified_at.as_deref()?)),
+            Self::KeyringUpsert(r) => Some((&r.uri, r.modified_at.as_deref()?)),
+            _ => None,
+        }
+    }
+
     /// The event type string as emitted by the broadcaster. Used for
     /// dispatch and for test assertions.
     pub fn event_name(&self) -> &'static str {
@@ -475,15 +498,17 @@ mod tests {
         let json = br#"{
             "uri": "at://did:plc:bob/app.opake.documentUpdate/upd1",
             "document_uri": "at://did:plc:alice/app.opake.document/doc1",
-            "author_did": "did:plc:bob",
-            "supersedes_uri": null
+            "author_did": "did:plc:bob"
         }"#;
         let event = SseEvent::from_name_and_data("document_update:upsert", json).unwrap();
         assert!(event.is_proposal());
         match event {
             SseEvent::DocumentUpdateUpsert(p) => {
                 assert_eq!(p.keyring_uri, None);
-                assert_eq!(p.supersedes_uri, None);
+                assert_eq!(
+                    p.document_uri,
+                    "at://did:plc:alice/app.opake.document/doc1"
+                );
             }
             _ => panic!("expected DocumentUpdateUpsert"),
         }

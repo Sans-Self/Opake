@@ -495,6 +495,7 @@ impl TreeKeeper {
             encrypted_metadata: None,
             key_wrapping: None,
             keyring_uri: None,
+            modified_at: None,
             deleted_at: Some(String::new()),
             indexed_at: None,
         };

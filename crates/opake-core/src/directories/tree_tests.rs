@@ -622,6 +622,7 @@ fn sse_record(uri: &str, dir: &Directory, keyring_uri: Option<&str>) -> SseDirec
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
         keyring_uri: keyring_uri.map(String::from),
+        modified_at: dir.modified_at.clone(),
         deleted_at: None,
         indexed_at: None,
     }
@@ -635,6 +636,7 @@ fn sse_deleted(uri: &str) -> SseDirectoryRecord {
         encrypted_metadata: None,
         key_wrapping: None,
         keyring_uri: None,
+        modified_at: None,
         deleted_at: Some("2026-04-11T12:00:00Z".into()),
         indexed_at: None,
     }
@@ -837,6 +839,7 @@ fn apply_directory_delta_missing_key_wrapping_errors() {
         encrypted_metadata: Some(serde_json::json!({"ciphertext": "", "nonce": ""})),
         key_wrapping: None, // missing
         keyring_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     };
