@@ -424,7 +424,12 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
             directoryUri: currentDirectoryUri ?? undefined,
           },
           {
-            onSuccess: () => toastSuccess("File uploaded"),
+            onSuccess: (result) =>
+              toastSuccess(
+                result.proposed
+                  ? "Uploaded — pending owner review"
+                  : "File uploaded",
+              ),
             onError: (err) => toastError(err instanceof Error ? err.message : "Upload failed"),
           },
         );

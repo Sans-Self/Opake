@@ -369,10 +369,25 @@ async fn handle_sse_event(opake: &SharedOpake, event: SseEvent, did: &str) {
                 warn!("sync: reconnect catch-up failed for {did}: {e}");
             }
         }
+    } else if let Some((target_uri, modified_at)) = event.cleanup_target() {
+        // Target-record upsert events drive the editor-side proposal
+        // cleanup heuristic — delete any of the caller's outstanding
+        // proposals targeting this URI whose createdAt < modified_at.
+        // Same dispatch shape as the web SSE consumer in
+        // crates/opake-wasm/src/sse_wasm.rs.
+        let target_uri = target_uri.to_string();
+        let modified_at = modified_at.to_string();
+        let mut guard = opake.lock().await;
+        if let Err(e) = guard
+            .cleanup_proposals_for_target(&target_uri, &modified_at)
+            .await
+        {
+            warn!("sync: proposal cleanup for {target_uri} failed for {did}: {e}");
+        }
     }
-    // Record events (DirectoryUpsert, DocumentUpsert, GrantUpsert, etc.)
-    // are dropped intentionally. The CLI has no TreeKeeper or UI that
-    // needs live tree state.
+    // Other record events (GrantUpsert, deletes, etc.) are dropped
+    // intentionally. The CLI has no TreeKeeper or UI that needs live
+    // tree state.
 }
 
 /// Build a token fetcher that uses the shared Opake to request a fresh

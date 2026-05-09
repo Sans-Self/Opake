@@ -434,6 +434,29 @@ impl WasmOpakeHandle {
                 // "Shared with me" view updates live.
                 apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &started_flag, &event)
                     .await;
+
+                // Editor proposal cleanup: target-record upsert events
+                // (document/directory/keyring) carrying modified_at are
+                // the signal that the owner has applied something to
+                // that record. Delete any of the caller's outstanding
+                // proposals targeting it whose createdAt < modified_at.
+                if let Some((target_uri, modified_at)) = event.cleanup_target() {
+                    let target_uri = target_uri.to_string();
+                    let modified_at = modified_at.to_string();
+                    let mut opake = opake_rc.lock().await;
+                    if !started_flag.get() {
+                        log::debug!("[sse] consumer stopped during proposal cleanup");
+                        break;
+                    }
+                    if let Err(e) = opake
+                        .cleanup_proposals_for_target(&target_uri, &modified_at)
+                        .await
+                    {
+                        log::warn!(
+                            "[sse] proposal cleanup for {target_uri} failed: {e}"
+                        );
+                    }
+                }
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a

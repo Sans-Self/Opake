@@ -155,43 +155,52 @@ Existing documents encrypted under the old group key stay as-is. New uploads use
 
 ## Upload with Workspace
 
-Encrypts a file and wraps the content key under the workspace's group key instead of individual public keys.
+Workspace uploads split by caller role, but both write the canonical `app.opake.document` record to the **caller's** PDS — federated, atproto-shaped. The keyring (which holds the group key wrapped to each member) and the directory record (which holds the entry list) stay on the workspace owner's PDS.
+
+- **Owner uploads** are atomic on the owner's PDS: blob + document + directory entry update in a single `applyWrites`.
+- **Member uploads** are atomic on the member's PDS: blob + document + a `directoryUpdate.addEntry` proposal in a single `applyWrites`. The owner's daemon applies the proposal to register the entry in the workspace directory.
+
+The encryption surface is identical in both cases: a per-document content key, AES-256-GCM blob, content key wrapped under the workspace group key (AES-KW). The difference is only the second write op (directory entry vs. directoryUpdate proposal).
 
 ```mermaid
 sequenceDiagram
     participant User
-    participant CLI
+    participant Web as Caller's Browser
     participant Opake as Opake + FileManager
     participant Crypto
-    participant PDS
+    participant CallerPDS as Caller's PDS
 
-    User->>CLI: opake upload photo.jpg --workspace family-photos
+    User->>Web: Upload photo.jpg to family-photos
 
-    CLI->>Opake: ctx.opake() + file_context(Some("family-photos"))
-    Note over Opake: resolve_workspace: keyring lookup + group key unwrap from PDS
-    Opake->>Opake: file_manager(&ctx)
-
-    Opake->>Opake: mgr.upload_at(plaintext, "photo.jpg", "image/jpeg", None, None)
+    Web->>Opake: ctx.opake() + file_context(Some("family-photos"))
+    Note over Opake: resolve_workspace: keyring lookup + group key unwrap
 
     Opake->>Crypto: generate_content_key() → K
     Opake->>Crypto: encrypt_blob(K, plaintext)
     Crypto-->>Opake: { ciphertext, nonce }
 
-    Opake->>PDS: com.atproto.repo.uploadBlob (ciphertext)
-    PDS-->>Opake: blob ref
+    Opake->>CallerPDS: com.atproto.repo.uploadBlob (ciphertext)
+    CallerPDS-->>Opake: blob ref
 
     Opake->>Crypto: wrap_content_key_for_keyring(K, GK)
     Crypto-->>Opake: AES-KW wrapped content key
 
-    Opake->>PDS: createRecord (document with keyringEncryption)
-    PDS-->>Opake: { uri, cid }
-
-    Note over Opake: #[signoff] auto-persists session if refreshed
-
-    CLI->>User: Uploaded: at://did/.../document-tid
+    alt Caller is workspace owner
+        Opake->>CallerPDS: applyWrites (createDocument + updateDirectory)
+        Note right of CallerPDS: Document and directory both on owner's PDS<br/>Directory entries updated atomically
+        CallerPDS-->>Opake: { uri, cid }
+        Opake->>User: Uploaded
+    else Caller is workspace member
+        Opake->>CallerPDS: applyWrites (createDocument + createDirectoryUpdate)
+        Note right of CallerPDS: Document on member's PDS<br/>directoryUpdate.addEntry proposal alongside it
+        CallerPDS-->>Opake: { uri, cid }
+        Opake->>User: Uploaded — pending owner review
+    end
 ```
 
-The document record references the keyring URI and stores `wrappedContentKey` (content key wrapped under GK) instead of per-DID wrapped keys.
+The directory entry list on the owner's PDS holds at-URIs that may resolve to records on any member's PDS. Reads federate: the indexer (or a client doing public XRPC) walks `entries` and fetches each document from whichever PDS hosts it. Storage and egress costs land on the contributor that wrote the file, not the workspace owner.
+
+After the owner's daemon applies the `directoryUpdate.addEntry` proposal, the directory's `modifiedAt` advances and the editor's cleanup module deletes the proposal record (see [revisions.md](revisions.md#editor-side-cleanup)).
 
 ## Download Workspace Document
 

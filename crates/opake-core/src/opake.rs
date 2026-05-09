@@ -581,6 +581,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let result = self
             .sync_single_workspace(kr, &private_keys.bundle())
             .await;
+
+        // Bootstrap reconciliation for the editor's proposal-cleanup
+        // heuristic: any of the caller's outstanding proposals whose
+        // target record has advanced past their createdAt are deleted.
+        // Runs once per workspace sync — cheap when there are few
+        // outstanding proposals, and the only path that catches up
+        // proposals applied while the SSE consumer was offline.
+        if let Err(e) = self.cleanup_outstanding_proposals().await {
+            log::warn!("proposal-cleanup sweep failed for {keyring_uri}: {e}");
+        }
+
         self.auto_persist_session().await?;
         Ok(Some(result))
     }
@@ -921,12 +932,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Apply document update proposals for an owned workspace.
     ///
-    /// For each pending document update from a workspace member:
-    /// 1. Fetch the full documentUpdate record from the proposer's PDS
-    /// 2. Apply the update (re-host blob, update document record)
-    /// 3. Proposer cleanup is handled separately
+    /// For each pending `documentUpdate` proposal from a workspace member,
+    /// fetch the full proposal record from the proposer's PDS and apply by
+    /// actionType: `updateContent` re-hosts the blob; `updateMetadata`
+    /// replaces the encrypted metadata field. Both stamp `modifiedAt` so
+    /// the proposer's editor-side cleanup picks up the apply.
     ///
-    /// Only the workspace owner processes these — they own the document records.
+    /// Only the workspace owner processes these — they own the canonical
+    /// document records and write to their own PDS.
     async fn apply_document_proposals(
         &mut self,
         proposals: &[crate::indexer::DocumentProposal],
@@ -939,13 +952,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 continue;
             }
 
-            let result = self.apply_single_document_proposal(p).await;
-
-            match result {
+            match self.apply_single_document_proposal(p).await {
                 Ok(()) => {
                     applied += 1;
                     log::info!(
-                        "document-sync: applied update {} for document {}",
+                        "document-sync: applied update {} for {}",
                         p.uri,
                         p.document_uri
                     );
@@ -969,8 +980,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Apply a single document update proposal.
     ///
-    /// Fetches the full record from the proposer's PDS, downloads the blob,
-    /// re-hosts it on the owner's PDS, and updates the document record.
+    /// Fetches the full record from the proposer's PDS, then either re-hosts
+    /// the proposed blob (`updateContent`) or replaces the encrypted metadata
+    /// (`updateMetadata`) on the existing document. The document's
+    /// `modifiedAt` is bumped so editor-side cleanup picks up the apply.
     async fn apply_single_document_proposal(
         &mut self,
         proposal: &crate::indexer::DocumentProposal,
@@ -1022,16 +1035,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             records::DocumentUpdate::UpdateMetadata {
                 encrypted_metadata, ..
             } => {
-                document.encrypted_metadata = encrypted_metadata;
-            }
-            records::DocumentUpdate::Supersede {
-                blob,
-                encrypted_metadata,
-                ..
-            } => {
-                document.blob = self
-                    .rehost_blob(proposer_pds, &proposal.author_did, &blob)
-                    .await?;
                 document.encrypted_metadata = encrypted_metadata;
             }
         }

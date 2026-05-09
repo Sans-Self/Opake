@@ -114,16 +114,15 @@ pub struct KeyringProposal {
     pub indexed_at: String,
 }
 
-/// A pending document update proposal from a workspace member.
-/// The Indexer stores only metadata — the full record (blob ref, encrypted
-/// metadata) lives on the proposer's PDS and must be fetched for processing.
+/// A pending documentUpdate proposal from a workspace member targeting an
+/// existing document. The Indexer stores only metadata — the full record
+/// (blob ref, encrypted metadata) lives on the proposer's PDS and must be
+/// fetched for processing.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DocumentProposal {
     pub uri: String,
     pub document_uri: String,
     pub author_did: String,
-    #[serde(default)]
-    pub supersedes_uri: Option<String>,
     pub indexed_at: String,
 }
 
