@@ -1,5 +1,5 @@
 use super::*;
-use crate::crypto::{generate_content_key, OsRng};
+use crate::{generate_content_key, OsRng};
 
 fn sample_metadata() -> DocumentMetadata {
     DocumentMetadata {

@@ -1,0 +1,30 @@
+[package]
+name = "opake-crypto"
+description = "Client-side cryptographic primitives for Opake — AES-256-GCM content encryption, hybrid X25519 + ML-KEM-768 key wrapping (BSI TR-02102 / ANSSI), BIP-39 mnemonic derivation."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+opake-derive = { path = "../opake-derive" }
+aes-gcm.workspace = true
+aes-kw.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
+hkdf.workspace = true
+libcrux-ml-kem.workspace = true
+pbkdf2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+x25519-dalek.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rand_chacha = "0.3"
+
+# aes-gcm pulls in getrandom transitively. On wasm32, getrandom needs the
+# "js" feature to use crypto.getRandomValues() instead of OS-level randomness.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

@@ -28,7 +28,7 @@ fn build_encrypted_metadata(
         tags: tags.to_vec(),
         description: description.map(Into::into),
     };
-    crypto::encrypt_metadata(content_key, &metadata, rng)
+    Ok(crypto::encrypt_metadata(content_key, &metadata, rng)?)
 }
 
 /// Everything needed to encrypt and upload a document, minus the transport

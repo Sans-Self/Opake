@@ -3,8 +3,8 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 
-use super::{ContentKey, CryptoRng, EncryptedPayload, RngCore};
 use crate::error::Error;
+use crate::{ContentKey, CryptoRng, EncryptedPayload, RngCore};
 
 /// Generate a random AES-256-GCM content key.
 pub fn generate_content_key(rng: &mut (impl CryptoRng + RngCore)) -> ContentKey {

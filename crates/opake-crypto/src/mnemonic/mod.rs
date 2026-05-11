@@ -2,8 +2,8 @@
 //
 // A 24-word mnemonic encodes 256 bits of entropy + 8-bit SHA-256 checksum.
 // From those words we derive a 512-bit master seed via PBKDF2, then split
-// it into X25519 (encryption) and Ed25519 (signing) keypairs via HKDF with
-// domain-separated info strings.
+// it into X25519 (encryption), Ed25519 (signing), and ML-KEM-768 (PQ KEM)
+// keypairs via HKDF with domain-separated info strings.
 //
 // The `Mnemonic` type is the boundary validator — you can only construct one
 // through `generate_mnemonic` (infallible, valid by construction) or
@@ -22,7 +22,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::Error;
 
-pub use derive::derive_identity_from_mnemonic;
+pub use derive::derive_keys_from_mnemonic;
 pub use format::{format_mnemonic_grid, parse_mnemonic_grid};
 pub use generate::generate_mnemonic;
 

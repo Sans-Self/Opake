@@ -6,7 +6,7 @@
 use sha2::{Digest, Sha256};
 
 use super::{wordlist, Mnemonic, BITS_PER_WORD, ENTROPY_BYTES, TOTAL_BITS, WORD_COUNT};
-use crate::crypto::{CryptoRng, RngCore};
+use crate::{CryptoRng, RngCore};
 
 /// Generate a new 24-word BIP-39 mnemonic from 256 bits of CSPRNG entropy.
 ///

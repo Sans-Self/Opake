@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::crypto::{derive_identity_from_mnemonic, parse_mnemonic, parse_mnemonic_grid};
+use opake_core::crypto::{parse_mnemonic, parse_mnemonic_grid};
 use opake_core::records::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
-use opake_core::storage::Storage;
+use opake_core::storage::{Identity, Storage};
 
 use crate::commands::Execute;
 use crate::identity;
@@ -52,7 +52,7 @@ impl Execute for RecoverCommand {
             }
         };
 
-        let derived = derive_identity_from_mnemonic(&mnemonic, did);
+        let derived = Identity::from_mnemonic(&mnemonic, did);
 
         // Use the raw authenticated client for the published-key check: we
         // can't build an Opake yet (no identity in storage), and building one

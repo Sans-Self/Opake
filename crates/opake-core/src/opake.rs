@@ -1540,11 +1540,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .iter()
             .find(|m| m.did() == did)
             .ok_or_else(|| Error::NotFound(format!("no member entry for DID {did}")))?;
-        crate::crypto::unwrap_key(
+        Ok(crate::crypto::unwrap_key(
             &member.wrapped_key,
             private_keys,
             &crate::crypto::WrapContext::Keyring { uri: keyring_uri },
-        )
+        )?)
     }
 
     // -- Indexer helpers --

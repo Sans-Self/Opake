@@ -8,9 +8,8 @@ use log::debug;
 use opake_core::client::ReqwestTransport;
 use opake_core::client::Transport;
 use opake_core::client::{Session, XrpcClient};
-use opake_core::crypto::{
-    derive_identity_from_mnemonic, format_mnemonic_grid, generate_mnemonic, OsRng,
-};
+use opake_core::crypto::{format_mnemonic_grid, generate_mnemonic, OsRng};
+use opake_core::storage::Identity;
 
 /// Resolve password from env var or a fallback function (e.g. stdin prompt).
 pub fn resolve_password(
@@ -250,7 +249,7 @@ fn generate_identity_from_seed_phrase(did: &str) -> Result<opake_core::storage::
     // Offer to save the seed phrase to a file.
     offer_save_seed_file(&mnemonic)?;
 
-    let identity = derive_identity_from_mnemonic(&mnemonic, did);
+    let identity = Identity::from_mnemonic(&mnemonic, did);
     Ok(identity)
 }
 

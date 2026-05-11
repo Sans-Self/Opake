@@ -14,6 +14,7 @@ pub enum Error {
     #[error("authentication failed: {0}")]
     Auth(String),
 
+
     #[error("XRPC error ({status}): {message}")]
     Xrpc { status: u16, message: String },
 
@@ -62,4 +63,22 @@ pub enum Error {
 
     #[error("SSE error: {0}")]
     Sse(String),
+}
+
+// Crypto-shaped errors can originate either inside opake-crypto (wrap_key,
+// encrypt_metadata, …) or inside opake-core itself (re-encryption, pair
+// receive, manager tree). Mapping variant-by-variant collapses both sources
+// into the same variant set so a `matches!(err, Error::KeyWrap(_))` arm
+// retries either origin uniformly. `InvalidEncoding` collapses into
+// `InvalidRecord` because that's the catch-all for malformed wire bytes.
+impl From<opake_crypto::Error> for Error {
+    fn from(err: opake_crypto::Error) -> Self {
+        match err {
+            opake_crypto::Error::Encryption(s) => Error::Encryption(s),
+            opake_crypto::Error::Decryption(s) => Error::Decryption(s),
+            opake_crypto::Error::KeyWrap(s) => Error::KeyWrap(s),
+            opake_crypto::Error::Mnemonic(s) => Error::Mnemonic(s),
+            opake_crypto::Error::InvalidEncoding(s) => Error::InvalidRecord(s),
+        }
+    }
 }

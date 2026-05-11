@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::atproto::AtBytes;
 
+// `WrappedKey` and `EncryptedMetadata` are the literal output shapes of the
+// wrap and metadata-encryption primitives in opake-crypto, re-exported here
+// so record-level code can refer to them as `records::WrappedKey` etc.
+pub use opake_crypto::{EncryptedMetadata, WrappedKey};
+
 /// A member's role in a workspace (keyring).
 ///
 /// Plaintext on the record because the Indexer needs it for authorization.
@@ -41,14 +46,6 @@ impl std::str::FromStr for Role {
     }
 }
 
-/// A symmetric key encrypted (wrapped) to a specific DID's public key.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WrappedKey {
-    pub did: String,
-    pub ciphertext: AtBytes,
-    pub algo: String,
-}
-
 /// A keyring member: wrapped group key paired with a workspace role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,15 +77,6 @@ pub struct KeyringRef {
     pub keyring: String,
     pub wrapped_content_key: AtBytes,
     pub rotation: u64,
-}
-
-/// AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON
-/// object with the real metadata (name, mimeType, size, tags, description).
-/// Encrypted with the same content key as the blob.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptedMetadata {
-    pub ciphertext: AtBytes,
-    pub nonce: AtBytes,
 }
 
 // ---------------------------------------------------------------------------

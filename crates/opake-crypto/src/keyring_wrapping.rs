@@ -1,7 +1,7 @@
 use aes_kw::KekAes256;
 
-use super::{ContentKey, CONTENT_KEY_LEN, WRAPPED_KEY_LEN};
 use crate::error::Error;
+use crate::{ContentKey, CONTENT_KEY_LEN, WRAPPED_KEY_LEN};
 
 /// Wrap a per-document content key under a keyring's group key (symmetric AES-KW).
 ///

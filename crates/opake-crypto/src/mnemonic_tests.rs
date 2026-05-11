@@ -1,8 +1,11 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 
 use super::generate::entropy_to_mnemonic;
 use super::*;
-use crate::crypto::{derive_identity_from_mnemonic, generate_mnemonic, parse_mnemonic};
+use crate::{
+    derive_keys_from_mnemonic, generate_mnemonic, parse_mnemonic, ML_KEM_PK_LEN, ML_KEM_SK_LEN,
+};
 
 /// Deterministic RNG seeded with zeros — produces known entropy for golden tests.
 fn test_rng() -> ChaCha20Rng {
@@ -157,67 +160,36 @@ fn nonzero_entropy_roundtrips() {
 #[test]
 fn derivation_is_deterministic() {
     let mnemonic = generate_mnemonic(&mut test_rng());
-    let id1 = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    let id2 = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    assert_eq!(id1.x25519_public_key, id2.x25519_public_key);
-    assert_eq!(id1.x25519_private_key, id2.x25519_private_key);
-    assert_eq!(id1.signing_key, id2.signing_key);
-    assert_eq!(id1.verify_key, id2.verify_key);
-    assert_eq!(id1.ml_kem_public_key, id2.ml_kem_public_key);
-    assert_eq!(id1.ml_kem_private_key, id2.ml_kem_private_key);
+    let a = derive_keys_from_mnemonic(&mnemonic);
+    let b = derive_keys_from_mnemonic(&mnemonic);
+    assert_eq!(a.x25519_public, b.x25519_public);
+    assert_eq!(a.x25519_private, b.x25519_private);
+    assert_eq!(a.ed25519_signing, b.ed25519_signing);
+    assert_eq!(a.ed25519_verifying, b.ed25519_verifying);
+    assert_eq!(a.ml_kem_public, b.ml_kem_public);
+    assert_eq!(a.ml_kem_private, b.ml_kem_private);
 }
 
 #[test]
-fn derivation_produces_valid_key_bytes() {
+fn derivation_produces_correct_key_lengths() {
     let mnemonic = generate_mnemonic(&mut test_rng());
-    let identity = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    assert_eq!(identity.x25519_public_key_bytes().unwrap().len(), 32);
-    assert_eq!(identity.x25519_private_key_bytes().unwrap().len(), 32);
-    assert!(identity.has_signing_keys());
-    assert!(identity.signing_key_bytes().unwrap().is_some());
-    assert!(identity.verify_key_bytes().unwrap().is_some());
-    assert_eq!(identity.ml_kem_public_key_bytes().unwrap().len(), 1184);
-    assert_eq!(identity.ml_kem_private_key_bytes().unwrap().len(), 2400);
-}
-
-#[test]
-fn derivation_did_stored_not_derived() {
-    let mnemonic = generate_mnemonic(&mut test_rng());
-    let id_a = derive_identity_from_mnemonic(&mnemonic, "did:plc:alice");
-    let id_b = derive_identity_from_mnemonic(&mnemonic, "did:plc:bob");
-    // Same mnemonic → same keys, regardless of DID.
-    assert_eq!(id_a.x25519_public_key, id_b.x25519_public_key);
-    assert_eq!(id_a.x25519_private_key, id_b.x25519_private_key);
-    // But DIDs differ.
-    assert_ne!(id_a.did, id_b.did);
+    let secrets = derive_keys_from_mnemonic(&mnemonic);
+    assert_eq!(secrets.x25519_public.len(), 32);
+    assert_eq!(secrets.x25519_private.len(), 32);
+    assert_eq!(secrets.ed25519_signing.len(), 32);
+    assert_eq!(secrets.ed25519_verifying.len(), 32);
+    assert_eq!(secrets.ml_kem_public.len(), ML_KEM_PK_LEN);
+    assert_eq!(secrets.ml_kem_private.len(), ML_KEM_SK_LEN);
 }
 
 #[test]
 fn different_mnemonics_produce_different_keys() {
     let m1 = generate_mnemonic(&mut ChaCha20Rng::from_seed([0u8; 32]));
     let m2 = generate_mnemonic(&mut ChaCha20Rng::from_seed([1u8; 32]));
-    let id1 = derive_identity_from_mnemonic(&m1, "did:plc:test");
-    let id2 = derive_identity_from_mnemonic(&m2, "did:plc:test");
-    assert_ne!(id1.x25519_public_key, id2.x25519_public_key);
-    assert_ne!(id1.x25519_private_key, id2.x25519_private_key);
-}
-
-#[test]
-fn derived_identity_serializes_like_random() {
-    let mnemonic = generate_mnemonic(&mut test_rng());
-    let derived = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
-    let json = serde_json::to_value(&derived).unwrap();
-    // Same fields as a random identity — no extra mnemonic field leaks.
-    assert!(json.get("did").is_some());
-    assert!(json.get("x25519_public_key").is_some());
-    assert!(json.get("x25519_private_key").is_some());
-    assert!(json.get("ml_kem_public_key").is_some());
-    assert!(json.get("ml_kem_private_key").is_some());
-    assert!(json.get("signing_key").is_some());
-    assert!(json.get("verify_key").is_some());
-    // Mnemonic must NOT appear in serialized form.
-    assert!(json.get("mnemonic").is_none());
-    assert!(json.get("seed_phrase").is_none());
+    let a = derive_keys_from_mnemonic(&m1);
+    let b = derive_keys_from_mnemonic(&m2);
+    assert_ne!(a.x25519_public, b.x25519_public);
+    assert_ne!(a.x25519_private, b.x25519_private);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,23 +210,24 @@ fn golden_vector_all_zero_entropy() {
          abandon abandon abandon abandon abandon abandon abandon art"
     );
 
-    let identity = derive_identity_from_mnemonic(&mnemonic, "did:plc:test");
+    let secrets = derive_keys_from_mnemonic(&mnemonic);
 
-    // Pinned values. If these change, the derivation pipeline is broken and
-    // existing seed-phrase-derived identities become unrecoverable.
+    // Pinned base64 values. If these change, the derivation pipeline is
+    // broken and existing seed-phrase-derived identities become
+    // unrecoverable.
     assert_eq!(
-        identity.x25519_public_key,
+        BASE64.encode(secrets.x25519_public),
         "7wIIxdbJBxTSFVOVTEdCV2//rOj/uvoiahBAvx8Ka1s="
     );
     assert_eq!(
-        identity.verify_key.as_deref(),
-        Some("JsOAnxAptr3it1PIm0D5DNZdSdAsOfFmCHa2MXQg/AA=")
+        BASE64.encode(secrets.ed25519_verifying),
+        "JsOAnxAptr3it1PIm0D5DNZdSdAsOfFmCHa2MXQg/AA="
     );
     // ML-KEM-768 public key fingerprint: first 32 bytes (44 base64 chars).
     // Anchors the hybrid-KEM derivation to a stable byte-level output;
     // 32 bytes is enough that any drift is caught with overwhelming probability.
     assert_eq!(
-        &identity.ml_kem_public_key[..44],
+        &BASE64.encode(secrets.ml_kem_public)[..44],
         "zugaa5eck9IqFwgK4skuNnM0d4tpsfLNJ5c1XASw2VZh"
     );
 }
@@ -301,7 +274,7 @@ fn wordlist_is_sorted() {
 // Grid formatting
 // ---------------------------------------------------------------------------
 
-use crate::crypto::{format_mnemonic_grid, parse_mnemonic_grid};
+use crate::{format_mnemonic_grid, parse_mnemonic_grid};
 
 #[test]
 fn grid_roundtrips_through_parse() {

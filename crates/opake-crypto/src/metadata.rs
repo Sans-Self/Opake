@@ -5,9 +5,8 @@ use aes_gcm::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use super::{ContentKey, CryptoRng, RngCore};
 use crate::error::Error;
-use crate::records::{AtBytes, EncryptedMetadata};
+use crate::{AtBytes, ContentKey, CryptoRng, EncryptedMetadata, RngCore};
 
 // ---------------------------------------------------------------------------
 // Metadata types — one per record kind

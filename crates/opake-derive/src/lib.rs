@@ -158,7 +158,7 @@ pub fn redacted_debug_derive(input: TokenStream) -> TokenStream {
                             quote! {
                                 s.field(
                                     stringify!(#field_name),
-                                    &::opake_core::crypto::Redacted(&self.#field_name),
+                                    &::opake_crypto::Redacted(&self.#field_name),
                                 );
                             }
                         } else {
@@ -200,7 +200,7 @@ pub fn redacted_debug_derive(input: TokenStream) -> TokenStream {
                         let index = syn::Index::from(i);
                         if is_redacted(f) {
                             quote! {
-                                s.field(&::opake_core::crypto::Redacted(&self.#index));
+                                s.field(&::opake_crypto::Redacted(&self.#index));
                             }
                         } else {
                             quote! {

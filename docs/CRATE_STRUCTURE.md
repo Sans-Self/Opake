@@ -48,19 +48,9 @@ crates/
         tree.rs        load_tree, resolve_entry, resolve_document_names, resolve_document_names_in, resolve_document_metadata_in
         admin.rs       WorkspaceAdmin<T, R, S> — add_member, remove_member, leave (keyring membership ops)
         manager_tests.rs  Unit tests
-      crypto/
-        mod.rs         Type defs (incl. DidMember struct), constants, re-exports
-        content.rs     AES-256-GCM: generate_content_key(), encrypt_blob(), decrypt_blob()
-        key_wrapping.rs  X25519-HKDF-A256KW: wrap_key(), unwrap_key(), create_group_key()
-        keyring_wrapping.rs  Symmetric AES-KW: wrap/unwrap content key under group key
-        mnemonic/
-          mod.rs       Mnemonic type, parse_mnemonic(), wordlist (BIP-39 embedded)
-          generate.rs  generate_mnemonic() — entropy → 24 words
-          derive.rs    derive_identity_from_mnemonic() — PBKDF2 → HKDF dual-path
-          format.rs    format_mnemonic_grid(), parse_mnemonic_grid() — .txt import/export
       records/
-        mod.rs         SCHEMA_VERSION, Versioned trait, check_version(), re-exports
-        defs.rs        WrappedKey, EncryptionEnvelope, KeyringRef, EncryptedMetadata, Role, KeyringMember, KeyWrapping, DirectKeyWrapping, KeyringKeyWrapping
+        mod.rs         Versioned trait, check_version(), re-exports (SCHEMA_VERSION comes from opake-crypto)
+        defs.rs        EncryptionEnvelope, KeyringRef, Role, KeyringMember, KeyWrapping, DirectKeyWrapping, KeyringKeyWrapping (re-exports WrappedKey + EncryptedMetadata from opake-crypto)
         directory.rs   Directory (uses KeyWrapping, not Encryption)
         document.rs    DirectEncryption, KeyringEncryption, Encryption, Document
         public_key.rs  PublicKeyRecord, collection/rkey constants
@@ -130,6 +120,22 @@ crates/
         cancel.rs      cancel_pair_request() — wipe pair state on user back-out
         cleanup.rs     cleanup_pair_records() — daemon sweep for expired/orphan records
 
+  opake-crypto/        Client-side cryptographic primitives (no I/O, platform-agnostic)
+    src/
+      lib.rs           Re-exports, RNG type aliases, hybrid-KEM constants (HYBRID_WRAP_ALGO, ML_KEM_*, AES_GCM_NONCE_LEN, …), SCHEMA_VERSION, ContentKey/PublicKeyBundle/PrivateKeyBundle/OwnedPublicKeys/OwnedPrivateKeys/DidMember/EphemeralKeypair, generate_ephemeral_keypair, WrapContext, hkdf_info, Redacted helper used by the RedactedDebug derive
+      error.rs         Error: Encryption/Decryption/KeyWrap/Mnemonic/InvalidEncoding. Mapped variant-by-variant onto opake-core's Error via a From impl in opake-core/src/error.rs.
+      at_bytes.rs      AtBytes — atproto's `{ "$bytes": <base64> }` wrapper. Every primitive that emits bytes for the wire (wrapped keys, encrypted metadata, ciphertexts) renders through it. Re-exported from opake-core as both crypto::AtBytes and atproto::AtBytes.
+      wire.rs          WrappedKey + EncryptedMetadata — literal output shapes of wrap_key() and encrypt_metadata(). Re-exported from opake-core::records::.
+      content.rs       AES-256-GCM: generate_content_key(), encrypt_blob(), decrypt_blob()
+      key_wrapping.rs  Hybrid X25519 + ML-KEM-768 KEM (`x25519-mlkem768-hkdf-a256kw-v2`): wrap_key(), unwrap_key(), create_group_key(). HKDF info commits to context (Keyring/Document/PairResponse/Cabinet) for splice protection.
+      keyring_wrapping.rs  Symmetric AES-KW: wrap/unwrap content key under group key
+      metadata.rs      encrypt_metadata(), decrypt_metadata(); DocumentMetadata, KeyringMetadata, GrantMetadata, DirectoryMetadata
+      mnemonic/
+        mod.rs         Mnemonic type (Zeroize+ZeroizeOnDrop), parse_mnemonic(), checksum validation, BIP-39 wordlist embedded
+        generate.rs    generate_mnemonic() — 256-bit entropy → 24 words
+        derive.rs      derive_keys_from_mnemonic() — PBKDF2-HMAC-SHA512 → HKDF tri-path → DerivedSecrets (raw X25519/Ed25519/ML-KEM bytes, zeroize on drop). opake-core's `Identity::from_mnemonic` wraps it.
+        format.rs      format_mnemonic_grid(), parse_mnemonic_grid() — .txt import/export
+
   opake-wasm/          WASM bridge (wasm-pack, wasm_bindgen)
     src/
       lib.rs           Module declarations, WASM init, pure crypto + tree exports (stateless)
@@ -144,7 +150,7 @@ crates/
 
   opake-derive/        Proc-macro crate
     src/
-      lib.rs           #[derive(RedactedDebug)] — generates Debug + Zeroize + Drop for structs with #[redact] fields
+      lib.rs           #[derive(RedactedDebug)] — generates Debug + Zeroize + Drop for structs with #[redact] fields. Macro expansion emits `::opake_crypto::Redacted` paths, so consumers must depend on opake-crypto (opake-core does, transitively).
                         #[signoff] — attribute macro for session persistence, auto-generates wrapper+inner split. #[signoff] for FileManager (self.opake.signoff()), #[signoff(self)] for Opake (self.signoff())
 
 apps/

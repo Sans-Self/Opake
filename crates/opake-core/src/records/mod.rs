@@ -50,9 +50,11 @@ pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
-/// The current app.opake.* schema version this client understands.
-/// Records with version <= this are compatible; higher versions must be rejected.
-pub const SCHEMA_VERSION: u32 = 1;
+/// The current app.opake.* schema version this client understands. Records
+/// with version <= this are compatible; higher versions must be rejected.
+/// Owned by opake-crypto because the HKDF info string folds it in for domain
+/// separation.
+pub use opake_crypto::SCHEMA_VERSION;
 
 /// Record types that carry a schema version number.
 pub trait Versioned {

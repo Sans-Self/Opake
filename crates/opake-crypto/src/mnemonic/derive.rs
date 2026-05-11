@@ -10,16 +10,15 @@
 //
 // No RNG parameter — entirely deterministic. That's an intentional signal.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hkdf::Hkdf;
 use sha2::{Sha256, Sha512};
 use zeroize::Zeroizing;
 
 use super::Mnemonic;
-use crate::crypto::{
-    Ed25519SigningKey, X25519DalekPublicKey, X25519DalekStaticSecret, ML_KEM_KEYGEN_RANDOMNESS_LEN,
+use crate::{
+    DerivedSecrets, Ed25519SigningKey, MlKemPrivateKey, MlKemPublicKey, X25519DalekPublicKey,
+    X25519DalekStaticSecret, ML_KEM_KEYGEN_RANDOMNESS_LEN,
 };
-use crate::storage::Identity;
 
 const PBKDF2_ROUNDS: u32 = 2048;
 // BIP-39 §"From mnemonic to seed": salt is "mnemonic" + optional passphrase.
@@ -36,14 +35,14 @@ const X25519_KEY_LEN: usize = 32;
 const ED25519_KEY_LEN: usize = 32;
 const MASTER_SEED_LEN: usize = 64;
 
-/// Derive an `Identity` (X25519 + Ed25519 + ML-KEM-768 keypairs) from a
+/// Derive a hybrid identity (X25519 + Ed25519 + ML-KEM-768 keypairs) from a
 /// validated mnemonic.
 ///
 /// Deterministic: the same mnemonic always produces the same keys, regardless
-/// of platform. The `did` is stored in the identity but does NOT influence
-/// key derivation — the same phrase on a different account yields the same
-/// cryptographic material.
-pub fn derive_identity_from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Identity {
+/// of platform. No DID is folded in — the same phrase on a different account
+/// yields the same cryptographic material. Callers attach the DID when
+/// assembling the higher-level identity wrapper.
+pub fn derive_keys_from_mnemonic(mnemonic: &Mnemonic) -> DerivedSecrets {
     let master_seed = derive_master_seed(mnemonic);
 
     let x25519_raw: Zeroizing<[u8; X25519_KEY_LEN]> =
@@ -60,15 +59,20 @@ pub fn derive_identity_from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Identity
     let ed25519_verifying = ed25519_signing.verifying_key();
 
     let mlkem_keypair = libcrux_ml_kem::mlkem768::generate_key_pair(*mlkem_randomness);
+    let ml_kem_public: MlKemPublicKey = (*mlkem_keypair.public_key().as_ref())
+        .try_into()
+        .expect("ML-KEM-768 public key is 1184 bytes per FIPS-203 §6.1");
+    let ml_kem_private: MlKemPrivateKey = (*mlkem_keypair.private_key().as_ref())
+        .try_into()
+        .expect("ML-KEM-768 private key is 2400 bytes per FIPS-203 §6.2");
 
-    Identity {
-        did: did.to_string(),
-        x25519_public_key: BASE64.encode(x25519_public.as_bytes()),
-        x25519_private_key: BASE64.encode(x25519_secret.to_bytes()),
-        ml_kem_public_key: BASE64.encode(mlkem_keypair.public_key().as_ref()),
-        ml_kem_private_key: BASE64.encode(mlkem_keypair.private_key().as_ref()),
-        signing_key: Some(BASE64.encode(ed25519_signing.to_bytes())),
-        verify_key: Some(BASE64.encode(ed25519_verifying.to_bytes())),
+    DerivedSecrets {
+        x25519_public: *x25519_public.as_bytes(),
+        x25519_private: x25519_secret.to_bytes(),
+        ml_kem_public,
+        ml_kem_private,
+        ed25519_verifying: ed25519_verifying.to_bytes(),
+        ed25519_signing: ed25519_signing.to_bytes(),
     }
 }
 

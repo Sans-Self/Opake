@@ -6,14 +6,13 @@ use libcrux_ml_kem::mlkem768::{
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
-use super::{
-    hkdf_info, ContentKey, CryptoRng, DidMember, PrivateKeyBundle, PublicKeyBundle, RngCore,
-    WrapContext, CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO, ML_KEM_CT_LEN,
-    ML_KEM_ENCAP_RANDOMNESS_LEN, ML_KEM_PK_LEN, ML_KEM_SS_LEN, WRAPPED_KEY_LEN, X25519_KEY_LEN,
-};
-use crate::atproto::AtBytes;
 use crate::error::Error;
-use crate::records::WrappedKey;
+use crate::{
+    hkdf_info, AtBytes, ContentKey, CryptoRng, DidMember, PrivateKeyBundle, PublicKeyBundle,
+    RngCore, WrapContext, WrappedKey, CONTENT_KEY_LEN, HYBRID_CIPHERTEXT_LEN, HYBRID_WRAP_ALGO,
+    ML_KEM_CT_LEN, ML_KEM_ENCAP_RANDOMNESS_LEN, ML_KEM_PK_LEN, ML_KEM_SS_LEN, WRAPPED_KEY_LEN,
+    X25519_KEY_LEN,
+};
 
 // ───── Hybrid wrap (default) ───────────────────────────────────────────────
 //
@@ -220,8 +219,7 @@ fn unwrap_key_hybrid(
     let x25519_shared = x25519_secret.diffie_hellman(&ephemeral_public);
 
     // ── ML-KEM-768 decapsulation ──
-    let mlkem_sk_array: Zeroizing<[u8; super::ML_KEM_SK_LEN]> =
-        Zeroizing::new(*keys.ml_kem);
+    let mlkem_sk_array: Zeroizing<[u8; crate::ML_KEM_SK_LEN]> = Zeroizing::new(*keys.ml_kem);
     let mlkem_sk: MlKem768PrivateKey = MlKem768PrivateKey::from(*mlkem_sk_array);
     let mlkem_ct: MlKem768Ciphertext = MlKem768Ciphertext::from(mlkem_ct_arr);
     let mlkem_shared = mlkem768::decapsulate(&mlkem_sk, &mlkem_ct);
@@ -281,7 +279,7 @@ pub fn create_group_key(
     keyring_uri: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(ContentKey, Vec<WrappedKey>), Error> {
-    let group_key = super::generate_content_key(rng);
+    let group_key = crate::generate_content_key(rng);
     let context = WrapContext::Keyring { uri: keyring_uri };
     let wrapped_keys: Result<Vec<_>, _> = members
         .iter()

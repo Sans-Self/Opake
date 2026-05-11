@@ -536,6 +536,6 @@ pub fn validate_mnemonic_js(phrase: &str) -> bool {
 pub fn derive_identity_from_mnemonic_js(phrase: &str, did: &str) -> Result<JsValue, JsError> {
     let mnemonic =
         opake_core::crypto::parse_mnemonic(phrase).map_err(|e| JsError::new(&e.to_string()))?;
-    let identity = opake_core::crypto::derive_identity_from_mnemonic(&mnemonic, did);
+    let identity = opake_core::storage::Identity::from_mnemonic(&mnemonic, did);
     serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
 }

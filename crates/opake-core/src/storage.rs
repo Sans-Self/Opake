@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Session;
 use crate::crypto::{
-    CryptoRng, Ed25519SigningKey, MlKemPrivateKey, MlKemPublicKey, OwnedPrivateKeys,
-    OwnedPublicKeys, RngCore, X25519DalekPublicKey, X25519DalekStaticSecret, X25519PrivateKey,
-    X25519PublicKey, ML_KEM_KEYGEN_RANDOMNESS_LEN,
+    derive_keys_from_mnemonic, CryptoRng, DerivedSecrets, Ed25519SigningKey, MlKemPrivateKey,
+    MlKemPublicKey, Mnemonic, OwnedPrivateKeys, OwnedPublicKeys, RngCore, X25519PrivateKey,
+    X25519PublicKey,
 };
 use crate::error::Error;
 use zeroize::Zeroizing;
@@ -215,19 +215,32 @@ impl Identity {
 
     /// Generate a new identity with random X25519 + Ed25519 + ML-KEM-768 keypairs.
     pub fn generate(did: &str, rng: &mut (impl CryptoRng + RngCore)) -> Self {
-        let x25519_private = X25519DalekStaticSecret::random_from_rng(&mut *rng);
-        let x25519_public = X25519DalekPublicKey::from(&x25519_private);
-        let (signing_key, verify_key) = Self::generate_signing_keypair(rng);
-        let (ml_kem_public_key, ml_kem_private_key) = Self::generate_ml_kem_keypair(rng);
+        Self::from_secrets(&DerivedSecrets::generate(rng), did)
+    }
 
+    /// Deterministically derive an identity from a validated BIP-39 mnemonic.
+    ///
+    /// The DID is stored only — it does not influence key derivation, so the
+    /// same phrase always yields the same key material regardless of account.
+    pub fn from_mnemonic(mnemonic: &Mnemonic, did: &str) -> Self {
+        Self::from_secrets(&derive_keys_from_mnemonic(mnemonic), did)
+    }
+
+    /// Base64-encode raw key bytes into the on-disk identity shape.
+    ///
+    /// All byte fields are borrowed into `BASE64.encode` to avoid copying
+    /// 2400 bytes of ML-KEM private key (and the X25519 / Ed25519 secrets)
+    /// onto base64's stack frame, where they would outlive `DerivedSecrets`'
+    /// `Drop` zeroize.
+    fn from_secrets(secrets: &DerivedSecrets, did: &str) -> Self {
         Identity {
             did: did.to_string(),
-            x25519_public_key: BASE64.encode(x25519_public.as_bytes()),
-            x25519_private_key: BASE64.encode(x25519_private.to_bytes()),
-            ml_kem_public_key,
-            ml_kem_private_key,
-            signing_key: Some(signing_key),
-            verify_key: Some(verify_key),
+            x25519_public_key: BASE64.encode(&secrets.x25519_public),
+            x25519_private_key: BASE64.encode(&secrets.x25519_private),
+            ml_kem_public_key: BASE64.encode(secrets.ml_kem_public.as_slice()),
+            ml_kem_private_key: BASE64.encode(secrets.ml_kem_private.as_slice()),
+            signing_key: Some(BASE64.encode(&secrets.ed25519_signing)),
+            verify_key: Some(BASE64.encode(&secrets.ed25519_verifying)),
         }
     }
 
@@ -249,18 +262,6 @@ impl Identity {
         (
             BASE64.encode(signing_key.to_bytes()),
             BASE64.encode(verify_key.to_bytes()),
-        )
-    }
-
-    /// Generate a fresh ML-KEM-768 keypair using injected randomness.
-    /// Returns `(public_key_b64, private_key_b64)`.
-    fn generate_ml_kem_keypair(rng: &mut (impl CryptoRng + RngCore)) -> (String, String) {
-        let mut randomness = Zeroizing::new([0u8; ML_KEM_KEYGEN_RANDOMNESS_LEN]);
-        rng.fill_bytes(randomness.as_mut());
-        let key_pair = libcrux_ml_kem::mlkem768::generate_key_pair(*randomness);
-        (
-            BASE64.encode(key_pair.public_key().as_ref()),
-            BASE64.encode(key_pair.private_key().as_ref()),
         )
     }
 }
@@ -783,5 +784,61 @@ mod tests {
         let added = identity.ensure_signing_keys(&mut OsRng);
         assert!(!added);
         assert_eq!(identity.signing_key, original_sk);
+    }
+
+    // -- Identity::from_mnemonic --
+
+    use crate::crypto::generate_mnemonic;
+
+    /// Same phrase under two different DIDs must yield identical keys —
+    /// the DID is stored, not folded into derivation.
+    #[test]
+    fn from_mnemonic_did_is_stored_not_derived() {
+        let mnemonic = generate_mnemonic(&mut OsRng);
+        let alice = Identity::from_mnemonic(&mnemonic, "did:plc:alice");
+        let bob = Identity::from_mnemonic(&mnemonic, "did:plc:bob");
+        assert_eq!(alice.x25519_public_key, bob.x25519_public_key);
+        assert_eq!(alice.x25519_private_key, bob.x25519_private_key);
+        assert_eq!(alice.ml_kem_public_key, bob.ml_kem_public_key);
+        assert_eq!(alice.ml_kem_private_key, bob.ml_kem_private_key);
+        assert_eq!(alice.signing_key, bob.signing_key);
+        assert_eq!(alice.verify_key, bob.verify_key);
+        assert_ne!(alice.did, bob.did);
+    }
+
+    /// Privacy guard: serialized form must not expose the phrase under any
+    /// field name that someone might add tomorrow. If you do add a phrase-
+    /// bearing field to `Identity` later, fix the design — don't change this
+    /// test.
+    #[test]
+    fn from_mnemonic_does_not_leak_phrase_in_serde() {
+        let mnemonic = generate_mnemonic(&mut OsRng);
+        let phrase = mnemonic.to_string();
+        let identity = Identity::from_mnemonic(&mnemonic, "did:plc:test");
+        let json = serde_json::to_value(&identity).unwrap();
+        assert!(json.get("mnemonic").is_none());
+        assert!(json.get("seed_phrase").is_none());
+        assert!(json.get("phrase").is_none());
+        let serialized = serde_json::to_string(&identity).unwrap();
+        for word in phrase.split_whitespace() {
+            assert!(
+                !serialized.contains(word),
+                "serialized identity must not contain mnemonic word {word:?}",
+            );
+        }
+    }
+
+    /// Round-trip the on-disk identity shape — fields decode back to the
+    /// raw byte lengths we declared and the public halves match what
+    /// `derive_keys_from_mnemonic` produced.
+    #[test]
+    fn from_mnemonic_round_trips_byte_lengths() {
+        let mnemonic = generate_mnemonic(&mut OsRng);
+        let identity = Identity::from_mnemonic(&mnemonic, "did:plc:test");
+        assert_eq!(identity.x25519_public_key_bytes().unwrap().len(), 32);
+        assert_eq!(identity.x25519_private_key_bytes().unwrap().len(), 32);
+        assert_eq!(identity.ml_kem_public_key_bytes().unwrap().len(), 1184);
+        assert_eq!(identity.ml_kem_private_key_bytes().unwrap().len(), 2400);
+        assert!(identity.has_signing_keys());
     }
 }

@@ -2,6 +2,8 @@
 
 Quick-reference for every algorithm, constant, and key type in the system. For the conceptual overview (why these choices, what the tradeoffs are), see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+All client-side cryptography lives in the [`opake-crypto`](../crates/opake-crypto/) crate — its own audit boundary, no I/O, no platform dependencies. Constants, types, and operations referenced below all sit there unless otherwise noted; `opake-core::crypto` is a re-export alias for backwards compatibility with existing call sites.
+
 ## Algorithms
 
 | Name | Use | Library |

@@ -1,4 +1,4 @@
-// opake-core: encryption, record types, and XRPC client.
+// opake-core: record types, XRPC client, indexer integrations.
 //
 // This crate is the shared foundation for both the CLI (opake-cli) and the
 // browser client (opake-web, via wasm-pack). Nothing in here depends on a
@@ -6,14 +6,14 @@
 //
 // Network I/O is injected via the `client::Transport` trait — the CLI provides
 // a reqwest-based implementation, the SPA provides one using browser fetch.
-// Crypto is synchronous and pure. Records are just types.
-
-// Allows `::opake_core::crypto::Redacted` to resolve inside this crate,
-// matching the path the RedactedDebug derive macro generates.
-extern crate self as opake_core;
+// Cryptographic primitives live in the sibling `opake-crypto` crate; the
+// `crypto` re-export below gives consumers a single `opake_core::crypto::*`
+// path for both record-shaped wire types and pure crypto operations.
 
 pub use opake_derive::signoff;
 pub use opake_derive::RedactedDebug;
+
+pub use opake_crypto as crypto;
 
 pub fn binding_check() -> &'static str {
     log::trace!("binding_check called");
@@ -24,7 +24,6 @@ pub mod account_config;
 pub mod atproto;
 pub mod cabinet;
 pub mod client;
-pub mod crypto;
 pub mod directories;
 pub mod documents;
 pub mod error;

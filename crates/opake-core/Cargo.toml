@@ -13,6 +13,7 @@ dns = ["dep:hickory-resolver"]
 native = ["reqwest-transport", "dns"]
 
 [dependencies]
+opake-crypto = { path = "../opake-crypto" }
 opake-derive = { path = "../opake-derive" }
 base64.workspace = true
 ed25519-dalek.workspace = true
@@ -23,40 +24,35 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+# Zeroizing<...> for in-memory secret handling (pair flow, decryption buffers,
+# storage-side signing-key migration). x25519-dalek / libcrux-ml-kem are pulled
+# in transitively via opake-crypto — opake-core never reaches into them
+# directly.
+zeroize.workspace = true
+
+# DPoP JWT thumbprint + OAuth PKCE challenge.
+sha2.workspace = true
+
 reqwest = { workspace = true, optional = true }
 bytes = { version = "1", optional = true }
 hickory-resolver = { version = "0.24", optional = true }
 
-aes-gcm = "0.10"
+# DPoP proofs and OAuth token-binding — kept here because they're a client
+# concern, not a primitive-crypto one.
 p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
 urlencoding = "2"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-aes-kw = { version = "0.2", features = ["alloc"] }
-hkdf = "0.12"                   # HKDF key derivation (RFC 5869)
-pbkdf2 = "0.12"                 # PBKDF2-HMAC-SHA512 for BIP-39 seed derivation
-sha2 = "0.10"                   # SHA-256/512 — used by HKDF and PBKDF2
-zeroize = { version = "1", features = ["derive"] }  # Zero sensitive memory on drop
-
-# ML-KEM-768 implementation for the hybrid X25519+ML-KEM-768 KEM.
-# Construction aligned with BSI TR-02102 (German federal cryptographic
-# recommendations) and ANSSI guidance for post-quantum migration. The
-# ML-KEM-768 algorithm itself is specified in NIST FIPS-203.
-#
-# `libcrux-ml-kem` is from Cryspen (formal-verification team based in
-# Aarhus / Berlin); the implementation is verified for panic freedom,
-# functional correctness, and secret independence via the hax toolchain.
-#
-# Default features disabled to skip the `rand` feature (we inject
-# randomness explicitly throughout opake-core) and the unused
-# mlkem512 / mlkem1024 variants.
-libcrux-ml-kem = { version = "0.0.8", default-features = false, features = ["mlkem768"] }
 
 [dev-dependencies]
 rand_chacha = "0.3"             # Deterministic RNG for reproducible test vectors
 tokio = { workspace = true, features = ["macros", "rt"] }
+# Direct deps for test fixtures that need deterministic keypairs from fixed seeds.
+# Production opake-core reaches into them only via re-exports from opake-crypto.
+x25519-dalek.workspace = true
+libcrux-ml-kem.workspace = true
 
-# aes-gcm pulls in getrandom transitively. On wasm32, getrandom needs the
-# "js" feature to use crypto.getRandomValues() instead of OS-level randomness.
+# aes-gcm (via opake-crypto) pulls in getrandom transitively. On wasm32,
+# getrandom needs the "js" feature to use crypto.getRandomValues() instead
+# of OS-level randomness.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 js-sys = "0.3"

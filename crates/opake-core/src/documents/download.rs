@@ -22,7 +22,7 @@ pub(super) fn decrypt_with_nonce(
     })?;
 
     trace!("decrypting {} bytes", ciphertext.len());
-    crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })
+    Ok(crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })?)
 }
 
 /// Resolve a document's name from encrypted metadata if present, falling
@@ -71,11 +71,11 @@ fn unwrap_document_key(
                         "no wrapped key for DID ({did}) — you may not have access"
                     ))
                 })?;
-            crypto::unwrap_key(
+            Ok(crypto::unwrap_key(
                 wrapped,
                 private_keys,
                 &crypto::WrapContext::Document { uri: document_uri },
-            )
+            )?)
         }
         Encryption::Keyring(kr_enc) => {
             let keys = keys.ok_or_else(|| {
@@ -94,7 +94,7 @@ fn unwrap_document_key(
                 .wrapped_content_key
                 .decode()
                 .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
-            crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk)
+            Ok(crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk)?)
         }
     }
 }

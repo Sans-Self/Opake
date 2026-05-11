@@ -1,31 +1,37 @@
-// Client-side encryption primitives.
+// opake-crypto: client-side cryptographic primitives.
 //
+// Lets the `RedactedDebug` derive macro's `::opake_crypto::Redacted` path
+// resolve inside this crate.
+extern crate self as opake_crypto;
+
 // NOTE TO EDITORS:
 // Opake uses a dual-documentation system. If you modify the cryptographic
-// primitives, key wrapping schemes, or security model in this file, you
+// primitives, key wrapping schemes, or security model in this crate, you
 // MUST also update the corresponding MDX content in `apps/web/src/content/`
 // to prevent documentation drift.
 //
-// This module handles AES-256-GCM content encryption and asymmetric key
-// wrapping. Wrapping uses the hybrid X25519 + ML-KEM-768 KEM
-// (`x25519-mlkem768-hkdf-a256kw-v2`) — defends against harvest-now-decrypt-later
-// per BSI TR-02102 (Germany) and ANSSI (France) guidance for hybrid
-// post-quantum key establishment. The pair flow generates an ephemeral
-// hybrid bundle on the new device so the same construction applies.
+// AES-256-GCM content encryption and asymmetric key wrapping. Wrapping uses
+// the hybrid X25519 + ML-KEM-768 KEM (`x25519-mlkem768-hkdf-a256kw-v2`) —
+// defends against harvest-now-decrypt-later per BSI TR-02102 (Germany) and
+// ANSSI (France) guidance for hybrid post-quantum key establishment. The pair
+// flow generates an ephemeral hybrid bundle on the new device so the same
+// construction applies.
 //
-// The module has no I/O — it takes bytes in and returns bytes out. The
-// calling layer (CLI or WASM) handles reading/writing files and talking
-// to the PDS. Randomness is injected via CryptoRng + RngCore parameters
-// so the module stays platform-agnostic — native callers pass OsRng,
-// WASM callers pass a crypto.getRandomValues()-backed RNG.
+// The crate has no I/O — it takes bytes in and returns bytes out. The
+// calling layer handles reading/writing files and talking to the PDS.
+// Randomness is injected via CryptoRng + RngCore parameters so the crate
+// stays platform-agnostic — native callers pass OsRng, WASM callers pass a
+// crypto.getRandomValues()-backed RNG.
 
+mod at_bytes;
 mod content;
+pub mod error;
 mod key_wrapping;
 mod keyring_wrapping;
 mod metadata;
 mod mnemonic;
-
-use crate::records::SCHEMA_VERSION;
+mod secrets;
+mod wire;
 
 /// Re-export so callers don't need direct rand_core / x25519_dalek / ed25519_dalek dependencies.
 pub use aes_gcm::aead::rand_core::{CryptoRng, OsRng, RngCore};
@@ -37,8 +43,9 @@ pub use x25519_dalek::{
     PublicKey as X25519DalekPublicKey, StaticSecret as X25519DalekStaticSecret,
 };
 
-// Re-export all public items at the `crypto::` level.
+pub use at_bytes::AtBytes;
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
+pub use error::Error;
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
 // `WrapContext` is part of the public wrap/unwrap surface — callers must
 // pass one to scope their wrap to a record context.
@@ -48,9 +55,17 @@ pub use metadata::{
     KeyringMetadata,
 };
 pub use mnemonic::{
-    derive_identity_from_mnemonic, format_mnemonic_grid, generate_mnemonic, parse_mnemonic,
+    derive_keys_from_mnemonic, format_mnemonic_grid, generate_mnemonic, parse_mnemonic,
     parse_mnemonic_grid, Mnemonic,
 };
+pub use secrets::DerivedSecrets;
+pub use wire::{EncryptedMetadata, WrappedKey};
+
+/// The current app.opake.* schema version this crate implements. Records
+/// with version <= this are compatible; higher versions must be rejected by
+/// the caller. Also folded into the HKDF info string for domain separation
+/// so wraps from one schema version cannot be replayed under a later one.
+pub const SCHEMA_VERSION: u32 = 1;
 
 const CONTENT_KEY_LEN: usize = 32;
 pub const AES_GCM_NONCE_LEN: usize = 12;
@@ -90,7 +105,7 @@ pub(crate) const ML_KEM_SS_LEN: usize = 32;
 
 /// ML-KEM-768 KeyGen randomness: 32-byte seed `d` ‖ 32-byte implicit-rejection
 /// seed `z`. NIST FIPS-203 §7.1.
-pub(crate) const ML_KEM_KEYGEN_RANDOMNESS_LEN: usize = 64;
+pub const ML_KEM_KEYGEN_RANDOMNESS_LEN: usize = 64;
 
 /// ML-KEM-768 Encaps randomness: 32-byte message `m`. NIST FIPS-203 §7.2.
 pub(crate) const ML_KEM_ENCAP_RANDOMNESS_LEN: usize = 32;
@@ -145,7 +160,7 @@ impl<const N: usize> std::fmt::Debug for Redacted<'_, Option<[u8; N]>> {
 ///
 /// Zeroized on drop — RedactedDebug auto-generates Zeroize + Drop for
 /// `#[redact]` fields.
-#[derive(Clone, crate::RedactedDebug)]
+#[derive(Clone, opake_derive::RedactedDebug)]
 pub struct ContentKey(#[redact] pub [u8; CONTENT_KEY_LEN]);
 
 /// An X25519 public key: 32 raw bytes.

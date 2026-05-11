@@ -77,10 +77,9 @@ fn tampered_nonce_fails() {
 
 /// Owned hybrid keypair for crypto-level tests.
 ///
-/// Local helper duplicating the structure of `test_utils::TestKeys` because
-/// crypto_tests is in the same module as the implementation it exercises;
-/// pulling in the workspace-wide test helper would add a circular module
-/// dependency for what amounts to four byte arrays.
+/// Local helper duplicating the structure of the workspace `TestKeys`
+/// helper because crypto_tests is internal to opake-crypto; pulling in
+/// the workspace-wide helper would add a circular crate dependency.
 struct LocalKeys {
     x25519_pub: X25519PublicKey,
     x25519_priv: Zeroizing<X25519PrivateKey>,
@@ -361,8 +360,6 @@ fn cross_context_splice_rejected() {
 fn unwrap_rejects_unknown_algo() {
     // Build a `WrappedKey` with an unsupported `algo` string — `unwrap_key`
     // must refuse rather than try to parse it as a hybrid envelope.
-    use crate::atproto::AtBytes;
-    use crate::records::WrappedKey;
     let keys = LocalKeys::generate();
     let bogus = WrappedKey {
         did: "did:plc:test".into(),

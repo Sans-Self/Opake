@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/opake-core", "crates/opake-derive", "crates/opake-wasm", "apps/cli"]
+members = [
+    "crates/opake-core",
+    "crates/opake-crypto",
+    "crates/opake-derive",
+    "crates/opake-wasm",
+    "apps/cli",
+]
 resolver = "2"
 
 [workspace.package]
@@ -42,3 +48,18 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 toml = "1"
+
+# Cryptography dependencies shared by opake-crypto. Versions pinned here so
+# both the workspace member crate and any future audit cross-references share
+# one source of truth.
+aes-gcm = "0.10"
+aes-kw = { version = "0.2", features = ["alloc"] }
+hkdf = "0.12"
+# ML-KEM-768 implementation (Cryspen, Aarhus / Berlin). Default features
+# disabled to skip the `rand` feature (we inject randomness explicitly) and
+# the unused mlkem512 / mlkem1024 variants.
+libcrux-ml-kem = { version = "0.0.8", default-features = false, features = ["mlkem768"] }
+pbkdf2 = "0.12"
+sha2 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = { version = "1", features = ["derive"] }
