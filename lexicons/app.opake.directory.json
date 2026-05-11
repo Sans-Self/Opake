@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A directory in the personal cloud. Contains an ordered list of AT-URIs referencing documents or other directories. The root directory is a singleton at rkey 'self'. Directory name is encrypted in encryptedMetadata.",
+      "description": "A directory in the personal cloud, or one segment of a workspace directory chain. Each entry pairs an AT-URI with the CID of the target record at the moment this directory was written, so the indexer can detect chain forks when two writers supersede the same prior directory concurrently. The root directory of a personal cabinet is a singleton at rkey 'self'. A workspace directory at a given path is the head of a supersede chain — the canonical state is whichever directory record has no successor pointing at it. Directory name is encrypted in encryptedMetadata.",
       "key": "any",
       "record": {
         "type": "object",
@@ -29,12 +29,34 @@
           },
           "entries": {
             "type": "array",
-            "description": "Ordered list of AT-URIs of child documents or directories.",
-            "items": { "type": "string", "format": "at-uri" },
+            "description": "Ordered list of child entries. Each entry pins an AT-URI plus the CID of the target record at the moment this directory was written. Targets may be documents or other directories; for nested directories the targetCid is the head of that child path's chain at write time.",
+            "items": { "type": "ref", "ref": "#listingEntry" },
             "maxLength": 10000
+          },
+          "supersedes": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the prior canonical directory at this path, if any. Absent on the genesis record of a chain. Indexers walk this back-edge to verify the chain and detect forks (two records superseding the same prior URI)."
           },
           "createdAt": { "type": "string", "format": "datetime" },
           "modifiedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+
+    "listingEntry": {
+      "type": "object",
+      "description": "One entry in a directory's listing: the AT-URI of the target record (document or directory) plus a CID pinning the version of that record observed at directory-write time. The CID lets the indexer detect concurrent supersedes that conflict on a child path without re-fetching every target.",
+      "required": ["target", "targetCid"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the entry — either an app.opake.document or an app.opake.directory."
+        },
+        "targetCid": {
+          "type": "cid-link",
+          "description": "CID of the target record at the moment this directory was written. For a child directory, this is the head of that path's chain at write time."
         }
       }
     }

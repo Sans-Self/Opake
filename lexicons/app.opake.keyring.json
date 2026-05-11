@@ -21,11 +21,11 @@
     },
     "main": {
       "type": "record",
-      "description": "A named keyring for group-based access control. Contains a group symmetric key wrapped to each member's DID public key. Analogous to git-crypt's named keys — documents encrypted under this keyring are accessible to all members without per-document key management.",
+      "description": "A named keyring for group-based access control, or one segment of a keyring supersede chain. Contains a group symmetric key wrapped to each member's DID public key. Manager-authority only writes; membership, rotation, rename, and relocation all go through supersede. The canonical keyring is the head of the chain — whichever record has no successor pointing at it. Analogous to git-crypt's named keys, but with the chain as the authority structure rather than a single canonical owner.",
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["opakeVersion", "algo", "owner", "members", "encryptedMetadata", "createdAt"],
+        "required": ["opakeVersion", "algo", "members", "encryptedMetadata", "createdAt"],
         "properties": {
           "opakeVersion": {
             "type": "integer",
@@ -37,10 +37,10 @@
             "description": "The symmetric algorithm the group key is intended for.",
             "knownValues": ["aes-256-gcm"]
           },
-          "owner": {
+          "supersedes": {
             "type": "string",
-            "format": "did",
-            "description": "DID of the canonical keyring owner. The owner's copy is authoritative for membership, rotation, and keyHistory."
+            "format": "at-uri",
+            "description": "AT-URI of the prior canonical keyring this record supersedes, if any. Absent on the genesis keyring. Indexers walk this back-edge to verify the chain and check that the supersede was authored by a manager of the prior keyring."
           },
           "members": {
             "type": "array",

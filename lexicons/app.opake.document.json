@@ -33,6 +33,11 @@
             "type": "ref",
             "ref": "app.opake.defs#encryptedMetadata"
           },
+          "supersedes": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of an earlier document this record supersedes, if any. History annotation only — non-load-bearing for read paths; indexers may surface it for lineage queries. Absent on a fresh document."
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime"
