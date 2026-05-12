@@ -52,7 +52,6 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
     ];
 
     let keyring = Keyring::new(
-        TEST_DID.into(),
         members,
         encrypted_metadata,
         "2026-03-01T00:00:00Z".into(),

@@ -68,7 +68,7 @@ fn sse_dir_upsert(uri: &str, name: &str, entries: Vec<String>) -> SseEvent {
     SseEvent::DirectoryUpsert(SseDirectoryRecord {
         directory_uri: uri.into(),
         owner_did: TEST_DID.into(),
-        entries: dir.entries.clone(),
+        entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
         keyring_uri: None,
@@ -484,7 +484,7 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
         &SseDirectoryRecord {
             directory_uri: WS_ROOT_URI.into(),
             owner_did: TEST_DID.into(),
-            entries: dir.entries.clone(),
+            entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
             encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
             key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
             keyring_uri: Some(WS_URI.into()),

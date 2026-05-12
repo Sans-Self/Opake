@@ -204,7 +204,6 @@ fn two_member_keyring_with_real_crypto(
         .collect();
 
     let keyring = Keyring::new(
-        OWNER_DID.into(),
         keyring_members,
         encrypted_metadata,
         "2026-03-01T00:00:00Z".into(),

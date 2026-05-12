@@ -36,7 +36,7 @@ pub use defs::{
     DirectKeyWrapping, EncryptedMetadata, EncryptionEnvelope, KeyWrapping, KeyringKeyWrapping,
     KeyringMember, KeyringRef, Role, WrappedKey,
 };
-pub use directory::Directory;
+pub use directory::{Directory, ListingEntry};
 pub use directory_update::{DirectoryUpdate, DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION};
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
 pub use document_update::{DocumentUpdate, DocumentUpdateRecord, DOCUMENT_UPDATE_COLLECTION};
@@ -229,8 +229,14 @@ mod tests {
     fn directory_with_entries_roundtrips() {
         let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         directory.entries = vec![
-            "at://did:plc:test/app.opake.document/abc".into(),
-            "at://did:plc:test/app.opake.directory/def".into(),
+            ListingEntry::new(
+                "at://did:plc:test/app.opake.document/abc",
+                "bafydoc",
+            ),
+            ListingEntry::new(
+                "at://did:plc:test/app.opake.directory/def",
+                "bafydir",
+            ),
         ];
         directory.modified_at = Some("2026-03-01T12:00:00Z".into());
 
@@ -238,9 +244,33 @@ mod tests {
         let parsed: Directory = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.entries.len(), 2);
-        assert!(parsed.entries[0].contains("document"));
-        assert!(parsed.entries[1].contains("directory"));
+        assert!(parsed.entries[0].target.contains("document"));
+        assert!(parsed.entries[1].target.contains("directory"));
+        assert_eq!(parsed.entries[0].target_cid.cid, "bafydoc");
         assert_eq!(parsed.modified_at.unwrap(), "2026-03-01T12:00:00Z");
+    }
+
+    #[test]
+    fn directory_supersedes_omitted_when_none() {
+        let directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
+        let json = serde_json::to_value(&directory).unwrap();
+        assert!(
+            json.get("supersedes").is_none(),
+            "absent supersedes should be omitted from serialization"
+        );
+    }
+
+    #[test]
+    fn directory_supersedes_roundtrips() {
+        let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
+        directory.supersedes = Some("at://did:plc:test/app.opake.directory/prior".into());
+
+        let json = serde_json::to_string(&directory).unwrap();
+        let parsed: Directory = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.supersedes.as_deref(),
+            Some("at://did:plc:test/app.opake.directory/prior")
+        );
     }
 
     #[test]
@@ -250,7 +280,6 @@ mod tests {
         let json = serde_json::json!({
             "opakeVersion": 1,
             "algo": "aes-256-gcm",
-            "owner": "did:plc:test",
             "members": [{
                 "wrappedKey": {
                     "did": "did:plc:test",
@@ -274,7 +303,6 @@ mod tests {
     #[test]
     fn keyring_key_history_omitted_when_empty() {
         let keyring = Keyring::new(
-            "did:plc:test".into(),
             vec![KeyringMember {
                 wrapped_key: WrappedKey {
                     did: "did:plc:test".into(),
@@ -300,6 +328,39 @@ mod tests {
         assert!(
             json.get("keyHistory").is_none(),
             "empty key_history should be omitted from serialization"
+        );
+    }
+
+    #[test]
+    fn keyring_supersedes_roundtrips() {
+        let mut keyring = Keyring::new(
+            vec![KeyringMember {
+                wrapped_key: WrappedKey {
+                    did: "did:plc:test".into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+                },
+                role: Role::Manager,
+            }],
+            EncryptedMetadata {
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                nonce: AtBytes {
+                    encoded: "BBBB".into(),
+                },
+            },
+            "2026-03-01T00:00:00Z".into(),
+        );
+        keyring.supersedes = Some("at://did:plc:test/app.opake.keyring/prior".into());
+
+        let json = serde_json::to_string(&keyring).unwrap();
+        let parsed: Keyring = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.supersedes.as_deref(),
+            Some("at://did:plc:test/app.opake.keyring/prior")
         );
     }
 

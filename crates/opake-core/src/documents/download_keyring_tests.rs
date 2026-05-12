@@ -151,7 +151,6 @@ fn keyring_document(fixture: &KeyringFixture) -> Document {
 
 fn keyring_record(fixture: &KeyringFixture) -> Keyring {
     Keyring::new(
-        OWNER_DID.into(),
         vec![
             KeyringMember {
                 wrapped_key: fixture.owner_wrapped_gk.clone(),

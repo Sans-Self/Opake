@@ -36,6 +36,11 @@ pub struct Document {
     pub blob: BlobRef,
     pub encryption: Encryption,
     pub encrypted_metadata: EncryptedMetadata,
+    /// AT-URI of an earlier document this record supersedes, if any. History
+    /// annotation only — non-load-bearing for read paths; indexers may
+    /// surface it for lineage queries. Absent on a fresh document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<String>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
@@ -53,6 +58,7 @@ impl Document {
             blob,
             encryption,
             encrypted_metadata,
+            supersedes: None,
             created_at,
             modified_at: None,
         }

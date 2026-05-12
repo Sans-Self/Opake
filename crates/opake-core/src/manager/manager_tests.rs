@@ -116,8 +116,8 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     assert_eq!(update_op["collection"], "app.opake.directory");
     let updated: Directory = serde_json::from_value(update_op["value"].clone()).unwrap();
     assert_eq!(
-        updated.entries,
-        vec![OTHER_DOC_URI.to_string()],
+        updated.entries.iter().map(|e| e.target.as_str()).collect::<Vec<_>>(),
+        vec![OTHER_DOC_URI],
         "deleted doc URI must be pruned from parent.entries; siblings preserved",
     );
     assert_eq!(

@@ -489,6 +489,10 @@ fn keyring_directory(
     )
     .unwrap();
 
+    let entries = entries
+        .into_iter()
+        .map(|target| crate::records::ListingEntry::new(target, "bafytest"))
+        .collect();
     Directory {
         entries,
         ..Directory::new(
@@ -618,7 +622,7 @@ fn sse_record(uri: &str, dir: &Directory, keyring_uri: Option<&str>) -> SseDirec
     SseDirectoryRecord {
         directory_uri: uri.into(),
         owner_did: TEST_DID.into(),
-        entries: dir.entries.clone(),
+        entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
         keyring_uri: keyring_uri.map(String::from),

@@ -16,13 +16,18 @@ pub struct Keyring {
     #[serde(default = "default_version")]
     pub opake_version: u32,
     pub algo: String,
-    pub owner: String,
     pub members: Vec<KeyringMember>,
     #[serde(default)]
     pub rotation: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_history: Vec<KeyHistoryEntry>,
     pub encrypted_metadata: EncryptedMetadata,
+    /// AT-URI of the prior canonical keyring this record supersedes, if any.
+    /// Absent on the genesis keyring of a workspace. Indexers walk this
+    /// back-edge to verify the chain and check that the supersede was
+    /// authored by a manager of the prior keyring.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<String>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
@@ -31,7 +36,6 @@ pub struct Keyring {
 impl Keyring {
     /// New keyring with current schema version and defaults.
     pub fn new(
-        owner: String,
         members: Vec<KeyringMember>,
         encrypted_metadata: EncryptedMetadata,
         created_at: String,
@@ -39,11 +43,11 @@ impl Keyring {
         Self {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            owner,
             members,
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata,
+            supersedes: None,
             created_at,
             modified_at: None,
         }

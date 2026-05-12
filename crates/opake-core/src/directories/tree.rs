@@ -157,7 +157,7 @@ impl DirectoryTree {
                         name: String::new(),
                         key_wrapping: dir.key_wrapping,
                         encrypted_metadata: dir.encrypted_metadata,
-                        entries: dir.entries,
+                        entries: dir.entries.into_iter().map(|e| e.target).collect(),
                     },
                 )
             })

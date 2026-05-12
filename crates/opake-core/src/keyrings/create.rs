@@ -63,7 +63,6 @@ pub async fn create_keyring(
     let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, rng)?;
 
     let keyring = Keyring::new(
-        params.owner_did.to_string(),
         keyring_members,
         encrypted_metadata,
         params.created_at.to_string(),

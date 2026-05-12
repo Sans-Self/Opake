@@ -4,7 +4,7 @@ use crate::atproto;
 use crate::client::ApplyWriteOp;
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{self, Directory};
+use crate::records::{self, Directory, ListingEntry};
 
 use super::DIRECTORY_COLLECTION;
 
@@ -28,13 +28,19 @@ pub async fn prepare_add_entry(
     let mut directory: Directory = serde_json::from_value(entry.value)?;
     records::check_version(directory.opake_version)?;
 
-    if directory.entries.iter().any(|e| e == entry_uri) {
+    if directory.entries.iter().any(|e| e.target == entry_uri) {
         return Err(Error::InvalidRecord(format!(
             "{entry_uri} is already in this directory"
         )));
     }
 
-    directory.entries.push(entry_uri.to_string());
+    // Phase 2 WIP: cabinet writes still go through this path and don't yet
+    // compute the target CID client-side. Cascade rewrite (Phase 2c) replaces
+    // this whole helper with `cascade::build_listing_entry` that pre-resolves
+    // the CID from the chain head it just wrote.
+    directory
+        .entries
+        .push(ListingEntry::new(entry_uri, "pending"));
     directory.modified_at = Some(modified_at.to_string());
 
     Ok(ApplyWriteOp::Update {
@@ -65,7 +71,7 @@ pub async fn prepare_remove_entry(
     records::check_version(directory.opake_version)?;
 
     let original_len = directory.entries.len();
-    directory.entries.retain(|e| e != entry_uri);
+    directory.entries.retain(|e| e.target != entry_uri);
 
     if directory.entries.len() == original_len {
         return Err(Error::NotFound(format!(
@@ -149,7 +155,9 @@ mod tests {
                 let op = &writes[0];
                 assert_eq!(op["collection"], "app.opake.directory");
                 let updated: Directory = serde_json::from_value(op["value"].clone()).unwrap();
-                assert_eq!(updated.entries, vec![DOC_URI]);
+                let targets: Vec<&str> =
+                    updated.entries.iter().map(|e| e.target.as_str()).collect();
+                assert_eq!(targets, vec![DOC_URI]);
                 assert_eq!(updated.modified_at.unwrap(), "2026-03-01T12:00:00Z");
             }
             _ => panic!("expected JSON body"),
@@ -205,7 +213,9 @@ mod tests {
                 let writes = v["writes"].as_array().unwrap();
                 let updated: Directory =
                     serde_json::from_value(writes[0]["value"].clone()).unwrap();
-                assert_eq!(updated.entries, vec![DOC_URI_2]);
+                let targets: Vec<&str> =
+                    updated.entries.iter().map(|e| e.target.as_str()).collect();
+                assert_eq!(targets, vec![DOC_URI_2]);
                 assert!(updated.modified_at.is_some());
             }
             _ => panic!("expected JSON body"),

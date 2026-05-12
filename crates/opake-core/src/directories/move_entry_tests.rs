@@ -82,7 +82,9 @@ async fn move_doc_into_directory() {
         Some(RequestBody::Json(v)) => {
             let writes = v["writes"].as_array().unwrap();
             let dir: Directory = serde_json::from_value(writes[0]["value"].clone()).unwrap();
-            assert_eq!(dir.entries, vec![DOC_URI]);
+            let targets: Vec<&str> =
+                dir.entries.iter().map(|e| e.target.as_str()).collect();
+            assert_eq!(targets, vec![DOC_URI]);
         }
         _ => panic!("expected JSON body"),
     }

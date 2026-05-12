@@ -68,11 +68,11 @@ mod tests {
         Keyring {
             opake_version: records::SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            owner: "did:plc:owner".into(),
             members,
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
+            supersedes: None,
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }

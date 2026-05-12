@@ -109,7 +109,6 @@ mod tests {
         Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            owner: owner_did.into(),
             members: vec![KeyringMember {
                 wrapped_key: WrappedKey {
                     did: owner_did.into(),
@@ -123,6 +122,7 @@ mod tests {
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
+            supersedes: None,
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }

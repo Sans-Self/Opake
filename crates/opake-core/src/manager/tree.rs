@@ -253,8 +253,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
             if let Some(entries) = adds_by_dir.get(*dir_uri) {
                 for entry_uri in entries {
-                    if !directory.entries.iter().any(|e| e == entry_uri) {
-                        directory.entries.push(entry_uri.clone());
+                    if !directory.entries.iter().any(|e| e.target == *entry_uri) {
+                        // Phase 2 WIP: this whole proposal-apply path goes away
+                        // in the curatorial-supersede rewrite; placeholder CID
+                        // exists only to keep the dead branch compiling.
+                        directory
+                            .entries
+                            .push(crate::records::ListingEntry::new(entry_uri, "pending"));
                         applied += 1;
                         changed = true;
                     }
@@ -264,7 +269,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             if let Some(entries) = removes_by_dir.get(*dir_uri) {
                 for entry_uri in entries {
                     let before = directory.entries.len();
-                    directory.entries.retain(|e| e != entry_uri);
+                    directory.entries.retain(|e| e.target != *entry_uri);
                     if directory.entries.len() < before {
                         applied += 1;
                         changed = true;

@@ -227,6 +227,10 @@ pub(crate) mod tests {
     }
 
     pub fn dummy_directory_with_entries(name: &str, entries: Vec<String>) -> Directory {
+        let entries = entries
+            .into_iter()
+            .map(|target| crate::records::ListingEntry::new(target, "bafytest"))
+            .collect();
         Directory {
             entries,
             ..dummy_directory(name)
