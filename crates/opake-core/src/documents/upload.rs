@@ -190,7 +190,7 @@ async fn encrypt_and_upload(
 ) -> Result<String, Error> {
     let (record, _tid) = prepare_upload(client, params, rng, "test-tid").await?;
     let record_ref = client
-        .create_record(super::DOCUMENT_COLLECTION, &record)
+        .create_record(super::DOCUMENT_COLLECTION, None, &record)
         .await?;
     Ok(record_ref.uri)
 }

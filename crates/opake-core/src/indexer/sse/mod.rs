@@ -43,7 +43,7 @@ pub mod reqwest_connection;
 
 pub use consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
 pub use events::{
-    SseDeletePayload, SseDirectoryRecord, SseDirectoryUpdate, SseDocumentRecord, SseDocumentUpdate,
-    SseEvent, SseGrantRecord, SseKeyringRecord, SseKeyringUpdate,
+    SseChainForked, SseDeletePayload, SseDirectoryRecord, SseDocumentRecord, SseEvent,
+    SseGrantRecord, SseKeyringRecord,
 };
 pub use transport::{SseConnection, SseTransport};

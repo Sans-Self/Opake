@@ -3,7 +3,6 @@ use crate::client::Transport;
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories;
 use crate::error::Error;
-use crate::records::{DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION};
 use crate::storage::Storage;
 
 use super::types::{FileContext, MutationOutcome, UploadResult};
@@ -83,14 +82,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     &cabinet.public_keys(),
                     &mut self.opake.rng,
                 )?;
-                let uri =
+                let dir_ref =
                     directories::create_directory(&mut self.opake.client, kw, meta, &now).await?;
 
-                directories::add_entry(&mut self.opake.client, &parent, &uri, &now).await?;
+                directories::add_entry(
+                    &mut self.opake.client,
+                    &parent,
+                    &dir_ref.uri,
+                    &dir_ref.cid,
+                    &now,
+                )
+                .await?;
                 self.invalidate_directory_cache().await;
 
                 Ok(UploadResult {
-                    uri,
+                    uri: dir_ref.uri,
                     outcome: MutationOutcome::Applied,
                 })
             }
@@ -103,29 +109,28 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     ws.rotation,
                     &mut self.opake.rng,
                 )?;
-                let uri =
+                let dir_ref =
                     directories::create_directory(&mut self.opake.client, kw, meta, &now).await?;
 
                 let dir_owner = atproto::parse_at_uri(&parent)?.authority;
-                if dir_owner == self.opake.did {
-                    directories::add_entry(&mut self.opake.client, &parent, &uri, &now).await?;
-                    self.invalidate_directory_cache().await;
-                    Ok(UploadResult {
-                        uri,
-                        outcome: MutationOutcome::Applied,
-                    })
-                } else {
-                    let update =
-                        DirectoryUpdateRecord::add_entry(ws.uri.clone(), parent, uri.clone(), now);
-                    self.opake
-                        .client
-                        .create_record(DIRECTORY_UPDATE_COLLECTION, &update)
-                        .await?;
-                    Ok(UploadResult {
-                        uri: uri.clone(),
-                        outcome: MutationOutcome::Proposed { update_uri: uri },
-                    })
+                if dir_owner != self.opake.did {
+                    return Err(Error::Unimplemented(
+                        "workspace member directory creation (cascade)".into(),
+                    ));
                 }
+                directories::add_entry(
+                    &mut self.opake.client,
+                    &parent,
+                    &dir_ref.uri,
+                    &dir_ref.cid,
+                    &now,
+                )
+                .await?;
+                self.invalidate_directory_cache().await;
+                Ok(UploadResult {
+                    uri: dir_ref.uri,
+                    outcome: MutationOutcome::Applied,
+                })
             }
         }
     }
@@ -166,7 +171,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Delete a directory and remove it from its parent.
     ///
-    /// For workspace members, the parent entry removal is proposed.
+    /// Today the parent directory record must live on the caller's PDS.
+    /// The federation rewrite replaces this with a curatorial-supersede
+    /// cascade any chain participant can author.
     #[::opake_derive::signoff]
     pub async fn delete_directory(
         &mut self,
@@ -177,45 +184,22 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         directories::delete_directory(&mut self.opake.client, directory_uri).await?;
 
-        if let Some(parent) = parent_directory_uri {
-            match &self.context {
-                FileContext::Cabinet(_) => {
-                    directories::remove_entry(&mut self.opake.client, parent, directory_uri, &now)
-                        .await?;
-                    self.invalidate_directory_cache().await;
-                    Ok(MutationOutcome::Applied)
-                }
-                FileContext::Workspace(ws) => {
-                    let dir_owner = atproto::parse_at_uri(parent)?.authority;
-                    if dir_owner == self.opake.did {
-                        directories::remove_entry(
-                            &mut self.opake.client,
-                            parent,
-                            directory_uri,
-                            &now,
-                        )
-                        .await?;
-                        self.invalidate_directory_cache().await;
-                        Ok(MutationOutcome::Applied)
-                    } else {
-                        let update = DirectoryUpdateRecord::remove_entry(
-                            ws.uri.clone(),
-                            parent.to_string(),
-                            directory_uri.to_string(),
-                            now,
-                        );
-                        self.opake
-                            .client
-                            .create_record(DIRECTORY_UPDATE_COLLECTION, &update)
-                            .await?;
-                        Ok(MutationOutcome::Proposed {
-                            update_uri: directory_uri.to_string(),
-                        })
-                    }
-                }
+        let parent = match parent_directory_uri {
+            Some(p) => p,
+            None => return Ok(MutationOutcome::Applied),
+        };
+
+        if matches!(self.context, FileContext::Workspace(_)) {
+            let dir_owner = atproto::parse_at_uri(parent)?.authority;
+            if dir_owner != self.opake.did {
+                return Err(Error::Unimplemented(
+                    "workspace member directory deletion (cascade)".into(),
+                ));
             }
-        } else {
-            Ok(MutationOutcome::Applied)
         }
+
+        directories::remove_entry(&mut self.opake.client, parent, directory_uri, &now).await?;
+        self.invalidate_directory_cache().await;
+        Ok(MutationOutcome::Applied)
     }
 }

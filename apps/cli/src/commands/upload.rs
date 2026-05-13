@@ -66,11 +66,7 @@ impl Execute for UploadCommand {
             .await?;
 
         let dir_label = self.dir.as_deref().unwrap_or("/");
-        if result.outcome.is_proposed() {
-            println!("{} → {} (proposed in {})", filename, result.uri, dir_label);
-        } else {
-            println!("{} → {} (in {})", filename, result.uri, dir_label);
-        }
+        println!("{} → {} (in {})", filename, result.uri, dir_label);
 
         Ok(None)
     }

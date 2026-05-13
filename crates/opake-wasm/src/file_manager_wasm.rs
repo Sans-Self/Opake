@@ -66,7 +66,7 @@ impl WasmFileManagerHandle {
 
         to_js(&MutationResultDto {
             uri: Some(result.uri),
-            proposed: result.outcome.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -88,13 +88,13 @@ impl WasmFileManagerHandle {
     ) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
-        let result = mgr
+        let _result = mgr
             .delete(document_uri, parent_directory_uri)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: result.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -107,13 +107,13 @@ impl WasmFileManagerHandle {
     ) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
-        let result = mgr
+        let _result = mgr
             .move_entry(entry_uri, source_dir, target_dir)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: result.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -131,7 +131,7 @@ impl WasmFileManagerHandle {
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: Some(result.uri),
-            proposed: result.outcome.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -232,37 +232,31 @@ impl WasmFileManagerHandle {
             None
         };
 
-        mgr.cleanup_own_applied_proposals(&tree).await;
-        let applied = mgr.apply_pending_proposals(&tree).await.unwrap_or(0);
-        let proposals = mgr.proposals().to_vec();
-
-        let proposal_uris: Vec<&str> = proposals
-            .iter()
-            .filter_map(|p| p.entry_uri.as_deref())
-            .collect();
-        if !proposal_uris.is_empty() {
-            if let Ok(proposal_meta) = mgr.resolve_document_metadata_for(&proposal_uris).await {
-                metadata
-                    .get_or_insert_with(std::collections::HashMap::new)
-                    .extend(proposal_meta);
-            }
-        }
+        // Federation rewrite: proposal apply/cleanup is replaced by
+        // curatorial-supersede cascades — every writer mutates their own
+        // PDS directly, so nothing accumulates on the manager's PDS for
+        // batch processing. SDK callers keep the `proposals` /
+        // `proposals_applied` keys for backwards-compatible JSON shape;
+        // both are now stably empty/zero.
+        let _ = &mut metadata;
 
         to_js(&serde_json::json!({
             "snapshot": snapshot,
             "metadata": metadata,
-            "proposals": proposals,
-            "proposals_applied": applied,
+            "proposals": Vec::<serde_json::Value>::new(),
+            "proposals_applied": 0usize,
         }))
     }
 
-    /// Apply pending proposals without metadata resolution (daemon use).
+    /// Stub of the legacy `syncAndApplyProposals` entry point.
+    ///
+    /// Always returns 0 under the federation model — proposals are gone.
+    /// Kept on the public surface only to keep older SDK builds from
+    /// hard-failing while the SDK migration lands; remove once consumers
+    /// have moved off it.
     #[wasm_bindgen(js_name = syncAndApplyProposals)]
     pub async fn sync_and_apply_proposals(&self) -> Result<usize, JsError> {
-        let (mut opake, ctx) = self.parts().await?;
-        let mut mgr = opake.file_manager(ctx);
-        let tree = mgr.load_tree().await.map_err(wasm_err)?;
-        mgr.apply_pending_proposals(&tree).await.map_err(wasm_err)
+        Ok(0)
     }
 
     // -- Editor operations --
@@ -275,13 +269,13 @@ impl WasmFileManagerHandle {
     ) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
-        let result = mgr
+        let _result = mgr
             .rename_directory(directory_uri, new_name)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: result.is_proposed(),
+            proposed: false,
         })
     }
 

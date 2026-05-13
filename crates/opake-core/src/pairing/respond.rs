@@ -52,7 +52,7 @@ pub async fn respond_to_pair_request(
     };
 
     client
-        .create_record(PAIR_RESPONSE_COLLECTION, &record)
+        .create_record(PAIR_RESPONSE_COLLECTION, None, &record)
         .await?;
     Ok(())
 }

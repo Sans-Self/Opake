@@ -31,11 +31,7 @@ impl Execute for MkdirCommand {
             .await?;
 
         let label = self.dir.as_deref().unwrap_or("/");
-        if result.outcome.is_proposed() {
-            println!("{} → {} (proposed in {})", self.name, result.uri, label);
-        } else {
-            println!("{} → {} (in {})", self.name, result.uri, label);
-        }
+        println!("{} → {} (in {})", self.name, result.uri, label);
 
         Ok(None)
     }

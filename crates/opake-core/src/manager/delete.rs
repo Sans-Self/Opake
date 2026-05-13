@@ -3,7 +3,6 @@ use crate::client::{ApplyWriteOp, Transport};
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories::{self, DirectoryTree, ResolvedPath};
 use crate::error::Error;
-use crate::records::{DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION};
 use crate::storage::Storage;
 
 use super::types::{FileContext, MutationOutcome};
@@ -12,14 +11,12 @@ use super::FileManager;
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
     /// Delete a document and clean up its directory entry — atomically.
     ///
-    /// The caller MUST pass the parent directory URI. The document deletion
-    /// and directory entry removal happen in a single `applyWrites` call, so
-    /// there's no dangling reference on partial failure.
-    ///
-    /// Callers that genuinely don't know the parent (shouldn't happen via the
-    /// UI) must resolve it from the tree first. Silently accepting an unknown
-    /// parent would leave the entry behind in the parent's `entries` array
-    /// and desync every consumer that mirrors that list.
+    /// Document deletion + directory entry removal happen in a single
+    /// `applyWrites` call. The directory record being mutated must live on
+    /// the caller's own PDS — for workspaces that means the caller is the
+    /// workspace owner (today). The federation rewrite replaces this
+    /// asymmetry with cascade-based supersedes that any chain participant
+    /// can author; see `directories::cascade`.
     #[::opake_derive::signoff]
     pub async fn delete(
         &mut self,
@@ -48,43 +45,24 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 self.invalidate_directory_cache().await;
                 Ok(MutationOutcome::Applied)
             }
-            FileContext::Workspace(ws) => {
+            FileContext::Workspace(_) => {
                 let dir_owner = atproto::parse_at_uri(parent_directory_uri)?.authority;
-                if dir_owner == self.opake.did {
-                    let dir_op = directories::prepare_remove_entry(
-                        &mut self.opake.client,
-                        parent_directory_uri,
-                        document_uri,
-                        &now,
-                    )
-                    .await?;
-
-                    self.opake.client.apply_writes(&[delete_op, dir_op]).await?;
-                    self.invalidate_directory_cache().await;
-                    Ok(MutationOutcome::Applied)
-                } else {
-                    let update = DirectoryUpdateRecord::remove_entry(
-                        ws.uri.clone(),
-                        parent_directory_uri.to_string(),
-                        document_uri.to_string(),
-                        now,
-                    );
-
-                    self.opake
-                        .client
-                        .apply_writes(&[
-                            delete_op,
-                            ApplyWriteOp::Create {
-                                collection: DIRECTORY_UPDATE_COLLECTION.into(),
-                                rkey: None,
-                                record: serde_json::to_value(&update)?,
-                            },
-                        ])
-                        .await?;
-                    Ok(MutationOutcome::Proposed {
-                        update_uri: document_uri.to_string(),
-                    })
+                if dir_owner != self.opake.did {
+                    return Err(Error::Unimplemented(
+                        "workspace member delete (cascade)".into(),
+                    ));
                 }
+                let dir_op = directories::prepare_remove_entry(
+                    &mut self.opake.client,
+                    parent_directory_uri,
+                    document_uri,
+                    &now,
+                )
+                .await?;
+
+                self.opake.client.apply_writes(&[delete_op, dir_op]).await?;
+                self.invalidate_directory_cache().await;
+                Ok(MutationOutcome::Applied)
             }
         }
     }

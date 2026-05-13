@@ -1,29 +1,28 @@
 use log::trace;
 
-use crate::client::{Transport, XrpcClient};
+use crate::client::{RecordRef, Transport, XrpcClient};
 use crate::error::Error;
 use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 
 use super::DIRECTORY_COLLECTION;
 
-/// Create a new directory record. Returns its AT-URI.
+/// Create a new directory record. Returns its AT-URI and CID.
 ///
-/// Callers are responsible for encrypting the directory metadata and wrapping
-/// the content key before calling this function.
+/// The CID pins the bytes the PDS committed — callers thread it into the
+/// parent directory's listing entry so the listing accurately observes the
+/// child's version at write time.
 pub async fn create_directory(
     client: &mut XrpcClient<impl Transport>,
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     created_at: &str,
-) -> Result<String, Error> {
+) -> Result<RecordRef, Error> {
     let directory = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
 
     trace!("creating directory");
-    let record_ref = client
-        .create_record(DIRECTORY_COLLECTION, &directory)
-        .await?;
-
-    Ok(record_ref.uri)
+    client
+        .create_record(DIRECTORY_COLLECTION, None, &directory)
+        .await
 }
 
 #[cfg(test)]
@@ -52,7 +51,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result, uri);
+        assert_eq!(result.uri, uri);
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);

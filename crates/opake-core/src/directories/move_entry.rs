@@ -5,6 +5,7 @@
 
 use log::trace;
 
+use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
 
@@ -23,7 +24,6 @@ pub async fn move_entry(
     target_dir_uri: &str,
     modified_at: &str,
 ) -> Result<MoveResult, Error> {
-    // Remove from old parent if tracked.
     if let Some(parent_uri) = &source.parent_uri {
         if parent_uri == target_dir_uri {
             return Err(Error::InvalidRecord(format!(
@@ -35,8 +35,20 @@ pub async fn move_entry(
         remove_entry(client, parent_uri, &source.uri, modified_at).await?;
     }
 
+    let parsed = atproto::parse_at_uri(&source.uri)?;
+    let entry_record = client
+        .get_record(&parsed.authority, &parsed.collection, &parsed.rkey)
+        .await?;
+
     trace!("adding {} to new parent {}", source.uri, target_dir_uri);
-    add_entry(client, target_dir_uri, &source.uri, modified_at).await?;
+    add_entry(
+        client,
+        target_dir_uri,
+        &source.uri,
+        &entry_record.cid,
+        modified_at,
+    )
+    .await?;
 
     Ok(MoveResult {
         uri: source.uri.clone(),

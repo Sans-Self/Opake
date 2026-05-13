@@ -16,19 +16,27 @@ fn record_with_type<R: Serialize>(collection: &str, record: &R) -> serde_json::V
 
 impl<T: Transport> super::XrpcClient<T> {
     /// Create a record via `com.atproto.repo.createRecord`.
+    ///
+    /// When `rkey` is `Some`, the PDS commits at the chosen key (used for
+    /// stable identities like TID-derived document keys). When `None`, the
+    /// PDS allocates a fresh rkey.
     pub async fn create_record<R: Serialize>(
         &mut self,
         collection: &str,
+        rkey: Option<&str>,
         record: &R,
     ) -> Result<RecordRef, Error> {
         trace!("creating record in {}", collection);
         let did = self.did()?.to_owned();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "repo": did,
             "collection": collection,
             "record": record_with_type(collection, record),
         });
+        if let Some(rkey) = rkey {
+            body["rkey"] = serde_json::Value::String(rkey.to_owned());
+        }
 
         let mut request = HttpRequest {
             method: HttpMethod::Post,

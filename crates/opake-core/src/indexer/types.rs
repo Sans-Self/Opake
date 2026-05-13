@@ -86,58 +86,16 @@ pub struct TreeDocument {
     pub indexed_at: String,
 }
 
-/// A pending directory update proposal from a workspace member.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TreeProposal {
-    pub uri: String,
-    pub author_did: String,
-    pub action_type: String,
-    pub directory_uri: Option<String>,
-    pub entry_uri: Option<String>,
-    pub encrypted_metadata: Option<serde_json::Value>,
-    pub source_directory_uri: Option<String>,
-    pub target_directory_uri: Option<String>,
-    pub parent_directory_uri: Option<String>,
-    pub indexed_at: String,
-}
-
-/// A pending keyring update proposal from a workspace member.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct KeyringProposal {
-    pub uri: String,
-    pub author_did: String,
-    pub action_type: String,
-    pub member_did: Option<String>,
-    pub member_public_key: Option<String>,
-    pub role: Option<String>,
-    pub encrypted_metadata: Option<serde_json::Value>,
-    pub indexed_at: String,
-}
-
-/// A pending documentUpdate proposal from a workspace member targeting an
-/// existing document. The Indexer stores only metadata — the full record
-/// (blob ref, encrypted metadata) lives on the proposer's PDS and must be
-/// fetched for processing.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DocumentProposal {
-    pub uri: String,
-    pub document_uri: String,
-    pub author_did: String,
-    pub indexed_at: String,
-}
-
 /// Response from /api/cabinet/tree, /api/cabinet/sync,
 /// /api/workspace/tree, /api/workspace/sync.
+///
+/// Pre-federation this also carried `proposals` / `keyringProposals` /
+/// `documentProposals` arrays for the three `*Update` collections; the
+/// federation rewrite drops those collections entirely.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TreeDelta {
     pub directories: Vec<TreeDirectory>,
     pub documents: Vec<TreeDocument>,
-    #[serde(default)]
-    pub proposals: Vec<TreeProposal>,
-    #[serde(default, rename = "keyringProposals")]
-    pub keyring_proposals: Vec<KeyringProposal>,
-    #[serde(default, rename = "documentProposals")]
-    pub document_proposals: Vec<DocumentProposal>,
     pub server_time: String,
 }
 

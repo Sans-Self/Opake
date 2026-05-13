@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 
 /// A directory record event. Sent when the indexer commits a directory
 /// create/update from the firehose.
+///
+/// Indexer-emitted `modified_at` is intentionally dropped here — the
+/// pre-federation proposal-cleanup heuristics that consumed it are gone
+/// and no caller reads it. Serde silently ignores unknown fields, so the
+/// indexer can keep emitting without coordination.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SseDirectoryRecord {
     pub directory_uri: String,
@@ -28,10 +33,6 @@ pub struct SseDirectoryRecord {
     /// Workspace scope. Absent for personal cabinet directories.
     #[serde(default)]
     pub keyring_uri: Option<String>,
-    /// Owner-stamped on every mutation; consumed by editor proposal
-    /// cleanup (delete proposal once `modified_at > proposal.created_at`).
-    #[serde(default)]
-    pub modified_at: Option<String>,
     #[serde(default)]
     pub deleted_at: Option<String>,
     #[serde(default)]
@@ -53,9 +54,6 @@ pub struct SseDocumentRecord {
     pub keyring_uri: Option<String>,
     #[serde(default)]
     pub rotation: Option<u64>,
-    /// Owner-stamped on every mutation; consumed by editor proposal cleanup.
-    #[serde(default)]
-    pub modified_at: Option<String>,
     #[serde(default)]
     pub deleted_at: Option<String>,
     #[serde(default)]
@@ -75,9 +73,6 @@ pub struct SseKeyringRecord {
     pub encrypted_metadata: Option<serde_json::Value>,
     #[serde(default)]
     pub created_at: Option<String>,
-    /// Owner-stamped on every mutation; consumed by editor proposal cleanup.
-    #[serde(default)]
-    pub modified_at: Option<String>,
     #[serde(default)]
     pub indexed_at: Option<String>,
 }
@@ -119,67 +114,39 @@ impl SseDeletePayload {
 }
 
 // ---------------------------------------------------------------------------
-// Proposal events — drive ProposalDebouncer (NOT the tree)
+// Fork detection — emitted to the losing writer when concurrent supersedes
+// race against the same chain head.
 // ---------------------------------------------------------------------------
 
-/// A directory update proposal from a workspace member.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SseDirectoryUpdate {
-    pub uri: String,
-    pub author_did: String,
-    pub action_type: String,
-    #[serde(default)]
-    pub keyring_uri: Option<String>,
-    #[serde(default)]
-    pub directory_uri: Option<String>,
-    #[serde(default)]
-    pub entry_uri: Option<String>,
-    #[serde(default)]
-    pub encrypted_metadata: Option<serde_json::Value>,
-    #[serde(default)]
-    pub source_directory_uri: Option<String>,
-    #[serde(default)]
-    pub target_directory_uri: Option<String>,
-    #[serde(default)]
-    pub parent_directory_uri: Option<String>,
-}
-
-/// A keyring update proposal.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SseKeyringUpdate {
-    pub uri: String,
-    pub author_did: String,
-    pub action_type: String,
-    #[serde(default)]
-    pub keyring_uri: Option<String>,
-    #[serde(default)]
-    pub member_did: Option<String>,
-    #[serde(default)]
-    pub member_public_key: Option<String>,
-    #[serde(default)]
-    pub role: Option<String>,
-    #[serde(default)]
-    pub encrypted_metadata: Option<serde_json::Value>,
-}
-
-/// A document update proposal.
+/// Notification that the recipient's most recent supersede lost a fork race.
 ///
-/// Note: the `app.opake.documentUpdate` lexicon itself has no
-/// `keyring` field — the indexer's firehose consumer injects `keyring_uri` at
-/// dispatch time by joining through the documents table. When the
-/// join succeeds, the broadcaster routes on the workspace topic
-/// (where owners subscribe); when it fails (cabinet documents or a
-/// backfill ordering edge case), the event is dropped and the
-/// owner's next `sync_workspace_by_uri` call picks up the proposal
-/// from the DB.
+/// Emitted only to the loser's personal SSE topic. The winner just becomes
+/// the new head via the normal `directory:upsert` / `keyring:upsert`
+/// stream. Clients act on this by replaying the original intent against
+/// the new head and retrying (bounded by an exponential-backoff budget).
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SseDocumentUpdate {
-    pub uri: String,
-    /// AT-URI of the existing document being updated.
-    pub document_uri: String,
-    pub author_did: String,
+pub struct SseChainForked {
+    /// Genesis keyring URI of the workspace. Identifies the workspace
+    /// independently of chain advancement.
+    pub workspace_id: String,
+    /// Which chain forked: `"directory"` or `"keyring"`.
+    pub scope: String,
+    /// Workspace-relative POSIX-style path for `directory` scope.
+    /// Absent for `keyring` (a workspace has exactly one keyring chain).
     #[serde(default)]
-    pub keyring_uri: Option<String>,
+    pub path: Option<String>,
+    /// AT-URI of the recipient's losing write.
+    pub your_uri: String,
+    /// AT-URI the loser tried to supersede. Lets retry distinguish "I lost
+    /// one race against this head" from "I'm already N supersedes behind"
+    /// — the former retries cheaply, the latter needs a fresh sync first.
+    pub fork_point_uri: String,
+    /// AT-URI of the supersede that won the race and is the new head.
+    pub winner_uri: String,
+    /// CID of the winning record as the indexer observed it. Pins exactly
+    /// what to replay against and detects races between fork emission and
+    /// retry (winner itself superseded before the retry lands).
+    pub winner_cid: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,36 +172,15 @@ pub enum SseEvent {
     GrantUpsert(SseGrantRecord),
     GrantDelete(SseDeletePayload),
 
-    // Proposal events — drive ProposalDebouncer, NOT the tree. A proposal
-    // is a pending-but-not-applied change. Patching the tree with one would
-    // show unapplied proposals as if they were live, then "jump" when the
-    // owner applies them seconds later.
-    DirectoryUpdateUpsert(SseDirectoryUpdate),
-    DirectoryUpdateDelete(SseDeletePayload),
-    KeyringUpdateUpsert(SseKeyringUpdate),
-    KeyringUpdateDelete(SseDeletePayload),
-    DocumentUpdateUpsert(SseDocumentUpdate),
-    DocumentUpdateDelete(SseDeletePayload),
+    /// Indexer detected a fork race against this client's latest supersede.
+    /// Drives retry logic in the SDK; doesn't touch the tree.
+    ChainForked(SseChainForked),
 
     // Synthetic
     Reconnect,
 }
 
 impl SseEvent {
-    /// For target-record upsert events (document/directory/keyring),
-    /// return the record's URI and `modifiedAt` so the editor's
-    /// proposal-cleanup can compare against its outstanding proposals.
-    /// Returns `None` for proposal events, delete events, events
-    /// without `modified_at` set, and the synthetic Reconnect.
-    pub fn cleanup_target(&self) -> Option<(&str, &str)> {
-        match self {
-            Self::DocumentUpsert(r) => Some((&r.document_uri, r.modified_at.as_deref()?)),
-            Self::DirectoryUpsert(r) => Some((&r.directory_uri, r.modified_at.as_deref()?)),
-            Self::KeyringUpsert(r) => Some((&r.uri, r.modified_at.as_deref()?)),
-            _ => None,
-        }
-    }
-
     /// The event type string as emitted by the broadcaster. Used for
     /// dispatch and for test assertions.
     pub fn event_name(&self) -> &'static str {
@@ -247,12 +193,7 @@ impl SseEvent {
             Self::KeyringDelete(_) => "keyring:delete",
             Self::GrantUpsert(_) => "grant:upsert",
             Self::GrantDelete(_) => "grant:delete",
-            Self::DirectoryUpdateUpsert(_) => "directory_update:upsert",
-            Self::DirectoryUpdateDelete(_) => "directory_update:delete",
-            Self::KeyringUpdateUpsert(_) => "keyring_update:upsert",
-            Self::KeyringUpdateDelete(_) => "keyring_update:delete",
-            Self::DocumentUpdateUpsert(_) => "document_update:upsert",
-            Self::DocumentUpdateDelete(_) => "document_update:delete",
+            Self::ChainForked(_) => "chain:forked",
             Self::Reconnect => "__reconnect__",
         }
     }
@@ -261,13 +202,6 @@ impl SseEvent {
     /// after it has extracted the `event: name` and `data: { ... }` fields
     /// from the SSE frame.
     pub fn from_name_and_data(name: &str, data: &[u8]) -> Result<Self, crate::error::Error> {
-        let parse = |tag: &str| -> Result<serde_json::Value, crate::error::Error> {
-            serde_json::from_slice(data).map_err(|e| {
-                crate::error::Error::Sse(format!("failed to parse {tag} payload: {e}"))
-            })
-        };
-
-        // Helper to reduce boilerplate: parse JSON → strongly-typed variant.
         fn decode<T: serde::de::DeserializeOwned>(
             data: &[u8],
             tag: &str,
@@ -286,30 +220,11 @@ impl SseEvent {
             "keyring:delete" => Self::KeyringDelete(decode(data, "keyring:delete")?),
             "grant:upsert" => Self::GrantUpsert(decode(data, "grant:upsert")?),
             "grant:delete" => Self::GrantDelete(decode(data, "grant:delete")?),
-            "directory_update:upsert" => {
-                Self::DirectoryUpdateUpsert(decode(data, "directory_update:upsert")?)
-            }
-            "directory_update:delete" => {
-                Self::DirectoryUpdateDelete(decode(data, "directory_update:delete")?)
-            }
-            "keyring_update:upsert" => {
-                Self::KeyringUpdateUpsert(decode(data, "keyring_update:upsert")?)
-            }
-            "keyring_update:delete" => {
-                Self::KeyringUpdateDelete(decode(data, "keyring_update:delete")?)
-            }
-            "document_update:upsert" => {
-                Self::DocumentUpdateUpsert(decode(data, "document_update:upsert")?)
-            }
-            "document_update:delete" => {
-                Self::DocumentUpdateDelete(decode(data, "document_update:delete")?)
-            }
+            "chain:forked" => Self::ChainForked(decode(data, "chain:forked")?),
             other => {
                 // Silent drop — the indexer may add event types we don't
                 // understand yet, and forward-compat beats hard-failure.
                 log::debug!("[sse] ignoring unknown event type: {other}");
-                let _ = parse; // satisfy unused-binding when all variants
-                               // above use `decode` directly
                 return Err(crate::error::Error::Sse(format!(
                     "unknown event type: {other}"
                 )));
@@ -319,43 +234,23 @@ impl SseEvent {
         Ok(event)
     }
 
-    /// True if this is a proposal event (drives the debouncer, not the tree).
-    pub fn is_proposal(&self) -> bool {
-        matches!(
-            self,
-            Self::DirectoryUpdateUpsert(_)
-                | Self::DirectoryUpdateDelete(_)
-                | Self::KeyringUpdateUpsert(_)
-                | Self::KeyringUpdateDelete(_)
-                | Self::DocumentUpdateUpsert(_)
-                | Self::DocumentUpdateDelete(_)
-        )
-    }
-
     /// The workspace keyring URI this event affects, if any.
     ///
     /// Record events carry `keyring_uri` natively (for workspace-scoped
-    /// writes). Proposal upserts carry it when the lexicon includes a
-    /// `keyring` field — `directoryUpdate` and `keyringUpdate` do,
-    /// `documentUpdate` does not, so those always return None and the
-    /// caller must decide how to route them. Delete payloads and
-    /// control events never carry one.
+    /// writes). Chain-fork events carry `workspace_id` which is the genesis
+    /// keyring URI. Delete payloads and the synthetic Reconnect never carry
+    /// one.
     pub fn keyring_uri(&self) -> Option<&str> {
         match self {
             Self::DirectoryUpsert(r) => r.keyring_uri.as_deref(),
             Self::DocumentUpsert(r) => r.keyring_uri.as_deref(),
             Self::KeyringUpsert(r) => Some(r.uri.as_str()),
-            Self::DirectoryUpdateUpsert(p) => p.keyring_uri.as_deref(),
-            Self::KeyringUpdateUpsert(p) => p.keyring_uri.as_deref(),
-            Self::DocumentUpdateUpsert(p) => p.keyring_uri.as_deref(),
+            Self::ChainForked(f) => Some(f.workspace_id.as_str()),
             Self::DirectoryDelete(_)
             | Self::DocumentDelete(_)
             | Self::KeyringDelete(_)
             | Self::GrantUpsert(_)
             | Self::GrantDelete(_)
-            | Self::DirectoryUpdateDelete(_)
-            | Self::KeyringUpdateDelete(_)
-            | Self::DocumentUpdateDelete(_)
             | Self::Reconnect => None,
         }
     }
@@ -469,56 +364,48 @@ mod tests {
     }
 
     #[test]
-    fn decodes_directory_update_proposal() {
+    fn decodes_chain_forked_with_directory_scope() {
         let json = br#"{
-            "uri": "at://did:plc:alice/app.opake.directoryUpdate/prop1",
-            "author_did": "did:plc:bob",
-            "action_type": "addEntry",
-            "keyring_uri": "at://did:plc:alice/app.opake.keyring/kr1",
-            "directory_uri": "at://did:plc:alice/app.opake.directory/abc",
-            "entry_uri": "at://did:plc:bob/app.opake.document/xyz"
+            "workspace_id": "at://did:plc:alice/app.opake.keyring/kr1",
+            "scope": "directory",
+            "path": "/q1/",
+            "your_uri": "at://did:plc:bob/app.opake.directory/loserTID",
+            "fork_point_uri": "at://did:plc:alice/app.opake.directory/headTID",
+            "winner_uri": "at://did:plc:carol/app.opake.directory/winnerTID",
+            "winner_cid": "bafywinner"
         }"#;
-        let event = SseEvent::from_name_and_data("directory_update:upsert", json).unwrap();
-        assert!(event.is_proposal());
+        let event = SseEvent::from_name_and_data("chain:forked", json).unwrap();
         match event {
-            SseEvent::DirectoryUpdateUpsert(p) => {
-                assert_eq!(p.action_type, "addEntry");
-                assert_eq!(
-                    p.keyring_uri.as_deref(),
-                    Some("at://did:plc:alice/app.opake.keyring/kr1")
-                );
+            SseEvent::ChainForked(f) => {
+                assert_eq!(f.scope, "directory");
+                assert_eq!(f.path.as_deref(), Some("/q1/"));
+                assert!(f.your_uri.contains("loserTID"));
+                assert!(f.fork_point_uri.contains("headTID"));
+                assert!(f.winner_uri.contains("winnerTID"));
+                assert_eq!(f.winner_cid, "bafywinner");
             }
-            _ => panic!("expected DirectoryUpdateUpsert"),
+            _ => panic!("expected ChainForked"),
         }
     }
 
     #[test]
-    fn decodes_document_update_without_keyring_uri() {
-        // document_update has no `keyring` field in the lexicon.
+    fn decodes_chain_forked_keyring_scope_without_path() {
         let json = br#"{
-            "uri": "at://did:plc:bob/app.opake.documentUpdate/upd1",
-            "document_uri": "at://did:plc:alice/app.opake.document/doc1",
-            "author_did": "did:plc:bob"
+            "workspace_id": "at://did:plc:alice/app.opake.keyring/kr1",
+            "scope": "keyring",
+            "your_uri": "at://did:plc:bob/app.opake.keyring/loserTID",
+            "fork_point_uri": "at://did:plc:alice/app.opake.keyring/headTID",
+            "winner_uri": "at://did:plc:carol/app.opake.keyring/winnerTID",
+            "winner_cid": "bafywinner"
         }"#;
-        let event = SseEvent::from_name_and_data("document_update:upsert", json).unwrap();
-        assert!(event.is_proposal());
+        let event = SseEvent::from_name_and_data("chain:forked", json).unwrap();
         match event {
-            SseEvent::DocumentUpdateUpsert(p) => {
-                assert_eq!(p.keyring_uri, None);
-                assert_eq!(
-                    p.document_uri,
-                    "at://did:plc:alice/app.opake.document/doc1"
-                );
+            SseEvent::ChainForked(f) => {
+                assert_eq!(f.scope, "keyring");
+                assert!(f.path.is_none());
             }
-            _ => panic!("expected DocumentUpdateUpsert"),
+            _ => panic!("expected ChainForked"),
         }
-    }
-
-    #[test]
-    fn record_events_are_not_proposals() {
-        let json = br#"{"directory_uri":"a","owner_did":"b","entries":[]}"#;
-        let event = SseEvent::from_name_and_data("directory:upsert", json).unwrap();
-        assert!(!event.is_proposal());
     }
 
     #[test]
@@ -539,6 +426,5 @@ mod tests {
     fn reconnect_synthetic_name() {
         let event = SseEvent::Reconnect;
         assert_eq!(event.event_name(), "__reconnect__");
-        assert!(!event.is_proposal());
     }
 }

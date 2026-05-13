@@ -1,5 +1,5 @@
 use super::*;
-use crate::client::RequestBody;
+use crate::client::{HttpResponse, RequestBody};
 use crate::records::Directory;
 use crate::test_utils::MockTransport;
 
@@ -12,6 +12,20 @@ const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_A_URI: &str = "at://did:plc:test/app.opake.directory/dirA";
 const DIR_B_URI: &str = "at://did:plc:test/app.opake.directory/dirB";
 const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+const DOC_CID: &str = "bafytestdoccid";
+
+fn doc_record_response() -> HttpResponse {
+    HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: serde_json::to_vec(&serde_json::json!({
+            "uri": DOC_URI,
+            "cid": DOC_CID,
+            "value": {},
+        }))
+        .unwrap(),
+    }
+}
 
 async fn load_tree_with(dirs: &[(&str, Directory)]) -> DirectoryTree {
     let mock = MockTransport::new();
@@ -43,13 +57,15 @@ async fn move_doc_into_directory() {
     .await;
 
     let mock = MockTransport::new();
-    // remove_entry: get old parent, put old parent
+    // remove_entry: getRecord(old parent), applyWrites
     mock.enqueue(get_record_response(
         ROOT_URI,
         &dummy_directory_with_entries("/", vec![DOC_URI.into()]),
     ));
     mock.enqueue(put_record_response(ROOT_URI));
-    // add_entry: get new parent, put new parent
+    // move_entry fetches the doc's CID before add_entry
+    mock.enqueue(doc_record_response());
+    // add_entry: getRecord(new parent), applyWrites
     mock.enqueue(get_record_response(DIR_A_URI, &dummy_directory("Photos")));
     mock.enqueue(put_record_response(DIR_A_URI));
 
@@ -63,7 +79,7 @@ async fn move_doc_into_directory() {
     assert_eq!(result.uri, DOC_URI);
 
     let reqs = mock.requests();
-    assert_eq!(reqs.len(), 4);
+    assert_eq!(reqs.len(), 5);
 
     // Old parent should have doc removed (via applyWrites)
     assert!(reqs[1].url.contains("applyWrites"));
@@ -76,15 +92,15 @@ async fn move_doc_into_directory() {
         _ => panic!("expected JSON body"),
     }
 
-    // New parent should have doc added (via applyWrites)
-    assert!(reqs[3].url.contains("applyWrites"));
-    match &reqs[3].body {
+    // New parent should have doc added with the observed CID
+    assert!(reqs[4].url.contains("applyWrites"));
+    match &reqs[4].body {
         Some(RequestBody::Json(v)) => {
             let writes = v["writes"].as_array().unwrap();
             let dir: Directory = serde_json::from_value(writes[0]["value"].clone()).unwrap();
-            let targets: Vec<&str> =
-                dir.entries.iter().map(|e| e.target.as_str()).collect();
-            assert_eq!(targets, vec![DOC_URI]);
+            assert_eq!(dir.entries.len(), 1);
+            assert_eq!(dir.entries[0].target, DOC_URI);
+            assert_eq!(dir.entries[0].target_cid.cid, DOC_CID);
         }
         _ => panic!("expected JSON body"),
     }
@@ -99,7 +115,8 @@ async fn move_untracked_doc_into_directory() {
     .await;
 
     let mock = MockTransport::new();
-    // No remove_entry — doc has no parent. Just add_entry.
+    // No remove_entry — doc has no parent. Fetch doc CID, then add_entry.
+    mock.enqueue(doc_record_response());
     mock.enqueue(get_record_response(DIR_A_URI, &dummy_directory("Photos")));
     mock.enqueue(put_record_response(DIR_A_URI));
 
@@ -111,7 +128,7 @@ async fn move_untracked_doc_into_directory() {
         .unwrap();
 
     assert_eq!(result.uri, DOC_URI);
-    assert_eq!(mock.requests().len(), 2);
+    assert_eq!(mock.requests().len(), 3);
 }
 
 #[tokio::test]

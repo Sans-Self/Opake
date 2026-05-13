@@ -191,7 +191,6 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
     let outcome = mgr.delete(DOC_URI, PARENT_URI).await.unwrap();
 
     assert!(outcome.is_applied(), "owner path must produce Applied");
-    assert!(!outcome.is_proposed());
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "expected getRecord + applyWrites (no proposal)");
@@ -206,35 +205,26 @@ async fn workspace_owner_delete_is_applied_not_proposed() {
 }
 
 /// Workspace delete where the caller does NOT own the parent directory
-/// generates a directoryUpdate proposal record alongside the document
-/// delete — the proposal records the intent and the owner (or any admin)
-/// can apply it later.
+/// is rejected pending the federation rewrite (curatorial-supersede cascade
+/// not yet wired through the manager).
 #[tokio::test]
-async fn workspace_non_owner_delete_emits_directory_update_proposal() {
+async fn workspace_non_owner_delete_rejected_pending_cascade() {
     use crate::client::{LegacySession, Session, XrpcClient};
     use crate::crypto::{generate_content_key, OsRng};
-    use crate::directories::tests::put_record_response;
+    use crate::error::Error;
     use crate::manager::types::FileContext;
     use crate::opake::Opake;
-    use crate::records::{
-        DirectoryUpdate, DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION,
-    };
     use crate::storage::{Identity, NoopStorage};
     use crate::test_utils::MockTransport;
     use crate::workspace::Workspace;
 
-    // Alice is the caller, Bob owns the parent directory (and the workspace).
     const ALICE_DID: &str = "did:plc:alice";
     const BOB_DID: &str = "did:plc:bob";
     const PARENT_URI: &str = "at://did:plc:bob/app.opake.directory/self";
     const DOC_URI: &str = "at://did:plc:alice/app.opake.document/doc1";
     const KEYRING_URI: &str = "at://did:plc:bob/app.opake.keyring/ws1";
 
-    // Non-owner path: no getRecord on the parent (no direct rewrite), only
-    // one applyWrites batch carrying the delete + the proposal record.
     let mock = MockTransport::new();
-    mock.enqueue(put_record_response("at://did:plc:alice/app.opake.directoryUpdate/tid"));
-
     let session = Session::Legacy(LegacySession {
         did: ALICE_DID.into(),
         handle: "alice.test".into(),
@@ -265,50 +255,15 @@ async fn workspace_non_owner_delete_emits_directory_update_proposal() {
     );
     let ctx = FileContext::Workspace(workspace);
     let mut mgr = opake.file_manager(&ctx);
-    let outcome = mgr.delete(DOC_URI, PARENT_URI).await.unwrap();
-
-    assert!(outcome.is_proposed(), "non-owner path must produce Proposed");
-    assert!(!outcome.is_applied());
-
-    let reqs = mock.requests();
-    assert_eq!(reqs.len(), 1, "expected a single applyWrites batch");
-    let Some(RequestBody::Json(body)) = &reqs[0].body else {
-        panic!("applyWrites body should be JSON");
-    };
-    let writes = body["writes"].as_array().expect("writes array");
-    assert_eq!(writes.len(), 2, "batch: [delete doc, create proposal]");
-
-    assert_eq!(writes[0]["$type"], "com.atproto.repo.applyWrites#delete");
-    assert_eq!(writes[0]["collection"], "app.opake.document");
-
-    assert_eq!(writes[1]["$type"], "com.atproto.repo.applyWrites#create");
-    assert_eq!(writes[1]["collection"], DIRECTORY_UPDATE_COLLECTION);
-    let proposal: DirectoryUpdateRecord = serde_json::from_value(writes[1]["value"].clone())
-        .expect("proposal record should round-trip");
-    match proposal.update {
-        DirectoryUpdate::RemoveEntry {
-            keyring,
-            directory,
-            entry,
-            ..
-        } => {
-            assert_eq!(keyring, KEYRING_URI, "proposal keyring must match workspace");
-            assert_eq!(directory, PARENT_URI, "proposal directory must match parent");
-            assert_eq!(entry, DOC_URI, "proposal must target the deleted document");
-        }
-        other => panic!("expected RemoveEntry proposal, got {other:?}"),
-    }
+    let err = mgr.delete(DOC_URI, PARENT_URI).await.unwrap_err();
+    assert!(
+        matches!(err, Error::Unimplemented(ref msg) if msg.contains("cascade")),
+        "expected federation-cascade stub error, got {err:?}"
+    );
 }
 
 #[test]
 fn mutation_outcome_predicates() {
     let applied = MutationOutcome::Applied;
     assert!(applied.is_applied());
-    assert!(!applied.is_proposed());
-
-    let proposed = MutationOutcome::Proposed {
-        update_uri: "at://did:plc:x/app.opake.directoryUpdate/tid".into(),
-    };
-    assert!(!proposed.is_applied());
-    assert!(proposed.is_proposed());
 }

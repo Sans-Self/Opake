@@ -2,8 +2,7 @@
 //
 // The FileManager is the primary public API for opake-core file operations.
 // It dispatches internally based on the FileContext (Cabinet vs Workspace),
-// handling encryption differences and the owner/member proposal pattern
-// transparently.
+// handling encryption differences transparently.
 //
 // Construct via `Opake::file_manager()`.
 
@@ -27,19 +26,12 @@ pub use types::{
 
 use crate::client::Transport;
 use crate::crypto::{CryptoRng, RngCore};
-use crate::indexer::{DocumentProposal, KeyringProposal, TreeProposal};
 use crate::opake::Opake;
 use crate::storage::Storage;
 
 pub struct FileManager<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) opake: &'a mut Opake<T, R, S>,
     pub(crate) context: &'a FileContext,
-    /// Directory proposals from the last tree sync (workspace only).
-    pub(crate) last_proposals: Vec<TreeProposal>,
-    /// Keyring proposals from the last tree sync (workspace only).
-    pub(crate) last_keyring_proposals: Vec<KeyringProposal>,
-    /// Document update proposals from the last tree sync (workspace only).
-    pub(crate) last_document_proposals: Vec<DocumentProposal>,
 }
 
 impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'a, T, R, S> {
@@ -56,24 +48,6 @@ impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'a, T, R,
         self.context
     }
 
-    /// Pending directory update proposals from the last tree sync.
-    ///
-    /// Only populated for workspace contexts after `load_tree()`. The Indexer
-    /// verifies that each proposal's author is a current workspace member.
-    pub fn proposals(&self) -> &[TreeProposal] {
-        &self.last_proposals
-    }
-
-    /// Pending keyring update proposals from the last tree sync.
-    pub fn last_keyring_proposals(&self) -> &[KeyringProposal] {
-        &self.last_keyring_proposals
-    }
-
-    /// Pending document update proposals from the last tree sync.
-    pub fn last_document_proposals(&self) -> &[DocumentProposal] {
-        &self.last_document_proposals
-    }
-
     /// Create a record on the caller's PDS.
     ///
     /// Low-level passthrough for one-off writes that don't fit other
@@ -81,9 +55,14 @@ impl<'a, T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'a, T, R,
     pub async fn create_record(
         &mut self,
         collection: &str,
+        rkey: Option<&str>,
         record: &impl serde::Serialize,
     ) -> Result<crate::client::RecordRef, crate::error::Error> {
-        let result = self.opake.client.create_record(collection, record).await;
+        let result = self
+            .opake
+            .client
+            .create_record(collection, rkey, record)
+            .await;
         self.opake.signoff(result).await
     }
 }

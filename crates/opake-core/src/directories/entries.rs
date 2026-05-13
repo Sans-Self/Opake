@@ -10,12 +10,15 @@ use super::DIRECTORY_COLLECTION;
 
 /// Fetch a directory and prepare an add-entry mutation.
 ///
-/// Returns an `ApplyWriteOp::Update` that can be batched with other writes
-/// via `apply_writes` for atomicity. Does NOT write to the PDS.
+/// `target_cid` pins the version of the target the caller just observed
+/// (typically returned from the createRecord that produced the target).
+/// Returns an `ApplyWriteOp::Update` for batching via `apply_writes`. Does
+/// NOT write to the PDS.
 pub async fn prepare_add_entry(
     client: &mut XrpcClient<impl Transport>,
     directory_uri: &str,
     entry_uri: &str,
+    target_cid: &str,
     modified_at: &str,
 ) -> Result<ApplyWriteOp, Error> {
     let at_uri = atproto::parse_at_uri(directory_uri)?;
@@ -34,13 +37,9 @@ pub async fn prepare_add_entry(
         )));
     }
 
-    // Phase 2 WIP: cabinet writes still go through this path and don't yet
-    // compute the target CID client-side. Cascade rewrite (Phase 2c) replaces
-    // this whole helper with `cascade::build_listing_entry` that pre-resolves
-    // the CID from the chain head it just wrote.
     directory
         .entries
-        .push(ListingEntry::new(entry_uri, "pending"));
+        .push(ListingEntry::new(entry_uri, target_cid));
     directory.modified_at = Some(modified_at.to_string());
 
     Ok(ApplyWriteOp::Update {
@@ -96,9 +95,10 @@ pub async fn add_entry(
     client: &mut XrpcClient<impl Transport>,
     directory_uri: &str,
     entry_uri: &str,
+    target_cid: &str,
     modified_at: &str,
 ) -> Result<(), Error> {
-    let op = prepare_add_entry(client, directory_uri, entry_uri, modified_at).await?;
+    let op = prepare_add_entry(client, directory_uri, entry_uri, target_cid, modified_at).await?;
     client.apply_writes(&[op]).await
 }
 
@@ -130,6 +130,7 @@ mod tests {
     const DIR_URI: &str = "at://did:plc:test/app.opake.directory/dir1";
     const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
     const DOC_URI_2: &str = "at://did:plc:test/app.opake.document/doc2";
+    const DOC_CID: &str = "bafytestdoccid";
 
     #[tokio::test]
     async fn add_entry_happy_path() {
@@ -139,7 +140,7 @@ mod tests {
         mock.enqueue(put_record_response(DIR_URI)); // applyWrites just needs 200
 
         let mut client = mock_client(mock.clone());
-        add_entry(&mut client, DIR_URI, DOC_URI, "2026-03-01T12:00:00Z")
+        add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
             .await
             .unwrap();
 
@@ -155,9 +156,9 @@ mod tests {
                 let op = &writes[0];
                 assert_eq!(op["collection"], "app.opake.directory");
                 let updated: Directory = serde_json::from_value(op["value"].clone()).unwrap();
-                let targets: Vec<&str> =
-                    updated.entries.iter().map(|e| e.target.as_str()).collect();
-                assert_eq!(targets, vec![DOC_URI]);
+                assert_eq!(updated.entries.len(), 1);
+                assert_eq!(updated.entries[0].target, DOC_URI);
+                assert_eq!(updated.entries[0].target_cid.cid, DOC_CID);
                 assert_eq!(updated.modified_at.unwrap(), "2026-03-01T12:00:00Z");
             }
             _ => panic!("expected JSON body"),
@@ -171,7 +172,7 @@ mod tests {
         mock.enqueue(get_record_response(DIR_URI, &directory));
 
         let mut client = mock_client(mock);
-        let err = add_entry(&mut client, DIR_URI, DOC_URI, "2026-03-01T12:00:00Z")
+        let err = add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
             .await
             .unwrap_err();
 
@@ -187,7 +188,7 @@ mod tests {
         mock.enqueue(get_record_response(DIR_URI, &directory));
 
         let mut client = mock_client(mock);
-        let err = add_entry(&mut client, DIR_URI, DOC_URI, "2026-03-01T12:00:00Z")
+        let err = add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
             .await
             .unwrap_err();
 

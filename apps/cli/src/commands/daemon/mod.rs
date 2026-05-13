@@ -326,68 +326,24 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
 
 /// Dispatch an SSE event to the shared Opake for this DID.
 ///
-/// Proposal events trigger a single-workspace sync. Reconnect triggers
-/// a full catch-up across every owned workspace (same as initial). All
-/// other event variants are dropped — the CLI has no TreeKeeper to
-/// patch.
+/// Reconnect triggers a full catch-up across every owned workspace (same
+/// as initial). All other event variants are dropped — the CLI has no
+/// TreeKeeper to patch. The pre-federation proposal-dispatch and
+/// proposal-cleanup paths are gone with the federation rewrite; chain-fork
+/// retry will land alongside the cascade-aware SDK.
 async fn handle_sse_event(opake: &SharedOpake, event: SseEvent, did: &str) {
-    if event.is_proposal() {
-        let Some(keyring_uri) = event.keyring_uri() else {
-            // Unroutable proposal — in practice a `documentUpdate`
-            // whose parent document hasn't been indexed yet, so the
-            // broadcaster couldn't attach a keyring. The DB still
-            // has the proposal; the next syncable event or reconnect
-            // will pick it up.
-            return;
-        };
-        let keyring_uri = keyring_uri.to_string();
-        let mut guard = opake.lock().await;
-        match guard.sync_workspace_by_uri(&keyring_uri).await {
-            Ok(Some(result)) if result.proposals_applied > 0 => {
-                info!(
-                    "sync: applied {} proposals on {} for {did}",
-                    result.proposals_applied, keyring_uri
-                );
-            }
-            Ok(_) => {}
-            Err(e) => {
-                warn!("sync: failed to apply proposals on {keyring_uri} for {did}: {e}");
-            }
-        }
-    } else if matches!(event, SseEvent::Reconnect) {
-        // Reconnect after a disconnect — phoenix PubSub doesn't buffer,
-        // so we may have missed events. Catch up everything we own.
+    if matches!(event, SseEvent::Reconnect) {
         let mut guard = opake.lock().await;
         match guard.sync_owned_workspaces_detailed().await {
-            Ok(results) => {
-                let applied: usize = results.iter().map(|r| r.proposals_applied).sum();
-                if applied > 0 {
-                    info!("sync: reconnect catch-up applied {applied} proposals for {did}");
-                }
-            }
+            Ok(_) => {}
             Err(e) => {
                 warn!("sync: reconnect catch-up failed for {did}: {e}");
             }
         }
-    } else if let Some((target_uri, modified_at)) = event.cleanup_target() {
-        // Target-record upsert events drive the editor-side proposal
-        // cleanup heuristic — delete any of the caller's outstanding
-        // proposals targeting this URI whose createdAt < modified_at.
-        // Same dispatch shape as the web SSE consumer in
-        // crates/opake-wasm/src/sse_wasm.rs.
-        let target_uri = target_uri.to_string();
-        let modified_at = modified_at.to_string();
-        let mut guard = opake.lock().await;
-        if let Err(e) = guard
-            .cleanup_proposals_for_target(&target_uri, &modified_at)
-            .await
-        {
-            warn!("sync: proposal cleanup for {target_uri} failed for {did}: {e}");
-        }
     }
-    // Other record events (GrantUpsert, deletes, etc.) are dropped
-    // intentionally. The CLI has no TreeKeeper or UI that needs live
-    // tree state.
+    // Other record events (GrantUpsert, deletes, ChainForked, etc.) are
+    // dropped intentionally. The CLI has no TreeKeeper or UI that needs
+    // live tree state.
 }
 
 /// Build a token fetcher that uses the shared Opake to request a fresh

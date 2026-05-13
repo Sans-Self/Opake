@@ -24,6 +24,8 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::AmbiguousName { .. } => "AmbiguousName",
         Error::AlreadyExists(_) => "AlreadyExists",
         Error::InvalidRecord(_) => "InvalidRecord",
+        Error::ChainCycle { .. } => "ChainCycle",
+        Error::Unimplemented(_) => "Unimplemented",
         Error::Serialization(_) => "Serialization",
         Error::Mnemonic(_) => "Mnemonic",
         Error::Storage(_) => "Storage",
@@ -117,7 +119,12 @@ pub fn parse_role(s: &str) -> Result<opake_core::records::Role, JsError> {
     }
 }
 
-/// Result DTO for mutations that may be applied or proposed.
+/// Result DTO for mutations.
+///
+/// `proposed` is wire-stable scaffolding for the SDK Zod schema during the
+/// federation rewrite. Post-rewrite every mutation is direct, so it lands
+/// as `false` on every successful call. Drop the field — and these structs
+/// alongside the SDK schema — once the SDK stops reading it.
 #[derive(Serialize)]
 pub struct MutationResultDto {
     pub uri: Option<String>,

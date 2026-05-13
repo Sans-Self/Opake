@@ -52,6 +52,20 @@ pub enum Error {
     #[error("invalid record: {0}")]
     InvalidRecord(String),
 
+    /// A supersede chain revisited a URI it already walked — the back-edges
+    /// form a cycle, which a well-formed chain cannot. Signals a protocol
+    /// violation by whoever wrote the records, not local corruption.
+    #[error("chain cycle detected at {uri}")]
+    ChainCycle { uri: String },
+
+    /// A code path is recognised but not yet wired through. Distinct from
+    /// `InvalidRecord` (which means "wire bytes are malformed") so callers
+    /// can distinguish "this op makes no sense" from "this op makes sense
+    /// but the implementation is still landing." The contained string is
+    /// the operation's human name, e.g. "workspace member upload".
+    #[error("not implemented yet: {0}")]
+    Unimplemented(String),
+
     #[error("{0}")]
     Serialization(#[from] serde_json::Error),
 

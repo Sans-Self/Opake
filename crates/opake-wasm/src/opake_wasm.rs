@@ -254,13 +254,13 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
         let role = parse_role(role)?;
-        let outcome = opake
+        let _outcome = opake
             .add_workspace_member(keyring_uri, &ws.key, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: outcome.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -290,7 +290,7 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let (key_result, outcome) = opake
+        let (key_result, _outcome) = opake
             .remove_workspace_member(keyring_uri, &ws.key, member_did)
             .await
             .map_err(wasm_err)?;
@@ -303,7 +303,7 @@ impl WasmOpakeHandle {
         }
         serde_wasm_bindgen::to_value(&R {
             rotation: key_result.map(|(_, r)| r),
-            proposed: outcome.is_proposed(),
+            proposed: false,
         })
         .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -326,7 +326,7 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let outcome = opake
+        let _outcome = opake
             .update_workspace_metadata(
                 keyring_uri,
                 &ws.key,
@@ -338,7 +338,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: outcome.is_proposed(),
+            proposed: false,
         })
     }
 
@@ -352,13 +352,13 @@ impl WasmOpakeHandle {
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let role = parse_role(role)?;
-        let outcome = opake
+        let _outcome = opake
             .update_member_role(keyring_uri, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: None,
-            proposed: outcome.is_proposed(),
+            proposed: false,
         })
     }
 

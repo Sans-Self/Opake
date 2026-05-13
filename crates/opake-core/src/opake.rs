@@ -28,8 +28,8 @@ use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLEC
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::{
-    Invitation, InvitationAcceptance, KeyringUpdateRecord, Role, INVITATION_ACCEPTANCE_COLLECTION,
-    INVITATION_COLLECTION, KEYRING_UPDATE_COLLECTION,
+    Invitation, InvitationAcceptance, Role, INVITATION_ACCEPTANCE_COLLECTION,
+    INVITATION_COLLECTION,
 };
 use crate::storage::{Identity, Storage};
 use crate::workspace::Workspace;
@@ -231,9 +231,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         FileManager {
             opake: self,
             context,
-            last_proposals: Vec::new(),
-            last_keyring_proposals: Vec::new(),
-            last_document_proposals: Vec::new(),
         }
     }
 
@@ -491,9 +488,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub async fn create_record(
         &mut self,
         collection: &str,
+        rkey: Option<&str>,
         record: &impl serde::Serialize,
     ) -> Result<crate::client::RecordRef, Error> {
-        let result = self.client.create_record(collection, record).await;
+        let result = self.client.create_record(collection, rkey, record).await;
         self.signoff(result).await
     }
 
@@ -582,24 +580,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .sync_single_workspace(kr, &private_keys.bundle())
             .await;
 
-        // Bootstrap reconciliation for the editor's proposal-cleanup
-        // heuristic: any of the caller's outstanding proposals whose
-        // target record has advanced past their createdAt are deleted.
-        // Runs once per workspace sync — cheap when there are few
-        // outstanding proposals, and the only path that catches up
-        // proposals applied while the SSE consumer was offline.
-        if let Err(e) = self.cleanup_outstanding_proposals().await {
-            log::warn!("proposal-cleanup sweep failed for {keyring_uri}: {e}");
-        }
-
         self.auto_persist_session().await?;
         Ok(Some(result))
     }
 
-    /// Sync a single workspace: cleanup + apply proposals.
+    /// Sync a single workspace: load the tree so SSE consumers can patch it.
     ///
-    /// Captures all errors into `WorkspaceSyncResult::error` instead of
-    /// propagating — the caller can continue with remaining workspaces.
+    /// Pre-federation this method also applied proposals from the workspace
+    /// owner's perspective and cleaned up the caller's already-applied
+    /// proposals. The federation rewrite replaces both with chain-aware
+    /// curatorial supersedes — every chain participant writes directly to
+    /// their own PDS, so there's nothing to apply on someone else's behalf.
     async fn sync_single_workspace(
         &mut self,
         kr: &crate::indexer::IndexerKeyring,
@@ -629,12 +620,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             }
         };
 
-        // Indexer DTO doesn't carry `keyHistory`; the daemon-driven sync
-        // path builds the workspace without historical keys. That's fine
-        // for proposal cleanup / apply, which doesn't decrypt content
-        // older than the current rotation. If a sync caller later needs
-        // to decrypt rotation-mismatched documents, fetch the full
-        // keyring record and rebuild via `resolve_workspace_by_uri`.
         let workspace = crate::workspace::Workspace::from_keyring(
             kr.uri.clone(),
             String::new(),
@@ -646,488 +631,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         );
         let ctx = crate::manager::FileContext::Workspace(workspace);
         let mut mgr = self.file_manager(&ctx);
-        let tree = match mgr.load_tree().await {
-            Ok(t) => t,
-            Err(e) => {
-                return WorkspaceSyncResult {
-                    keyring_uri: kr.uri.clone(),
-                    is_owner,
-                    proposals_applied: 0,
-                    proposals_cleaned_up: 0,
-                    error: Some(format!("tree sync: {e}")),
-                };
-            }
+        let error = match mgr.load_tree().await {
+            Ok(_) => None,
+            Err(e) => Some(format!("tree sync: {e}")),
         };
-
-        // Cleanup + apply directory proposals
-        let cleaned_up = mgr.cleanup_own_applied_proposals(&tree).await;
-        let mut applied = 0usize;
-        let mut error: Option<String> = None;
-
-        match mgr.apply_pending_proposals(&tree).await {
-            Ok(n) => applied += n,
-            Err(e) => {
-                log::warn!("proposal apply failed for {}: {e}", kr.uri);
-                error = Some(format!("directory proposals: {e}"));
-            }
-        }
-
-        // Extract proposal data before dropping mgr (releases self borrow)
-        let keyring_proposals = mgr.last_keyring_proposals().to_vec();
-        let doc_proposals = mgr.last_document_proposals().to_vec();
-        drop(mgr);
-
-        // Cleanup own applied keyring proposals
-        let member_dids: std::collections::HashSet<&str> =
-            members.iter().map(|m| m.did()).collect();
-        self.cleanup_own_applied_keyring_proposals(&keyring_proposals, &member_dids)
-            .await;
-
-        // Owner-only: document + keyring proposals
-        if is_owner && !doc_proposals.is_empty() {
-            match self.apply_document_proposals(&doc_proposals).await {
-                Ok(n) => applied += n,
-                Err(e) => {
-                    log::warn!("document proposal apply failed for {}: {e}", kr.uri);
-                    error = Some(format!("document proposals: {e}"));
-                }
-            }
-        }
-
-        if is_owner && !keyring_proposals.is_empty() {
-            match self
-                .apply_keyring_proposals(&kr.uri, &keyring_proposals)
-                .await
-            {
-                Ok(n) => applied += n,
-                Err(e) => {
-                    log::warn!("keyring proposal apply failed for {}: {e}", kr.uri);
-                    error = Some(format!("keyring proposals: {e}"));
-                }
-            }
-        }
 
         WorkspaceSyncResult {
             keyring_uri: kr.uri.clone(),
             is_owner,
-            proposals_applied: applied,
-            proposals_cleaned_up: cleaned_up,
+            proposals_applied: 0,
+            proposals_cleaned_up: 0,
             error,
-        }
-    }
-
-    /// Apply keyring update proposals for an owned workspace.
-    ///
-    /// Fetches the current keyring, applies each proposal (addMember, removeMember,
-    /// rename, updateDescription, updateRole), then writes the updated record back.
-    async fn apply_keyring_proposals(
-        &mut self,
-        keyring_uri: &str,
-        proposals: &[crate::indexer::KeyringProposal],
-    ) -> Result<usize, Error> {
-        use crate::crypto;
-        use crate::records::{self, keyring_update};
-
-        let at_uri = atproto::parse_at_uri(keyring_uri)?;
-        let entry = self
-            .client
-            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-            .await?;
-        let mut keyring: records::Keyring = serde_json::from_value(entry.value)?;
-        records::check_version(keyring.opake_version)?;
-
-        // Derive identity + group key once for all proposals that need key wrapping.
-        // Mutable because removeMember/leave rotates the key — subsequent proposals
-        // must use the rotated key.
-        let private_keys = self.private_keys_from_cache();
-        let mut group_key = Self::unwrap_workspace_key(
-            &keyring.members,
-            &self.did,
-            keyring_uri,
-            &private_keys.bundle(),
-        )?;
-
-        let mut applied = 0;
-
-        for p in proposals {
-            match p.action_type.as_str() {
-                keyring_update::ACTION_ADD_MEMBER => {
-                    let Some(ref did) = p.member_did else {
-                        continue;
-                    };
-                    if keyring.members.iter().any(|m| m.did() == did) {
-                        continue;
-                    }
-                    // The proposal carries only the proposer's X25519 hint; we
-                    // resolve the new member's full hybrid identity from their
-                    // published `app.opake.publicKey/self` record so the wrap
-                    // covers both halves of the KEM.
-                    let resolved = match self.resolve_identity(did).await {
-                        Ok(r) => r,
-                        Err(e) => {
-                            log::warn!("keyring-sync: cannot resolve identity for {did}: {e}");
-                            continue;
-                        }
-                    };
-                    let role = p
-                        .role
-                        .as_deref()
-                        .and_then(|r| r.parse::<records::Role>().ok())
-                        .unwrap_or(records::Role::Editor);
-
-                    let recipient_bundle = crypto::PublicKeyBundle {
-                        x25519: &resolved.x25519_public_key,
-                        ml_kem: &resolved.ml_kem_public_key,
-                    };
-                    let wrapped = crypto::wrap_key(
-                        &group_key,
-                        &recipient_bundle,
-                        did,
-                        &crypto::WrapContext::Keyring { uri: keyring_uri },
-                        &mut self.rng,
-                    )?;
-                    keyring.members.push(records::KeyringMember {
-                        wrapped_key: wrapped,
-                        role,
-                    });
-                    applied += 1;
-                    log::info!("keyring-sync: added member {did}");
-                }
-                keyring_update::ACTION_REMOVE_MEMBER | keyring_update::ACTION_LEAVE => {
-                    // For leave, the author IS the member being removed
-                    let did = if p.action_type == keyring_update::ACTION_LEAVE {
-                        &p.author_did
-                    } else {
-                        match p.member_did.as_ref() {
-                            Some(d) => d,
-                            None => continue,
-                        }
-                    };
-                    let before = keyring.members.len();
-                    keyring.members.retain(|m| m.did() != did);
-                    if keyring.members.len() < before {
-                        // Remaining members need the old key to decrypt pre-rotation
-                        // documents. Archive AFTER retain so the removed member is excluded.
-                        keyring.key_history.push(records::KeyHistoryEntry {
-                            rotation: keyring.rotation,
-                            members: keyring.members.clone(),
-                        });
-
-                        // New group key requires each member's current hybrid keypair.
-                        let mut remaining_pubkeys = Vec::with_capacity(keyring.members.len());
-                        for member in &keyring.members {
-                            let resolved = self.resolve_identity(member.did()).await?;
-                            remaining_pubkeys.push((
-                                member.did().to_string(),
-                                resolved.x25519_public_key,
-                                resolved.ml_kem_public_key,
-                            ));
-                        }
-
-                        let did_members: Vec<crypto::DidMember<'_>> = remaining_pubkeys
-                            .iter()
-                            .map(|(d, x_pk, mlkem_pk)| crypto::DidMember {
-                                did: d.as_str(),
-                                keys: crypto::PublicKeyBundle {
-                                    x25519: x_pk,
-                                    ml_kem: mlkem_pk,
-                                },
-                            })
-                            .collect();
-
-                        let (new_key, new_wrapped) =
-                            crypto::create_group_key(&did_members, keyring_uri, &mut self.rng)?;
-
-                        // Roles must survive re-wrapping (new WrappedKeys lose the association)
-                        let role_map: std::collections::HashMap<&str, records::Role> =
-                            keyring.members.iter().map(|m| (m.did(), m.role)).collect();
-
-                        keyring.members = new_wrapped
-                            .into_iter()
-                            .map(|wk| records::KeyringMember {
-                                role: role_map
-                                    .get(wk.did.as_str())
-                                    .copied()
-                                    .unwrap_or(records::Role::Editor),
-                                wrapped_key: wk,
-                            })
-                            .collect();
-
-                        // Metadata is encrypted under the group key — must re-encrypt
-                        let metadata: crypto::KeyringMetadata =
-                            crypto::decrypt_metadata(&group_key, &keyring.encrypted_metadata)?;
-                        keyring.encrypted_metadata =
-                            crypto::encrypt_metadata(&new_key, &metadata, &mut self.rng)?;
-
-                        keyring.rotation += 1;
-                        group_key = new_key;
-                        applied += 1;
-                        log::info!(
-                            "keyring-sync: removed member {did}, rotated key to rotation {}",
-                            keyring.rotation
-                        );
-                    }
-                }
-                keyring_update::ACTION_RENAME | keyring_update::ACTION_UPDATE_DESCRIPTION => {
-                    if let Some(ref em_value) = p.encrypted_metadata {
-                        if let Ok(em) =
-                            serde_json::from_value::<records::EncryptedMetadata>(em_value.clone())
-                        {
-                            keyring.encrypted_metadata = em;
-                            applied += 1;
-                            log::info!("keyring-sync: applied metadata update");
-                        }
-                    }
-                }
-                keyring_update::ACTION_UPDATE_ROLE => {
-                    let Some(ref did) = p.member_did else {
-                        continue;
-                    };
-                    let Some(ref role_str) = p.role else {
-                        continue;
-                    };
-                    let Ok(role) = role_str.parse::<records::Role>() else {
-                        continue;
-                    };
-                    if let Some(member) = keyring.members.iter_mut().find(|m| m.did() == did) {
-                        member.role = role;
-                        applied += 1;
-                        log::info!("keyring-sync: updated role for {did} to {role_str}");
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if applied > 0 {
-            keyring.modified_at = Some(self.now());
-            self.client
-                .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
-                .await?;
-            log::info!(
-                "keyring-sync: applied {applied} keyring proposals for {}",
-                keyring_uri
-            );
-        }
-
-        Ok(applied)
-    }
-
-    /// Download a blob from a foreign PDS and re-host it on the caller's PDS.
-    async fn rehost_blob(
-        &mut self,
-        source_pds: &str,
-        source_did: &str,
-        blob: &crate::atproto::BlobRef,
-    ) -> Result<crate::atproto::BlobRef, Error> {
-        let data = crate::client::get_blob_public(
-            self.client.transport(),
-            source_pds,
-            source_did,
-            &blob.reference.cid,
-        )
-        .await?;
-        self.client.upload_blob(data, &blob.mime_type).await
-    }
-
-    /// Apply document update proposals for an owned workspace.
-    ///
-    /// For each pending `documentUpdate` proposal from a workspace member,
-    /// fetch the full proposal record from the proposer's PDS and apply by
-    /// actionType: `updateContent` re-hosts the blob; `updateMetadata`
-    /// replaces the encrypted metadata field. Both stamp `modifiedAt` so
-    /// the proposer's editor-side cleanup picks up the apply.
-    ///
-    /// Only the workspace owner processes these — they own the canonical
-    /// document records and write to their own PDS.
-    async fn apply_document_proposals(
-        &mut self,
-        proposals: &[crate::indexer::DocumentProposal],
-    ) -> Result<usize, Error> {
-        let mut applied = 0;
-
-        for p in proposals {
-            // Skip our own proposals (owner doesn't propose updates to their own docs)
-            if p.author_did == self.did {
-                continue;
-            }
-
-            match self.apply_single_document_proposal(p).await {
-                Ok(()) => {
-                    applied += 1;
-                    log::info!(
-                        "document-sync: applied update {} for {}",
-                        p.uri,
-                        p.document_uri
-                    );
-                }
-                Err(e) => {
-                    log::warn!(
-                        "document-sync: failed to apply update {} for {}: {e}",
-                        p.uri,
-                        p.document_uri
-                    );
-                }
-            }
-        }
-
-        if applied > 0 {
-            self.auto_persist_session().await?;
-        }
-
-        Ok(applied)
-    }
-
-    /// Apply a single document update proposal.
-    ///
-    /// Fetches the full record from the proposer's PDS, then either re-hosts
-    /// the proposed blob (`updateContent`) or replaces the encrypted metadata
-    /// (`updateMetadata`) on the existing document. The document's
-    /// `modifiedAt` is bumped so editor-side cleanup picks up the apply.
-    async fn apply_single_document_proposal(
-        &mut self,
-        proposal: &crate::indexer::DocumentProposal,
-    ) -> Result<(), Error> {
-        use crate::client::get_record_public;
-        use crate::records;
-
-        let doc_at_uri = atproto::parse_at_uri(&proposal.document_uri)?;
-        let update_at_uri = atproto::parse_at_uri(&proposal.uri)?;
-
-        // Resolve proposer's PDS
-        let proposer_identity = self.resolve_identity(&proposal.author_did).await?;
-        let proposer_pds = &proposer_identity.pds_url;
-
-        // Fetch the full documentUpdate record from the proposer's PDS
-        let update_entry = get_record_public(
-            self.client.transport(),
-            proposer_pds,
-            &update_at_uri.authority,
-            &update_at_uri.collection,
-            &update_at_uri.rkey,
-        )
-        .await?;
-
-        let update_record: records::DocumentUpdateRecord =
-            serde_json::from_value(update_entry.value)?;
-        records::check_version(update_record.opake_version)?;
-
-        // Fetch the current document record from the owner's PDS
-        let doc_entry = self
-            .client
-            .get_record(
-                &doc_at_uri.authority,
-                &doc_at_uri.collection,
-                &doc_at_uri.rkey,
-            )
-            .await?;
-        let mut document: records::Document = serde_json::from_value(doc_entry.value)?;
-        records::check_version(document.opake_version)?;
-
-        let now = self.now();
-
-        match update_record.update {
-            records::DocumentUpdate::UpdateContent { blob, .. } => {
-                document.blob = self
-                    .rehost_blob(proposer_pds, &proposal.author_did, &blob)
-                    .await?;
-            }
-            records::DocumentUpdate::UpdateMetadata {
-                encrypted_metadata, ..
-            } => {
-                document.encrypted_metadata = encrypted_metadata;
-            }
-        }
-        document.modified_at = Some(now);
-
-        // Write updated document back
-        self.client
-            .put_record(&doc_at_uri.collection, &doc_at_uri.rkey, &document)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Clean up the caller's own keyring proposals that have been applied.
-    ///
-    /// Runs for all members (not just the owner). Compares each of the caller's
-    /// own proposals against the current keyring member list. If the proposal's
-    /// effect is reflected in the keyring state, deletes the proposal record
-    /// from the caller's PDS so the Indexer drops it from its index.
-    ///
-    /// Metadata proposals (rename, updateDescription) are skipped — verifying
-    /// encrypted content isn't practical here. They're idempotent, so the owner
-    /// just skips them on re-processing.
-    async fn cleanup_own_applied_keyring_proposals(
-        &mut self,
-        proposals: &[crate::indexer::KeyringProposal],
-        member_dids: &std::collections::HashSet<&str>,
-    ) -> usize {
-        use crate::client::ApplyWriteOp;
-        use crate::records::keyring_update;
-
-        let own_proposals: Vec<_> = proposals
-            .iter()
-            .filter(|p| p.author_did == self.did)
-            .collect();
-
-        if own_proposals.is_empty() {
-            return 0;
-        }
-
-        let mut delete_ops: Vec<ApplyWriteOp> = Vec::new();
-
-        for p in &own_proposals {
-            let applied = match p.action_type.as_str() {
-                keyring_update::ACTION_ADD_MEMBER => p
-                    .member_did
-                    .as_ref()
-                    .is_some_and(|did| member_dids.contains(&did.as_str())),
-                keyring_update::ACTION_REMOVE_MEMBER => p
-                    .member_did
-                    .as_ref()
-                    .is_some_and(|did| !member_dids.contains(&did.as_str())),
-                keyring_update::ACTION_LEAVE => !member_dids.contains(&p.author_did.as_str()),
-                keyring_update::ACTION_UPDATE_ROLE => {
-                    // Role is on the keyring record, which we don't have here.
-                    // Skip — harmless to re-process.
-                    false
-                }
-                // rename, updateDescription — can't verify without decrypting
-                _ => false,
-            };
-
-            if applied {
-                log::trace!(
-                    "keyring-cleanup: proposal {} ({}) applied, will delete",
-                    p.uri,
-                    p.action_type
-                );
-                if let Ok(at_uri) = atproto::parse_at_uri(&p.uri) {
-                    delete_ops.push(ApplyWriteOp::Delete {
-                        collection: at_uri.collection.clone(),
-                        rkey: at_uri.rkey.clone(),
-                    });
-                }
-            }
-        }
-
-        if delete_ops.is_empty() {
-            return 0;
-        }
-
-        let count = delete_ops.len();
-        match self.client.apply_writes(&delete_ops).await {
-            Ok(()) => {
-                log::info!(
-                    "keyring-cleanup: deleted {count} applied proposal records from own PDS"
-                );
-                count
-            }
-            Err(e) => {
-                log::warn!("keyring-cleanup: failed to delete applied proposals: {e}");
-                0
-            }
         }
     }
 
@@ -1178,36 +692,28 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             self.auto_persist_session().await?;
             Ok(MutationOutcome::Applied)
         } else {
-            let update = KeyringUpdateRecord::add_member(
-                keyring_uri.to_string(),
-                member_did.to_string(),
-                member_public_keys.x25519.to_vec(),
-                role.to_string(),
-                now,
-            );
-            self.client
-                .create_record(KEYRING_UPDATE_COLLECTION, &update)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Proposed {
-                update_uri: keyring_uri.to_string(),
-            })
+            // Federation rewrite: every keyring mutation becomes a
+            // curatorial supersede on the caller's PDS (manager authority
+            // validated by walking the chain). Pending that wiring,
+            // non-manager-on-own-PDS additions are unsupported.
+            let _ = (role, now, member_public_keys);
+            Err(Error::Unimplemented(
+                "non-owner add-member (keyring supersede)".into(),
+            ))
         }
     }
 
-    /// Leave a workspace. Writes a keyringUpdate with actionType "leave".
+    /// Leave a workspace.
     ///
-    /// The Indexer handles visibility immediately (stops listing the workspace).
-    /// The owner's daemon processes key rotation asynchronously.
+    /// Pre-federation this wrote a `keyringUpdate.leave` record that the
+    /// owner's daemon processed. The federation rewrite replaces this with
+    /// a manager-authority supersede that drops the leaving member; pending
+    /// that wiring, this path errors out.
     pub async fn leave_workspace(&mut self, keyring_uri: &str) -> Result<String, Error> {
-        let now = self.now();
-        let record = KeyringUpdateRecord::leave(keyring_uri.to_string(), now);
-        let record_ref = self
-            .client
-            .create_record(KEYRING_UPDATE_COLLECTION, &record)
-            .await?;
-        self.auto_persist_session().await?;
-        Ok(record_ref.uri)
+        let _ = keyring_uri;
+        Err(Error::Unimplemented(
+            "workspace leave (keyring supersede)".into(),
+        ))
     }
 
     /// Remove a member from a workspace.
@@ -1279,20 +785,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             let result = admin.remove_member(member_did, &remaining_keys).await?;
             Ok((Some(result), MutationOutcome::Applied))
         } else {
-            let update = KeyringUpdateRecord::remove_member(
-                keyring_uri.to_string(),
-                member_did.to_string(),
-                now,
-            );
-            self.client
-                .create_record(KEYRING_UPDATE_COLLECTION, &update)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok((
-                None,
-                MutationOutcome::Proposed {
-                    update_uri: keyring_uri.to_string(),
-                },
+            let _ = (member_did, now);
+            Err(Error::Unimplemented(
+                "non-owner remove-member (keyring supersede)".into(),
             ))
         }
     }
@@ -1357,20 +852,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             self.auto_persist_session().await?;
             Ok(MutationOutcome::Applied)
         } else {
-            let now = self.now();
-            let has_name_change = name.is_some();
-            let update = if has_name_change {
-                KeyringUpdateRecord::rename(keyring_uri.to_string(), new_encrypted, now)
-            } else {
-                KeyringUpdateRecord::update_description(keyring_uri.to_string(), new_encrypted, now)
-            };
-            self.client
-                .create_record(KEYRING_UPDATE_COLLECTION, &update)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Proposed {
-                update_uri: keyring_uri.to_string(),
-            })
+            let _ = new_encrypted;
+            Err(Error::Unimplemented(
+                "non-owner workspace metadata update (keyring supersede)".into(),
+            ))
         }
     }
 
@@ -1414,19 +899,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             self.auto_persist_session().await?;
             Ok(MutationOutcome::Applied)
         } else {
-            let update = KeyringUpdateRecord::update_role(
-                keyring_uri.to_string(),
-                member_did.to_string(),
-                new_role.to_string(),
-                now,
-            );
-            self.client
-                .create_record(KEYRING_UPDATE_COLLECTION, &update)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Proposed {
-                update_uri: keyring_uri.to_string(),
-            })
+            let _ = (member_did, new_role, now);
+            Err(Error::Unimplemented(
+                "non-owner role update (keyring supersede)".into(),
+            ))
         }
     }
 
@@ -1444,7 +920,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let record = Invitation::workspace(keyring_uri.to_string(), role, token.clone(), now);
         let record_ref = self
             .client
-            .create_record(INVITATION_COLLECTION, &record)
+            .create_record(INVITATION_COLLECTION, None, &record)
             .await?;
         self.auto_persist_session().await?;
         Ok((record_ref.uri, token))
@@ -1482,7 +958,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let record = InvitationAcceptance::new(invitation_uri.to_string(), now);
         let record_ref = self
             .client
-            .create_record(INVITATION_ACCEPTANCE_COLLECTION, &record)
+            .create_record(INVITATION_ACCEPTANCE_COLLECTION, None, &record)
             .await?;
         self.auto_persist_session().await?;
         Ok(record_ref.uri)

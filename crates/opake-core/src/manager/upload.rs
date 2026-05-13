@@ -1,11 +1,9 @@
-use crate::client::{ApplyWriteOp, Transport};
+use crate::client::Transport;
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories;
 use crate::documents;
 use crate::error::Error;
-use crate::records::{DirectoryUpdateRecord, DIRECTORY_UPDATE_COLLECTION};
 use crate::storage::Storage;
-use crate::tid::uri_with_tid;
 
 use super::types::{FileContext, MutationOutcome, UploadRequest, UploadResult};
 use super::FileManager;
@@ -46,13 +44,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Upload a file to the current context (cabinet or workspace).
     ///
-    /// Encrypts the plaintext, uploads the ciphertext blob, and atomically
-    /// creates the document record + updates the target directory in a single
-    /// `applyWrites` call. No ghost documents on partial failure.
+    /// Two-phase write: first creates the document record, then updates the
+    /// target directory's listing with the document's CID embedded. The PDS
+    /// assigns the CID, so we cannot batch both writes in one `applyWrites`
+    /// without losing the back-reference. Partial-failure case: a document
+    /// record exists without a directory entry; safe to retry the upload
+    /// with the same plaintext (TID changes, no collision).
     ///
-    /// For workspace members (non-owners), the document lives on the member's
-    /// PDS and a `directoryUpdate.addEntry` proposal is written alongside it
-    /// for the workspace owner to apply.
+    /// Federation rewrite (in progress): workspace member uploads will route
+    /// through `directories::cascade::execute_cascade` so each member writes
+    /// to their own PDS. Today only the directory's PDS authority can write
+    /// through this path; non-owner workspace writes return an error.
     #[::opake_derive::signoff]
     pub async fn upload(&mut self, req: &UploadRequest<'_>) -> Result<UploadResult, Error> {
         let now = self.opake.now();
@@ -80,7 +82,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let tid = self.opake.generate_tid();
 
-        // Upload blob first (idempotent, PDS GCs orphans)
         let (doc_record, tid) = documents::prepare_upload(
             &mut self.opake.client,
             &documents::UploadParams {
@@ -98,29 +99,25 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         )
         .await?;
 
-        let doc_uri = uri_with_tid(&cabinet.did, documents::DOCUMENT_COLLECTION, &tid);
-
-        // Prepare directory entry addition
-        let dir_op =
-            directories::prepare_add_entry(&mut self.opake.client, &target, &doc_uri, now).await?;
-
-        // Atomic: create document + update directory
-        self.opake
+        let doc_ref = self
+            .opake
             .client
-            .apply_writes(&[
-                ApplyWriteOp::Create {
-                    collection: documents::DOCUMENT_COLLECTION.into(),
-                    rkey: Some(tid),
-                    record: doc_record,
-                },
-                dir_op,
-            ])
+            .create_record(documents::DOCUMENT_COLLECTION, Some(&tid), &doc_record)
             .await?;
+
+        directories::add_entry(
+            &mut self.opake.client,
+            &target,
+            &doc_ref.uri,
+            &doc_ref.cid,
+            now,
+        )
+        .await?;
 
         self.invalidate_directory_cache().await;
 
         Ok(UploadResult {
-            uri: doc_uri,
+            uri: doc_ref.uri,
             outcome: MutationOutcome::Applied,
         })
     }
@@ -139,14 +136,24 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             None => ws.root_directory_uri(),
         };
 
-        // Owner: ensure root exists before upload
+        // Federation-rewrite gap: today the directory record lives on
+        // whichever PDS originally created it. Member writes can't mutate
+        // that record without a curatorial-supersede cascade. Until the
+        // cascade path is wired through this manager, only the directory's
+        // PDS authority can land an upload here.
+        if crate::atproto::parse_at_uri(&target)?.authority != self.opake.did {
+            return Err(Error::Unimplemented(
+                "workspace member upload (cascade)".into(),
+            ));
+        }
+
         if self.is_owner() {
             self.ensure_root().await?;
         }
 
         let tid = self.opake.generate_tid();
 
-        let (doc_record, _) = documents::prepare_upload_keyring(
+        let (doc_record, tid) = documents::prepare_upload_keyring(
             &mut self.opake.client,
             &documents::KeyringUploadParams {
                 plaintext: req.plaintext,
@@ -164,66 +171,26 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         )
         .await?;
 
-        let doc_uri = uri_with_tid(&self.opake.did, documents::DOCUMENT_COLLECTION, &tid);
+        let doc_ref = self
+            .opake
+            .client
+            .create_record(documents::DOCUMENT_COLLECTION, Some(&tid), &doc_record)
+            .await?;
 
-        // The target directory's authority always belongs to the workspace
-        // owner — even when a member is contributing into someone else's
-        // workspace, the directory record is on the owner's PDS.
-        let is_owner = crate::atproto::parse_at_uri(&target)?.authority == self.opake.did;
+        directories::add_entry(
+            &mut self.opake.client,
+            &target,
+            &doc_ref.uri,
+            &doc_ref.cid,
+            now,
+        )
+        .await?;
 
-        let doc_create = ApplyWriteOp::Create {
-            collection: documents::DOCUMENT_COLLECTION.into(),
-            rkey: Some(tid),
-            record: doc_record,
-        };
+        self.invalidate_directory_cache().await;
 
-        if is_owner {
-            let dir_op =
-                directories::prepare_add_entry(&mut self.opake.client, &target, &doc_uri, now)
-                    .await?;
-
-            self.opake
-                .client
-                .apply_writes(&[doc_create, dir_op])
-                .await?;
-
-            self.invalidate_directory_cache().await;
-
-            Ok(UploadResult {
-                uri: doc_uri,
-                outcome: MutationOutcome::Applied,
-            })
-        } else {
-            // Member upload: doc lives on the member's own PDS; the entry
-            // gets registered with the owner's directory via a
-            // `directoryUpdate.addEntry` proposal that the owner's daemon
-            // applies. Both writes go in a single applyWrites so we don't
-            // emit a doc record without a matching proposal.
-            let update = DirectoryUpdateRecord::add_entry(
-                ws.uri.clone(),
-                target,
-                doc_uri.clone(),
-                now.to_string(),
-            );
-
-            self.opake
-                .client
-                .apply_writes(&[
-                    doc_create,
-                    ApplyWriteOp::Create {
-                        collection: DIRECTORY_UPDATE_COLLECTION.into(),
-                        rkey: None, // PDS generates TID for proposal
-                        record: serde_json::to_value(&update)?,
-                    },
-                ])
-                .await?;
-
-            Ok(UploadResult {
-                outcome: MutationOutcome::Proposed {
-                    update_uri: doc_uri.clone(),
-                },
-                uri: doc_uri,
-            })
-        }
+        Ok(UploadResult {
+            uri: doc_ref.uri,
+            outcome: MutationOutcome::Applied,
+        })
     }
 }

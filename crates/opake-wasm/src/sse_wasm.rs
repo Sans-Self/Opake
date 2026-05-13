@@ -12,11 +12,8 @@
 // The consumer loop runs via wasm_bindgen_futures::spawn_local and pulls
 // events from the browser's EventSource (WasmSseTransport). Record
 // events are dispatched to both the TreeKeeper (directory tree state)
-// and the WorkspaceKeeper (workspace-list state). Proposals flow through
-// the debounced sync scheduler as before.
+// and the WorkspaceKeeper (workspace-list state).
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -382,23 +379,7 @@ impl WasmOpakeHandle {
                     break;
                 }
 
-                if event.is_proposal() {
-                    if let Some(keyring_uri) = event.keyring_uri() {
-                        schedule_proposal_sync(Rc::clone(&opake_rc), keyring_uri.to_string());
-                    } else {
-                        // Unroutable proposal — in practice a
-                        // `documentUpdate` (the lexicon has no
-                        // `keyring` field). The indexer routes it
-                        // to the author's personal topic, so the
-                        // workspace owner never sees it and the web
-                        // client has no polling fallback to fill
-                        // the gap. Tracked in the cleanup sweep.
-                        log::debug!(
-                            "[sse] unroutable proposal event (no keyring_uri): {:?}",
-                            event
-                        );
-                    }
-                } else {
+                {
                     let mut keeper = tree_keeper_rc.lock().await;
                     // Re-check the flag after acquiring the lock: if the
                     // consumer was stopped while we were waiting for it,
@@ -435,28 +416,9 @@ impl WasmOpakeHandle {
                 apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &started_flag, &event)
                     .await;
 
-                // Editor proposal cleanup: target-record upsert events
-                // (document/directory/keyring) carrying modified_at are
-                // the signal that the owner has applied something to
-                // that record. Delete any of the caller's outstanding
-                // proposals targeting it whose createdAt < modified_at.
-                if let Some((target_uri, modified_at)) = event.cleanup_target() {
-                    let target_uri = target_uri.to_string();
-                    let modified_at = modified_at.to_string();
-                    let mut opake = opake_rc.lock().await;
-                    if !started_flag.get() {
-                        log::debug!("[sse] consumer stopped during proposal cleanup");
-                        break;
-                    }
-                    if let Err(e) = opake
-                        .cleanup_proposals_for_target(&target_uri, &modified_at)
-                        .await
-                    {
-                        log::warn!(
-                            "[sse] proposal cleanup for {target_uri} failed: {e}"
-                        );
-                    }
-                }
+                // Federation rewrite: editor proposal-cleanup heuristic
+                // is gone. Chain-fork retry replaces it; that dispatch
+                // lands with the cascade-aware SDK migration.
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -478,7 +440,6 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = stopSseConsumer)]
     pub fn stop_sse_consumer(&self) {
         self.sse_started.set(false);
-        PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| state.borrow_mut().clear());
     }
 
     /// Drain every in-memory keeper: directory trees, the workspace
@@ -539,87 +500,12 @@ fn make_token_fetcher(opake_rc: Rc<Mutex<WasmOpake>>, indexer_url: String) -> To
     })
 }
 
-// Per-keyring debounce state. Increments on every `schedule_proposal_sync`
-// call; the delayed task re-checks the generation before firing so a
-// burst of events for the same keyring collapses into a single sync.
-// `stop_sse_consumer` clears the map on teardown and the owning task
-// clears its own entry on successful fire, so long-running sessions
-// that touch many workspaces don't leak URIs indefinitely.
-thread_local! {
-    static PROPOSAL_DEBOUNCE_GENERATIONS: RefCell<HashMap<String, u64>> =
-        RefCell::new(HashMap::new());
-}
-
-/// Coalesce window for proposal events targeting the same workspace.
-/// Long enough to collapse a flurry of three-event record-echoes, short
-/// enough that collaborative edits still feel live.
-const PROPOSAL_DEBOUNCE_WINDOW: Duration = Duration::from_millis(2_000);
-
-/// Schedule a debounced workspace sync. Fire-and-forget: returns before
-/// the task spawns so the SSE consumer loop keeps pulling events.
-fn schedule_proposal_sync(opake_rc: Rc<Mutex<WasmOpake>>, keyring_uri: String) {
-    let generation = PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| {
-        let mut state = state.borrow_mut();
-        let entry = state.entry(keyring_uri.clone()).or_insert(0);
-        *entry += 1;
-        *entry
-    });
-
-    wasm_bindgen_futures::spawn_local(async move {
-        wasm_sleep(PROPOSAL_DEBOUNCE_WINDOW).await;
-
-        // If another event bumped the generation for this keyring while
-        // we were sleeping, that newer task will run the sync — stand
-        // down and leave its counter in place for it to clean up.
-        let still_current = PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| {
-            let state = state.borrow();
-            state.get(&keyring_uri).copied() == Some(generation)
-        });
-        if !still_current {
-            log::debug!("[sse] proposal sync superseded for {keyring_uri}");
-            return;
-        }
-
-        // We're the authoritative task for this generation — remove the
-        // entry before firing so the map stays bounded. A later event
-        // can freely re-register; it'll start the counter back at 1.
-        PROPOSAL_DEBOUNCE_GENERATIONS.with(|state| {
-            state.borrow_mut().remove(&keyring_uri);
-        });
-
-        dispatch_proposal_sync(&opake_rc, &keyring_uri).await;
-    });
-}
-
-/// Acquire the Opake lock and call `sync_workspace_by_uri`. Called only
-/// from the debounced scheduler — never from the consumer loop directly.
-async fn dispatch_proposal_sync(opake_rc: &Rc<Mutex<WasmOpake>>, keyring_uri: &str) {
-    let mut guard = opake_rc.lock().await;
-    match guard.sync_workspace_by_uri(keyring_uri).await {
-        Ok(Some(result)) => {
-            if result.proposals_applied > 0 {
-                log::info!(
-                    "[sse] applied {} proposals on {}",
-                    result.proposals_applied,
-                    keyring_uri
-                );
-            }
-        }
-        Ok(None) => {
-            // Not a member of this keyring — silently drop.
-        }
-        Err(e) => {
-            log::warn!("[sse] proposal sync failed for {keyring_uri}: {e}");
-        }
-    }
-}
-
 /// Promise-based sleep using JS `setTimeout`. Works in any context with
-/// a global `setTimeout` (Window, Worker).
+/// a global `setTimeout` (Window, Worker). Used by `SseConsumer` for
+/// exponential-backoff reconnect timing.
 async fn wasm_sleep(duration: Duration) {
     let ms = duration.as_millis() as i32;
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        // Use global setTimeout — works in both Window and Worker.
         let global = js_sys::global();
         let set_timeout = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
             .ok()

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use log::{info, trace, warn};
+use log::{trace, warn};
 
 use crate::atproto;
 use crate::client::Transport;
@@ -32,18 +32,6 @@ fn doc_scope_key(context: &FileContext) -> String {
         FileContext::Cabinet(_) => "cabinet:documents".into(),
         FileContext::Workspace(ws) => format!("ws:{}:documents", ws.uri),
     }
-}
-
-/// Collect all entry URIs across all directories in a tree.
-fn collect_tree_entries(tree: &DirectoryTree) -> std::collections::HashSet<&str> {
-    tree.all_directory_uris()
-        .flat_map(|dir_uri| {
-            tree.entries_for(dir_uri)
-                .unwrap_or(&[])
-                .iter()
-                .map(|s| s.as_str())
-        })
-        .collect()
 }
 
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
@@ -84,10 +72,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 cached_coll.fetched_at,
             );
 
-            // Sync deltas from Indexer if available
-            let (records, proposals) = self.try_sync_deltas(cached_coll).await?;
-            trace!("sync returned {} proposals", proposals.len());
-            self.last_proposals = proposals;
+            let records = self.try_sync_deltas(cached_coll).await?;
             DirectoryTree::from_cached_records(&records)
         } else {
             trace!("no cache — bootstrapping tree");
@@ -100,306 +85,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         Ok(tree)
     }
 
-    /// Apply pending directory proposals from workspace members.
-    ///
-    /// Pre-filters proposals against the loaded tree to skip already-applied
-    /// ones (the Indexer keeps serving proposals until the editor deletes
-    /// them). Groups remaining proposals by target directory, fetches each
-    /// once, batch-applies adds/removes, and submits atomically via
-    /// `applyWrites`. Consumes `last_proposals` — subsequent calls return 0.
-    pub async fn apply_pending_proposals(&mut self, tree: &DirectoryTree) -> Result<usize, Error> {
-        use crate::client::ApplyWriteOp;
-        use crate::directories::DIRECTORY_COLLECTION;
-        use crate::records::directory_update::{
-            ACTION_ADD_ENTRY, ACTION_MOVE_ENTRY, ACTION_REMOVE_ENTRY, ACTION_RENAME_DIRECTORY,
-        };
-        use crate::records::{self, Directory};
-        use std::collections::HashSet;
-
-        let is_owner = self.is_owner();
-        trace!(
-            "apply_pending_proposals: owner={is_owner}, {} proposals queued",
-            self.last_proposals.len()
-        );
-
-        if !is_owner {
-            return Ok(0);
-        }
-
-        let proposals = std::mem::take(&mut self.last_proposals);
-        if proposals.is_empty() {
-            return Ok(0);
-        }
-
-        // Pre-filter: skip proposals already reflected in the tree.
-        let tree_entries = collect_tree_entries(tree);
-
-        let mut adds_by_dir: HashMap<String, Vec<String>> = HashMap::new();
-        let mut removes_by_dir: HashMap<String, Vec<String>> = HashMap::new();
-        let mut renames: HashMap<String, crate::records::EncryptedMetadata> = HashMap::new();
-
-        trace!("pre-filter: {} tree entries total", tree_entries.len());
-
-        for p in &proposals {
-            trace!(
-                "proposal: action={}, dir={:?}, entry={:?}, source={:?}, target={:?}",
-                p.action_type,
-                p.directory_uri,
-                p.entry_uri,
-                p.source_directory_uri,
-                p.target_directory_uri
-            );
-            match p.action_type.as_str() {
-                ACTION_ADD_ENTRY => {
-                    if let (Some(dir), Some(entry)) = (&p.directory_uri, &p.entry_uri) {
-                        let in_tree = tree_entries.contains(entry.as_str());
-                        trace!("  addEntry: entry in tree = {in_tree}");
-                        if !in_tree {
-                            adds_by_dir
-                                .entry(dir.clone())
-                                .or_default()
-                                .push(entry.clone());
-                        }
-                    }
-                }
-                ACTION_REMOVE_ENTRY => {
-                    if let (Some(dir), Some(entry)) = (&p.directory_uri, &p.entry_uri) {
-                        if tree_entries.contains(entry.as_str()) {
-                            removes_by_dir
-                                .entry(dir.clone())
-                                .or_default()
-                                .push(entry.clone());
-                        }
-                    }
-                }
-                ACTION_MOVE_ENTRY => {
-                    if let (Some(source), Some(target), Some(entry)) = (
-                        &p.source_directory_uri,
-                        &p.target_directory_uri,
-                        &p.entry_uri,
-                    ) {
-                        removes_by_dir
-                            .entry(source.clone())
-                            .or_default()
-                            .push(entry.clone());
-                        adds_by_dir
-                            .entry(target.clone())
-                            .or_default()
-                            .push(entry.clone());
-                    }
-                }
-                ACTION_RENAME_DIRECTORY => {
-                    if let (Some(dir), Some(meta)) = (&p.directory_uri, &p.encrypted_metadata) {
-                        if let Ok(parsed) = serde_json::from_value(meta.clone()) {
-                            renames.insert(dir.clone(), parsed);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let has_entry_changes = !adds_by_dir.is_empty() || !removes_by_dir.is_empty();
-        if !has_entry_changes && renames.is_empty() {
-            return Ok(0);
-        }
-
-        let dir_uris: HashSet<&String> = adds_by_dir
-            .keys()
-            .chain(removes_by_dir.keys())
-            .chain(renames.keys())
-            .collect();
-
-        let now = self.opake.now();
-        let mut ops: Vec<ApplyWriteOp> = Vec::new();
-        let mut applied = 0;
-
-        for dir_uri in &dir_uris {
-            let at_uri = match atproto::parse_at_uri(dir_uri) {
-                Ok(u) => u,
-                Err(e) => {
-                    warn!("invalid directory URI {dir_uri}: {e}");
-                    continue;
-                }
-            };
-
-            let record = match self
-                .opake
-                .client
-                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-                .await
-            {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("failed to fetch directory {dir_uri}: {e}");
-                    continue;
-                }
-            };
-
-            let mut directory: Directory = match serde_json::from_value(record.value) {
-                Ok(d) => d,
-                Err(e) => {
-                    warn!("failed to parse directory {dir_uri}: {e}");
-                    continue;
-                }
-            };
-
-            if records::check_version(directory.opake_version).is_err() {
-                warn!("directory {dir_uri} has unsupported schema version");
-                continue;
-            }
-
-            let mut changed = false;
-
-            if let Some(entries) = adds_by_dir.get(*dir_uri) {
-                for entry_uri in entries {
-                    if !directory.entries.iter().any(|e| e.target == *entry_uri) {
-                        // Phase 2 WIP: this whole proposal-apply path goes away
-                        // in the curatorial-supersede rewrite; placeholder CID
-                        // exists only to keep the dead branch compiling.
-                        directory
-                            .entries
-                            .push(crate::records::ListingEntry::new(entry_uri, "pending"));
-                        applied += 1;
-                        changed = true;
-                    }
-                }
-            }
-
-            if let Some(entries) = removes_by_dir.get(*dir_uri) {
-                for entry_uri in entries {
-                    let before = directory.entries.len();
-                    directory.entries.retain(|e| e.target != *entry_uri);
-                    if directory.entries.len() < before {
-                        applied += 1;
-                        changed = true;
-                    }
-                }
-            }
-
-            if let Some(new_metadata) = renames.get(*dir_uri) {
-                directory.encrypted_metadata = new_metadata.clone();
-                applied += 1;
-                changed = true;
-            }
-
-            if changed {
-                directory.modified_at = Some(now.clone());
-                if let Ok(value) = serde_json::to_value(&directory) {
-                    ops.push(ApplyWriteOp::Update {
-                        collection: DIRECTORY_COLLECTION.into(),
-                        rkey: at_uri.rkey.clone(),
-                        record: value,
-                    });
-                }
-            }
-        }
-
-        if !ops.is_empty() {
-            self.opake.client.apply_writes(&ops).await?;
-            self.invalidate_directory_cache().await;
-            trace!(
-                "applied {applied} proposals across {} directories",
-                ops.len()
-            );
-        }
-
-        Ok(applied)
-    }
-
-    /// Delete the caller's own applied proposal records from their PDS.
-    ///
-    /// After a tree sync, proposals authored by the caller whose effects are
-    /// already in the tree are stale. Deleting them from the PDS propagates
-    /// via the firehose so the Indexer drops them from its index too.
-    ///
-    /// Must be called with proposals still in `last_proposals` (before
-    /// `apply_pending_proposals` consumes them).
-    pub async fn cleanup_own_applied_proposals(&mut self, tree: &DirectoryTree) -> usize {
-        use crate::client::ApplyWriteOp;
-        use crate::records::directory_update::{
-            ACTION_ADD_ENTRY, ACTION_MOVE_ENTRY, ACTION_REMOVE_ENTRY,
-        };
-
-        let my_did = &self.opake.did;
-        let own_proposals = self
-            .last_proposals
-            .iter()
-            .filter(|p| p.author_did == *my_did)
-            .count();
-
-        if own_proposals == 0 {
-            return 0;
-        }
-
-        let tree_entries = collect_tree_entries(tree);
-
-        trace!(
-            "checking {own_proposals} own proposals against {} tree entries",
-            tree_entries.len()
-        );
-
-        let mut delete_ops: Vec<ApplyWriteOp> = Vec::new();
-
-        for p in &self.last_proposals {
-            if p.author_did != *my_did {
-                continue;
-            }
-            let applied = match p.entry_uri.as_deref() {
-                Some(entry)
-                    if p.action_type == ACTION_ADD_ENTRY || p.action_type == ACTION_MOVE_ENTRY =>
-                {
-                    tree_entries.contains(entry)
-                }
-                Some(entry) if p.action_type == ACTION_REMOVE_ENTRY => {
-                    !tree_entries.contains(entry)
-                }
-                _ => false,
-            };
-            if applied {
-                trace!("proposal {} applied (entry in tree), will delete", p.uri);
-                if let Ok(at_uri) = atproto::parse_at_uri(&p.uri) {
-                    delete_ops.push(ApplyWriteOp::Delete {
-                        collection: at_uri.collection.clone(),
-                        rkey: at_uri.rkey.clone(),
-                    });
-                }
-            } else {
-                trace!(
-                    "proposal {} not yet applied (entry {:?} not in tree)",
-                    p.uri,
-                    p.entry_uri
-                );
-            }
-        }
-
-        if delete_ops.is_empty() {
-            return 0;
-        }
-
-        let count = delete_ops.len();
-        match self.opake.client.apply_writes(&delete_ops).await {
-            Ok(()) => {
-                info!("cleaned up {count} applied proposal records from own PDS");
-                count
-            }
-            Err(e) => {
-                warn!("failed to clean up applied proposals: {e}");
-                0
-            }
-        }
-    }
-
     /// Try to sync deltas from the Indexer. If Indexer is unavailable,
     /// return the cached records as-is (offline-capable).
     async fn try_sync_deltas(
         &self,
         cached: CachedCollection,
-    ) -> Result<(Vec<CachedRecord>, Vec<crate::indexer::TreeProposal>), Error> {
+    ) -> Result<Vec<CachedRecord>, Error> {
         let indexer_url = self.opake.resolve_indexer_url();
         let signing_key = match self.opake.identity().signing_key_bytes() {
             Ok(Some(k)) => k,
-            _ => return Ok((cached.records, Vec::new())),
+            _ => return Ok(cached.records),
         };
 
         // Extract sync cursor from the metadata sentinel record (uri = "__sync__")
@@ -458,13 +153,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         match delta_result {
             Ok(delta) => {
-                let proposals = delta.proposals.clone();
                 let updated = self.apply_and_cache_delta(&cached.records, &delta).await?;
-                Ok((updated, proposals))
+                Ok(updated)
             }
             Err(e) => {
                 warn!("Indexer sync failed, using cached tree: {e}");
-                Ok((cached.records, Vec::new()))
+                Ok(cached.records)
             }
         }
     }
@@ -571,9 +265,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
-        self.last_proposals = snapshot.proposals.clone();
-        self.last_keyring_proposals = snapshot.keyring_proposals.clone();
-        self.last_document_proposals = snapshot.document_proposals.clone();
         let dir_records = snapshot.directory_cache_records();
         let doc_records = snapshot.document_cache_records();
         let with_cursor = Self::with_sync_cursor(dir_records.clone(), snapshot.sync_cursor());

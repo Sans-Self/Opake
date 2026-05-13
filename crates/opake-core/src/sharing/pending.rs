@@ -49,7 +49,7 @@ pub async fn create_pending_share(
         now.to_string(),
     );
     let record_ref = client
-        .create_record(PENDING_SHARE_COLLECTION, &record)
+        .create_record(PENDING_SHARE_COLLECTION, None, &record)
         .await?;
     Ok(record_ref.uri)
 }

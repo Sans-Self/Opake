@@ -411,18 +411,22 @@ impl TreeKeeper {
             // Grant events: don't affect the tree. Consumers can react
             // separately for sharing UI updates.
             SseEvent::GrantUpsert(_) | SseEvent::GrantDelete(_) => {}
-            // Proposal events: routed upstream by the WASM SSE consumer
-            // via `dispatch_proposal_sync`, not applied to the tree
-            // directly. By the time they'd reach here they've already
-            // been handled (or dropped as unroutable). TreeKeeper is
-            // pure tree state — proposals require a sync round-trip
-            // that can't happen under the keeper lock anyway.
-            SseEvent::DirectoryUpdateUpsert(_)
-            | SseEvent::DirectoryUpdateDelete(_)
-            | SseEvent::KeyringUpdateUpsert(_)
-            | SseEvent::KeyringUpdateDelete(_)
-            | SseEvent::DocumentUpdateUpsert(_)
-            | SseEvent::DocumentUpdateDelete(_) => {}
+            // Chain-fork notifications belong to the SDK retry layer, not
+            // TreeKeeper — but until that wiring lands they must not be
+            // silently swallowed. Surfacing as a warn makes the regression
+            // path visible in logs and crash reports.
+            SseEvent::ChainForked(fork) => {
+                log::warn!(
+                    "chain forked: workspace={} scope={} path={:?} your={} fork_point={} winner={} winner_cid={}",
+                    fork.workspace_id,
+                    fork.scope,
+                    fork.path,
+                    fork.your_uri,
+                    fork.fork_point_uri,
+                    fork.winner_uri,
+                    fork.winner_cid,
+                );
+            }
             // Reconnect: callers handle full-sync out-of-band. We just
             // fire all watchers so the UI repaints from current state
             // (which is stale until a full sync lands).
@@ -495,7 +499,6 @@ impl TreeKeeper {
             encrypted_metadata: None,
             key_wrapping: None,
             keyring_uri: None,
-            modified_at: None,
             deleted_at: Some(String::new()),
             indexed_at: None,
         };

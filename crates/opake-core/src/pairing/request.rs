@@ -60,7 +60,7 @@ where
         created_at,
     );
     let record_ref = client
-        .create_record(PAIR_REQUEST_COLLECTION, &record)
+        .create_record(PAIR_REQUEST_COLLECTION, None, &record)
         .await?;
 
     let rkey = atproto::parse_at_uri(&record_ref.uri)?.rkey;

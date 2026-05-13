@@ -57,19 +57,16 @@ pub struct DownloadResult {
     pub plaintext: Vec<u8>,
 }
 
-/// Whether a mutation was applied directly or proposed for owner approval.
+/// Whether a mutation was applied directly.
 ///
-/// Cabinet operations always return `Applied`. Workspace operations return
-/// `Proposed` when the caller is a member (not the owner) — in that case,
-/// a `directoryUpdate` record was written to the caller's PDS for the
-/// owner's daemon to pick up.
+/// Pre-federation this enum also carried a `Proposed` variant for editor
+/// writes that targeted someone else's PDS. The federation rewrite replaces
+/// those with curatorial-supersede cascades — every chain participant
+/// writes to their own PDS, so every mutation reaches `Applied`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutationOutcome {
     /// The operation was applied directly to the PDS.
     Applied,
-    /// A proposal was created for the workspace owner to apply.
-    /// `update_uri` is the AT-URI of the affected entity (document or
-    /// directory), not the proposal record itself.
-    Proposed { update_uri: String },
 }
 
 /// Document metadata including record timestamps.
@@ -109,9 +106,5 @@ impl ResolvedDocumentMetadata {
 impl MutationOutcome {
     pub fn is_applied(&self) -> bool {
         matches!(self, MutationOutcome::Applied)
-    }
-
-    pub fn is_proposed(&self) -> bool {
-        matches!(self, MutationOutcome::Proposed { .. })
     }
 }

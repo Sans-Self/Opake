@@ -50,7 +50,9 @@ pub async fn create_grant(
     );
 
     trace!("creating grant record");
-    let record_ref = client.create_record(GRANT_COLLECTION, &grant).await?;
+    let record_ref = client
+        .create_record(GRANT_COLLECTION, None, &grant)
+        .await?;
     Ok(record_ref.uri)
 }
 

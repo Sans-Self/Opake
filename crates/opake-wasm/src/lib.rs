@@ -1,3 +1,4 @@
+#[cfg(target_arch = "wasm32")]
 use std::collections::HashMap;
 
 use opake_core::client::dpop::DpopKeyPair;
@@ -433,6 +434,7 @@ pub fn pds_from_did_document_js(doc_json: &[u8]) -> Result<String, JsError> {
 // and the FileManager / SSE bindings that emit tree snapshots to JS.
 // ---------------------------------------------------------------------------
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Serialize)]
 pub(crate) struct TypedEntry {
     pub(crate) uri: String,
@@ -440,6 +442,7 @@ pub(crate) struct TypedEntry {
     pub(crate) kind: &'static str,
 }
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DirectorySnapshotEntry {
@@ -448,6 +451,7 @@ pub(crate) struct DirectorySnapshotEntry {
     pub(crate) parent_uri: Option<String>,
 }
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DirectoryTreeSnapshot {
@@ -461,12 +465,6 @@ pub(crate) struct DirectoryTreeSnapshot {
 #[wasm_bindgen(js_name = workspaceRootDirectoryUri)]
 pub fn workspace_root_directory_uri(did: &str, keyring_uri: &str) -> String {
     opake_core::directories::workspace_root_directory_uri(did, keyring_uri)
-}
-
-/// Return the collection string for directoryUpdate records.
-#[wasm_bindgen(js_name = directoryUpdateCollection)]
-pub fn directory_update_collection_export() -> String {
-    opake_core::records::DIRECTORY_UPDATE_COLLECTION.to_owned()
 }
 
 // ---------------------------------------------------------------------------

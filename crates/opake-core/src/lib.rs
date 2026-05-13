@@ -34,7 +34,6 @@ pub mod metadata;
 pub mod opake;
 pub mod pairing;
 pub mod paths;
-pub mod proposal_cleanup;
 pub mod records;
 pub mod reencryption;
 pub mod resolve;
