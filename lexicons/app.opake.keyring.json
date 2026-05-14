@@ -42,6 +42,11 @@
             "format": "at-uri",
             "description": "AT-URI of the prior canonical keyring this record supersedes, if any. Absent on the genesis keyring. Indexers walk this back-edge to verify the chain and check that the supersede was authored by a manager of the prior keyring."
           },
+          "workspaceId": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The genesis keyring URI of this workspace's chain — the stable workspace identity across rotations and membership changes. Absent on the genesis keyring (where this record's own URI is the workspace ID). Present on every supersede so any reader can resolve workspace identity without walking the chain back to genesis."
+          },
           "members": {
             "type": "array",
             "description": "Each member's wrapped group key and workspace role.",

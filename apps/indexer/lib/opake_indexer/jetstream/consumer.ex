@@ -13,7 +13,7 @@ defmodule OpakeIndexer.Jetstream.Consumer do
       when no opake events are happening, which is the dev experience
       we actually want.
 
-    * `:opake_only` — only the seven `app.opake.*` collections, server-
+    * `:opake_only` — only the five `app.opake.*` collections, server-
       side filtered. Use this for low-bandwidth deployments or when you
       need a fast cold-start catch-up after extended downtime.
 
@@ -54,10 +54,7 @@ defmodule OpakeIndexer.Jetstream.Consumer do
     "app.opake.grant",
     "app.opake.keyring",
     "app.opake.document",
-    "app.opake.documentUpdate",
-    "app.opake.keyringUpdate",
     "app.opake.directory",
-    "app.opake.directoryUpdate",
     "app.opake.accountConfig"
   ]
 

@@ -24,7 +24,7 @@ defmodule OpakeIndexerWeb.HealthControllerTest do
     {:ok, _} =
       GrantQueries.upsert_grant(%{
         uri: "at://did:plc:owner/app.opake.grant/3abc",
-        owner_did: "did:plc:owner",
+        author_did: "did:plc:owner",
         recipient_did: "did:plc:me",
         document_uri: "at://did:plc:owner/app.opake.document/3xyz",
         created_at: "2026-03-01T12:00:00Z",

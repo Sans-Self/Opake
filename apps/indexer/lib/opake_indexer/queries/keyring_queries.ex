@@ -1,32 +1,73 @@
 defmodule OpakeIndexer.Queries.KeyringQueries do
   @moduledoc """
-  Keyring membership CRUD and queries. Upserts are transactional
-  delete-all-then-reinsert to match the "full member list" semantics of
-  the `app.opake.keyring` record. `list_keyrings_for_member/3` returns
-  distinct keyrings containing a given DID, with cursor-based pagination.
-  `list_keyrings_full/3` joins the full keyring record data.
+  Keyring CRUD and membership queries. Keyrings are immutable chain members;
+  current head pointers live in `OpakeIndexer.Queries.KeyringChainQueries`.
+
+  `keyring_members` reflects the *current* head's members — replaced
+  wholesale on every supersede via `replace_members/2` (delete-all-then-
+  insert in a transaction).
+
+  Workspace identity is `workspace_id` (= genesis keyring URI). All
+  member-keyed queries take `workspace_id`, not the keyring URI.
   """
 
   import Ecto.Query
 
   alias OpakeIndexer.Repo
-  alias OpakeIndexer.Schemas.{Keyring, KeyringMember, KeyringUpdate}
+  alias OpakeIndexer.Schemas.{Keyring, KeyringMember}
   alias OpakeIndexer.Queries.Pagination
 
-  @spec upsert_keyring(String.t(), String.t(), [map()]) :: {:ok, term()} | {:error, term()}
-  def upsert_keyring(keyring_uri, owner_did, member_entries) do
+  @spec upsert_keyring_record(map()) :: {:ok, Keyring.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_keyring_record(attrs) do
+    %Keyring{}
+    |> Keyring.changeset(%{
+      uri: attrs.uri,
+      workspace_id: attrs[:workspace_id],
+      rotation: attrs[:rotation] || 0,
+      encrypted_metadata: attrs[:encrypted_metadata],
+      supersedes_uri: attrs[:supersedes_uri],
+      created_at: attrs[:created_at],
+      modified_at: attrs[:modified_at],
+      indexed_at: DateTime.utc_now()
+    })
+    |> Repo.insert(
+      on_conflict:
+        {:replace,
+         [
+           :workspace_id,
+           :rotation,
+           :encrypted_metadata,
+           :supersedes_uri,
+           :created_at,
+           :modified_at,
+           :indexed_at
+         ]},
+      conflict_target: :uri
+    )
+  end
+
+  @spec lookup(String.t()) :: Keyring.t() | nil
+  def lookup(uri), do: Repo.get(Keyring, uri)
+
+  @doc """
+  Replace the membership rows for a workspace with the head keyring's
+  member list. Delete-all-then-insert in a transaction so the visible
+  state matches the keyring's "full member list" semantics — partial
+  changes are never observable.
+  """
+  @spec replace_members(String.t(), [map()]) :: {:ok, term()} | {:error, term()}
+  def replace_members(workspace_id, member_entries) do
     now = DateTime.utc_now()
 
     Repo.transaction(fn ->
-      from(km in KeyringMember, where: km.keyring_uri == ^keyring_uri)
+      from(km in KeyringMember, where: km.workspace_id == ^workspace_id)
       |> Repo.delete_all()
 
       rows =
         Enum.map(member_entries, fn entry ->
           %{
-            keyring_uri: keyring_uri,
+            workspace_id: workspace_id,
             member_did: entry.did,
-            owner_did: owner_did,
             role: entry[:role],
             wrapped_key: entry[:wrapped_key],
             indexed_at: now
@@ -37,56 +78,28 @@ defmodule OpakeIndexer.Queries.KeyringQueries do
     end)
   end
 
-  @spec upsert_keyring_record(map()) :: {:ok, Keyring.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_keyring_record(attrs) do
-    %Keyring{
-      uri: attrs.uri,
-      owner_did: attrs.owner_did,
-      rotation: attrs[:rotation] || 0,
-      encrypted_metadata: attrs[:encrypted_metadata],
-      created_at: attrs[:created_at],
-      modified_at: attrs[:modified_at],
-      indexed_at: DateTime.utc_now()
-    }
-    |> Repo.insert(
-      on_conflict:
-        {:replace, [:rotation, :encrypted_metadata, :created_at, :modified_at, :indexed_at]},
-      conflict_target: :uri
-    )
-  end
-
-  @spec remove_member(String.t(), String.t()) :: {non_neg_integer(), nil}
-  def remove_member(keyring_uri, member_did) do
-    from(km in KeyringMember,
-      where: km.keyring_uri == ^keyring_uri and km.member_did == ^member_did
-    )
-    |> Repo.delete_all()
-  end
-
-  @spec delete_keyring(String.t()) :: :ok
-  def delete_keyring(keyring_uri) do
-    from(km in KeyringMember, where: km.keyring_uri == ^keyring_uri)
+  @spec delete_workspace(String.t()) :: :ok
+  def delete_workspace(workspace_id) do
+    from(km in KeyringMember, where: km.workspace_id == ^workspace_id)
     |> Repo.delete_all()
 
-    from(k in Keyring, where: k.uri == ^keyring_uri)
+    from(k in Keyring, where: k.workspace_id == ^workspace_id)
     |> Repo.delete_all()
 
     :ok
   end
 
-  @spec list_keyrings_for_member(String.t(), keyword()) :: {[map()], String.t() | nil}
-  def list_keyrings_for_member(member_did, opts \\ []) do
+  @spec list_workspaces_for_member(String.t(), keyword()) :: {[map()], String.t() | nil}
+  def list_workspaces_for_member(member_did, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
     cursor = Keyword.get(opts, :cursor)
 
     query =
       from(km in KeyringMember,
         where: km.member_did == ^member_did,
-        distinct: km.keyring_uri,
-        order_by: [desc: km.indexed_at, desc: km.keyring_uri],
+        order_by: [desc: km.indexed_at, desc: km.workspace_id],
         select: %{
-          uri: km.keyring_uri,
-          owner_did: km.owner_did,
+          workspace_id: km.workspace_id,
           indexed_at: km.indexed_at
         },
         limit: ^limit
@@ -98,79 +111,100 @@ defmodule OpakeIndexer.Queries.KeyringQueries do
           from(km in query,
             where:
               km.indexed_at < ^cursor_time or
-                (km.indexed_at == ^cursor_time and km.keyring_uri < ^cursor_uri)
+                (km.indexed_at == ^cursor_time and km.workspace_id < ^cursor_uri)
           )
 
         :none ->
           query
       end
 
-    keyrings = Repo.all(query)
-    next_cursor = Pagination.build_next_cursor(keyrings)
+    workspaces = Repo.all(query)
+    next_cursor = build_workspace_cursor(workspaces)
 
-    {keyrings, next_cursor}
+    {workspaces, next_cursor}
   end
 
   @doc """
-  List keyrings with full data (keyring-level + all members) for a given DID.
-  Returns `{[{Keyring.t(), [KeyringMember.t()]}], cursor}`.
+  List workspaces a DID is a member of, joined with the current head keyring
+  data. Returns `{[{Keyring.t(), [KeyringMember.t()]}], cursor}` where the
+  keyring is the chain head (not all chain members).
   """
-  @spec list_keyrings_full(String.t(), keyword()) ::
+  @spec list_workspaces_full(String.t(), keyword()) ::
           {[{Keyring.t(), [KeyringMember.t()]}], String.t() | nil}
-  def list_keyrings_full(member_did, opts \\ []) do
+  def list_workspaces_full(member_did, opts \\ []) do
+    alias OpakeIndexer.Schemas.KeyringChain
+
     limit = Keyword.get(opts, :limit, 50)
     cursor = Keyword.get(opts, :cursor)
 
-    # Step 1: find keyring URIs the DID is a member of
-    uri_query =
+    # Find workspaces the DID is a member of; join through the chain
+    # head to fetch the current keyring record.
+    base_query =
       from(km in KeyringMember,
+        join: kc in KeyringChain,
+        on: kc.workspace_id == km.workspace_id,
         join: k in Keyring,
-        on: km.keyring_uri == k.uri,
+        on: k.uri == kc.head_uri,
         where: km.member_did == ^member_did,
-        select: k,
         order_by: [desc: k.indexed_at, desc: k.uri],
+        select: k,
         limit: ^limit
       )
 
-    uri_query =
+    query =
       case Pagination.parse_cursor(cursor) do
         {:ok, cursor_time, cursor_uri} ->
-          from([km, k] in uri_query,
+          from([km, kc, k] in base_query,
             where:
               k.indexed_at < ^cursor_time or
                 (k.indexed_at == ^cursor_time and k.uri < ^cursor_uri)
           )
 
         :none ->
-          uri_query
+          base_query
       end
 
-    keyrings = Repo.all(uri_query)
+    keyrings = Repo.all(query)
     next_cursor = Pagination.build_next_cursor(keyrings)
 
-    # Step 2: batch-load all members for these keyrings
-    uris = Enum.map(keyrings, & &1.uri)
+    workspace_ids = Enum.map(keyrings, & &1.workspace_id)
 
-    members_by_uri =
-      if uris == [] do
+    members_by_workspace =
+      if workspace_ids == [] do
         %{}
       else
-        from(km in KeyringMember, where: km.keyring_uri in ^uris)
+        from(km in KeyringMember, where: km.workspace_id in ^workspace_ids)
         |> Repo.all()
-        |> Enum.group_by(& &1.keyring_uri)
+        |> Enum.group_by(& &1.workspace_id)
       end
 
-    pairs = Enum.map(keyrings, fn k -> {k, Map.get(members_by_uri, k.uri, [])} end)
+    pairs =
+      Enum.map(keyrings, fn k ->
+        {k, Map.get(members_by_workspace, k.workspace_id, [])}
+      end)
 
     {pairs, next_cursor}
   end
 
   @spec is_member?(String.t(), String.t()) :: boolean()
-  def is_member?(keyring_uri, did) do
+  def is_member?(workspace_id, did) do
     from(km in KeyringMember,
-      where: km.keyring_uri == ^keyring_uri and km.member_did == ^did
+      where: km.workspace_id == ^workspace_id and km.member_did == ^did
     )
     |> Repo.exists?()
+  end
+
+  @doc """
+  Return the role of a DID in a workspace, or `nil` if they're not a member.
+  Used by `OpakeIndexer.Authority` to validate manager-only supersedes.
+  """
+  @spec member_role(String.t(), String.t()) :: String.t() | nil
+  def member_role(workspace_id, did) do
+    from(km in KeyringMember,
+      where: km.workspace_id == ^workspace_id and km.member_did == ^did,
+      select: km.role
+    )
+    |> Repo.one()
   end
 
   @spec all_member_dids() :: [String.t()]
@@ -179,36 +213,25 @@ defmodule OpakeIndexer.Queries.KeyringQueries do
     |> Repo.all()
   end
 
-  @spec keyring_count() :: non_neg_integer()
-  def keyring_count do
-    from(km in KeyringMember, select: count(km.keyring_uri, :distinct))
+  @spec workspace_count() :: non_neg_integer()
+  def workspace_count do
+    from(km in KeyringMember, select: count(km.workspace_id, :distinct))
     |> Repo.one()
   end
 
-  # -- Keyring updates (proposals) --
+  # -- Internal --
 
-  @spec upsert_keyring_update(map()) :: {:ok, KeyringUpdate.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_keyring_update(attrs) do
-    %KeyringUpdate{}
-    |> KeyringUpdate.changeset(attrs)
-    |> Repo.insert(on_conflict: {:replace_all_except, [:uri]}, conflict_target: :uri)
-  end
+  defp build_workspace_cursor([]), do: nil
 
-  @spec delete_keyring_update(String.t()) :: :ok
-  def delete_keyring_update(uri) do
-    from(ku in KeyringUpdate, where: ku.uri == ^uri) |> Repo.delete_all()
-    :ok
-  end
+  defp build_workspace_cursor(rows) do
+    last = List.last(rows)
 
-  @doc "List keyring updates for a workspace, verified against membership."
-  @spec member_keyring_updates(String.t()) :: [KeyringUpdate.t()]
-  def member_keyring_updates(keyring_uri) do
-    from(ku in KeyringUpdate,
-      join: km in KeyringMember,
-      on: km.keyring_uri == ku.keyring_uri and km.member_did == ku.author_did,
-      where: ku.keyring_uri == ^keyring_uri,
-      order_by: [asc: ku.indexed_at]
-    )
-    |> Repo.all()
+    case last do
+      %{indexed_at: ts, workspace_id: id} ->
+        "#{DateTime.to_iso8601(ts)}::#{id}"
+
+      _ ->
+        nil
+    end
   end
 end

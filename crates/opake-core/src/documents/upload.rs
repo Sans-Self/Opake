@@ -162,7 +162,8 @@ pub async fn prepare_upload_keyring(
         }),
         encrypted_metadata,
         params.created_at.into(),
-    );
+    )
+    .with_workspace_id(params.workspace_id);
 
     Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
@@ -172,7 +173,12 @@ pub struct KeyringUploadParams<'a> {
     pub plaintext: &'a [u8],
     pub filename: &'a str,
     pub mime_type: &'a str,
+    /// AT-URI of the keyring whose group key wraps the content key. May
+    /// be the chain head or any rotation member — distinct from `workspace_id`.
     pub keyring_uri: &'a str,
+    /// Genesis keyring URI for the workspace this document belongs to.
+    /// Equals `keyring_uri` until the first keyring supersede.
+    pub workspace_id: &'a str,
     pub group_key: &'a ContentKey,
     pub rotation: u64,
     pub description: Option<&'a str>,

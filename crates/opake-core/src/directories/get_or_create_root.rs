@@ -44,11 +44,13 @@ pub async fn get_or_create_root(
 /// Get or create a workspace's root directory.
 ///
 /// Same pattern as [`get_or_create_root`] but uses a deterministic rkey
-/// derived from the keyring URI (`ws-{keyring_rkey}`).
+/// derived from the keyring URI (`ws-{keyring_rkey}`) and stamps the
+/// `workspace_id` field on the genesis root.
 pub async fn get_or_create_workspace_root(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
     keyring_uri: &str,
+    workspace_id: &str,
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     created_at: &str,
@@ -62,7 +64,8 @@ pub async fn get_or_create_workspace_root(
         }
         Err(Error::NotFound(_)) => {
             trace!("workspace root not found, creating");
-            let root = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
+            let root = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string())
+                .with_workspace_id(workspace_id);
             let record_ref = client
                 .put_record(DIRECTORY_COLLECTION, &rkey, &root)
                 .await?;

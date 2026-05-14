@@ -28,12 +28,12 @@ defmodule OpakeIndexer.Queries.GrantQueries do
   end
 
   @doc """
-  Returns `{owner_did, recipient_did}` for a grant URI, or `nil` if not found.
+  Returns `{author_did, recipient_did}` for a grant URI, or `nil` if not found.
   Used by the broadcaster to fan out delete events before the row is removed.
   """
   @spec grant_parties(String.t()) :: {String.t(), String.t()} | nil
   def grant_parties(uri) do
-    from(g in Grant, where: g.uri == ^uri, select: {g.owner_did, g.recipient_did})
+    from(g in Grant, where: g.uri == ^uri, select: {g.author_did, g.recipient_did})
     |> Repo.one()
   end
 

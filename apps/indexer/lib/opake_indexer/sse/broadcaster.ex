@@ -7,8 +7,12 @@ defmodule OpakeIndexer.SSE.Broadcaster do
 
   Formatting uses bracket-access (`attrs[:key]`) because the indexer passes
   raw event attrs (plain maps from the firehose parser), not Ecto schema
-  structs. TreeHelpers formatters use dot access and require fields like
-  `indexed_at` that only exist on DB records — they can't be reused here.
+  structs.
+
+  Federation rewrite: the `*_update` broadcasts are gone with the proposal
+  lexicons. Member writes route through curatorial supersedes on the same
+  record types (directory / keyring), and forks surface via
+  `chain:forked`.
   """
 
   require Logger
@@ -21,14 +25,24 @@ defmodule OpakeIndexer.SSE.Broadcaster do
   # -- Public API --
 
   def broadcast_directory(attrs, action) do
-    payload = if action == :upsert, do: format_directory(attrs), else: %{directory_uri: get(attrs, :directory_uri)}
+    payload =
+      case action do
+        :upsert -> format_directory(attrs)
+        :delete -> %{uri: get(attrs, :uri)}
+      end
+
     broadcast_owned(attrs, "directory", action, payload)
   rescue
     e -> Logger.warning("[Broadcaster] directory broadcast failed: #{inspect(e)}")
   end
 
   def broadcast_document(attrs, action) do
-    payload = if action == :upsert, do: format_document(attrs), else: %{document_uri: get(attrs, :document_uri)}
+    payload =
+      case action do
+        :upsert -> format_document(attrs)
+        :delete -> %{uri: get(attrs, :uri)}
+      end
+
     broadcast_owned(attrs, "document", action, payload)
   rescue
     e -> Logger.warning("[Broadcaster] document broadcast failed: #{inspect(e)}")
@@ -36,21 +50,22 @@ defmodule OpakeIndexer.SSE.Broadcaster do
 
   def broadcast_keyring(attrs, action) do
     uri = get(attrs, :uri)
-    owner = get(attrs, :owner_did)
-    payload = if action == :upsert, do: format_keyring(attrs), else: %{uri: uri}
+    workspace_id = get(attrs, :workspace_id)
+
+    payload =
+      case action do
+        :upsert -> format_keyring(attrs)
+        :delete -> %{uri: uri}
+      end
+
     event_type = "keyring:#{action}"
 
-    # Broadcast to the workspace topic (existing subscribers)
-    if uri, do: broadcast(Topics.workspace(uri), event_type, payload)
-    # Broadcast to the owner's personal topic
-    if owner, do: broadcast(Topics.personal(owner), event_type, payload)
+    if workspace_id, do: broadcast(Topics.workspace(workspace_id), event_type, payload)
 
-    # Broadcast to each member's personal topic so newly-added members
-    # can discover the keyring and subscribe to its workspace topic.
     if action == :upsert do
       for entry <- get(attrs, :member_entries) || [] do
         did = entry[:did] || entry["did"]
-        if did && did != owner, do: broadcast(Topics.personal(did), event_type, payload)
+        if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
       end
     end
   rescue
@@ -64,69 +79,28 @@ defmodule OpakeIndexer.SSE.Broadcaster do
         :delete -> %{uri: get(attrs, :uri)}
       end
 
-    if owner = get(attrs, :owner_did), do: broadcast(Topics.personal(owner), "grant:#{action}", payload)
+    if author = get(attrs, :author_did),
+      do: broadcast(Topics.personal(author), "grant:#{action}", payload)
+
     maybe_broadcast_recipient(attrs, payload, action)
   rescue
     e -> Logger.warning("[Broadcaster] grant broadcast failed: #{inspect(e)}")
   end
 
-  def broadcast_directory_update(attrs, action) do
-    payload =
-      case action do
-        :upsert -> format_proposal(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
+  @doc """
+  Announce a chain fork to the workspace topic. `payload` should be a map
+  with workspace_id, scope ("keyring" | "directory"), path (nullable),
+  your_uri (the supersede that lost), fork_point_uri (the URI both
+  supersedes targeted), and the winning head's URI + CID.
+  """
+  def broadcast_chain_forked(payload) do
+    workspace_id = get(payload, :workspace_id)
 
-    if kr = get(attrs, :keyring_uri), do: broadcast(Topics.workspace(kr), "directory_update:#{action}", payload)
-  rescue
-    e -> Logger.warning("[Broadcaster] directory_update broadcast failed: #{inspect(e)}")
-  end
-
-  def broadcast_keyring_update(attrs, action) do
-    payload =
-      case action do
-        :upsert -> format_keyring_proposal(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
-
-    if kr = get(attrs, :keyring_uri), do: broadcast(Topics.workspace(kr), "keyring_update:#{action}", payload)
-  rescue
-    e -> Logger.warning("[Broadcaster] keyring_update broadcast failed: #{inspect(e)}")
-  end
-
-  def broadcast_document_update(attrs, action) do
-    payload =
-      case action do
-        :upsert -> format_document_proposal(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
-
-    event_type = "document_update:#{action}"
-
-    # `app.opake.documentUpdate` carries no `keyring` field in the
-    # lexicon, so the indexer injects `keyring_uri` at dispatch time
-    # via a JOIN through the documents table. When the lookup
-    # succeeds we broadcast on the workspace topic where the owner
-    # (and every other member) is subscribed.
-    #
-    # When the lookup fails — cabinet documents (ill-formed for this
-    # event type, since cabinets have single owners) or a backfill
-    # edge case where the proposal is indexed before its parent
-    # document — we drop the event silently. The proposal row is
-    # still written to the DB, so the owner's next
-    # `sync_workspace_by_uri` call picks it up from the proposal
-    # store whenever that fires. Nothing is lost; only the real-time
-    # hop is skipped.
-    case get(attrs, :keyring_uri) do
-      nil ->
-        Logger.debug("[Broadcaster] document_update: no keyring for #{get(attrs, :uri)}, dropping")
-        :ok
-
-      kr ->
-        broadcast(Topics.workspace(kr), event_type, payload)
+    if workspace_id do
+      broadcast(Topics.workspace(workspace_id), "chain:forked", payload)
     end
   rescue
-    e -> Logger.warning("[Broadcaster] document_update broadcast failed: #{inspect(e)}")
+    e -> Logger.warning("[Broadcaster] chain:forked broadcast failed: #{inspect(e)}")
   end
 
   # -- Internal --
@@ -134,9 +108,13 @@ defmodule OpakeIndexer.SSE.Broadcaster do
   defp broadcast_owned(attrs, prefix, action, payload) do
     event_type = "#{prefix}:#{action}"
 
-    case get(attrs, :keyring_uri) do
-      nil -> if did = get(attrs, :owner_did), do: broadcast(Topics.personal(did), event_type, payload)
-      kr -> broadcast(Topics.workspace(kr), event_type, payload)
+    case get(attrs, :workspace_id) do
+      nil ->
+        if did = get(attrs, :author_did),
+          do: broadcast(Topics.personal(did), event_type, payload)
+
+      workspace_id ->
+        broadcast(Topics.workspace(workspace_id), event_type, payload)
     end
   end
 
@@ -155,59 +133,43 @@ defmodule OpakeIndexer.SSE.Broadcaster do
   # -- Formatters (bracket-access safe for raw indexer attrs) --
 
   defp format_directory(attrs) do
-    %{directory_uri: get(attrs, :directory_uri), owner_did: get(attrs, :owner_did), entries: get(attrs, :entries) || []}
-    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
+    %{
+      uri: get(attrs, :uri),
+      author_did: get(attrs, :author_did),
+      entries: get(attrs, :entries_json) || []
+    }
+    |> TreeHelpers.maybe_put(:workspace_id, get(attrs, :workspace_id))
+    |> TreeHelpers.maybe_put(:chain_genesis_uri, get(attrs, :chain_genesis_uri))
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
     |> TreeHelpers.maybe_put(:key_wrapping, get(attrs, :key_wrapping))
+    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
     |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 
   defp format_document(attrs) do
-    %{document_uri: get(attrs, :document_uri), owner_did: get(attrs, :owner_did)}
-    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
+    %{
+      uri: get(attrs, :uri),
+      author_did: get(attrs, :author_did)
+    }
+    |> TreeHelpers.maybe_put(:workspace_id, get(attrs, :workspace_id))
     |> TreeHelpers.maybe_put(:rotation, get(attrs, :rotation))
     |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
     |> TreeHelpers.maybe_put(:encryption, get(attrs, :encryption))
     |> TreeHelpers.maybe_put(:blob_ref, get(attrs, :blob_ref))
+    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
     |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 
   defp format_keyring(attrs) do
-    %{uri: get(attrs, :uri), owner_did: get(attrs, :owner_did), rotation: get(attrs, :rotation), member_entries: get(attrs, :member_entries) || []}
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-    |> TreeHelpers.maybe_put(:created_at, get(attrs, :created_at))
-    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
-  end
-
-  # Proposal formatters — safe bracket-access versions of TreeHelpers formatters
-  # which use dot access and require DB schema fields like indexed_at.
-
-  defp format_proposal(attrs) do
-    %{uri: get(attrs, :uri), author_did: get(attrs, :author_did), action_type: get(attrs, :action_type)}
-    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
-    |> TreeHelpers.maybe_put(:directory_uri, get(attrs, :directory_uri))
-    |> TreeHelpers.maybe_put(:entry_uri, get(attrs, :entry_uri))
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-    |> TreeHelpers.maybe_put(:source_directory_uri, get(attrs, :source_directory_uri))
-    |> TreeHelpers.maybe_put(:target_directory_uri, get(attrs, :target_directory_uri))
-    |> TreeHelpers.maybe_put(:parent_directory_uri, get(attrs, :parent_directory_uri))
-  end
-
-  defp format_keyring_proposal(attrs) do
-    %{uri: get(attrs, :uri), author_did: get(attrs, :author_did), action_type: get(attrs, :action_type)}
-    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
-    |> TreeHelpers.maybe_put(:member_did, get(attrs, :member_did))
-    |> TreeHelpers.maybe_put(:member_public_key, get(attrs, :member_public_key))
-    |> TreeHelpers.maybe_put(:role, get(attrs, :role))
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-  end
-
-  defp format_document_proposal(attrs) do
     %{
       uri: get(attrs, :uri),
-      author_did: get(attrs, :author_did),
-      document_uri: get(attrs, :document_uri)
+      workspace_id: get(attrs, :workspace_id),
+      rotation: get(attrs, :rotation),
+      member_entries: get(attrs, :member_entries) || []
     }
-    |> TreeHelpers.maybe_put(:keyring_uri, get(attrs, :keyring_uri))
+    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
+    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
+    |> TreeHelpers.maybe_put(:created_at, get(attrs, :created_at))
+    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 end

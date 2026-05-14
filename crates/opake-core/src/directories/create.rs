@@ -11,13 +11,20 @@ use super::DIRECTORY_COLLECTION;
 /// The CID pins the bytes the PDS committed — callers thread it into the
 /// parent directory's listing entry so the listing accurately observes the
 /// child's version at write time.
+///
+/// `workspace_id` is the genesis keyring URI of the owning workspace. Pass
+/// `None` for cabinet directories.
 pub async fn create_directory(
     client: &mut XrpcClient<impl Transport>,
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
+    workspace_id: Option<&str>,
     created_at: &str,
 ) -> Result<RecordRef, Error> {
-    let directory = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
+    let mut directory = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
+    if let Some(wid) = workspace_id {
+        directory = directory.with_workspace_id(wid);
+    }
 
     trace!("creating directory");
     client
@@ -46,6 +53,7 @@ mod tests {
             &mut client,
             dir.key_wrapping,
             dir.encrypted_metadata,
+            None,
             "2026-03-01T00:00:00Z",
         )
         .await
@@ -83,6 +91,7 @@ mod tests {
             &mut client,
             dir.key_wrapping,
             dir.encrypted_metadata,
+            None,
             "2026-03-01T00:00:00Z",
         )
         .await

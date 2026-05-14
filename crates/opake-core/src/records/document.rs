@@ -41,6 +41,11 @@ pub struct Document {
     /// surface it for lineage queries. Absent on a fresh document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// Genesis keyring URI of the workspace this document belongs to.
+    /// Absent for cabinet documents. Carried explicitly so any reader
+    /// can resolve workspace identity without walking the keyring chain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
@@ -59,8 +64,16 @@ impl Document {
             encryption,
             encrypted_metadata,
             supersedes: None,
+            workspace_id: None,
             created_at,
             modified_at: None,
         }
+    }
+
+    /// Stamp the workspace's genesis keyring URI onto this record. Builder-
+    /// style so callers can chain after `new`.
+    pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.workspace_id = Some(workspace_id.into());
+        self
     }
 }

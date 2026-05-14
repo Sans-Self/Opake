@@ -3,39 +3,40 @@ defmodule OpakeIndexer.Backfill do
   Backfill records from a PDS when the firehose cursor is absent or stale.
 
   Fetches all `app.opake.*` collections via `com.atproto.repo.listRecords`
-  (public, unauthenticated endpoint) and upserts them through the same query
-  path as the indexer.
+  (public, unauthenticated endpoint) and feeds each record through the
+  firehose dispatch as a synthetic create commit. Routing the backfill
+  path through the same code as the live indexer guarantees parse logic,
+  chain dispatch, authority validation, and SSE broadcasting are
+  identical — no second source of truth.
 
   ## Supported collections
 
-  - `app.opake.keyring` — workspace records + member lists (critical for
-    membership checks — missing keyrings cause 403s on workspace endpoints)
-  - `app.opake.directory` — directory tree structure + encrypted metadata
-  - `app.opake.document` — document records + encryption metadata + blob refs
-  - `app.opake.grant` — sharing grants (inbox visibility)
+  - `app.opake.keyring` — workspace records (chain members + heads)
+  - `app.opake.directory` — directory tree records
+  - `app.opake.document` — document records (workspace + cabinet)
+  - `app.opake.grant` — sharing grants
 
   ## Usage
 
   - `Backfill.backfill_did(did)` — backfill all collections for a single DID
   - `Backfill.backfill_known_dids()` — backfill every DID found in `keyring_members`
   - `mix opake.resync <did>` — CLI trigger for dev/ops
-
-  ## Not backfilled
-
-  `directoryUpdate`, `keyringUpdate`, `documentUpdate` — these are transient
-  proposal records consumed by workspace owners. Not needed for tree
-  reconstruction (the applied results are already in the base records).
   """
 
   require Logger
 
-  alias OpakeIndexer.Queries.{DirectoryQueries, DocumentQueries, GrantQueries, KeyringQueries}
+  alias OpakeIndexer.Firehose
+  alias OpakeIndexer.Queries.KeyringQueries
 
   @keyring_collection "app.opake.keyring"
   @directory_collection "app.opake.directory"
   @document_collection "app.opake.document"
   @grant_collection "app.opake.grant"
 
+  # Ordering matters during a single-DID backfill: keyrings carry workspace
+  # identity that directories and documents reference. Indexing keyrings
+  # first means the chain dispatch can resolve workspace_id by joining
+  # through the keyring rows rather than rejecting orphans.
   @collections [
     @keyring_collection,
     @directory_collection,
@@ -47,11 +48,10 @@ defmodule OpakeIndexer.Backfill do
   def backfill_did(did) do
     with {:ok, pds_url} <- resolve_pds(did) do
       Logger.info("[Backfill] #{did} from #{pds_url}")
-      now = DateTime.utc_now()
 
       results =
         Enum.map(@collections, fn collection ->
-          case backfill_collection(did, pds_url, collection, now) do
+          case backfill_collection(did, pds_url, collection) do
             {:ok, count} ->
               Logger.info("[Backfill] #{collection}: #{count} record(s)")
               {:ok, collection, count}
@@ -90,11 +90,11 @@ defmodule OpakeIndexer.Backfill do
 
   # -- Per-collection backfill --
 
-  defp backfill_collection(did, pds_url, collection, now) do
+  defp backfill_collection(did, pds_url, collection) do
     case list_records(pds_url, did, collection) do
       {:ok, records} ->
         Enum.each(records, fn record ->
-          index_record(did, collection, record, now)
+          dispatch_via_firehose(did, collection, record)
         end)
 
         {:ok, length(records)}
@@ -104,110 +104,43 @@ defmodule OpakeIndexer.Backfill do
     end
   end
 
-  # -- Record indexing (reuses the same query paths as the firehose indexer) --
+  # -- Firehose dispatch (single source of truth) --
 
-  @spec index_record(String.t(), String.t(), map(), DateTime.t()) ::
-          :ok | {:ok, term()} | {:error, term()}
+  # Construct a synthetic Jetstream-shaped commit JSON and feed it through
+  # the firehose. The firehose's parser handles the new record shapes and
+  # its dispatch runs chain logic, authority validation, and broadcasting.
+  defp dispatch_via_firehose(did, collection, %{"uri" => uri, "value" => record} = entry) do
+    rkey = extract_rkey(uri)
+    cid = entry["cid"]
 
-  def index_record(did, @keyring_collection, %{"uri" => uri, "value" => record}, _now) do
-    members = record["members"] || []
+    synthetic =
+      %{
+        "kind" => "commit",
+        "did" => did,
+        # No real time_us during backfill — cursor save throttles on
+        # nil, so this won't corrupt the live cursor.
+        "time_us" => nil,
+        "commit" => %{
+          "operation" => "create",
+          "collection" => collection,
+          "rkey" => rkey,
+          "cid" => cid,
+          "record" => record
+        }
+      }
+      |> Jason.encode!()
 
-    member_entries =
-      members
-      |> Enum.filter(&is_map/1)
-      |> Enum.map(fn m ->
-        wrapped = m["wrappedKey"] || %{}
-        %{did: wrapped["did"], role: m["role"], wrapped_key: wrapped}
-      end)
-      |> Enum.filter(fn entry -> is_binary(entry.did) end)
-
-    KeyringQueries.upsert_keyring(uri, did, member_entries)
-
-    KeyringQueries.upsert_keyring_record(%{
-      uri: uri,
-      owner_did: did,
-      rotation: record["rotation"],
-      encrypted_metadata: record["encryptedMetadata"],
-      created_at: record["createdAt"]
-    })
+    Firehose.process_message(synthetic, 0)
+    :ok
   end
 
-  def index_record(did, @directory_collection, %{"uri" => uri, "value" => record}, now) do
-    key_wrapping = record["keyWrapping"]
-    encrypted_metadata = record["encryptedMetadata"]
+  defp dispatch_via_firehose(_, _, _), do: :ok
 
-    entries =
-      case record["entries"] do
-        list when is_list(list) -> Enum.filter(list, &is_binary/1)
-        _ -> []
-      end
-
-    keyring_uri =
-      case key_wrapping do
-        %{"keyringRef" => %{"keyring" => kr}} when is_binary(kr) -> kr
-        _ -> nil
-      end
-
-    DirectoryQueries.upsert_directory(%{
-      directory_uri: uri,
-      keyring_uri: keyring_uri,
-      owner_did: did,
-      entries: entries,
-      encrypted_metadata: encrypted_metadata,
-      key_wrapping: key_wrapping,
-      deleted_at: nil,
-      indexed_at: now
-    })
+  defp extract_rkey(uri) do
+    uri
+    |> String.split("/")
+    |> List.last()
   end
-
-  def index_record(did, @document_collection, %{"uri" => uri, "value" => record}, now) do
-    encryption = record["encryption"]
-    encrypted_metadata = record["encryptedMetadata"]
-    blob = record["blob"]
-
-    {keyring_uri, rotation} =
-      case encryption do
-        %{"keyringRef" => %{"keyring" => kr, "rotation" => rot}}
-        when is_binary(kr) and is_integer(rot) ->
-          {kr, rot}
-
-        _ ->
-          {nil, nil}
-      end
-
-    DocumentQueries.upsert_document(%{
-      document_uri: uri,
-      keyring_uri: keyring_uri,
-      owner_did: did,
-      rotation: rotation,
-      encrypted_metadata: encrypted_metadata,
-      encryption: encryption,
-      blob_ref: blob,
-      deleted_at: nil,
-      indexed_at: now
-    })
-  end
-
-  def index_record(did, @grant_collection, %{"uri" => uri, "value" => record}, now) do
-    recipient = record["recipient"]
-    document = record["document"]
-    created_at = record["createdAt"]
-
-    if is_binary(recipient) and is_binary(document) and is_binary(created_at) do
-      GrantQueries.upsert_grant(%{
-        uri: uri,
-        owner_did: did,
-        recipient_did: recipient,
-        document_uri: document,
-        created_at: created_at,
-        indexed_at: now
-      })
-    else
-      :ok
-    end
-  end
-
-  def index_record(_, _, _, _), do: :ok
 
   # -- PDS resolution --
 

@@ -42,9 +42,8 @@ defmodule OpakeIndexerWeb.Router do
     get "/cabinet/sync", CabinetController, :sync
 
     get "/workspace", WorkspaceController, :documents
-    get "/workspace/updates", WorkspaceController, :updates
-    get "/workspace/directory-updates", WorkspaceController, :directory_updates
     get "/workspace/snapshot", WorkspaceController, :snapshot
     get "/workspace/sync", WorkspaceController, :sync
+    get "/workspace/chain-head", WorkspaceController, :chain_head
   end
 end

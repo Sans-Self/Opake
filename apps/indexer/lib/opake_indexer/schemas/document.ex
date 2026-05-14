@@ -1,8 +1,11 @@
 defmodule OpakeIndexer.Schemas.Document do
   @moduledoc """
-  An indexed `app.opake.document` record. Documents are encrypted files stored
-  on a PDS. Workspace documents reference a keyring; cabinet documents don't.
-  The indexer indexes these from the firehose for tree/sync queries.
+  An indexed `app.opake.document` record. Workspace documents reference a
+  keyring via `keyringRef`; cabinet documents have `workspace_id = nil`.
+
+  `supersedes_uri` is a history annotation — documents don't drive chain
+  heads (the parent directory's listing entry is the canonical pointer).
+  Tracked so clients can show lineage if they want.
   """
 
   use Ecto.Schema
@@ -12,13 +15,14 @@ defmodule OpakeIndexer.Schemas.Document do
 
   @primary_key false
   schema "documents" do
-    field :document_uri, :string, primary_key: true
-    field :keyring_uri, :string
-    field :owner_did, :string
+    field :uri, :string, primary_key: true
+    field :workspace_id, :string
+    field :author_did, :string
     field :rotation, :integer
     field :encrypted_metadata, :map
     field :encryption, :map
     field :blob_ref, :map
+    field :supersedes_uri, :string
     field :modified_at, :string
     field :deleted_at, :utc_datetime_usec
     field :indexed_at, :utc_datetime_usec
@@ -28,17 +32,18 @@ defmodule OpakeIndexer.Schemas.Document do
   def changeset(doc, attrs) do
     doc
     |> cast(attrs, [
-      :document_uri,
-      :keyring_uri,
-      :owner_did,
+      :uri,
+      :workspace_id,
+      :author_did,
       :rotation,
       :encrypted_metadata,
       :encryption,
       :blob_ref,
+      :supersedes_uri,
       :modified_at,
       :deleted_at,
       :indexed_at
     ])
-    |> validate_required([:document_uri, :owner_did, :indexed_at])
+    |> validate_required([:uri, :author_did, :indexed_at])
   end
 end

@@ -28,13 +28,21 @@ pub struct Keyring {
     /// authored by a manager of the prior keyring.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// Genesis keyring URI of this workspace's chain — the stable workspace
+    /// identity across rotations and membership changes. Absent on the
+    /// genesis keyring (this record's own URI is the workspace ID). Present
+    /// on every supersede so readers can resolve workspace identity without
+    /// walking the chain back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_at: Option<String>,
 }
 
 impl Keyring {
-    /// New keyring with current schema version and defaults.
+    /// New genesis keyring. No supersedes, no workspace_id (the record's
+    /// own URI becomes the workspace ID once the PDS assigns the rkey).
     pub fn new(
         members: Vec<KeyringMember>,
         encrypted_metadata: EncryptedMetadata,
@@ -48,8 +56,17 @@ impl Keyring {
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: None,
+            workspace_id: None,
             created_at,
             modified_at: None,
         }
+    }
+
+    /// Stamp the workspace's genesis keyring URI onto a supersede record.
+    /// Genesis records leave `workspace_id` absent — their own URI is the
+    /// workspace ID once the PDS assigns the rkey.
+    pub fn with_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.workspace_id = Some(workspace_id.into());
+        self
     }
 }

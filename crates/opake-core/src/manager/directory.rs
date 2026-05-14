@@ -48,6 +48,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     &mut self.opake.client,
                     &ws.owner_did,
                     &ws.uri,
+                    &ws.uri,
                     kw,
                     meta,
                     &now,
@@ -83,7 +84,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     &mut self.opake.rng,
                 )?;
                 let dir_ref =
-                    directories::create_directory(&mut self.opake.client, kw, meta, &now).await?;
+                    directories::create_directory(&mut self.opake.client, kw, meta, None, &now)
+                        .await?;
 
                 directories::add_entry(
                     &mut self.opake.client,
@@ -109,8 +111,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     ws.rotation,
                     &mut self.opake.rng,
                 )?;
-                let dir_ref =
-                    directories::create_directory(&mut self.opake.client, kw, meta, &now).await?;
+                let dir_ref = directories::create_directory(
+                    &mut self.opake.client,
+                    kw,
+                    meta,
+                    Some(&ws.uri),
+                    &now,
+                )
+                .await?;
 
                 let dir_owner = atproto::parse_at_uri(&parent)?.authority;
                 if dir_owner != self.opake.did {

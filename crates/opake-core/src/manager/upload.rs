@@ -160,6 +160,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 filename: req.filename,
                 mime_type: req.mime_type,
                 keyring_uri: &ws.uri,
+                workspace_id: &ws.uri,
                 group_key: &ws.key,
                 rotation: ws.rotation,
                 description: req.description,

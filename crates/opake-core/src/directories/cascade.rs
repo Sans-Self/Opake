@@ -129,6 +129,7 @@ impl CascadeOutcome {
 /// retry can compound the orphan count.
 pub async fn execute_cascade<T: Transport>(
     client: &mut XrpcClient<T>,
+    workspace_id: &str,
     ancestors: Vec<AncestorLevel>,
     leaf: LeafLevel,
     modified_at: &str,
@@ -138,7 +139,8 @@ pub async fn execute_cascade<T: Transport>(
 
     // Leaf first — no child to thread, entries are exactly as supplied.
     trace!("cascade leaf (depth from leaf: 0)");
-    let leaf_head = write_level(client, leaf.mode, leaf.entries, modified_at).await?;
+    let leaf_head =
+        write_level(client, workspace_id, leaf.mode, leaf.entries, modified_at).await?;
     let leaf_uri = leaf_head.new_head.uri.clone();
     let leaf_cid = leaf_head.new_head.cid.clone();
     steps.push(leaf_head);
@@ -151,7 +153,7 @@ pub async fn execute_cascade<T: Transport>(
         trace!("cascade ancestor {depth_from_root} (depth from leaf: {depth_from_leaf})");
 
         let entries = patch_child_pointer(ancestor.entries, &ancestor.linkage, &child_link)?;
-        let step = write_level(client, ancestor.mode, entries, modified_at).await?;
+        let step = write_level(client, workspace_id, ancestor.mode, entries, modified_at).await?;
         child_link = (step.new_head.uri.clone(), step.new_head.cid.clone());
         steps.push(step);
     }
@@ -161,6 +163,7 @@ pub async fn execute_cascade<T: Transport>(
 
 async fn write_level<T: Transport>(
     client: &mut XrpcClient<T>,
+    workspace_id: &str,
     mode: LevelMode,
     entries: Vec<ListingEntry>,
     modified_at: &str,
@@ -173,6 +176,7 @@ async fn write_level<T: Transport>(
         encrypted_metadata,
         entries,
         supersedes: supersedes.clone(),
+        workspace_id: Some(workspace_id.to_owned()),
         created_at: modified_at.to_owned(),
         modified_at: Some(modified_at.to_owned()),
     };

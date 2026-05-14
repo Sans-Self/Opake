@@ -22,7 +22,7 @@ defmodule OpakeIndexerWeb.InboxController do
             Enum.map(grants, fn g ->
               %{
                 uri: g.uri,
-                owner_did: g.owner_did,
+                author_did: g.author_did,
                 document_uri: g.document_uri,
                 created_at: g.created_at
               }

@@ -1,8 +1,8 @@
 defmodule OpakeIndexerWeb.KeyringsController do
   @moduledoc """
-  Returns full keyring records for keyrings where the authenticated DID is a
-  member. Joins `keyring_members` (membership + wrapped keys) with `keyrings`
-  (rotation, encrypted metadata) so clients get everything in one call.
+  Returns the current head of each workspace the authenticated DID is a
+  member of, joined with that head's member list (so clients receive
+  everything they need in one call).
   """
 
   use OpakeIndexerWeb, :controller
@@ -16,16 +16,17 @@ defmodule OpakeIndexerWeb.KeyringsController do
 
     with {:ok, limit} <- parse_limit(params) do
       cursor = params["cursor"]
-      {pairs, next_cursor} = KeyringQueries.list_keyrings_full(did, limit: limit, cursor: cursor)
+      {pairs, next_cursor} = KeyringQueries.list_workspaces_full(did, limit: limit, cursor: cursor)
 
       response =
         %{
-          keyrings:
+          workspaces:
             Enum.map(pairs, fn {k, members} ->
               %{
-                uri: k.uri,
-                owner_did: k.owner_did,
+                workspace_id: k.workspace_id,
+                head_uri: k.uri,
                 rotation: k.rotation,
+                supersedes_uri: k.supersedes_uri,
                 members:
                   Enum.map(members, fn m ->
                     %{

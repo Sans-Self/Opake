@@ -38,6 +38,11 @@
             "format": "at-uri",
             "description": "AT-URI of the prior canonical directory at this path, if any. Absent on the genesis record of a chain. Indexers walk this back-edge to verify the chain and detect forks (two records superseding the same prior URI)."
           },
+          "workspaceId": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Genesis keyring URI of the workspace this directory belongs to. Absent on cabinet directories. Carried explicitly so any reader can resolve workspace identity without walking the keyring chain back to genesis."
+          },
           "createdAt": { "type": "string", "format": "datetime" },
           "modifiedAt": { "type": "string", "format": "datetime" }
         }

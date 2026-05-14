@@ -7,6 +7,7 @@ use super::super::tests::{dummy_directory, dummy_directory_with_entries, mock_cl
 
 const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
 const DOC_CID: &str = "bafydoc1";
+const TEST_WORKSPACE_ID: &str = "at://did:plc:test/app.opake.keyring/genesis";
 
 fn ok_create(uri: &str, cid: &str) -> HttpResponse {
     HttpResponse {
@@ -57,7 +58,7 @@ async fn single_level_supersede_writes_leaf_and_returns_head() {
         entries: leaf_entries,
     };
 
-    let outcome = execute_cascade(&mut client, vec![], leaf, "2026-03-01T12:00:00Z")
+    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
         .await
         .unwrap();
 
@@ -115,7 +116,7 @@ async fn two_level_supersede_threads_child_cid_into_parent() {
         entries: leaf_entries,
     };
 
-    let outcome = execute_cascade(&mut client, ancestors, leaf, "2026-03-01T12:00:00Z")
+    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
         .await
         .unwrap();
 
@@ -176,7 +177,7 @@ async fn add_child_appends_new_listing_entry_at_parent() {
         entries: leaf_entries,
     };
 
-    let outcome = execute_cascade(&mut client, ancestors, leaf, "2026-03-01T12:00:00Z")
+    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
         .await
         .unwrap();
 
@@ -214,7 +215,7 @@ async fn genesis_with_stable_rkey_uses_put_record() {
         entries: vec![],
     };
 
-    execute_cascade(&mut client, vec![], leaf, "2026-03-01T12:00:00Z")
+    execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
         .await
         .unwrap();
 
@@ -256,7 +257,7 @@ async fn replace_child_with_missing_prior_uri_errors() {
         entries: vec![],
     };
 
-    let err = execute_cascade(&mut client, ancestors, leaf, "2026-03-01T12:00:00Z")
+    let err = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
         .await
         .unwrap_err();
     assert!(err.to_string().contains("missing expected child URI"));

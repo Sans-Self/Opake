@@ -76,20 +76,22 @@ defmodule OpakeIndexerWeb.EventsController do
     # Subscribe to personal topic
     Phoenix.PubSub.subscribe(@pubsub, Topics.personal(did))
 
-    # Subscribe to all workspace keyrings
-    {keyrings, _cursor} = KeyringQueries.list_keyrings_for_member(did, limit: 1000)
-    keyring_uris = MapSet.new(Enum.map(keyrings, & &1.uri))
+    # Subscribe to every workspace the DID is a member of. Workspace
+    # topics are keyed by workspace_id (= genesis keyring URI), so an
+    # SSE event from any chain rotation lands on the same topic.
+    {workspaces, _cursor} = KeyringQueries.list_workspaces_for_member(did, limit: 1000)
+    workspace_ids = MapSet.new(Enum.map(workspaces, & &1.workspace_id))
 
-    if MapSet.size(keyring_uris) >= 1000 do
-      Logger.warning("[SSE] #{did} has 1000+ keyrings — SSE subscriptions truncated")
+    if MapSet.size(workspace_ids) >= 1000 do
+      Logger.warning("[SSE] #{did} has 1000+ workspaces — SSE subscriptions truncated")
     end
 
-    Enum.each(keyring_uris, fn uri ->
-      Phoenix.PubSub.subscribe(@pubsub, Topics.workspace(uri))
+    Enum.each(workspace_ids, fn workspace_id ->
+      Phoenix.PubSub.subscribe(@pubsub, Topics.workspace(workspace_id))
     end)
 
     timer = schedule_keepalive()
-    state = %{did: did, subscribed_keyrings: keyring_uris, keepalive_timer: timer}
+    state = %{did: did, subscribed_keyrings: workspace_ids, keepalive_timer: timer}
 
     # try/after guarantees ConnectionTracker.release even on crash.
     # Phoenix requires the action to return a Plug.Conn, so we track it
