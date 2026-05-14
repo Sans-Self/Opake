@@ -202,61 +202,71 @@ async fn walk_back_propagates_missing_intermediate() {
 
 // -- ChainHeadProvider contract --
 //
-// The trait has no production impl yet — that lives in the indexer-client
-// layer (not built). The map-backed mock below proves the trait shape
-// compiles and exercises the contract the production impl must match.
+// The production impl lives in the indexer-client layer. The map-backed
+// mock below exercises the trait shape and contract.
 
+#[derive(Default)]
 struct MapChainHeadProvider {
-    directory: std::collections::HashMap<(String, String), ChainHead>,
-    keyring: std::collections::HashMap<String, ChainHead>,
+    heads: std::collections::HashMap<String, WorkspaceChainHeads>,
 }
 
 impl ChainHeadProvider for MapChainHeadProvider {
-    async fn directory_head(
+    async fn workspace_chain_heads(
         &self,
         workspace_id: &str,
-        path: &str,
-    ) -> Result<Option<ChainHead>, Error> {
-        Ok(self
-            .directory
-            .get(&(workspace_id.to_owned(), path.to_owned()))
-            .cloned())
-    }
-
-    async fn keyring_head(&self, workspace_id: &str) -> Result<Option<ChainHead>, Error> {
-        Ok(self.keyring.get(workspace_id).cloned())
+    ) -> Result<WorkspaceChainHeads, Error> {
+        Ok(self.heads.get(workspace_id).cloned().unwrap_or_default())
     }
 }
 
 #[tokio::test]
-async fn chain_head_provider_returns_none_for_unknown_path() {
-    let provider = MapChainHeadProvider {
-        directory: std::collections::HashMap::new(),
-        keyring: std::collections::HashMap::new(),
-    };
-    let head = provider.directory_head("ws-x", "/missing/").await.unwrap();
-    assert!(head.is_none());
+async fn chain_head_provider_returns_empty_for_unknown_workspace() {
+    let provider = MapChainHeadProvider::default();
+    let heads = provider.workspace_chain_heads("ws-missing").await.unwrap();
+    assert!(heads.keyring.is_none());
+    assert!(heads.root_directory.is_none());
 }
 
 #[tokio::test]
-async fn chain_head_provider_returns_known_head() {
-    let mut directory = std::collections::HashMap::new();
-    directory.insert(
-        ("ws-1".to_owned(), "/q1/".to_owned()),
-        ChainHead {
-            uri: URI_HEAD.to_owned(),
-            cid: "bafyhead".to_owned(),
+async fn chain_head_provider_returns_known_heads() {
+    let mut heads = std::collections::HashMap::new();
+    heads.insert(
+        "ws-1".to_owned(),
+        WorkspaceChainHeads {
+            keyring: Some(ChainHead {
+                uri: URI_HEAD.to_owned(),
+                cid: "bafykeyring".to_owned(),
+            }),
+            root_directory: Some(ChainHead {
+                uri: URI_GENESIS.to_owned(),
+                cid: "bafyroot".to_owned(),
+            }),
         },
     );
-    let provider = MapChainHeadProvider {
-        directory,
-        keyring: std::collections::HashMap::new(),
-    };
-    let head = provider
-        .directory_head("ws-1", "/q1/")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(head.uri, URI_HEAD);
-    assert_eq!(head.cid, "bafyhead");
+    let provider = MapChainHeadProvider { heads };
+
+    let result = provider.workspace_chain_heads("ws-1").await.unwrap();
+    assert_eq!(result.keyring.as_ref().unwrap().uri, URI_HEAD);
+    assert_eq!(result.root_directory.as_ref().unwrap().cid, "bafyroot");
+}
+
+#[tokio::test]
+async fn chain_head_provider_handles_partial_population() {
+    // A freshly-created workspace has a keyring head but no root yet.
+    let mut heads = std::collections::HashMap::new();
+    heads.insert(
+        "ws-fresh".to_owned(),
+        WorkspaceChainHeads {
+            keyring: Some(ChainHead {
+                uri: URI_GENESIS.to_owned(),
+                cid: "bafygenesis".to_owned(),
+            }),
+            root_directory: None,
+        },
+    );
+    let provider = MapChainHeadProvider { heads };
+
+    let result = provider.workspace_chain_heads("ws-fresh").await.unwrap();
+    assert!(result.keyring.is_some());
+    assert!(result.root_directory.is_none());
 }

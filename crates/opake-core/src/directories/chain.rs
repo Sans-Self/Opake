@@ -67,27 +67,41 @@ pub struct ChainHead {
     pub cid: String,
 }
 
+/// Snapshot of a workspace's chain heads, observed at the indexer.
+///
+/// Both heads are returned together because a single cascade typically
+/// needs both (the keyring head pins authority validation, the root
+/// directory head anchors the cascade), and the indexer endpoint
+/// returns them in one shot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkspaceChainHeads {
+    pub keyring: Option<ChainHead>,
+    pub root_directory: Option<ChainHead>,
+}
+
 /// Read-side abstraction over indexer queries for current chain heads.
 ///
-/// The cascade builder needs the head at every path it touches. Hiding
-/// that lookup behind a trait keeps cascade testable without standing
-/// up an indexer, and lets the concrete implementation live in the
-/// indexer-client layer where the materialized view is queried.
+/// The cascade builder needs the current heads before authoring a
+/// supersede. Hiding that lookup behind a trait keeps the cascade path
+/// testable without standing up an indexer, and lets the concrete
+/// implementation live in the indexer-client layer.
+///
+/// We deliberately don't expose per-path directory heads — path is
+/// encrypted-name-derived in our model, so the indexer can't key on it
+/// without leaking. Subtree heads are discovered by walking listings
+/// downward from the root.
 #[allow(async_fn_in_trait)] // dyn-free, WASM-compatible
 pub trait ChainHeadProvider {
-    /// Current head at a directory path within a workspace.
+    /// Current keyring + root-directory heads for a workspace.
     ///
-    /// `path` is a workspace-relative POSIX-style path (e.g. `"/"`,
-    /// `"/q1/"`). Returns `None` if no record has ever been written
-    /// at this path.
-    async fn directory_head(
+    /// `workspace_id` is the genesis keyring URI. Both heads may be
+    /// `None` independently — a freshly-created workspace will have a
+    /// keyring head but no root-directory head until the first cascade
+    /// runs.
+    async fn workspace_chain_heads(
         &self,
         workspace_id: &str,
-        path: &str,
-    ) -> Result<Option<ChainHead>, Error>;
-
-    /// Current head of a workspace's keyring chain.
-    async fn keyring_head(&self, workspace_id: &str) -> Result<Option<ChainHead>, Error>;
+    ) -> Result<WorkspaceChainHeads, Error>;
 }
 
 /// Fetch a single chain node by AT-URI.

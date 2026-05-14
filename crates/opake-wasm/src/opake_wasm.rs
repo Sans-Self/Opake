@@ -273,12 +273,11 @@ impl WasmOpakeHandle {
     /// Remove a member from a workspace. Resolves the keyring + group key
     /// internally so the key never crosses the WASM/JS boundary.
     ///
-    /// Owner: rotates the group key in-place and re-wraps to remaining
-    /// members — the new key stays inside WASM. Non-owner: writes a
-    /// keyringUpdate proposal. In both cases the returned DTO carries
-    /// only `{ proposed, rotation }`; the rotated key bytes are dropped
-    /// (they'd be a boundary violation) and the next operation re-resolves
-    /// via `resolve_workspace_by_uri`.
+    /// Federation cascade: rotates the group key inside WASM, re-wraps for
+    /// remaining members, writes a keyring supersede on the caller's PDS.
+    /// The rotated key bytes never cross the boundary (they'd be a security
+    /// violation — JS can't zeroize). Returns the new rotation index; the
+    /// caller re-resolves via `resolve_workspace_by_uri` for the next op.
     #[wasm_bindgen(js_name = removeWorkspaceMember)]
     pub async fn remove_workspace_member(
         &self,
@@ -290,22 +289,17 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let (key_result, _outcome) = opake
+        let (_new_key, rotation) = opake
             .remove_workspace_member(keyring_uri, &ws.key, member_did)
             .await
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
         struct R {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            rotation: Option<u64>,
-            proposed: bool,
+            rotation: u64,
         }
-        serde_wasm_bindgen::to_value(&R {
-            rotation: key_result.map(|(_, r)| r),
-            proposed: false,
-        })
-        .map_err(|e| JsError::new(&e.to_string()))
+        serde_wasm_bindgen::to_value(&R { rotation })
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Update workspace metadata (name, description, icon). Resolves the

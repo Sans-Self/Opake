@@ -44,6 +44,7 @@ pub struct UploadRequest<'a> {
 }
 
 /// Result of an upload or directory creation.
+#[derive(Debug, Clone)]
 pub struct UploadResult {
     /// AT-URI of the created record.
     pub uri: String,

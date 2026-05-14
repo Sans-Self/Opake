@@ -4,10 +4,12 @@
 // with the caller's Ed25519 key via sign_indexer_request.
 
 use crate::client::{HttpMethod, HttpRequest, Transport};
+use crate::directories::{ChainHead, ChainHeadProvider, WorkspaceChainHeads};
 use crate::error::Error;
 use crate::indexer::auth::sign_indexer_request;
 use crate::indexer::types::{
-    InboxGrant, InboxResponse, KeyringsResponse, TreeDelta, WorkspaceDocument, WorkspaceResponse,
+    InboxGrant, InboxResponse, KeyringsResponse, TreeDelta, WorkspaceChainHeadResponse,
+    WorkspaceDocument, WorkspaceResponse,
 };
 
 /// Check an indexer JSON response for errors.
@@ -367,6 +369,82 @@ pub async fn request_sse_token(
         })?;
 
     Ok(parsed.token)
+}
+
+// ---------------------------------------------------------------------------
+// Chain head lookup
+// ---------------------------------------------------------------------------
+
+/// Fetch the current keyring + root-directory chain heads for a workspace.
+///
+/// `workspace_id` is the genesis keyring URI. Returns both heads together
+/// because the indexer keeps them in lockstep (single-row reads on
+/// `keyring_chains` + `workspace_roots`) and the cascade path typically
+/// needs both.
+pub async fn fetch_workspace_chain_heads(
+    transport: &impl Transport,
+    indexer_url: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+    workspace_id: &str,
+) -> Result<WorkspaceChainHeadResponse, Error> {
+    // AT-URIs are URL-safe by construction (DID syntax + atproto rkey
+    // alphabet — no spaces, `&`, `?`, `#`). Bytewise interpolation
+    // matches what `fetch_workspace_snapshot` does for `keyring_uri`.
+    let query = format!("workspace_id={workspace_id}");
+    let body = indexer_get(
+        transport,
+        indexer_url,
+        "/api/workspace/chain-head",
+        did,
+        signing_key,
+        &query,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(|e| Error::Indexer {
+        status: 200,
+        message: format!("failed to parse chain-head response: {e}"),
+    })
+}
+
+/// `ChainHeadProvider` implementation backed by the hosted indexer.
+///
+/// All fields are borrowed — construct one per cascade, drop it when
+/// you're done. The struct exists to satisfy the trait bound that
+/// cascade-building helpers depend on; there's no state to amortize
+/// across calls.
+pub struct IndexerChainHeadProvider<'a, T: Transport> {
+    pub transport: &'a T,
+    pub indexer_url: &'a str,
+    pub did: &'a str,
+    pub signing_key: &'a [u8; 32],
+}
+
+impl<T: Transport> ChainHeadProvider for IndexerChainHeadProvider<'_, T> {
+    async fn workspace_chain_heads(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceChainHeads, Error> {
+        let response = fetch_workspace_chain_heads(
+            self.transport,
+            self.indexer_url,
+            self.did,
+            self.signing_key,
+            workspace_id,
+        )
+        .await?;
+
+        Ok(WorkspaceChainHeads {
+            keyring: response.keyring.map(|r| ChainHead {
+                uri: r.head_uri,
+                cid: r.head_cid,
+            }),
+            root_directory: response.root_directory.map(|r| ChainHead {
+                uri: r.head_uri,
+                cid: r.head_cid,
+            }),
+        })
+    }
 }
 
 #[cfg(test)]

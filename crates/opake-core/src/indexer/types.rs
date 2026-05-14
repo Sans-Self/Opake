@@ -99,6 +99,25 @@ pub struct TreeDelta {
     pub server_time: String,
 }
 
+/// A single chain head pointer as returned by `/api/workspace/chain-head`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ChainHeadResponse {
+    pub head_uri: String,
+    pub head_cid: String,
+}
+
+/// Response from `/api/workspace/chain-head`.
+///
+/// Both pointers may be `None`: a freshly created workspace's root
+/// directory is lazy — it doesn't exist until the first cascade lands.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspaceChainHeadResponse {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub keyring: Option<ChainHeadResponse>,
+    pub root_directory: Option<ChainHeadResponse>,
+}
+
 // ---------------------------------------------------------------------------
 // Cache conversions
 // ---------------------------------------------------------------------------

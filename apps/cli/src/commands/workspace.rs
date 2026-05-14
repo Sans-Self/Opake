@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use opake_core::atproto;
 use opake_core::client::{ReqwestTransport, Session};
-use opake_core::crypto::DidMember;
 use opake_core::keyrings;
 use opake_core::records::Role;
 use opake_core::resolve;
@@ -223,37 +222,11 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
         }
     }
 
-    let kr_record = opake
-        .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-        .await?;
-    let kr: opake_core::records::Keyring = serde_json::from_value(kr_record.value)?;
-
-    let remaining_dids: Vec<&str> = kr
-        .members
-        .iter()
-        .filter(|m| m.did() != resolved.did)
-        .map(|m| m.did())
-        .collect();
-
-    let mut remaining_pubkeys = Vec::new();
-    for did in &remaining_dids {
-        let identity = opake.resolve_identity(did).await?;
-        remaining_pubkeys.push((identity.x25519_public_key, identity.ml_kem_public_key));
-    }
-    let remaining_keys: Vec<DidMember<'_>> = remaining_dids
-        .iter()
-        .enumerate()
-        .map(|(i, did)| DidMember {
-            did,
-            keys: opake_core::crypto::PublicKeyBundle {
-                x25519: &remaining_pubkeys[i].0,
-                ml_kem: &remaining_pubkeys[i].1,
-            },
-        })
-        .collect();
-
+    // The federation `remove_member` path resolves remaining-members'
+    // keys + handles the rotation internally; CLI no longer needs the
+    // pre-resolution dance the legacy in-place flow required.
     let mut admin = opake.workspace_admin(&workspace);
-    let (new_group_key, new_rotation) = admin.remove_member(&resolved.did, &remaining_keys).await?;
+    let (new_group_key, new_rotation) = admin.remove_member(&resolved.did).await?;
 
     keyring_store::save_group_key(
         &ctx.storage,

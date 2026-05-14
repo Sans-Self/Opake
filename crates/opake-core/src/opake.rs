@@ -22,9 +22,10 @@
 use crate::atproto;
 use crate::cabinet::Cabinet;
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{ContentKey, CryptoRng, DidMember, OwnedPrivateKeys, PublicKeyBundle, RngCore};
+use crate::crypto::{ContentKey, CryptoRng, OwnedPrivateKeys, PublicKeyBundle, RngCore};
+use crate::directories::ChainHeadProvider;
 use crate::error::Error;
-use crate::keyrings::{self, AddMemberParams, CreateKeyringParams, KEYRING_COLLECTION};
+use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::{
@@ -645,62 +646,135 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         }
     }
 
-    /// Add a member to a workspace.
+    /// Fetch the current keyring chain head record for a workspace.
     ///
-    /// Resolves the member's hybrid public-key bundle internally from the
-    /// DID, mirroring the proposal-application path. Callers (including
-    /// the WASM binding) only need to pass the DID — fewer byte arrays
-    /// crossing the boundary, one resolution path.
+    /// Returns `(head_uri, Keyring)`. Used by every keyring-supersede
+    /// path — they all need to know what URI to point `supersedes` at,
+    /// and they all need the prior record to mutate.
     ///
-    /// Owner: applies directly. Non-owner manager: creates a keyringUpdate
-    /// proposal carrying the new member's DID. The owner re-resolves and
-    /// re-wraps when applying.
+    /// The head record may live on any member's PDS; the lookup goes
+    /// through the indexer's `chain-head` endpoint, then a cross-PDS
+    /// `fetch_chain_node` to retrieve the record itself.
+    async fn fetch_keyring_chain_head(
+        &mut self,
+        workspace_id: &str,
+    ) -> Result<(String, crate::records::Keyring), Error> {
+        let url = self.resolve_indexer_url();
+        let signing_key = self.require_signing_key()?;
+        let provider = crate::indexer::IndexerChainHeadProvider {
+            transport: self.client.transport(),
+            indexer_url: &url,
+            did: &self.did,
+            signing_key: &signing_key,
+        };
+        let heads = provider.workspace_chain_heads(workspace_id).await?;
+        let head = heads.keyring.ok_or_else(|| {
+            Error::NotFound(format!("workspace {workspace_id} has no indexed keyring"))
+        })?;
+
+        let node = crate::directories::fetch_chain_node::<crate::records::Keyring>(
+            self.client.transport(),
+            &head.uri,
+        )
+        .await?;
+        crate::records::check_version(node.record.opake_version)?;
+        Ok((node.uri, node.record))
+    }
+
+    /// Client-side manager-authority check. The indexer is authoritative,
+    /// but a local check produces a clear error before any write attempt.
+    fn require_manager(&self, keyring: &crate::records::Keyring) -> Result<(), Error> {
+        let is_manager = keyring
+            .members
+            .iter()
+            .any(|m| m.did() == self.did && matches!(m.role, Role::Manager));
+        if is_manager {
+            Ok(())
+        } else {
+            Err(Error::Auth(format!(
+                "{} is not a manager of this workspace",
+                self.did
+            )))
+        }
+    }
+
+    /// Write a keyring supersede record on caller's PDS, then auto-persist.
+    ///
+    /// The supersede's `workspace_id` field is filled from the caller-
+    /// provided value (the stable genesis URI), not the prior record's
+    /// `workspace_id` — both are the same in steady-state but explicit
+    /// avoids relying on the prior record having it populated.
+    async fn write_keyring_supersede(
+        &mut self,
+        workspace_id: &str,
+        prior_uri: String,
+        mut record: crate::records::Keyring,
+    ) -> Result<MutationOutcome, Error> {
+        let now = self.now();
+        record.supersedes = Some(prior_uri);
+        record.workspace_id = Some(workspace_id.to_owned());
+        record.created_at = now.clone();
+        record.modified_at = Some(now);
+
+        self.client
+            .create_record(KEYRING_COLLECTION, None, &record)
+            .await?;
+        self.auto_persist_session().await?;
+        Ok(MutationOutcome::Applied)
+    }
+
+    /// Add a member to a workspace via curatorial keyring supersede.
+    ///
+    /// Federation model: any manager can author. The caller's PDS receives
+    /// a new keyring record whose `supersedes` points at the indexer-
+    /// reported chain head. Authority is validated:
+    ///
+    /// * Client-side, defensively — early error if the caller's DID isn't
+    ///   in the head's manager list.
+    /// * Server-side, authoritatively — the indexer's keyring-supersede
+    ///   handler checks manager role at the prior record's snapshot.
+    ///
+    /// `workspace_id` is the genesis keyring URI — stable across the
+    /// chain. The new member's wrapped key is bound to it (rather than
+    /// the current head URI) so wraps survive future supersedes.
     pub async fn add_workspace_member(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &str,
         key: &ContentKey,
         member_did: &str,
         role: Role,
     ) -> Result<MutationOutcome, Error> {
-        let owner_did = atproto::parse_at_uri(keyring_uri)?.authority.to_string();
-        let is_owner = owner_did == self.did();
-        let now = self.now();
+        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
 
-        // Resolve the member's hybrid bundle from their published
-        // publicKey/self record. This is the same path the proposal
-        // application code takes, so owner + non-owner stay symmetric.
+        if prior.members.iter().any(|m| m.did() == member_did) {
+            return Err(Error::InvalidRecord(format!(
+                "{member_did} is already a member of this workspace"
+            )));
+        }
+
         let resolved = self.resolve_identity(member_did).await?;
         let member_public_keys = PublicKeyBundle {
             x25519: &resolved.x25519_public_key,
             ml_kem: &resolved.ml_kem_public_key,
         };
 
-        if is_owner {
-            keyrings::add_member(
-                &mut self.client,
-                &AddMemberParams {
-                    keyring_uri,
-                    group_key: key,
-                    new_member_did: member_did,
-                    new_member_public_keys: member_public_keys,
-                    role,
-                    modified_at: &now,
-                },
-                &mut self.rng,
-            )
-            .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Applied)
-        } else {
-            // Federation rewrite: every keyring mutation becomes a
-            // curatorial supersede on the caller's PDS (manager authority
-            // validated by walking the chain). Pending that wiring,
-            // non-manager-on-own-PDS additions are unsupported.
-            let _ = (role, now, member_public_keys);
-            Err(Error::Unimplemented(
-                "non-owner add-member (keyring supersede)".into(),
-            ))
-        }
+        let wrapped = crate::crypto::wrap_key(
+            key,
+            &member_public_keys,
+            member_did,
+            &crate::crypto::WrapContext::Keyring { uri: workspace_id },
+            &mut self.rng,
+        )?;
+
+        let mut new_record = prior;
+        new_record.members.push(crate::records::KeyringMember {
+            wrapped_key: wrapped,
+            role,
+        });
+
+        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+            .await
     }
 
     /// Leave a workspace.
@@ -716,112 +790,134 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         ))
     }
 
-    /// Remove a member from a workspace.
+    /// Remove a member from a workspace via curatorial keyring supersede.
     ///
-    /// Owner: rotates the group key, re-wraps to remaining members, returns
-    /// `(new_group_key, new_rotation)`. Non-owner: creates a keyringUpdate
-    /// proposal; returns `None` since no key rotation happened locally.
+    /// Federation model: any manager can author. Rotates the group key
+    /// (forward-secrecy contract — removed members retain access to
+    /// historical docs but can't read anything wrapped under the new key),
+    /// re-wraps the new key for each remaining member, and writes the
+    /// supersede on caller's PDS.
+    ///
+    /// Returns `(new_group_key, new_rotation)` so the caller can update
+    /// their in-memory `Workspace`. The supersede record carries the
+    /// prior rotation's members in `keyHistory` for backward decryption.
     pub async fn remove_workspace_member(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &str,
         group_key: &ContentKey,
         member_did: &str,
-    ) -> Result<(Option<(ContentKey, u64)>, MutationOutcome), Error> {
-        let at_uri = atproto::parse_at_uri(keyring_uri)?;
-        let owner_did = at_uri.authority.to_string();
-        let is_owner = owner_did == self.did();
-        let now = self.now();
+    ) -> Result<(ContentKey, u64), Error> {
+        use crate::crypto::{generate_content_key, wrap_key, WrapContext};
+        use crate::records::{KeyHistoryEntry, KeyringMember};
 
-        if is_owner {
-            let entry = self
-                .client
-                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-                .await?;
-            let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-            crate::records::check_version(keyring.opake_version)?;
+        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
 
-            let remaining_dids: Vec<&str> = keyring
+        if !prior.members.iter().any(|m| m.did() == member_did) {
+            return Err(Error::InvalidRecord(format!(
+                "{member_did} is not a member of this workspace"
+            )));
+        }
+
+        // Forward-secrecy rotation: generate a new group key, re-wrap
+        // for everyone except the departing member, push the prior
+        // members snapshot into key_history so historical docs can
+        // still be decrypted by remaining members.
+        let new_group_key = generate_content_key(&mut self.rng);
+        let new_rotation = prior.rotation + 1;
+
+        let remaining_dids: Vec<&str> = prior
+            .members
+            .iter()
+            .filter(|m| m.did() != member_did)
+            .map(|m| m.did())
+            .collect();
+
+        let mut remaining_keys = Vec::with_capacity(remaining_dids.len());
+        for did in &remaining_dids {
+            let identity = self.resolve_identity(did).await?;
+            remaining_keys.push((identity.x25519_public_key, identity.ml_kem_public_key));
+        }
+
+        let mut new_members: Vec<KeyringMember> = Vec::with_capacity(remaining_dids.len());
+        for (i, did) in remaining_dids.iter().enumerate() {
+            let public_keys = PublicKeyBundle {
+                x25519: &remaining_keys[i].0,
+                ml_kem: &remaining_keys[i].1,
+            };
+            let wrapped = wrap_key(
+                &new_group_key,
+                &public_keys,
+                did,
+                &WrapContext::Keyring { uri: workspace_id },
+                &mut self.rng,
+            )?;
+            // Roles carry forward unchanged for remaining members.
+            let prior_role = prior
                 .members
                 .iter()
-                .filter(|m| m.did() != member_did)
-                .map(|m| m.did())
-                .collect();
-
-            let mut remaining_pubkeys = Vec::new();
-            for did in &remaining_dids {
-                let identity = self.resolve_identity(did).await?;
-                remaining_pubkeys.push((identity.x25519_public_key, identity.ml_kem_public_key));
-            }
-
-            let remaining_keys: Vec<DidMember<'_>> = remaining_dids
-                .iter()
-                .enumerate()
-                .map(|(i, did)| DidMember {
-                    did,
-                    keys: PublicKeyBundle {
-                        x25519: &remaining_pubkeys[i].0,
-                        ml_kem: &remaining_pubkeys[i].1,
-                    },
-                })
-                .collect();
-
-            let private_keys = self.private_keys_from_cache();
-            let historical_keys = crate::workspace::derive_historical_keys(
-                &keyring,
-                &self.did,
-                keyring_uri,
-                &private_keys.bundle(),
-            );
-            let workspace = Workspace {
-                uri: keyring_uri.to_string(),
-                name: String::new(),
-                description: None,
-                owner_did,
-                key: group_key.clone(),
-                rotation: keyring.rotation,
-                historical_keys,
-            };
-            let mut admin = self.workspace_admin(&workspace);
-            let result = admin.remove_member(member_did, &remaining_keys).await?;
-            Ok((Some(result), MutationOutcome::Applied))
-        } else {
-            let _ = (member_did, now);
-            Err(Error::Unimplemented(
-                "non-owner remove-member (keyring supersede)".into(),
-            ))
+                .find(|m| m.did() == *did)
+                .map(|m| m.role)
+                .unwrap_or(Role::Editor);
+            new_members.push(KeyringMember {
+                wrapped_key: wrapped,
+                role: prior_role,
+            });
         }
+
+        let mut new_record = crate::records::Keyring {
+            opake_version: prior.opake_version,
+            algo: prior.algo.clone(),
+            members: new_members,
+            rotation: new_rotation,
+            key_history: prior.key_history.clone(),
+            encrypted_metadata: prior.encrypted_metadata.clone(),
+            supersedes: None,    // filled by write_keyring_supersede
+            workspace_id: None,  // filled by write_keyring_supersede
+            created_at: String::new(),
+            modified_at: None,
+        };
+
+        // Push the prior rotation into key_history so docs encrypted
+        // under it remain decryptable by remaining members.
+        new_record.key_history.push(KeyHistoryEntry {
+            rotation: prior.rotation,
+            members: prior.members.clone(),
+        });
+
+        // Re-encrypt metadata under new group key so old wrap is not
+        // referenced after rotation.
+        let metadata: crate::crypto::KeyringMetadata =
+            crate::crypto::decrypt_metadata(group_key, &prior.encrypted_metadata)?;
+        new_record.encrypted_metadata =
+            crate::crypto::encrypt_metadata(&new_group_key, &metadata, &mut self.rng)?;
+
+        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+            .await?;
+        Ok((new_group_key, new_rotation))
     }
 
-    /// Update workspace metadata (name, description).
+    /// Update workspace metadata (name, description, icon) via keyring
+    /// supersede.
     ///
-    /// Owner: applies directly. Non-owner: encrypts the new metadata and
-    /// creates a keyringUpdate proposal.
+    /// Manager-only; client-side check produces a clear error before the
+    /// write attempt. The new record carries the prior members + rotation
+    /// untouched — only `encrypted_metadata` changes.
     pub async fn update_workspace_metadata(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &str,
         group_key: &ContentKey,
         name: Option<&str>,
         description: Option<&str>,
         icon: Option<&str>,
     ) -> Result<MutationOutcome, Error> {
         use crate::crypto::{self, KeyringMetadata};
-        use crate::records;
 
-        let at_uri = atproto::parse_at_uri(keyring_uri)?;
-        let owner_did = at_uri.authority.to_string();
-        let is_owner = owner_did == self.did();
-
-        // Both paths need the current metadata to patch it
-        let entry = self
-            .client
-            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-            .await?;
-        let mut keyring: records::Keyring = serde_json::from_value(entry.value)?;
-        records::check_version(keyring.opake_version)?;
+        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
 
         let mut metadata: KeyringMetadata =
-            crypto::decrypt_metadata(group_key, &keyring.encrypted_metadata)?;
-
+            crypto::decrypt_metadata(group_key, &prior.encrypted_metadata)?;
         if let Some(n) = name {
             metadata.name = n.to_string();
         }
@@ -842,68 +938,39 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         let new_encrypted = crypto::encrypt_metadata(group_key, &metadata, &mut self.rng)?;
 
-        if is_owner {
-            keyring.encrypted_metadata = new_encrypted;
-            keyring.modified_at = Some(self.now());
+        let mut new_record = prior;
+        new_record.encrypted_metadata = new_encrypted;
 
-            self.client
-                .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Applied)
-        } else {
-            let _ = new_encrypted;
-            Err(Error::Unimplemented(
-                "non-owner workspace metadata update (keyring supersede)".into(),
-            ))
-        }
+        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+            .await
     }
 
-    /// Update a workspace member's role.
+    /// Update a workspace member's role via keyring supersede.
     ///
-    /// Owner: modifies the keyring record directly. Non-owner: creates a
-    /// keyringUpdate proposal.
+    /// Manager-only. Other members' wrapped keys + roles carry forward
+    /// untouched.
     pub async fn update_member_role(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &str,
         member_did: &str,
         new_role: Role,
     ) -> Result<MutationOutcome, Error> {
-        let at_uri = atproto::parse_at_uri(keyring_uri)?;
-        let owner_did = at_uri.authority.to_string();
-        let is_owner = owner_did == self.did();
-        let now = self.now();
+        let (prior_uri, mut prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
 
-        if is_owner {
-            let entry = self
-                .client
-                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-                .await?;
-            let mut keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
-            crate::records::check_version(keyring.opake_version)?;
+        let member = prior
+            .members
+            .iter_mut()
+            .find(|m| m.did() == member_did)
+            .ok_or_else(|| {
+                Error::InvalidRecord(format!(
+                    "{member_did} is not a member of this workspace"
+                ))
+            })?;
+        member.role = new_role;
 
-            let found = keyring.members.iter_mut().find(|m| m.did() == member_did);
-            match found {
-                Some(member) => member.role = new_role,
-                None => {
-                    return Err(Error::InvalidRecord(format!(
-                        "{member_did} is not a member of this keyring"
-                    )));
-                }
-            }
-            keyring.modified_at = Some(now);
-
-            self.client
-                .put_record(KEYRING_COLLECTION, &at_uri.rkey, &keyring)
-                .await?;
-            self.auto_persist_session().await?;
-            Ok(MutationOutcome::Applied)
-        } else {
-            let _ = (member_did, new_role, now);
-            Err(Error::Unimplemented(
-                "non-owner role update (keyring supersede)".into(),
-            ))
-        }
+        self.write_keyring_supersede(workspace_id, prior_uri, prior)
+            .await
     }
 
     // -- Invitations --
@@ -1117,7 +1184,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// always has signing keys. The only way to hit this error is a custom
     /// `Opake::new` caller that supplied a legacy Identity without signing
     /// keys — surface the problem rather than quietly returning empty data.
-    fn require_signing_key(&self) -> Result<crate::storage::Ed25519SecretKey, Error> {
+    pub(crate) fn require_signing_key(
+        &self,
+    ) -> Result<crate::storage::Ed25519SecretKey, Error> {
         self.identity
             .signing_key_bytes()?
             .ok_or_else(|| Error::Auth("identity is missing Ed25519 signing key".into()))

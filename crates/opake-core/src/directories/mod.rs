@@ -20,10 +20,11 @@ pub use cascade::{
 };
 pub use chain::{
     fetch_chain_node, walk_back_to_genesis, ChainHead, ChainHeadProvider, ChainNode, Superseding,
+    WorkspaceChainHeads,
 };
 pub use create::create_directory;
 pub(crate) use delete::delete_directory;
-pub(crate) use entries::{add_entry, prepare_add_entry, prepare_remove_entry, remove_entry};
+pub(crate) use entries::{add_entry, prepare_add_entry, prepare_remove_entry};
 pub(crate) use get_or_create_root::{get_or_create_root, get_or_create_workspace_root};
 pub use move_entry::{check_cycle, move_entry, MoveResult};
 pub use remove::{remove, RemoveResult};

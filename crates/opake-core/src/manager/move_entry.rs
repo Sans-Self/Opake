@@ -11,11 +11,13 @@ use super::FileManager;
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
     /// Move an entry (document or directory) between directories.
     ///
-    /// Source removal + target addition happen in a single `applyWrites`
-    /// call so partial failure can't leave the entry registered twice or
-    /// nowhere. Today this only succeeds when the source directory lives
-    /// on the caller's PDS; the federation rewrite replaces this with a
-    /// cascade-driven path any chain participant can author.
+    /// Cabinet: atomic `applyWrites` — remove from source, add to target.
+    ///
+    /// Workspace: not yet wired. Move always involves source ≠ target,
+    /// and at least one of them must be a non-root subdirectory (you
+    /// can't move within the same listing). The deep-cascade builder
+    /// (walking root → source and root → target with re-fetches at each
+    /// level) is a later slice.
     #[::opake_derive::signoff]
     pub async fn move_entry(
         &mut self,
@@ -32,13 +34,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let now = self.opake.now();
 
         if matches!(self.context, FileContext::Workspace(_)) {
-            let source_owner = atproto::parse_at_uri(source_dir)?.authority;
-            let target_owner = atproto::parse_at_uri(target_dir)?.authority;
-            if source_owner != self.opake.did || target_owner != self.opake.did {
-                return Err(Error::Unimplemented(
-                    "workspace member move (cascade)".into(),
-                ));
-            }
+            return Err(Error::Unimplemented(
+                "workspace move (requires deep cascade — two non-root supersedes)".into(),
+            ));
         }
 
         // The target directory's listing pins the entry at the CID we just

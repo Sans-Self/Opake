@@ -1,21 +1,25 @@
 use crate::atproto;
 use crate::client::Transport;
 use crate::crypto::{self, CryptoRng, DirectoryMetadata, RngCore};
+use crate::directories::DIRECTORY_COLLECTION;
 use crate::error::Error;
-use crate::records::{self, KeyWrapping};
+use crate::records::{self, Directory, KeyWrapping, SCHEMA_VERSION};
 use crate::storage::Storage;
 
 use super::types::{FileContext, MutationOutcome};
 use super::FileManager;
 
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
-    /// Rename a directory by re-encrypting its metadata with the new name.
+    /// Rename a directory by re-encrypting its metadata under the new name.
     ///
-    /// Fetches the directory record, decrypts metadata, changes the name,
-    /// re-encrypts, and writes back. Today this only succeeds when the
-    /// caller is the directory's PDS authority. The federation rewrite
-    /// replaces this with a curatorial-supersede cascade any chain
-    /// participant can author.
+    /// Cabinet: in-place `putRecord` — the directory lives on the caller's
+    /// PDS, no chain follows.
+    ///
+    /// Workspace: single-level supersede on caller's PDS. The directory's
+    /// chain head advances; parent listings still reference the old URI
+    /// (they aren't cascaded up — the indexer's chain-follower resolves
+    /// reads to the current head). Works at any depth because no parent
+    /// entries change.
     #[::opake_derive::signoff]
     pub async fn rename_directory(
         &mut self,
@@ -75,24 +79,40 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let new_encrypted_metadata =
             crypto::encrypt_metadata(&content_key, &metadata, &mut self.opake.rng)?;
 
-        if at_uri.authority != self.opake.did {
-            return Err(Error::Unimplemented(
-                "workspace member rename (cascade)".into(),
-            ));
+        let now = self.opake.now();
+
+        match &self.context {
+            FileContext::Cabinet(_) => {
+                let mut updated = directory;
+                updated.encrypted_metadata = new_encrypted_metadata;
+                updated.modified_at = Some(now);
+
+                self.opake
+                    .client
+                    .put_record(DIRECTORY_COLLECTION, &at_uri.rkey, &updated)
+                    .await?;
+            }
+            FileContext::Workspace(ws) => {
+                // Cross-PDS-safe supersede: write a new directory record
+                // on the caller's PDS with `supersedes` pointing at the
+                // observed URI. Carry the workspace_id so the indexer
+                // routes the supersede onto the right chain.
+                let new_record = Directory {
+                    opake_version: SCHEMA_VERSION,
+                    key_wrapping: directory.key_wrapping,
+                    encrypted_metadata: new_encrypted_metadata,
+                    entries: directory.entries,
+                    supersedes: Some(directory_uri.to_owned()),
+                    workspace_id: Some(ws.uri.clone()),
+                    created_at: now.clone(),
+                    modified_at: Some(now),
+                };
+                self.opake
+                    .client
+                    .create_record(DIRECTORY_COLLECTION, None, &new_record)
+                    .await?;
+            }
         }
-
-        let mut updated = directory;
-        updated.encrypted_metadata = new_encrypted_metadata;
-        updated.modified_at = Some(self.opake.now());
-
-        self.opake
-            .client
-            .put_record(
-                crate::directories::DIRECTORY_COLLECTION,
-                &at_uri.rkey,
-                &updated,
-            )
-            .await?;
 
         self.invalidate_directory_cache().await;
         Ok(MutationOutcome::Applied)
