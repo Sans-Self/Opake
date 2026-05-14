@@ -262,3 +262,198 @@ async fn replace_child_with_missing_prior_uri_errors() {
         .unwrap_err();
     assert!(err.to_string().contains("missing expected child URI"));
 }
+
+// ---------------------------------------------------------------------------
+// build_deep_cascade_levels
+//
+// Refetches each level in a uri_chain (root → target) and assembles the
+// (Vec<AncestorLevel>, LeafLevel) shape that `execute_cascade` consumes.
+// ---------------------------------------------------------------------------
+
+mod deep_cascade_levels {
+    use super::*;
+    use crate::client::HttpResponse;
+
+    fn did_doc(did: &str, pds_url: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": did,
+            "alsoKnownAs": [],
+            "service": [{
+                "id": "#atproto_pds",
+                "type": "AtprotoPersonalDataServer",
+                "serviceEndpoint": pds_url,
+            }]
+        })
+    }
+
+    fn ok(value: serde_json::Value) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&value).unwrap(),
+        }
+    }
+
+    fn get_dir_response(uri: &str, cid: &str, dir: &Directory) -> HttpResponse {
+        ok(serde_json::json!({
+            "uri": uri,
+            "cid": cid,
+            "value": dir,
+        }))
+    }
+
+    /// Empty chain is a usage error — caller didn't compute a path.
+    #[tokio::test]
+    async fn empty_chain_errors_invalid_record() {
+        let mock = MockTransport::new();
+        let err = build_deep_cascade_levels(&mock, &[], vec![])
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("empty uri_chain"),
+            "got: {err}"
+        );
+    }
+
+    /// Single-element chain (target IS the root). Returns no ancestors;
+    /// leaf supersedes the root URI with caller-supplied entries.
+    #[tokio::test]
+    async fn single_element_chain_produces_only_leaf() {
+        let mock = MockTransport::new();
+        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
+        let root_dir = dummy_directory_with_entries("/", vec![]);
+
+        mock.enqueue(ok(did_doc(TEST_DID, "https://pds.test")));
+        mock.enqueue(get_dir_response(&root_uri, "bafyroot", &root_dir));
+
+        let new_entries = vec![ListingEntry::new(DOC_URI, DOC_CID)];
+        let (ancestors, leaf) =
+            build_deep_cascade_levels(&mock, &[root_uri.clone()], new_entries.clone())
+                .await
+                .unwrap();
+
+        assert!(ancestors.is_empty());
+        match &leaf.mode {
+            LevelMode::Supersede {
+                prior_head_uri, ..
+            } => assert_eq!(prior_head_uri, &root_uri),
+            _ => panic!("expected Supersede mode"),
+        }
+        assert_eq!(leaf.entries.len(), 1);
+        assert_eq!(leaf.entries[0].target, DOC_URI);
+    }
+
+    /// Two-element chain (root + subdirectory). One ancestor (root)
+    /// linked to the subdir via Replace. Leaf supersedes the subdir.
+    #[tokio::test]
+    async fn two_element_chain_produces_root_ancestor_and_subdir_leaf() {
+        let mock = MockTransport::new();
+        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
+        let subdir_uri = format!("at://{TEST_DID}/app.opake.directory/q1");
+
+        let root_dir = dummy_directory_with_entries("/", vec![subdir_uri.clone()]);
+        let subdir = dummy_directory_with_entries("q1", vec![]);
+
+        // Fetches happen in chain order — root first, then subdir.
+        mock.enqueue(ok(did_doc(TEST_DID, "https://pds.test")));
+        mock.enqueue(get_dir_response(&root_uri, "bafyroot", &root_dir));
+        mock.enqueue(get_dir_response(&subdir_uri, "bafysubdir", &subdir));
+
+        let new_entries = vec![ListingEntry::new(DOC_URI, DOC_CID)];
+        let (ancestors, leaf) = build_deep_cascade_levels(
+            &mock,
+            &[root_uri.clone(), subdir_uri.clone()],
+            new_entries,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(ancestors.len(), 1);
+
+        // Root ancestor supersedes root_uri, linked to the subdir URI
+        // (so the cascade walker will patch in the freshly-written
+        // subdir URI/CID when threading up).
+        match &ancestors[0].mode {
+            LevelMode::Supersede { prior_head_uri, .. } => {
+                assert_eq!(prior_head_uri, &root_uri);
+            }
+            _ => panic!("expected Supersede"),
+        }
+        match &ancestors[0].linkage {
+            AncestorLinkage::Replace { prior_child_uri } => {
+                assert_eq!(prior_child_uri, &subdir_uri);
+            }
+            _ => panic!("expected Replace linkage"),
+        }
+        // Root's prior entries carry over (the walker patches them).
+        assert_eq!(ancestors[0].entries.len(), 1);
+        assert_eq!(ancestors[0].entries[0].target, subdir_uri);
+
+        // Leaf supersedes the subdir URI with the new entries.
+        match &leaf.mode {
+            LevelMode::Supersede { prior_head_uri, .. } => {
+                assert_eq!(prior_head_uri, &subdir_uri);
+            }
+            _ => panic!("expected Supersede"),
+        }
+        assert_eq!(leaf.entries[0].target, DOC_URI);
+    }
+
+    /// Three-element chain demonstrates the ancestor chaining: each
+    /// ancestor's `prior_child_uri` points at the URI of the level
+    /// immediately below.
+    #[tokio::test]
+    async fn three_element_chain_threads_child_uris_correctly() {
+        let mock = MockTransport::new();
+        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
+        let q1_uri = format!("at://{TEST_DID}/app.opake.directory/q1");
+        let foo_uri = format!("at://{TEST_DID}/app.opake.directory/foo");
+
+        let root_dir = dummy_directory_with_entries("/", vec![q1_uri.clone()]);
+        let q1 = dummy_directory_with_entries("q1", vec![foo_uri.clone()]);
+        let foo = dummy_directory_with_entries("foo", vec![]);
+
+        // Each cross-DID hop normally costs a DID-doc resolve, but the
+        // chain walker caches resolutions per call. All three URIs share
+        // TEST_DID so it's exactly one resolve.
+        mock.enqueue(ok(did_doc(TEST_DID, "https://pds.test")));
+        mock.enqueue(get_dir_response(&root_uri, "bafyroot", &root_dir));
+        mock.enqueue(get_dir_response(&q1_uri, "bafyq1", &q1));
+        mock.enqueue(get_dir_response(&foo_uri, "bafyfoo", &foo));
+
+        let new_entries = vec![ListingEntry::new(DOC_URI, DOC_CID)];
+        let (ancestors, leaf) = build_deep_cascade_levels(
+            &mock,
+            &[root_uri.clone(), q1_uri.clone(), foo_uri.clone()],
+            new_entries,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(ancestors.len(), 2);
+
+        // Root ancestor (index 0) links to q1.
+        match &ancestors[0].linkage {
+            AncestorLinkage::Replace { prior_child_uri } => {
+                assert_eq!(prior_child_uri, &q1_uri);
+            }
+            _ => panic!(),
+        }
+
+        // q1 ancestor (index 1) links to foo.
+        match &ancestors[1].linkage {
+            AncestorLinkage::Replace { prior_child_uri } => {
+                assert_eq!(prior_child_uri, &foo_uri);
+            }
+            _ => panic!(),
+        }
+
+        // Leaf supersedes foo with the new doc.
+        match &leaf.mode {
+            LevelMode::Supersede { prior_head_uri, .. } => {
+                assert_eq!(prior_head_uri, &foo_uri);
+            }
+            _ => panic!(),
+        }
+    }
+}

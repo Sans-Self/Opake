@@ -166,8 +166,23 @@ impl<T: Transport> super::XrpcClient<T> {
     /// Execute multiple record operations atomically via `com.atproto.repo.applyWrites`.
     ///
     /// All writes succeed or fail together. Useful for directory moves
-    /// (remove from source + add to target in one atomic call).
+    /// (remove from source + add to target in one atomic call). Discards
+    /// the per-write results — use [`Self::apply_writes_returning`] if
+    /// you need the URIs/CIDs of created records (e.g. for chain writes).
     pub async fn apply_writes(&mut self, writes: &[ApplyWriteOp]) -> Result<(), Error> {
+        let _ = self.apply_writes_returning(writes).await?;
+        Ok(())
+    }
+
+    /// Like [`Self::apply_writes`] but returns the result of each write.
+    ///
+    /// Result order matches `writes` order. `Create` ops carry the
+    /// assigned URI + CID; `Update` ops carry the URI + new CID;
+    /// `Delete` ops have all-`None` fields.
+    pub async fn apply_writes_returning(
+        &mut self,
+        writes: &[ApplyWriteOp],
+    ) -> Result<Vec<ApplyWriteResult>, Error> {
         trace!("applying {} writes atomically", writes.len());
         let did = self.did()?.to_owned();
 
@@ -220,9 +235,32 @@ impl<T: Transport> super::XrpcClient<T> {
         };
         self.attach_auth(&mut request)?;
 
-        self.send_checked(request).await?;
-        Ok(())
+        let response = self.send_checked(request).await?;
+        // The applyWrites response carries a `results` array with one
+        // entry per write. Older PDS versions returned no body — treat
+        // that as an empty results vec; callers depending on returned
+        // CIDs will then fail with a clear error rather than misread.
+        if response.body.is_empty() {
+            return Ok(Vec::new());
+        }
+        #[derive(serde::Deserialize)]
+        struct ApplyWritesResponse {
+            #[serde(default)]
+            results: Vec<ApplyWriteResult>,
+        }
+        let parsed: ApplyWritesResponse = serde_json::from_slice(&response.body)?;
+        Ok(parsed.results)
     }
+}
+
+/// One write's result from `applyWrites`. Field presence depends on the
+/// op type — `Create` carries `uri` + `cid`; `Delete` carries neither.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ApplyWriteResult {
+    #[serde(default)]
+    pub uri: Option<String>,
+    #[serde(default)]
+    pub cid: Option<String>,
 }
 
 /// A single operation for [`XrpcClient::apply_writes`].

@@ -2,7 +2,7 @@ use crate::atproto::CidLink;
 use crate::client::{ApplyWriteOp, Transport};
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories::{
-    self, fetch_chain_node, ChainHeadProvider, DIRECTORY_COLLECTION,
+    self, build_deep_cascade_levels, ChainHeadProvider, DIRECTORY_COLLECTION,
 };
 use crate::error::Error;
 use crate::indexer::IndexerChainHeadProvider;
@@ -116,15 +116,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Workspace directory creation via federation cascade.
     ///
-    /// Two writes (non-batched — the supersede needs the new dir's CID):
+    /// Two-phase write:
     ///
-    /// 1. `createRecord` for the new keyring-wrapped directory on caller's PDS
-    /// 2. Single-level cascade supersede of the parent (root only in this
-    ///    slice — deeper paths return `Unimplemented`)
+    /// 1. `createRecord` for the new keyring-wrapped directory on caller's PDS.
+    /// 2. Cascade supersede from the parent up to root, threading the new
+    ///    dir's URI/CID into the parent's listing and propagating each
+    ///    level's new URI/CID upward.
     ///
-    /// Partial failure (step 1 succeeds, step 2 fails) leaves an orphan
-    /// directory record. Same recovery story as upload: retry safely
-    /// produces a fresh TID, the orphan is GC'd by later cleanup.
+    /// Partial failure (step 1 succeeds, step 2 fails partway) leaves an
+    /// orphan directory record and possibly some stranded ancestor
+    /// supersedes. Same recovery story as upload: retry safely produces a
+    /// fresh TID, the orphan is GC'd by later cleanup.
     async fn workspace_create_directory_cascade(
         &mut self,
         ws: &Workspace,
@@ -132,8 +134,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         parent_uri: &str,
         now: &str,
     ) -> Result<UploadResult, Error> {
-        // Fetch indexer's view of the workspace chain heads. The parent
-        // we'll supersede must be the current root head.
+        let workspace_uri = ws.uri.clone();
         let chain_heads = {
             let url = self.opake.resolve_indexer_url();
             let signing_key = self.opake.require_signing_key()?;
@@ -143,7 +144,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 did: &self.opake.did,
                 signing_key: &signing_key,
             };
-            provider.workspace_chain_heads(&ws.uri).await?
+            provider.workspace_chain_heads(&workspace_uri).await?
         };
 
         let root_head = chain_heads.root_directory.as_ref().ok_or_else(|| {
@@ -151,17 +152,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 "workspace root not indexed yet — create the workspace first".into(),
             )
         })?;
-        if root_head.uri != parent_uri {
-            return Err(Error::Unimplemented(
-                "workspace subdirectory creation under non-root parent (deep cascade)".into(),
-            ));
-        }
 
-        // Step 1 — write the new directory record on caller's PDS.
+        // 1. Write the new directory record.
         let (kw, meta) = directories::encrypt_keyring_directory_envelope(
             name,
             None,
-            &ws.uri,
+            &workspace_uri,
             &ws.key,
             ws.rotation,
             &mut self.opake.rng,
@@ -170,39 +166,72 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             &mut self.opake.client,
             kw,
             meta,
-            Some(&ws.uri),
+            Some(&workspace_uri),
             now,
         )
         .await?;
-
-        // Step 2 — supersede root with the new dir threaded in.
-        let prior = fetch_chain_node::<Directory>(
-            self.opake.client.transport(),
-            &root_head.uri,
-        )
-        .await?;
-        let mut entries = prior.record.entries;
-        entries.push(ListingEntry {
+        let new_entry = ListingEntry {
             target: dir_ref.uri.clone(),
             target_cid: CidLink {
                 cid: dir_ref.cid.clone(),
             },
-        });
-
-        let new_root = Directory {
-            opake_version: SCHEMA_VERSION,
-            key_wrapping: prior.record.key_wrapping,
-            encrypted_metadata: prior.record.encrypted_metadata,
-            entries,
-            supersedes: Some(prior.uri),
-            workspace_id: Some(ws.uri.clone()),
-            created_at: now.to_owned(),
-            modified_at: Some(now.to_owned()),
         };
-        self.opake
-            .client
-            .create_record(DIRECTORY_COLLECTION, None, &new_root)
+
+        // 2. Cascade — root single-level or deep depending on whether
+        //    the parent is the indexed root.
+        if root_head.uri == parent_uri {
+            // Parent is the root — single-level supersede with the new
+            // child appended.
+            let prior = directories::fetch_chain_node::<Directory>(
+                self.opake.client.transport(),
+                &root_head.uri,
+            )
             .await?;
+            let mut entries = prior.record.entries;
+            entries.push(new_entry);
+            let new_root = Directory {
+                opake_version: SCHEMA_VERSION,
+                key_wrapping: prior.record.key_wrapping,
+                encrypted_metadata: prior.record.encrypted_metadata,
+                entries,
+                supersedes: Some(prior.uri),
+                workspace_id: Some(workspace_uri.clone()),
+                created_at: now.to_owned(),
+                modified_at: Some(now.to_owned()),
+            };
+            self.opake
+                .client
+                .create_record(DIRECTORY_COLLECTION, None, &new_root)
+                .await?;
+        } else {
+            // Deep cascade — fetch the path root → parent, build cascade
+            // levels with the new child appended to the parent's listing,
+            // execute.
+            let chain = self.resolve_workspace_path(&root_head.uri, parent_uri).await?;
+            let parent_record = directories::fetch_chain_node::<Directory>(
+                self.opake.client.transport(),
+                chain.last().expect("non-empty chain"),
+            )
+            .await?;
+            let mut new_parent_entries = parent_record.record.entries;
+            new_parent_entries.push(new_entry);
+
+            let (ancestors, leaf) = build_deep_cascade_levels(
+                self.opake.client.transport(),
+                &chain,
+                new_parent_entries,
+            )
+            .await?;
+
+            directories::execute_cascade(
+                &mut self.opake.client,
+                &workspace_uri,
+                ancestors,
+                leaf,
+                now,
+            )
+            .await?;
+        }
 
         self.invalidate_directory_cache().await;
         Ok(UploadResult {
@@ -306,17 +335,24 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Workspace directory deletion via cascade.
     ///
-    /// Atomic via single `applyWrites([Delete(dir), Create(new_root)])`.
-    /// The new root record supersedes the indexed root head with the dir's
-    /// listing entry pruned.
+    /// Root-parent: single `applyWrites([Delete(dir), Create(new_root)])`.
+    /// Atomic — both writes succeed together or neither does.
+    ///
+    /// Non-root parent: `applyWrites([Delete(dir), Create(new_parent)])`
+    /// for the leaf, then serial supersede walk up the ancestor chain
+    /// to root. Partial-atomicity contract matches `workspace_delete_deep`
+    /// for documents: the dir-delete + parent supersede are atomic;
+    /// upper ancestors are best-effort and the indexer chain-follows on
+    /// read so stale listings resolve correctly.
     async fn workspace_delete_directory_cascade(
         &mut self,
         directory_uri: &str,
         parent_uri: &str,
         now: &str,
     ) -> Result<MutationOutcome, Error> {
-        let FileContext::Workspace(ref ws) = self.context else {
-            unreachable!()
+        let workspace_uri = match &self.context {
+            FileContext::Workspace(ws) => ws.uri.clone(),
+            _ => unreachable!(),
         };
 
         let chain_heads = {
@@ -328,33 +364,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 did: &self.opake.did,
                 signing_key: &signing_key,
             };
-            provider.workspace_chain_heads(&ws.uri).await?
+            provider.workspace_chain_heads(&workspace_uri).await?
         };
 
-        let head = chain_heads.root_directory.as_ref().ok_or_else(|| {
+        let root_head = chain_heads.root_directory.as_ref().ok_or_else(|| {
             Error::NotFound("workspace root not indexed yet — nothing to delete".into())
         })?;
-        if head.uri != parent_uri {
-            return Err(Error::Unimplemented(
-                "workspace subdirectory deletion under non-root parent (deep cascade)".into(),
-            ));
-        }
-
-        let prior =
-            fetch_chain_node::<Directory>(self.opake.client.transport(), &head.uri).await?;
-
-        let original_len = prior.record.entries.len();
-        let new_entries: Vec<ListingEntry> = prior
-            .record
-            .entries
-            .into_iter()
-            .filter(|e| e.target != directory_uri)
-            .collect();
-        if new_entries.len() == original_len {
-            return Err(Error::NotFound(format!(
-                "{directory_uri} not in workspace root listing"
-            )));
-        }
 
         let dir_at = crate::atproto::parse_at_uri(directory_uri)?;
         let delete_op = ApplyWriteOp::Delete {
@@ -362,27 +377,172 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             rkey: dir_at.rkey.clone(),
         };
 
-        let new_root = Directory {
+        if root_head.uri == parent_uri {
+            // Single-level: bundle dir-delete with new root supersede.
+            let prior = directories::fetch_chain_node::<Directory>(
+                self.opake.client.transport(),
+                &root_head.uri,
+            )
+            .await?;
+            let original_len = prior.record.entries.len();
+            let new_entries: Vec<ListingEntry> = prior
+                .record
+                .entries
+                .into_iter()
+                .filter(|e| e.target != directory_uri)
+                .collect();
+            if new_entries.len() == original_len {
+                return Err(Error::NotFound(format!(
+                    "{directory_uri} not in workspace root listing"
+                )));
+            }
+            let new_root = Directory {
+                opake_version: SCHEMA_VERSION,
+                key_wrapping: prior.record.key_wrapping,
+                encrypted_metadata: prior.record.encrypted_metadata,
+                entries: new_entries,
+                supersedes: Some(prior.uri),
+                workspace_id: Some(workspace_uri),
+                created_at: now.to_owned(),
+                modified_at: Some(now.to_owned()),
+            };
+            let create_op = ApplyWriteOp::Create {
+                collection: DIRECTORY_COLLECTION.into(),
+                rkey: None,
+                record: serde_json::to_value(&new_root)?,
+            };
+            self.opake
+                .client
+                .apply_writes(&[delete_op, create_op])
+                .await?;
+        } else {
+            self.workspace_delete_dir_deep(
+                delete_op,
+                &workspace_uri,
+                &root_head.uri,
+                parent_uri,
+                directory_uri,
+                now,
+            )
+            .await?;
+        }
+
+        self.invalidate_directory_cache().await;
+        Ok(MutationOutcome::Applied)
+    }
+
+    /// Deep cascade for directory deletion under a non-root parent.
+    ///
+    /// Mirrors `workspace_delete_deep` for documents: bundle delete +
+    /// leaf supersede in one applyWrites, then walk ancestors serially.
+    async fn workspace_delete_dir_deep(
+        &mut self,
+        delete_op: ApplyWriteOp,
+        workspace_uri: &str,
+        root_head_uri: &str,
+        parent_uri: &str,
+        directory_uri: &str,
+        now: &str,
+    ) -> Result<(), Error> {
+        let chain = self.resolve_workspace_path(root_head_uri, parent_uri).await?;
+
+        let transport = self.opake.client.transport();
+        let mut pds_cache: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut chain_records: Vec<directories::ChainNode<Directory>> =
+            Vec::with_capacity(chain.len());
+        for uri in &chain {
+            chain_records.push(
+                directories::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache)
+                    .await?,
+            );
+        }
+
+        let parent_record = chain_records.pop().expect("non-empty chain");
+        let original_len = parent_record.record.entries.len();
+        let new_parent_entries: Vec<ListingEntry> = parent_record
+            .record
+            .entries
+            .iter()
+            .filter(|e| e.target != directory_uri)
+            .cloned()
+            .collect();
+        if new_parent_entries.len() == original_len {
+            return Err(Error::NotFound(format!(
+                "{directory_uri} not in {parent_uri} listing"
+            )));
+        }
+
+        let new_parent_record = Directory {
             opake_version: SCHEMA_VERSION,
-            key_wrapping: prior.record.key_wrapping,
-            encrypted_metadata: prior.record.encrypted_metadata,
-            entries: new_entries,
-            supersedes: Some(prior.uri),
-            workspace_id: Some(ws.uri.clone()),
+            key_wrapping: parent_record.record.key_wrapping.clone(),
+            encrypted_metadata: parent_record.record.encrypted_metadata.clone(),
+            entries: new_parent_entries,
+            supersedes: Some(parent_record.uri.clone()),
+            workspace_id: Some(workspace_uri.to_owned()),
             created_at: now.to_owned(),
             modified_at: Some(now.to_owned()),
         };
         let create_op = ApplyWriteOp::Create {
             collection: DIRECTORY_COLLECTION.into(),
             rkey: None,
-            record: serde_json::to_value(&new_root)?,
+            record: serde_json::to_value(&new_parent_record)?,
         };
-
-        self.opake
+        let results = self
+            .opake
             .client
-            .apply_writes(&[delete_op, create_op])
+            .apply_writes_returning(&[delete_op, create_op])
             .await?;
-        self.invalidate_directory_cache().await;
-        Ok(MutationOutcome::Applied)
+        let (mut child_uri, mut child_cid) = match results.get(1) {
+            Some(r) if r.uri.is_some() && r.cid.is_some() => {
+                (r.uri.clone().unwrap(), r.cid.clone().unwrap())
+            }
+            _ => {
+                return Err(Error::InvalidRecord(
+                    "applyWrites did not return URI/CID for new directory record".into(),
+                ))
+            }
+        };
+        let mut prior_child_uri = parent_record.uri;
+
+        while let Some(ancestor) = chain_records.pop() {
+            let mut new_entries = ancestor.record.entries.clone();
+            let slot = new_entries
+                .iter_mut()
+                .find(|e| e.target == prior_child_uri)
+                .ok_or_else(|| {
+                    Error::InvalidRecord(format!(
+                        "ancestor {} missing child {prior_child_uri}",
+                        ancestor.uri
+                    ))
+                })?;
+            slot.target = child_uri.clone();
+            slot.target_cid = CidLink {
+                cid: child_cid.clone(),
+            };
+
+            let new_record = Directory {
+                opake_version: SCHEMA_VERSION,
+                key_wrapping: ancestor.record.key_wrapping.clone(),
+                encrypted_metadata: ancestor.record.encrypted_metadata.clone(),
+                entries: new_entries,
+                supersedes: Some(ancestor.uri.clone()),
+                workspace_id: Some(workspace_uri.to_owned()),
+                created_at: now.to_owned(),
+                modified_at: Some(now.to_owned()),
+            };
+
+            let written = self
+                .opake
+                .client
+                .create_record(DIRECTORY_COLLECTION, None, &new_record)
+                .await?;
+
+            prior_child_uri = ancestor.uri;
+            child_uri = written.uri;
+            child_cid = written.cid;
+        }
+
+        Ok(())
     }
 }

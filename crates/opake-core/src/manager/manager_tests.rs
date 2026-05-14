@@ -562,42 +562,14 @@ mod workspace_upload_cascade {
         }
     }
 
-    /// Subdirectory uploads are out of scope for this slice — they need
-    /// the multi-level cascade builder (walking root → target via cached
-    /// tree + per-level CID refetches). We surface a clear stub error
-    /// rather than silently failing.
-    #[tokio::test]
-    async fn subdirectory_upload_returns_unimplemented_stub() {
-        use crate::error::Error;
-
-        let mock = MockTransport::new();
-        // chain-head call still happens before the subdirectory check.
-        let prior_root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
-        mock.enqueue(chain_head_response(
-            Some((KEYRING_URI, "bafygenesis")),
-            Some((&prior_root_uri, "bafyrootcurrent")),
-        ));
-
-        let mut opake = opake_for_alice(mock);
-        let workspace = workspace_for_alice();
-        let ctx = FileContext::Workspace(workspace);
-        let mut mgr = opake.file_manager(&ctx);
-
-        let subdir_uri = format!("at://{ALICE_DID}/app.opake.directory/somesubdir");
-        let req = super::super::types::UploadRequest {
-            plaintext: b"x",
-            filename: "x.pdf",
-            mime_type: "application/pdf",
-            description: None,
-            tags: &[],
-            directory_uri: Some(&subdir_uri),
-        };
-        let err = mgr.upload(&req).await.unwrap_err();
-        assert!(
-            matches!(err, Error::Unimplemented(ref msg) if msg.contains("deep cascade")),
-            "expected deep-cascade Unimplemented stub, got {err:?}"
-        );
-    }
+    // Deep cascade upload (subdirectory) is covered by unit tests on
+    // `build_deep_cascade_levels` in `directories::cascade::tests`. The
+    // full integration through `FileManager.upload` requires mocking the
+    // indexer snapshot endpoint + multiple cross-PDS DID resolutions +
+    // chained createRecord responses; the cost-to-coverage ratio favors
+    // testing the cascade-builder primitive in isolation and trusting
+    // the wire-up. We do exercise the root-only paths above as
+    // integration tests because they're the high-traffic flow.
 }
 
 // ---------------------------------------------------------------------------
@@ -768,29 +740,14 @@ mod workspace_delete_cascade {
         }
     }
 
-    /// Subdirectory deletes are out of scope (need deep cascade). Verify
-    /// the stub error is clear.
-    #[tokio::test]
-    async fn subdirectory_delete_returns_unimplemented_stub() {
-        let prior_root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
-        let subdir_uri = format!("at://{ALICE_DID}/app.opake.directory/subdir");
-        let doc_uri = format!("at://{ALICE_DID}/app.opake.document/d");
-
-        let mock = MockTransport::new();
-        mock.enqueue(chain_head_response(
-            Some((KEYRING_URI, "bafygenesis")),
-            Some((&prior_root_uri, "bafyrootcurrent")),
-        ));
-
-        let mut opake = opake_for_alice(mock);
-        let ctx = FileContext::Workspace(workspace_for_alice());
-        let mut mgr = opake.file_manager(&ctx);
-        let err = mgr.delete(&doc_uri, &subdir_uri).await.unwrap_err();
-        assert!(
-            matches!(err, Error::Unimplemented(ref msg) if msg.contains("deep cascade")),
-            "expected deep-cascade stub, got {err:?}"
-        );
-    }
+    // Subdirectory deletion (deep cascade) is covered by unit tests on
+    // `build_deep_cascade_levels` in `directories::cascade::tests`. The
+    // FileManager-level wire-up calls the cascade builder + an inline
+    // ancestor walker; both are exercised independently. Wiring up a
+    // full integration test would require mocking the indexer snapshot,
+    // multiple PDS DID-doc resolutions, applyWrites return-CID parsing,
+    // and chained createRecord responses — high cost, low marginal
+    // coverage. We hand-test this path on the test accounts.
 
     /// Deleting from an empty/un-indexed workspace produces a clear NotFound
     /// — the cascade can't supersede a head that doesn't exist.

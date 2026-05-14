@@ -120,7 +120,12 @@ where
     fetch_with_cache(transport, uri, &mut HashMap::new()).await
 }
 
-async fn fetch_with_cache<R>(
+/// Fetch a chain node, reusing a caller-managed PDS cache.
+///
+/// Use this when the caller fetches multiple URIs in a batch and wants
+/// to amortize DID→PDS resolutions. For one-shot fetches, prefer
+/// [`fetch_chain_node`].
+pub(crate) async fn fetch_with_cache<R>(
     transport: &impl Transport,
     uri: &str,
     pds_cache: &mut HashMap<String, String>,

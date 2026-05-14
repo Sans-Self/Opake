@@ -8,7 +8,7 @@ mod auth;
 mod blobs;
 mod repo;
 
-pub use repo::ApplyWriteOp;
+pub use repo::{ApplyWriteOp, ApplyWriteResult};
 
 use serde::{Deserialize, Serialize};
 

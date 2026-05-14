@@ -2,8 +2,8 @@ use crate::atproto::CidLink;
 use crate::client::Transport;
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories::{
-    self, fetch_chain_node, workspace_root_rkey, AncestorLevel, CascadeOutcome, ChainHeadProvider,
-    LeafLevel, LevelMode, WorkspaceChainHeads,
+    self, build_deep_cascade_levels, fetch_chain_node, workspace_root_rkey, AncestorLevel,
+    CascadeOutcome, ChainHeadProvider, LeafLevel, LevelMode, WorkspaceChainHeads,
 };
 use crate::documents;
 use crate::error::Error;
@@ -139,29 +139,22 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let FileContext::Workspace(ref ws) = self.context else {
             unreachable!()
         };
+        let workspace_uri = ws.uri.clone();
+        let chain_heads = self.fetch_workspace_chain_heads(&workspace_uri).await?;
 
-        // Subdirectory cascades require walking root→target via the cached
-        // tree (and re-fetching each level's CIDs). That's a separate slice;
-        // for now only root-targeted uploads cascade-route. `directory_uri`
-        // is None for the implicit-root case; an explicit URI that equals
-        // the indexed root head is also fine and lets callers be explicit.
-        let chain_heads = self.fetch_workspace_chain_heads(&ws.uri).await?;
-        let target_is_root = match req.directory_uri {
-            None => true,
-            Some(uri) => match &chain_heads.root_directory {
-                Some(head) => head.uri == uri,
-                // No indexed root yet — an explicit URI can only mean the
-                // owner's deterministic ws-{rkey} URI (genesis target).
-                None => uri == ws.root_directory_uri(),
-            },
-        };
-        if !target_is_root {
-            return Err(Error::Unimplemented(
-                "workspace subdirectory upload (deep cascade)".into(),
-            ));
-        }
+        // Three cases keyed on (target, indexed-root):
+        //   1. No target + no root           → genesis cascade at ws-{rkey}
+        //   2. Target == indexed root URI    → single-level supersede of root
+        //   3. Target != indexed root URI    → deep cascade root → target
+        //
+        // For case 3, the URI chain is discovered by walking the cached
+        // tree via `find_parent` from the target URI. The tree was built
+        // from the indexer's snapshot, so its topology matches what the
+        // indexer reports as the current root head.
+        let target_kind =
+            classify_upload_target(req.directory_uri, &chain_heads, &workspace_uri, ws)?;
 
-        // 1. Document record on caller's PDS.
+        // 1. Document record on caller's PDS. Same for all three cases.
         let tid = self.opake.generate_tid();
         let (doc_record, tid) = documents::prepare_upload_keyring(
             &mut self.opake.client,
@@ -169,8 +162,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 plaintext: req.plaintext,
                 filename: req.filename,
                 mime_type: req.mime_type,
-                keyring_uri: &ws.uri,
-                workspace_id: &ws.uri,
+                keyring_uri: &workspace_uri,
+                workspace_id: &workspace_uri,
                 group_key: &ws.key,
                 rotation: ws.rotation,
                 description: req.description,
@@ -187,16 +180,64 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .create_record(documents::DOCUMENT_COLLECTION, Some(&tid), &doc_record)
             .await?;
 
-        // 2. Root cascade (single level): either supersede the current head
-        //    or genesis a fresh root with the new doc as sole entry.
-        let leaf = self
-            .build_root_leaf_for_upload(ws, &chain_heads, &doc_ref.uri, &doc_ref.cid)
-            .await?;
+        // 2. Cascade — root single-level or deep depending on target.
+        let new_entry = ListingEntry {
+            target: doc_ref.uri.clone(),
+            target_cid: CidLink {
+                cid: doc_ref.cid.clone(),
+            },
+        };
+
+        let (ancestors, leaf): (Vec<AncestorLevel>, LeafLevel) = match target_kind {
+            UploadTarget::RootGenesis => {
+                let leaf = self
+                    .build_root_genesis_leaf(ws, vec![new_entry])
+                    .await?;
+                (Vec::new(), leaf)
+            }
+            UploadTarget::RootSupersede(root_head_uri) => {
+                let prior =
+                    fetch_chain_node::<Directory>(self.opake.client.transport(), &root_head_uri)
+                        .await?;
+                let mut entries = prior.record.entries;
+                entries.push(new_entry);
+                let leaf = LeafLevel {
+                    mode: LevelMode::Supersede {
+                        prior_head_uri: root_head_uri,
+                        key_wrapping: prior.record.key_wrapping,
+                        encrypted_metadata: prior.record.encrypted_metadata,
+                    },
+                    entries,
+                };
+                (Vec::new(), leaf)
+            }
+            UploadTarget::Subdirectory {
+                root_head_uri,
+                target_uri,
+            } => {
+                let uri_chain = self
+                    .resolve_workspace_path(&root_head_uri, &target_uri)
+                    .await?;
+                let target_record = fetch_chain_node::<Directory>(
+                    self.opake.client.transport(),
+                    uri_chain.last().expect("non-empty chain"),
+                )
+                .await?;
+                let mut new_leaf_entries = target_record.record.entries.clone();
+                new_leaf_entries.push(new_entry);
+                build_deep_cascade_levels(
+                    self.opake.client.transport(),
+                    &uri_chain,
+                    new_leaf_entries,
+                )
+                .await?
+            }
+        };
 
         let _: CascadeOutcome = directories::execute_cascade(
             &mut self.opake.client,
-            &ws.uri,
-            Vec::<AncestorLevel>::new(),
+            &workspace_uri,
+            ancestors,
             leaf,
             now,
         )
@@ -230,68 +271,120 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         provider.workspace_chain_heads(workspace_id).await
     }
 
-    /// Build the leaf level for a root-targeted workspace upload.
+    /// Build the leaf level for a workspace root genesis cascade.
     ///
-    /// Two shapes, gated on whether the indexer reports an existing root:
-    ///
-    /// * **Supersede** — fetch the prior root record (may live on any
-    ///   member's PDS), copy its key wrapping + encrypted metadata
-    ///   forward, append the new doc as an additional listing entry.
-    /// * **Genesis** — fresh keyring-wrapped root with the new doc as
-    ///   sole entry. Stable rkey `ws-{keyring_rkey}` so the owner's
-    ///   first write is idempotent against retries; non-owner genesis
-    ///   writes (rare — only when racing the owner) also use this rkey
-    ///   on their own PDS, which is fine because the resulting AT-URIs
-    ///   are scoped by DID.
-    async fn build_root_leaf_for_upload(
+    /// Used when the workspace has no indexed root yet (workspace just
+    /// created, first contributor authors the root). Stable rkey
+    /// `ws-{keyring_rkey}` makes retries idempotent on the same PDS;
+    /// non-owner genesis writes (racing the owner) also use this rkey
+    /// on their own PDS — AT-URIs are DID-scoped so no conflict.
+    async fn build_root_genesis_leaf(
         &mut self,
         ws: &Workspace,
-        chain_heads: &WorkspaceChainHeads,
-        new_doc_uri: &str,
-        new_doc_cid: &str,
+        entries: Vec<ListingEntry>,
     ) -> Result<LeafLevel, Error> {
-        let new_entry = ListingEntry {
-            target: new_doc_uri.to_owned(),
-            target_cid: CidLink {
-                cid: new_doc_cid.to_owned(),
+        let (kw, meta) = directories::encrypt_keyring_directory_envelope(
+            directories::ROOT_DIRECTORY_NAME,
+            None,
+            &ws.uri,
+            &ws.key,
+            ws.rotation,
+            &mut self.opake.rng,
+        )?;
+        Ok(LeafLevel {
+            mode: LevelMode::Genesis {
+                key_wrapping: kw,
+                encrypted_metadata: meta,
+                rkey: Some(workspace_root_rkey(&ws.uri)),
             },
-        };
+            entries,
+        })
+    }
 
-        if let Some(head) = chain_heads.root_directory.as_ref() {
-            let prior: directories::ChainNode<Directory> =
-                fetch_chain_node(self.opake.client.transport(), &head.uri).await?;
-            // Editor-additivity rule: we keep all prior entries and append
-            // the new doc. Removal-of-others is not authored here.
-            let mut entries = prior.record.entries;
-            entries.push(new_entry);
-
-            Ok(LeafLevel {
-                mode: LevelMode::Supersede {
-                    prior_head_uri: head.uri.clone(),
-                    key_wrapping: prior.record.key_wrapping,
-                    encrypted_metadata: prior.record.encrypted_metadata,
-                },
-                entries,
-            })
-        } else {
-            // Genesis: encrypt a fresh keyring-wrapped root envelope.
-            let (kw, meta) = directories::encrypt_keyring_directory_envelope(
-                directories::ROOT_DIRECTORY_NAME,
-                None,
-                &ws.uri,
-                &ws.key,
-                ws.rotation,
-                &mut self.opake.rng,
-            )?;
-            Ok(LeafLevel {
-                mode: LevelMode::Genesis {
-                    key_wrapping: kw,
-                    encrypted_metadata: meta,
-                    rkey: Some(workspace_root_rkey(&ws.uri)),
-                },
-                entries: vec![new_entry],
-            })
+    /// Resolve the URI chain from the workspace root down to `target_uri`.
+    ///
+    /// Walks the cached `DirectoryTree` upward via `find_parent`, then
+    /// reverses. The chain is inclusive of both endpoints, in root →
+    /// target order. Errors if:
+    ///
+    ///   * the tree doesn't know about `target_uri` (caller passed a URI
+    ///     not in this workspace, or the tree is stale);
+    ///   * the walk doesn't terminate at `expected_root_uri` (target is
+    ///     in a different workspace, or the tree's root has drifted from
+    ///     the indexer's report — caller should refresh and retry).
+    pub(crate) async fn resolve_workspace_path(
+        &mut self,
+        expected_root_uri: &str,
+        target_uri: &str,
+    ) -> Result<Vec<String>, Error> {
+        let tree = self.load_tree().await?;
+        let mut chain: Vec<String> = vec![target_uri.to_owned()];
+        loop {
+            let last = chain.last().expect("non-empty");
+            match tree.find_parent(last) {
+                Some(parent) => {
+                    if chain.contains(&parent) {
+                        return Err(Error::ChainCycle { uri: parent });
+                    }
+                    chain.push(parent);
+                }
+                None => break,
+            }
         }
+
+        let walked_root = chain.last().expect("non-empty");
+        if walked_root != expected_root_uri {
+            return Err(Error::NotFound(format!(
+                "{target_uri} is not reachable from indexer's root {expected_root_uri}; \
+                 local tree root is {walked_root}"
+            )));
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+}
+
+/// Where the upload is going, after reconciling caller intent with the
+/// indexer's chain-head report.
+enum UploadTarget {
+    /// Workspace has no indexed root yet — first write authors the
+    /// root with stable `ws-{rkey}`.
+    RootGenesis,
+    /// Target is the current indexed root; single-level supersede.
+    RootSupersede(String),
+    /// Target is a subdirectory; needs a deep cascade root → target.
+    Subdirectory {
+        root_head_uri: String,
+        target_uri: String,
+    },
+}
+
+fn classify_upload_target(
+    requested_target: Option<&str>,
+    chain_heads: &WorkspaceChainHeads,
+    workspace_uri: &str,
+    ws: &Workspace,
+) -> Result<UploadTarget, Error> {
+    let _ = workspace_uri;
+    match (requested_target, &chain_heads.root_directory) {
+        // Implicit root, indexed.
+        (None, Some(head)) => Ok(UploadTarget::RootSupersede(head.uri.clone())),
+        // Implicit root, no indexed root → genesis.
+        (None, None) => Ok(UploadTarget::RootGenesis),
+        // Explicit target.
+        (Some(uri), Some(head)) if uri == head.uri => {
+            Ok(UploadTarget::RootSupersede(head.uri.clone()))
+        }
+        (Some(uri), Some(head)) => Ok(UploadTarget::Subdirectory {
+            root_head_uri: head.uri.clone(),
+            target_uri: uri.to_owned(),
+        }),
+        // Explicit target with no indexed root: only valid if it's the
+        // deterministic owner-side genesis URI.
+        (Some(uri), None) if uri == ws.root_directory_uri() => Ok(UploadTarget::RootGenesis),
+        (Some(uri), None) => Err(Error::NotFound(format!(
+            "workspace has no indexed root yet; cannot upload to {uri}"
+        ))),
     }
 }
 

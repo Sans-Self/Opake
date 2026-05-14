@@ -28,6 +28,7 @@ use crate::records::{Directory, EncryptedMetadata, KeyWrapping, ListingEntry, SC
 use super::{ChainHead, DIRECTORY_COLLECTION};
 
 /// How a single level is written.
+#[derive(Debug)]
 pub enum LevelMode {
     /// Supersede an existing canonical record. Writes a new directory
     /// record (TID rkey) whose `supersedes` field points at the prior
@@ -55,6 +56,7 @@ pub enum LevelMode {
 ///
 /// The cascade walker patches the ancestor's entries after writing the
 /// child, threading the child's new URI + CID into the listing.
+#[derive(Debug)]
 pub enum AncestorLinkage {
     /// The ancestor previously contained a listing entry pointing at
     /// `prior_child_uri`. The walker replaces that entry's `target`
@@ -68,6 +70,7 @@ pub enum AncestorLinkage {
 }
 
 /// An ancestor level — every level except the deepest.
+#[derive(Debug)]
 pub struct AncestorLevel {
     pub mode: LevelMode,
     pub linkage: AncestorLinkage,
@@ -79,6 +82,7 @@ pub struct AncestorLevel {
 /// The deepest level — its `entries` carry the caller's final intent
 /// (add/remove/rename of the deepest child already applied). No child
 /// below it to link to.
+#[derive(Debug)]
 pub struct LeafLevel {
     pub mode: LevelMode,
     pub entries: Vec<ListingEntry>,
@@ -233,6 +237,92 @@ fn patch_child_pointer(
             Ok(entries)
         }
     }
+}
+
+/// Build a deep cascade for a write to a non-root target.
+///
+/// `uri_chain` is the URI sequence root → leaf inclusive (in that order).
+/// The caller obtains it by walking the cached `DirectoryTree` upward via
+/// `find_parent` from the target URI, reversing the walk so root comes
+/// first. Each URI is fetched from its owning PDS to retrieve current
+/// CIDs and entries; the records are then assembled into:
+///
+///   * a [`LeafLevel`] superseding the last URI in the chain, with the
+///     caller-supplied `new_leaf_entries` replacing its listing.
+///   * `Vec<AncestorLevel>` for every URI above the leaf, in root →
+///     leaf-minus-one order. Each ancestor uses
+///     [`AncestorLinkage::Replace`] pointing at the URI immediately
+///     below it — the cascade walker patches in the child's freshly-
+///     written URI/CID before each ancestor is sent.
+///
+/// All wrappings + encrypted metadata are copied forward from the prior
+/// records (cascade-supersede only mutates listings + identity-of-
+/// supersedes, not crypto).
+///
+/// Returns an error if `uri_chain` is empty, since there's no leaf to
+/// build. A single-element chain produces zero ancestors + a leaf
+/// superseding the chain's only URI — useful for the root-only case.
+pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
+    transport: &T,
+    uri_chain: &[String],
+    new_leaf_entries: Vec<ListingEntry>,
+) -> Result<(Vec<AncestorLevel>, LeafLevel), Error> {
+    if uri_chain.is_empty() {
+        return Err(Error::InvalidRecord(
+            "build_deep_cascade_levels: empty uri_chain".into(),
+        ));
+    }
+
+    let mut records: Vec<super::chain::ChainNode<Directory>> = Vec::with_capacity(uri_chain.len());
+    let mut pds_cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for uri in uri_chain {
+        records.push(
+            super::chain::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache).await?,
+        );
+    }
+
+    // Leaf — last element of the chain.
+    let leaf_node = records.pop().expect("non-empty chain");
+    let leaf = LeafLevel {
+        mode: LevelMode::Supersede {
+            prior_head_uri: leaf_node.uri,
+            key_wrapping: leaf_node.record.key_wrapping,
+            encrypted_metadata: leaf_node.record.encrypted_metadata,
+        },
+        entries: new_leaf_entries,
+    };
+
+    // Ancestors — root → second-to-leaf. Each links to the URI of the
+    // record immediately below (which is the next record in `records`,
+    // or the leaf URI for the deepest ancestor).
+    let ancestor_count = records.len();
+    let mut ancestors: Vec<AncestorLevel> = Vec::with_capacity(ancestor_count);
+    // Walk records[i] (the ancestor) paired with the URI of records[i+1],
+    // or the leaf's prior URI for the deepest ancestor.
+    let mut child_uris: Vec<String> = records.iter().skip(1).map(|n| n.uri.clone()).collect();
+    if let LevelMode::Supersede {
+        ref prior_head_uri,
+        ..
+    } = leaf.mode
+    {
+        child_uris.push(prior_head_uri.clone());
+    }
+
+    for (ancestor_node, child_uri) in records.into_iter().zip(child_uris.into_iter()) {
+        ancestors.push(AncestorLevel {
+            mode: LevelMode::Supersede {
+                prior_head_uri: ancestor_node.uri,
+                key_wrapping: ancestor_node.record.key_wrapping,
+                encrypted_metadata: ancestor_node.record.encrypted_metadata,
+            },
+            linkage: AncestorLinkage::Replace {
+                prior_child_uri: child_uri,
+            },
+            entries: ancestor_node.record.entries,
+        });
+    }
+
+    Ok((ancestors, leaf))
 }
 
 fn unpack_mode(
