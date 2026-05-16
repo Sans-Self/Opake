@@ -41,20 +41,19 @@ export interface AccountConfigPatch {
   readonly indexerUrl?: string | null;
 }
 
-/** Result of a mutation that may be applied directly or proposed for owner approval. */
+/** Result of a mutation. Federation cascades commit on every call — there
+ *  is no "proposed" state. `uri` may be `null` for mutations that touch
+ *  multiple records and don't have a single artefact the caller would
+ *  address (deletes, member-list edits, cascade-superseded directories). */
 export interface MutationResult {
-  /** URI of the created/updated record (null for proposals on other owners' PDS). */
+  /** URI of the primary created/updated record, if any. */
   readonly uri: string | null;
-  /** True if this was a proposal (non-owner workspace member). False if applied immediately. */
-  readonly proposed: boolean;
 }
 
-/** Result of a file upload (mutation result + the document URI). */
+/** Result of a file upload. */
 export interface UploadResult {
   /** AT URI of the created document record. */
   readonly uri: string;
-  /** Whether the upload was a proposal (workspace member, not owner). */
-  readonly proposed: boolean;
 }
 
 /** Decrypted file download. */
@@ -118,16 +117,20 @@ export interface WorkspaceMember {
   readonly role: WorkspaceRole;
 }
 
-/** Workspace (keyring) entry as returned by listWorkspaces. */
+/** Workspace entry as returned by `listWorkspaces`. */
 export interface WorkspaceEntry {
-  readonly uri: string;
-  readonly ownerDid: string;
+  /** Stable workspace identity — the genesis keyring URI. */
+  readonly workspaceId: string;
+  /** Current keyring chain-head URI; equal to `workspaceId` when un-superseded. */
+  readonly headUri: string;
   readonly name: string;
   readonly description: string | null;
   readonly icon: string | null;
   readonly createdAt: string | null;
   readonly rotation: number;
   readonly memberCount: number;
+  /** The current user's role in this workspace (`manager` | `editor` | `reader`). */
+  readonly myRole: string | null;
 }
 
 /**
@@ -150,7 +153,9 @@ export interface ResolvedIdentity {
 /** Result of a per-workspace sync operation (from daemon). */
 export interface WorkspaceSyncResult {
   readonly keyringUri: string;
-  readonly proposalsApplied: number;
+  /** True if the caller's DID is the workspace's genesis-keyring owner. */
+  readonly isOwner: boolean;
+  /** Captured per-workspace error so one bad sync doesn't break the loop. */
   readonly error?: string;
 }
 
@@ -196,7 +201,8 @@ export interface GrantEntry {
 /** An incoming grant as indexed by the Indexer (shared-with-me). */
 export interface InboxGrant {
   readonly uri: string;
-  readonly ownerDid: string;
+  /** DID of the workspace member who shared the document. */
+  readonly authorDid: string;
   readonly documentUri: string;
   readonly createdAt: string;
 }

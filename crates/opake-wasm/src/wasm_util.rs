@@ -119,16 +119,14 @@ pub fn parse_role(s: &str) -> Result<opake_core::records::Role, JsError> {
     }
 }
 
-/// Result DTO for mutations.
-///
-/// `proposed` is wire-stable scaffolding for the SDK Zod schema during the
-/// federation rewrite. Post-rewrite every mutation is direct, so it lands
-/// as `false` on every successful call. Drop the field — and these structs
-/// alongside the SDK schema — once the SDK stops reading it.
+/// Result DTO for mutations that may not produce a single URI (e.g. cascade
+/// writes that touch several records). `uri` is populated when there's an
+/// obvious "primary" written record (a doc upload, a directory creation);
+/// it's `None` for mutations like deletes or member-list edits that produce
+/// no single artefact the caller would address.
 #[derive(Serialize)]
 pub struct MutationResultDto {
     pub uri: Option<String>,
-    pub proposed: bool,
 }
 
 /// Build a DirectoryTreeSnapshot from a core DirectoryTree.

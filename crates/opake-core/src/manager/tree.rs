@@ -178,9 +178,23 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // Append sync cursor sentinel
         let with_cursor = Self::with_sync_cursor(updated, delta.sync_cursor());
 
-        // Cache document records for metadata resolution
+        // Cache document records for metadata resolution. Each envelope
+        // becomes a CachedRecord whose value is the verbatim PDS document
+        // JSON — the cache layer doesn't know or care about the indexer
+        // envelope wrapper.
         let doc_scope = doc_scope_key(self.context);
-        let doc_records = delta.document_cache_records();
+        let doc_records: Vec<CachedRecord> = delta
+            .documents
+            .iter()
+            .filter(|e| e.deleted_at.is_none())
+            .filter_map(|e| {
+                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
+                    uri: e.uri.clone(),
+                    cid: String::new(),
+                    value,
+                })
+            })
+            .collect();
         if !doc_records.is_empty() {
             self.opake
                 .storage
@@ -193,7 +207,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             if doc.deleted_at.is_some() {
                 self.opake
                     .storage
-                    .cache_remove_record(&self.opake.did, &doc_scope, &doc.document_uri)
+                    .cache_remove_record(&self.opake.did, &doc_scope, &doc.uri)
                     .await?;
             }
         }
@@ -265,8 +279,30 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
-        let dir_records = snapshot.directory_cache_records();
-        let doc_records = snapshot.document_cache_records();
+        let dir_records: Vec<CachedRecord> = snapshot
+            .directories
+            .iter()
+            .filter(|e| e.deleted_at.is_none())
+            .filter_map(|e| {
+                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
+                    uri: e.uri.clone(),
+                    cid: String::new(),
+                    value,
+                })
+            })
+            .collect();
+        let doc_records: Vec<CachedRecord> = snapshot
+            .documents
+            .iter()
+            .filter(|e| e.deleted_at.is_none())
+            .filter_map(|e| {
+                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
+                    uri: e.uri.clone(),
+                    cid: String::new(),
+                    value,
+                })
+            })
+            .collect();
         let with_cursor = Self::with_sync_cursor(dir_records.clone(), snapshot.sync_cursor());
 
         // Cache directories
@@ -302,8 +338,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tree.decrypt_names(&cabinet.did, &cabinet.private_keys());
             }
             FileContext::Workspace(ws) => {
-                let root_uri = ws.root_directory_uri();
-                tree.set_root(&root_uri);
+                // Root URI is detected by `DirectoryTree::from_records` via
+                // the `isWorkspaceRoot` flag on the chain-head record —
+                // no client-side URI derivation needed.
 
                 let mut group_keys = HashMap::new();
                 group_keys.insert(ws.uri.clone(), ws.group_keys());

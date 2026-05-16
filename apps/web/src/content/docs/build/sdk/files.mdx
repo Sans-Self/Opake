@@ -64,10 +64,12 @@ single `applyWrites` call. If you pass `directoryUri`, the same `applyWrites` al
 document as an entry in that directory, so the document never appears in the tree without its
 parent reference.
 
-The `result.proposed` check in the example only matters when the `FileManager` is pointed at a
-shared workspace that the caller doesn't own. For cabinet uploads it's always `false`. See
-[Workspaces](/docs/sdk/workspaces#proposal-vs-applied) for what "proposed" means and how the
-owner side picks those up.
+In a workspace, the same `applyWrites` also writes a directory cascade — new directory
+records superseding each ancestor up to the workspace root, with the writer's PDS as the
+authority. The indexer chain-follows the supersedes and emits `directory:upsert` events on
+the affected paths; other members see the new entry on the next SSE echo. Concurrent writers
+racing the same chain head are detected at the indexer; the loser receives `chain:forked`.
+See [Workspaces](/docs/sdk/workspaces) for the federation model.
 
 <CodeBlock language="typescript" title="download.ts" code={downloadDocument} />
 
@@ -79,13 +81,15 @@ whether the document lives in your own cabinet or in a workspace you're a member
 
 <CodeBlock language="typescript" title="structure.ts" code={structureChanges} />
 
-All four are atomic for cabinet owners: `createDirectory` writes the new directory and updates
-the parent's entries in one `applyWrites`; `move` removes from source and adds to target in one
-call; `delete` removes the document record and its entry together; `deleteRecursive` walks the
-subtree and tears everything down in one batched operation.
+All four are atomic in the cabinet: `createDirectory` writes the new directory and updates
+the parent's entries in one `applyWrites`; `move` removes from source and adds to target in
+one call; `delete` removes the document record and its entry together; `deleteRecursive`
+walks the subtree and tears everything down in one batched operation.
 
-For workspace members (i.e. non-owners acting on a workspace someone else created), these turn
-into `directoryUpdate` proposals. See [Workspaces](/docs/sdk/workspaces) for the proposal flow.
+In a workspace the same four operations cascade-supersede every affected path's chain on the
+caller's PDS — same atomic guarantees within a single `applyWrites`, plus indexer-side
+chain-following so the canonical heads advance for every member. See
+[Workspaces](/docs/sdk/workspaces) for the federation model.
 
 ## Editing an existing document
 

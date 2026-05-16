@@ -43,10 +43,11 @@ directoryUri? }`. Omit `directoryUri` to upload to the context root. The optimis
 overlay inserts a placeholder entry in the target directory right away; the real entry
 replaces it when the SSE echo arrives (~1s after PDS write).
 
-Results are `UploadResult = { uri, proposed }` from the SDK. In a workspace you don't own,
-`proposed: true` means the upload landed as a `documentUpdate` proposal on your own PDS;
-the workspace owner's daemon applies it. See [workspaces](/docs/sdk/workspaces) for the
-proposal flow.
+Results are `UploadResult = { uri }` from the SDK. In a workspace, the cascade also
+supersedes every parent directory chain on your PDS — the indexer chain-follows and the
+other members see the new entry on the next SSE echo. If a concurrent writer beat you to
+the chain head, the hook automatically refetches and replays with exponential backoff
+(capped at 4 retries). See [workspaces](/docs/sdk/workspaces) for the federation model.
 
 ### `useDownload(keyringUri)`
 

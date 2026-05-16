@@ -1,11 +1,11 @@
 // @opake/sdk — public API
 
 // Main entry point
-export { Opake, type WorkspaceWatcher } from "./opake";
+export { Opake, type WorkspaceWatcher, type ChainForkWatcher } from "./opake";
 export { FileManager, type DirectoryWatcher } from "./file-manager";
 
 // Schema-driven derived types
-export { type WorkspaceSnapshot } from "./schemas";
+export { type WorkspaceSnapshot, type ChainForkedEvent } from "./schemas";
 
 // Sharing watcher (live inbox subscription — mirror of WorkspaceWatcher)
 export { type InboxWatcher } from "./types";

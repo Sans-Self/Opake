@@ -1,13 +1,15 @@
 defmodule OpakeIndexer.TombstoneCleanup do
   @moduledoc """
-  Periodic cleanup of soft-deleted directory and document records.
-  Runs every hour, purges tombstones older than 7 days.
+  Periodic cleanup of soft-deleted records. Runs every hour, purges
+  tombstones older than 7 days from the unified `records` table.
   """
 
   use GenServer
   require Logger
 
-  alias OpakeIndexer.Queries.DirectoryQueries
+  import Ecto.Query
+  alias OpakeIndexer.Repo
+  alias OpakeIndexer.Schemas.Record, as: RecordSchema
 
   @cleanup_interval :timer.hours(1)
   @tombstone_ttl_days 7
@@ -26,10 +28,13 @@ defmodule OpakeIndexer.TombstoneCleanup do
   @impl true
   def handle_info(:cleanup, state) do
     cutoff = DateTime.add(DateTime.utc_now(), -@tombstone_ttl_days * 24 * 3600, :second)
-    {dirs, docs} = DirectoryQueries.purge_tombstones(cutoff)
 
-    if dirs > 0 or docs > 0 do
-      Logger.info("Tombstone cleanup: purged #{dirs} directories, #{docs} documents")
+    {purged, _} =
+      from(r in RecordSchema, where: not is_nil(r.deleted_at) and r.deleted_at < ^cutoff)
+      |> Repo.delete_all()
+
+    if purged > 0 do
+      Logger.info("Tombstone cleanup: purged #{purged} records")
     end
 
     schedule_cleanup()

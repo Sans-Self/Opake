@@ -104,6 +104,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     entries: directory.entries,
                     supersedes: Some(directory_uri.to_owned()),
                     workspace_id: Some(ws.uri.clone()),
+                    // Inherit from the prior record so the "never flip"
+                    // invariant holds. Renaming the workspace-root keeps
+                    // it in the root chain; renaming any subdirectory
+                    // stays false.
+                    is_workspace_root: directory.is_workspace_root,
                     created_at: now.clone(),
                     modified_at: Some(now),
                 };

@@ -55,12 +55,6 @@ function kindMeta(kind: DaemonTask["kind"]): {
       return { label: "Grant healing", icon: ShieldCheckIcon, detail: `${kind.healed} healed` };
     case "shareRetry":
       return { label: "Share retry", icon: ArrowsClockwiseIcon, detail: `${kind.retried} retried` };
-    case "proposalSync":
-      return {
-        label: "Proposal sync",
-        icon: ArrowsClockwiseIcon,
-        detail: `${kind.proposalsApplied} applied`,
-      };
     case "unknown":
       return { label: "Background task", icon: ArrowsClockwiseIcon };
   }

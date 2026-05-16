@@ -38,6 +38,7 @@ import {
 } from "@/lib/fileContext";
 import { rkeyFromUri } from "@/lib/atUri";
 import { ancestorsOf, findParentUri, resolveDirectoryFromSplat } from "@/lib/directoryTree";
+import { useForkRetryExhaustedToast } from "@/lib/useForkRetryExhaustedToast";
 import { triggerBrowserDownload } from "@/lib/download";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { loading } from "@/stores/app";
@@ -179,6 +180,19 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const createDirMut = useCreateDirectory(keyringUri);
   const renameDirMut = useRenameDirectory(keyringUri);
   const moveMut = useMove(keyringUri);
+
+  // Surface fork-retry exhaustion across every workspace mutation as
+  // a single user-visible signal. The hooks share the same scope, so
+  // the most-recently-exhausted one is whatever the user just tried —
+  // collapsing them to one toast avoids stacking duplicate banners.
+  useForkRetryExhaustedToast([
+    uploadMut,
+    deleteMut,
+    deleteDirMut,
+    createDirMut,
+    renameDirMut,
+    moveMut,
+  ]);
 
   // Direct FileManager access for operations without a dedicated hook
   // (download, updateMetadata, preview decryption).
@@ -424,12 +438,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
             directoryUri: currentDirectoryUri ?? undefined,
           },
           {
-            onSuccess: (result) =>
-              toastSuccess(
-                result.proposed
-                  ? "Uploaded — pending owner review"
-                  : "File uploaded",
-              ),
+            onSuccess: () => toastSuccess("File uploaded"),
             onError: (err) => toastError(err instanceof Error ? err.message : "Upload failed"),
           },
         );

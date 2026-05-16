@@ -71,7 +71,7 @@ pub const REENCRYPTION_DEBOUNCE_SECONDS: i64 = 180;
 /// Maximum blob data to process per re-encryption batch.
 pub const REENCRYPTION_BATCH_SIZE_BYTES: u64 = 500 * 1024 * 1024;
 
-/// Result of syncing a single workspace (proposals applied + optional error).
+/// Result of syncing a single workspace (chain head load + optional error).
 ///
 /// Never fails at the Result level — per-workspace errors are captured in
 /// `error` so the caller can continue with remaining workspaces.
@@ -79,8 +79,6 @@ pub const REENCRYPTION_BATCH_SIZE_BYTES: u64 = 500 * 1024 * 1024;
 pub struct WorkspaceSyncResult {
     pub keyring_uri: String,
     pub is_owner: bool,
-    pub proposals_applied: usize,
-    pub proposals_cleaned_up: usize,
     pub error: Option<String>,
 }
 
@@ -110,11 +108,6 @@ pub enum DaemonTaskKind {
     GrantHealing { healed: usize },
     /// Retried pending shares for recipients who hadn't set up yet.
     ShareRetry { retried: usize },
-    /// Applied directory/keyring/document proposals for a workspace.
-    ProposalSync {
-        keyring_uri: String,
-        proposals_applied: usize,
-    },
     /// Re-wrap content keys from an old group key rotation to the current one.
     ReEncryption {
         keyring_uri: String,

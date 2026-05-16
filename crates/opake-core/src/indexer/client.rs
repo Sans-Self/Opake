@@ -1,16 +1,18 @@
-// Indexer client — fetches inbox grants from the indexer JSON API.
+// Indexer client — HTTP layer for the records / chain-heads endpoints.
 //
-// Uses the Transport trait for WASM compatibility. Signs each request
-// with the caller's Ed25519 key via sign_indexer_request.
+// All endpoints return envelope-shaped JSON (`{record, indexedAt, deletedAt?}`)
+// for record payloads. This client deserializes envelopes once and hands
+// the typed values back to the rest of the crate. No parallel `Sse*` or
+// `Tree*` shadow types — `IndexerEnvelope<T>` is the single response shape.
 
 use crate::client::{HttpMethod, HttpRequest, Transport};
 use crate::directories::{ChainHead, ChainHeadProvider, WorkspaceChainHeads};
 use crate::error::Error;
 use crate::indexer::auth::sign_indexer_request;
 use crate::indexer::types::{
-    InboxGrant, InboxResponse, KeyringsResponse, TreeDelta, WorkspaceChainHeadResponse,
-    WorkspaceDocument, WorkspaceResponse,
+    IndexerEnvelope, InboxResponse, TreeDelta, WorkspaceChainHeadResponse, WorkspacesResponse,
 };
+use crate::records::{Grant, Keyring};
 
 /// Check an indexer JSON response for errors.
 fn check_indexer_response(status: u16, body: &[u8]) -> Result<(), Error> {
@@ -80,7 +82,7 @@ pub async fn fetch_inbox_all(
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-) -> Result<Vec<InboxGrant>, Error> {
+) -> Result<Vec<IndexerEnvelope<Grant>>, Error> {
     let mut all_grants = Vec::new();
     let mut cursor: Option<String> = None;
 
@@ -107,110 +109,45 @@ pub async fn fetch_inbox_all(
     Ok(all_grants)
 }
 
-/// Fetch all workspace documents from the Indexer, paginated.
-pub async fn fetch_workspace_documents(
+/// Fetch every keyring head for which the caller is a current member.
+///
+/// `/api/keyrings` returns one envelope per workspace (the current
+/// chain head); the envelope's `record` is the verbatim PDS keyring,
+/// including its `members` array.
+pub async fn fetch_member_workspaces(
     transport: &impl Transport,
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    keyring_uri: &str,
-) -> Result<Vec<WorkspaceDocument>, Error> {
-    let path = "/api/workspace";
-    let mut all = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    loop {
-        let timestamp = crate::client::time::unix_now() as u64;
-        let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
-
-        let mut query = format!("keyringUri={keyring_uri}");
-        if let Some(ref c) = cursor {
-            query.push_str(&format!("&cursor={c}"));
-        }
-
-        let response = transport
-            .send(HttpRequest {
-                method: HttpMethod::Get,
-                url: format!("{indexer_url}{path}?{query}"),
-                headers: vec![("Authorization".into(), auth)],
-                body: None,
-            })
-            .await?;
-
-        check_indexer_response(response.status, &response.body)?;
-
-        let page: WorkspaceResponse =
-            serde_json::from_slice(&response.body).map_err(|e| Error::Indexer {
-                status: response.status,
-                message: format!("failed to parse workspace response: {e}"),
-            })?;
-
-        let has_more = page.cursor.is_some();
-        cursor = page.cursor;
-        all.extend(page.documents);
-
-        if !has_more {
-            break;
-        }
-    }
-
-    Ok(all)
-}
-
-/// Fetch all keyrings the user is a member of, with full record data.
-pub async fn fetch_member_keyrings(
-    transport: &impl Transport,
-    indexer_url: &str,
-    did: &str,
-    signing_key: &[u8; 32],
-) -> Result<Vec<super::IndexerKeyring>, Error> {
+) -> Result<Vec<IndexerEnvelope<Keyring>>, Error> {
     let path = "/api/keyrings";
-    let mut all = Vec::new();
-    let mut cursor: Option<String> = None;
+    let timestamp = crate::client::time::unix_now() as u64;
+    let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
 
-    loop {
-        let timestamp = crate::client::time::unix_now() as u64;
-        let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
+    let response = transport
+        .send(HttpRequest {
+            method: HttpMethod::Get,
+            url: format!("{indexer_url}{path}"),
+            headers: vec![("Authorization".into(), auth)],
+            body: None,
+        })
+        .await?;
 
-        let url = match &cursor {
-            Some(c) => format!("{indexer_url}{path}?cursor={c}"),
-            None => format!("{indexer_url}{path}"),
-        };
+    check_indexer_response(response.status, &response.body)?;
 
-        let response = transport
-            .send(HttpRequest {
-                method: HttpMethod::Get,
-                url,
-                headers: vec![("Authorization".into(), auth)],
-                body: None,
-            })
-            .await?;
+    let parsed: WorkspacesResponse =
+        serde_json::from_slice(&response.body).map_err(|e| Error::Indexer {
+            status: response.status,
+            message: format!("failed to parse workspaces response: {e}"),
+        })?;
 
-        check_indexer_response(response.status, &response.body)?;
-
-        let page: KeyringsResponse =
-            serde_json::from_slice(&response.body).map_err(|e| Error::Indexer {
-                status: response.status,
-                message: format!("failed to parse keyrings response: {e}"),
-            })?;
-
-        let has_more = page.cursor.is_some();
-        cursor = page.cursor;
-        all.extend(page.keyrings);
-
-        if !has_more {
-            break;
-        }
-    }
-
-    Ok(all)
+    Ok(parsed.workspaces)
 }
 
 // ---------------------------------------------------------------------------
-// Tree sync — delta broker endpoints
+// Tree sync — snapshot + delta endpoints
 // ---------------------------------------------------------------------------
 
-/// Fetch an authenticated Indexer JSON endpoint.
 async fn indexer_get(
     transport: &impl Transport,
     indexer_url: &str,
@@ -238,7 +175,6 @@ async fn indexer_get(
     Ok(response.body)
 }
 
-/// Fetch the full cabinet snapshot (all directories + documents for the caller's DID).
 pub async fn fetch_cabinet_snapshot(
     transport: &impl Transport,
     indexer_url: &str,
@@ -260,7 +196,6 @@ pub async fn fetch_cabinet_snapshot(
     })
 }
 
-/// Fetch cabinet changes since a given timestamp.
 pub async fn fetch_cabinet_sync(
     transport: &impl Transport,
     indexer_url: &str,
@@ -284,15 +219,14 @@ pub async fn fetch_cabinet_sync(
     })
 }
 
-/// Fetch the full workspace snapshot.
 pub async fn fetch_workspace_snapshot(
     transport: &impl Transport,
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    keyring_uri: &str,
+    workspace_id: &str,
 ) -> Result<TreeDelta, Error> {
-    let query = format!("keyring={keyring_uri}");
+    let query = format!("workspace_id={workspace_id}");
     let body = indexer_get(
         transport,
         indexer_url,
@@ -308,16 +242,15 @@ pub async fn fetch_workspace_snapshot(
     })
 }
 
-/// Fetch workspace changes since a given timestamp.
 pub async fn fetch_workspace_sync(
     transport: &impl Transport,
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    keyring_uri: &str,
+    workspace_id: &str,
     since: &str,
 ) -> Result<TreeDelta, Error> {
-    let query = format!("keyring={keyring_uri}&since={since}");
+    let query = format!("workspace_id={workspace_id}&since={since}");
     let body = indexer_get(
         transport,
         indexer_url,
@@ -334,9 +267,6 @@ pub async fn fetch_workspace_sync(
 }
 
 /// Request a short-lived SSE token from the indexer.
-///
-/// The token authenticates the EventSource connection (which cannot carry
-/// custom headers). Valid for ~60 seconds, single-use.
 pub async fn request_sse_token(
     transport: &impl Transport,
     indexer_url: &str,
@@ -375,12 +305,6 @@ pub async fn request_sse_token(
 // Chain head lookup
 // ---------------------------------------------------------------------------
 
-/// Fetch the current keyring + root-directory chain heads for a workspace.
-///
-/// `workspace_id` is the genesis keyring URI. Returns both heads together
-/// because the indexer keeps them in lockstep (single-row reads on
-/// `keyring_chains` + `workspace_roots`) and the cascade path typically
-/// needs both.
 pub async fn fetch_workspace_chain_heads(
     transport: &impl Transport,
     indexer_url: &str,
@@ -388,9 +312,6 @@ pub async fn fetch_workspace_chain_heads(
     signing_key: &[u8; 32],
     workspace_id: &str,
 ) -> Result<WorkspaceChainHeadResponse, Error> {
-    // AT-URIs are URL-safe by construction (DID syntax + atproto rkey
-    // alphabet — no spaces, `&`, `?`, `#`). Bytewise interpolation
-    // matches what `fetch_workspace_snapshot` does for `keyring_uri`.
     let query = format!("workspace_id={workspace_id}");
     let body = indexer_get(
         transport,
@@ -407,12 +328,7 @@ pub async fn fetch_workspace_chain_heads(
     })
 }
 
-/// `ChainHeadProvider` implementation backed by the hosted indexer.
-///
-/// All fields are borrowed — construct one per cascade, drop it when
-/// you're done. The struct exists to satisfy the trait bound that
-/// cascade-building helpers depend on; there's no state to amortize
-/// across calls.
+/// `ChainHeadProvider` backed by the hosted indexer.
 pub struct IndexerChainHeadProvider<'a, T: Transport> {
     pub transport: &'a T,
     pub indexer_url: &'a str,
@@ -453,23 +369,40 @@ mod tests {
     use crate::client::HttpResponse;
     use crate::test_utils::MockTransport;
 
-    fn inbox_json(grants: &[&str], cursor: Option<&str>) -> Vec<u8> {
-        let grants_str = grants.join(",");
+    fn dummy_key() -> [u8; 32] {
+        [42u8; 32]
+    }
+
+    fn grant_envelope_json(suffix: &str, recipient: &str) -> String {
+        format!(
+            r#"{{
+                "record": {{
+                    "opakeVersion": 1,
+                    "document": "at://did:plc:author/app.opake.document/doc-{suffix}",
+                    "recipient": "{recipient}",
+                    "wrappedKey": {{
+                        "did": "{recipient}",
+                        "ciphertext": "AAAA",
+                        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+                    }},
+                    "encryptedMetadata": {{
+                        "ciphertext": "AAAA",
+                        "nonce": "BBBB"
+                    }},
+                    "createdAt": "2026-03-01T12:00:00Z"
+                }},
+                "indexedAt": "2026-03-01T12:00:01Z"
+            }}"#
+        )
+    }
+
+    fn inbox_json(envelopes: &[String], cursor: Option<&str>) -> Vec<u8> {
+        let grants_str = envelopes.join(",");
         let cursor_str = match cursor {
             Some(c) => format!(r#","cursor":"{c}""#),
             None => String::new(),
         };
         format!(r#"{{"grants":[{grants_str}]{cursor_str}}}"#).into_bytes()
-    }
-
-    fn grant_json(uri_suffix: &str) -> String {
-        format!(
-            r#"{{"uri":"at://did:plc:owner/app.opake.grant/{uri_suffix}","owner_did":"did:plc:owner","document_uri":"at://did:plc:owner/app.opake.document/doc1","permissions":"read","note":null,"created_at":"2026-03-01T12:00:00Z"}}"#
-        )
-    }
-
-    fn dummy_key() -> [u8; 32] {
-        [42u8; 32]
     }
 
     #[tokio::test]
@@ -478,7 +411,13 @@ mod tests {
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
-            body: inbox_json(&[&grant_json("g1"), &grant_json("g2")], None),
+            body: inbox_json(
+                &[
+                    grant_envelope_json("g1", "did:plc:me"),
+                    grant_envelope_json("g2", "did:plc:me"),
+                ],
+                None,
+            ),
         });
 
         let resp = fetch_inbox(
@@ -509,12 +448,12 @@ mod tests {
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
-            body: inbox_json(&[&grant_json("g1")], Some("cursor1")),
+            body: inbox_json(&[grant_envelope_json("g1", "did:plc:me")], Some("cursor1")),
         });
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
-            body: inbox_json(&[&grant_json("g2")], None),
+            body: inbox_json(&[grant_envelope_json("g2", "did:plc:me")], None),
         });
 
         let grants = fetch_inbox_all(&mock, "https://indexer.test", "did:plc:me", &dummy_key())

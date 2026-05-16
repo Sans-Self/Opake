@@ -2,7 +2,7 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
   use OpakeIndexerWeb.ConnCase, async: false
   import Mox
 
-  alias OpakeIndexer.Queries.GrantQueries
+  alias OpakeIndexer.Queries.RecordQueries
 
   setup :set_mox_global
   setup :verify_on_exit!
@@ -10,6 +10,26 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
   setup do
     :ets.delete_all_objects(:key_cache)
     :ok
+  end
+
+  defp insert_grant(uri, author, recipient, document, indexed_at) do
+    RecordQueries.upsert(%{
+      uri: uri,
+      collection: "app.opake.grant",
+      author_did: author,
+      workspace_id: nil,
+      supersedes_uri: nil,
+      is_workspace_root: false,
+      cid: "bafytest#{uri}",
+      indexed_at: indexed_at,
+      deleted_at: nil,
+      record_jsonb: %{
+        "opakeVersion" => 1,
+        "document" => document,
+        "recipient" => recipient,
+        "createdAt" => "2026-03-01T12:00:00Z"
+      }
+    })
   end
 
   test "returns empty for unknown did", %{conn: conn} do
@@ -25,23 +45,23 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
     did = "did:plc:me"
 
     {:ok, _} =
-      GrantQueries.upsert_grant(%{
-        uri: "at://did:plc:owner/app.opake.grant/3abc",
-        author_did: "did:plc:owner",
-        recipient_did: did,
-        document_uri: "at://did:plc:owner/app.opake.document/3xyz",
-        created_at: "2026-03-01T12:00:00Z",
-        indexed_at: DateTime.utc_now()
-      })
+      insert_grant(
+        "at://did:plc:owner/app.opake.grant/3abc",
+        "did:plc:owner",
+        did,
+        "at://did:plc:owner/app.opake.document/3xyz",
+        DateTime.utc_now()
+      )
 
     conn = conn |> authed_conn(did, "/api/inbox") |> get("/api/inbox")
 
     response = json_response(conn, 200)
     assert length(response["grants"]) == 1
 
-    grant = hd(response["grants"])
-    assert grant["author_did"] == "did:plc:owner"
-    assert grant["document_uri"] == "at://did:plc:owner/app.opake.document/3xyz"
+    [envelope] = response["grants"]
+    assert envelope["record"]["document"] == "at://did:plc:owner/app.opake.document/3xyz"
+    assert envelope["record"]["recipient"] == did
+    assert is_binary(envelope["indexedAt"])
   end
 
   test "pagination", %{conn: conn} do
@@ -53,14 +73,13 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
         |> DateTime.from_naive!("Etc/UTC")
 
       {:ok, _} =
-        GrantQueries.upsert_grant(%{
-          uri: "at://did:plc:owner/app.opake.grant/#{i}",
-          author_did: "did:plc:owner",
-          recipient_did: did,
-          document_uri: "at://did:plc:owner/app.opake.document/#{i}",
-          created_at: "2026-03-01T12:00:00Z",
-          indexed_at: indexed_at
-        })
+        insert_grant(
+          "at://did:plc:owner/app.opake.grant/#{i}",
+          "did:plc:owner",
+          did,
+          "at://did:plc:owner/app.opake.document/#{i}",
+          indexed_at
+        )
     end
 
     conn = conn |> authed_conn(did, "/api/inbox") |> get("/api/inbox?limit=3")

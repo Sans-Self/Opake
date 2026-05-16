@@ -4,7 +4,6 @@ import {
   addWorkspaceMember,
   removeWorkspaceMember,
   leaveWorkspace,
-  proposalFlow,
   mutationResultHandling,
 } from "./_snippets";
 
@@ -13,8 +12,8 @@ import {
 <Lead>
   A workspace is a shared encrypted folder: a named group that owns a tree of files, with a
   roster of members who can read, write, or administer depending on their role. Technically
-  it's a keyring on the owner's PDS plus a collaborative proposal protocol that lets members
-  edit without needing write access to the owner's repository.
+  it's a keyring chain (manager-only supersedes) plus per-path directory chains that members
+  cascade-supersede on their own PDS — no cross-PDS write authority needed.
 </Lead>
 
 ## When to use a workspace (vs. a one-to-one grant)
@@ -67,73 +66,81 @@ pending-share mechanic, which applies the same way to workspace invites.
 
 Three roles exist:
 
-- **`manager`**: can add or remove members, change workspace metadata, and edit files like any editor.
-- **`editor`**: can read everything, upload new documents, and propose edits to existing ones.
-- **`viewer`**: can read but not write. Proposals from viewers are rejected by the owner daemon.
+- **`manager`**: can add, remove, and re-role members, supersede the keyring chain, and edit
+  files like an editor. The keyring chain is manager-only — non-manager keyring supersedes
+  are forked out at the indexer.
+- **`editor`**: can read everything, upload new documents, and supersede directory chains.
+  Editor supersedes are checked against the editor-additivity invariant — the new entry set
+  must be a superset of the prior canonical's. Removing other members' entries requires
+  manager authority.
+- **`viewer`**: can read but not write. Viewer-authored supersedes are forked out at the
+  indexer.
 
-Roles are enforced at the proposal-apply layer, not at the crypto layer. A viewer has the group
-key (that's what membership means) and can decrypt. Role enforcement stops them from *writing*
-valid proposals that the owner would accept. If your threat model requires a viewer who can't
-see content at all, they shouldn't be a workspace member.
+Roles are enforced at the indexer's authority layer over chain supersedes, not at the crypto
+layer. A viewer has the group key (that's what membership means) and can decrypt. Role
+enforcement stops them from *advancing* the canonical chain — their writes land on their PDS,
+but the indexer marks them `forked-out` and they never reach the canonical head. If your
+threat model requires a viewer who can't see content at all, they shouldn't be a workspace
+member.
 
 ## Remove a member
 
 <CodeBlock language="typescript" title="remove-member.ts" code={removeWorkspaceMember} />
 
-Removing a member is the expensive operation by design. When the owner initiates it:
+Removing a member is the expensive operation by design. When a manager initiates it:
 
 1. A fresh group key is generated inside WASM.
 2. Every remaining member's entry in the keyring is re-wrapped to the new key.
-3. The previous rotation's wrapped keys are archived into `keyHistory` on the keyring record
-   so the remaining members can still decrypt older documents (which were wrapped under the
-   old key).
+3. The previous rotation's wrapped keys are archived into `keyHistory` on the new keyring
+   record so the remaining members can still decrypt older documents (which were wrapped
+   under the old key).
 4. The `rotation` counter increments.
-5. Future uploads use the new key.
+5. The new keyring supersedes the prior chain head on the manager's PDS.
+6. Future uploads use the new key.
 
 The removed member keeps whatever they already decrypted or cached locally. Rotation prevents
 *new* access, not retroactive access. If the threat model requires forward secrecy for
-existing documents, the owner has to re-upload them after rotation. Opake doesn't do this
+existing documents, a manager has to re-upload them after rotation. Opake doesn't do this
 automatically.
 
 ## Leave a workspace
 
 <CodeBlock language="typescript" title="leave.ts" code={leaveWorkspace} />
 
-The member-side counterpart to being removed. Opting out goes through the same proposal path:
-the member writes a `keyringUpdate` with `actionType: "leave"` on their own PDS, the owner's
-daemon picks it up, and the standard rotate-and-re-wrap flow runs.
+Self-removal is currently manager-only — a viewer or editor writing a keyring supersede that
+drops their own entry would violate the editor-additivity invariant (entries can't shrink
+without manager authority). The semantics for non-manager self-removal are a pending design
+call; for now, ask a manager to remove you.
 
-Owners can't `leaveWorkspace` on their own workspace. Depending on the membership list they'd
-either leave themselves as the only member, or orphan the workspace entirely. To dissolve an
-owned workspace, remove the other members and then delete the keyring record directly.
+## How federated writes work
 
-## How proposals work
+Every member writes to their own PDS. There is no proposal flow. When an editor uploads a new
+document, supersedes a directory, or renames a file, the cascade lands on their PDS — no
+cross-PDS write authority required.
 
-Members who aren't the owner can't write to the owner's repository. The PDS auth model doesn't
-allow cross-account writes. So when an editor renames a file in a workspace, or uploads a new
-document, or moves a directory around, Opake doesn't touch the owner's PDS directly. Instead
-it writes a **proposal record** on the member's own PDS, describing the intended change.
+The directory tree under a workspace is split into per-path **chains**. One chain per path
+(`/`, `/q1/`, `/q1/reports/`, etc.); each chain has a sequence of `app.opake.directory`
+records linked by `supersedes`. The newest record in each chain is the canonical head.
+A write to a path:
 
-<CodeBlock language="typescript" title="proposal-flow.ts" code={proposalFlow} />
+1. Produces a fresh directory record on the writer's PDS with `supersedes:` pointing at the
+   prior canonical head (resolved via `/api/workspace/chain-head`).
+2. Cascades upward: each ancestor up to root is also superseded on the writer's PDS, with
+   its child URI updated to point at the freshly-written supersede.
+3. The indexer chain-follows the supersedes and advances each affected path's head.
 
-The owner's daemon (or wherever the owner's Opake instance is running) periodically scans for
-pending proposals against workspaces it owns. For each, it checks the proposer's role
-(`viewer` → reject; `editor`/`manager` → accept), applies the change as a canonical record on
-the owner's repository, and deletes the proposal from the member's PDS.
+Roles are enforced at the indexer's authority layer:
 
-The proposal record types are:
+- **Editor** supersedes must satisfy the editor-additivity invariant — the new entry set
+  is a superset of the prior canonical's by `target_uri`. Adding a new doc is fine;
+  removing or replacing entries from other members requires manager authority.
+- **Manager** supersedes are unconstrained on directory chains and are the only writes
+  accepted on the keyring chain.
+- **Viewer** supersedes are forked out unconditionally.
 
-- **`app.opake.documentUpdate`**: proposed document changes. Content updates, metadata edits,
-  adoption (claiming an existing member-uploaded document into the owner's canonical tree).
-- **`app.opake.directoryUpdate`**: proposed structure changes. Add entry, remove entry, move
-  entry, create directory, delete directory, rename directory.
-- **`app.opake.keyringUpdate`**: proposed membership changes. Add member, remove member,
-  update role, rename workspace, update description, leave.
-
-From your application's perspective, this is mostly invisible. You call `fm.upload(...)` or
-`fm.move(...)`, the WASM side figures out whether the caller is the owner and routes
-accordingly, and you get a `MutationResult` back that tells you whether the write was applied
-directly or proposed.
+Concurrent supersedes against the same head race. The loser's record lands on their PDS but
+the indexer marks it `forked-out` and emits a `chain:forked` SSE event to the loser. Clients
+refetch, replay, and retry with bounded exponential backoff.
 
 ## Reading `MutationResult`
 
@@ -143,14 +150,15 @@ directly or proposed.
   code={mutationResultHandling}
 />
 
-`proposed: true` means the write is pending apply on the owner's side. The returned URI is the
-proposal record on the caller's own PDS, not the target document or directory on the owner's
-PDS (which doesn't exist yet).
+`uri` is populated for writes that produce a single primary record the caller would address
+(uploads, directory creates). Cascade-only mutations (deletes, member-list edits, supersedes
+of existing records) return `uri: null` — the cascade still wrote multiple records, the
+caller just doesn't have a single "new primary" to point at.
 
-For optimistic UI, render the change immediately with a "pending" affordance. When the owner
-applies, the SSE consumer fires a tree update on the target directory and the pending marker
-can come off. If the owner rejects or if the daemon hasn't run in a while, the pending marker
-stays until the proposal is applied or cancelled.
+For optimistic UI, render the change immediately. The SSE echo for the matching
+`directory:upsert` arrives within ~1s on a healthy connection. If a concurrent writer races
+you, the `chain:forked` event triggers a refetch + replay; `useTreeMutation` in
+`@opake/react` wires this loop with a 4-retry cap.
 
 ## A note on the indexer
 

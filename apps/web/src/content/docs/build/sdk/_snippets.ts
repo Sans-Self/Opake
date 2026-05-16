@@ -300,9 +300,9 @@ export const getFileManager = `// Personal files. One FileManager per Opake inst
 const cabinet = await opake.cabinet();
 
 // Shared workspace. Resolved by URI; the WASM side unwraps the group
-// key internally using the caller's Identity, and the resulting
-// FileManager routes reads to the owner's PDS, writes to proposals
-// if the caller isn't the owner.
+// key internally using the caller's Identity. Every member writes to
+// their own PDS — federation cascades supersede the chain head on
+// commit, with concurrent-write fork detection at the indexer.
 const workspace = await opake.workspaceByUri(workspaceUri);`;
 
 export const uploadDocument = `const data = await readAsBytes(userFile); // from your UI
@@ -313,14 +313,10 @@ const result = await fm.upload(data, "budget.pdf", "application/pdf", {
   directoryUri: currentDirectoryUri, // where to place it in the tree
 });
 
-if (result.proposed) {
-  // Workspace member: the upload was written as a documentUpdate proposal.
-  // The owner's daemon will apply it on their next sync.
-  notify("Upload queued — waiting for the workspace owner to apply.");
-} else {
-  // Cabinet, or a workspace you own: applied immediately.
-  notify("Uploaded.");
-}`;
+// Federated upload: the doc record + directory cascade land in a single
+// applyWrites on the caller's PDS. The indexer chain-follows the new
+// supersedes; other members see the entry on the next SSE echo.
+notify("Uploaded.", result.uri);`;
 
 export const downloadDocument = `const { filename, data } = await fm.download(documentUri);
 
@@ -448,7 +444,7 @@ export const listInboxSnippet = `const grants = await opake.listInbox();
 for (const g of grants) {
   // g: { uri, ownerDid, documentUri, createdAt }
   // ownerDid is the DID of whoever shared with you.
-  console.log(\`Shared with you: \${g.documentUri} from \${g.ownerDid}\`);
+  console.log(\`Shared with you: \${g.documentUri} from \${g.authorDid}\`);
 }`;
 
 export const watchInbox = `const watcher = opake.watchInbox((snapshot) => {
@@ -521,61 +517,34 @@ await opake.addWorkspaceMember(keyringUri, recipient.did, "editor");
 // member entry containing the group key wrapped to the invitee's
 // hybrid bundle. They'll see the workspace in their next listWorkspaces.`;
 
-export const removeWorkspaceMember = `// Owner removing a member rotates the group key in place.
-const result = await opake.removeWorkspaceMember(keyringUri, memberDid);
+export const removeWorkspaceMember = `// Manager-authority required. Rotates the group key in place, re-wraps
+// for remaining members, writes a keyring supersede on the caller's PDS.
+const { rotation } = await opake.removeWorkspaceMember(keyringUri, memberDid);
 
-if (result.proposed) {
-  // The caller isn't the owner; this was written as a keyringUpdate
-  // proposal. The owner's daemon applies it.
-  return;
-}
-
-// Owner path: result.rotation is the new rotation number. Existing
-// documents stay readable by remaining members because keyHistory
-// retains the prior rotation's member entries. Documents uploaded
-// AFTER this point are wrapped under the new key, which the removed
-// member doesn't have.
-console.log("Rotated to", result.rotation);`;
+// Existing documents stay readable by remaining members because
+// keyHistory retains the prior rotation's member entries. Documents
+// uploaded AFTER this point are wrapped under the new key, which the
+// removed member doesn't have.
+console.log("Rotated to", rotation);`;
 
 export const leaveWorkspace = `// Opt out of a workspace you're a member of (not the owner of).
-// Writes a keyringUpdate proposal with actionType "leave"; the owner's
-// daemon processes it and triggers a normal remove-member rotation.
+// Self-removal currently requires manager authority — design call
+// pending on whether viewers/editors can self-remove (would violate
+// the editor-additivity invariant).
 await opake.leaveWorkspace(keyringUri);`;
 
-export const proposalFlow = `// Member writing to a workspace they don't own.
-const result = await fm.upload(data, "notes.md", "text/markdown", {
-  directoryUri: someWorkspaceDir,
-});
-// result.uri points at a documentUpdate proposal record on the CALLER's
-// PDS, NOT at a new document on the owner's PDS.
-// result.proposed === true
-
-// Owner side (running anywhere the owner's Opake instance is alive):
-// syncWorkspaceByUri picks up pending proposals, validates the
-// proposer's role, applies them as canonical records on the owner's
-// PDS, and deletes the proposal from the member's PDS.
-await opake.syncWorkspaceByUri(keyringUri);`;
-
 export const mutationResultHandling = `// Every write returns MutationResult:
-//   { uri: string; proposed: boolean }
+//   { uri: string | null }
 //
-// proposed: true means the write is a documentUpdate/directoryUpdate
-// record on the caller's own PDS, waiting for the workspace owner to
-// apply it. The URI in that case points at the proposal record, not the
-// target document/directory, so don't treat it as a new document URI.
-//
-// proposed: false means the write was applied directly — either the
-// caller owns the workspace (or it's their cabinet), or the owner is
-// acting on their own records.
+// uri is the primary record's AT-URI when the mutation produces one
+// (uploads, directory creates). Cascade-only mutations (deletes,
+// member-list edits, supersedes that don't surface a "new primary")
+// return uri: null.
 
 const result = await fm.updateMetadata(documentUri, { filename: "v2.pdf" });
-if (result.proposed) {
-  // Optimistic UI: mark the row as "pending apply" but show the new name.
-  markPending(documentUri, "v2.pdf");
-} else {
-  // Direct apply: the change is already on PDS.
-  updateLocalTree(documentUri, "v2.pdf");
-}`;
+// The write is already on the caller's PDS. Optimistic UI is fine —
+// the SSE echo will arrive and refresh the tree.
+updateLocalTree(documentUri, "v2.pdf");`;
 
 // -- events.mdx -------------------------------------------------------------
 

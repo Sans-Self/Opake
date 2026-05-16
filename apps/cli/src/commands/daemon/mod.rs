@@ -231,19 +231,17 @@ async fn run_share_retry(storage: &FileStorage) {
 // Replaces the old `directory-sync` timer-based task. Flow per DID:
 //
 //   1. Build an Opake (reads session from storage)
-//   2. Initial catch-up: call `sync_owned_workspaces_detailed` to apply
-//      every proposal we missed while the daemon was offline
+//   2. Initial catch-up: call `sync_owned_workspaces_detailed` to load
+//      chain heads for every workspace we're a member of (warms the
+//      indexer's tree cache before the live stream opens)
 //   3. Start an `SseConsumer` loop over `ReqwestSseTransport`
 //   4. On each event:
-//      - proposal events → call `sync_workspace_by_uri` for the target
-//        workspace. The routine applies directory/keyring/document
-//        proposals in one pass.
 //      - `SseEvent::Reconnect` → another `sync_owned_workspaces_detailed`
 //        to catch anything we missed during the disconnect. Phoenix
 //        PubSub doesn't buffer events for offline subscribers, so the
 //        catch-up sync is what makes reconnection "not lossy."
-//      - record events → drop silently. The CLI has no TreeKeeper or
-//        UI that needs live tree state.
+//      - record events + chain-fork events → drop silently. The CLI
+//        has no TreeKeeper or UI that needs live tree state.
 //   5. On cancellation (SIGINT from the main loop), exit cleanly.
 //
 // Session refresh: OAuth tokens are managed internally by the XrpcClient
@@ -267,22 +265,21 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
 
     let opake = Rc::new(Mutex::new(opake));
 
-    // Initial catch-up before opening the event stream. Any proposal
-    // that landed while the daemon was offline gets applied here.
+    // Initial catch-up before opening the event stream. Loads chain
+    // heads for every workspace we're a member of so the indexer's
+    // tree cache is warm before the live stream opens.
     {
         let mut guard = opake.lock().await;
         match guard.sync_owned_workspaces_detailed().await {
             Ok(results) => {
-                let applied: usize = results.iter().map(|r| r.proposals_applied).sum();
-                if applied > 0 {
-                    info!("sync: initial catch-up applied {applied} proposals for {did}");
+                if !results.is_empty() {
+                    info!("sync: initial catch-up loaded {} workspaces for {did}", results.len());
                 }
             }
             Err(e) => {
                 warn!("sync: initial catch-up failed for {did}: {e}");
-                // Non-fatal — we still start the consumer. The DB
-                // still has the proposals; a later reconnect or event
-                // will trigger another sync that may succeed.
+                // Non-fatal — we still start the consumer. A later
+                // reconnect or event will trigger another sync.
             }
         }
     }
@@ -392,9 +389,6 @@ async fn list_tasks(storage: &FileStorage) -> Result<()> {
                 ("grant-healing", format!("{healed} healed"))
             }
             DaemonTaskKind::ShareRetry { retried } => ("share-retry", format!("{retried} retried")),
-            DaemonTaskKind::ProposalSync {
-                proposals_applied, ..
-            } => ("proposal-sync", format!("{proposals_applied} applied")),
             DaemonTaskKind::ReEncryption { .. } => {
                 let progress = task.progress.as_ref().map_or(String::new(), |p| {
                     let mb = p.bytes_processed / (1024 * 1024);

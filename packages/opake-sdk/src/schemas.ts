@@ -47,24 +47,28 @@ export type ResolvedIdentity = z.output<typeof resolvedIdentitySchema>;
 
 export const workspaceEntrySchema = z
   .object({
-    uri: z.string(),
-    owner_did: z.string(),
+    workspace_id: z.string(),
+    head_uri: z.string(),
     rotation: z.number(),
     member_count: z.number(),
     created_at: z.string().nullable().optional(),
     name: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
     icon: z.string().nullable().optional(),
+    my_role: z.string().nullable().optional(),
   })
   .transform((r) => ({
-    uri: r.uri,
-    ownerDid: r.owner_did,
+    /** Stable workspace identity — the genesis keyring URI. */
+    workspaceId: r.workspace_id,
+    /** Current keyring chain-head URI; equal to `workspaceId` when un-superseded. */
+    headUri: r.head_uri,
     rotation: r.rotation,
     memberCount: r.member_count,
     createdAt: r.created_at ?? null,
     name: r.name ?? "",
     description: r.description ?? null,
     icon: r.icon ?? null,
+    myRole: r.my_role ?? null,
   }));
 
 export type WorkspaceEntry = z.output<typeof workspaceEntrySchema>;
@@ -81,9 +85,9 @@ export const createWorkspaceResultSchema = z
 
 export const listWorkspacesResultSchema = z
   .object({
-    keyrings: z.array(workspaceEntrySchema),
+    workspaces: z.array(workspaceEntrySchema),
   })
-  .transform((r) => r.keyrings);
+  .transform((r) => r.workspaces);
 
 /**
  * Snapshot of the workspace list emitted by `watchWorkspaces`. Fires
@@ -110,12 +114,12 @@ export type WorkspaceSnapshot = z.output<typeof workspaceSnapshotSchema>;
 export const workspaceSyncResultSchema = z
   .object({
     keyring_uri: z.string(),
-    proposals_applied: z.number(),
+    is_owner: z.boolean(),
     error: z.string().optional(),
   })
   .transform((r) => ({
     keyringUri: r.keyring_uri,
-    proposalsApplied: r.proposals_applied,
+    isOwner: r.is_owner,
     error: r.error,
   }));
 
@@ -257,13 +261,14 @@ export const grantEntriesSchema = z.array(grantEntrySchema);
 export const inboxGrantSchema = z
   .object({
     uri: z.string(),
-    owner_did: z.string(),
+    author_did: z.string(),
     document_uri: z.string(),
     created_at: z.string(),
   })
   .transform((r) => ({
     uri: r.uri,
-    ownerDid: r.owner_did,
+    /** DID of the workspace member who shared the document. */
+    authorDid: r.author_did,
     documentUri: r.document_uri,
     createdAt: r.created_at,
   }));
@@ -321,6 +326,42 @@ export const pendingShareEntrySchema = z
 export type PendingShareEntry = z.output<typeof pendingShareEntrySchema>;
 
 export const pendingShareEntriesSchema = z.array(pendingShareEntrySchema);
+
+// ---------------------------------------------------------------------------
+// Chain forks (concurrent-supersede race signal)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chain:forked` SSE event payload. Emitted to the loser when two
+ * supersedes raced against the same chain head. The Rust struct uses
+ * snake_case (matching how `SseChainForked` is serialized over the wire);
+ * the schema camel-cases for JS consumers.
+ *
+ * `scope` is `"directory"` for per-path directory chains or `"keyring"`
+ * for the workspace's keyring chain. `path` is only populated for
+ * directory scope — keyrings have no path concept.
+ */
+export const chainForkedEventSchema = z
+  .object({
+    workspace_id: z.string(),
+    scope: z.string(),
+    path: z.string().nullish(),
+    your_uri: z.string(),
+    fork_point_uri: z.string(),
+    winner_uri: z.string(),
+    winner_cid: z.string(),
+  })
+  .transform((r) => ({
+    workspaceId: r.workspace_id,
+    scope: r.scope,
+    path: r.path ?? null,
+    yourUri: r.your_uri,
+    forkPointUri: r.fork_point_uri,
+    winnerUri: r.winner_uri,
+    winnerCid: r.winner_cid,
+  }));
+
+export type ChainForkedEvent = z.output<typeof chainForkedEventSchema>;
 
 // ---------------------------------------------------------------------------
 // Pairing

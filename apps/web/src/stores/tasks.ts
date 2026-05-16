@@ -16,11 +16,6 @@ export type DaemonTaskKind =
   | { readonly type: "pairCleanup"; readonly deleted: number }
   | { readonly type: "grantHealing"; readonly healed: number }
   | { readonly type: "shareRetry"; readonly retried: number }
-  | {
-      readonly type: "proposalSync";
-      readonly proposalsApplied: number;
-      readonly keyringUri?: string;
-    }
   | { readonly type: "unknown"; readonly raw: Readonly<Record<string, unknown>> };
 
 export type TaskStatus = "running" | "completed" | { readonly failed: string };
@@ -46,12 +41,6 @@ function mapKind(raw: Readonly<Record<string, unknown>>): DaemonTaskKind {
       return { type: "grantHealing", healed: typeof raw.healed === "number" ? raw.healed : 0 };
     case "shareRetry":
       return { type: "shareRetry", retried: typeof raw.retried === "number" ? raw.retried : 0 };
-    case "proposalSync":
-      return {
-        type: "proposalSync",
-        proposalsApplied: typeof raw.proposalsApplied === "number" ? raw.proposalsApplied : 0,
-        keyringUri: typeof raw.keyringUri === "string" ? raw.keyringUri : undefined,
-      };
     default:
       return { type: "unknown", raw };
   }

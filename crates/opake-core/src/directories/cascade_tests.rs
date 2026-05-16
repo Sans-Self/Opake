@@ -56,6 +56,7 @@ async fn single_level_supersede_writes_leaf_and_returns_head() {
     let leaf = LeafLevel {
         mode: supersede_mode(&prior_root_uri, &prior_root),
         entries: leaf_entries,
+        is_workspace_root: true,
     };
 
     let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
@@ -110,10 +111,12 @@ async fn two_level_supersede_threads_child_cid_into_parent() {
             prior_child_uri: prior_leaf_uri.clone(),
         },
         entries: root_entries,
+        is_workspace_root: false,
     }];
     let leaf = LeafLevel {
         mode: supersede_mode(&prior_leaf_uri, &prior_leaf),
         entries: leaf_entries,
+        is_workspace_root: false,
     };
 
     let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
@@ -171,10 +174,12 @@ async fn add_child_appends_new_listing_entry_at_parent() {
         mode: supersede_mode(&prior_root_uri, &prior_root),
         linkage: AncestorLinkage::Add,
         entries: prior_root.entries.clone(),
+        is_workspace_root: false,
     }];
     let leaf = LeafLevel {
         mode: genesis_mode(&leaf_seed, None),
         entries: leaf_entries,
+        is_workspace_root: false,
     };
 
     let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
@@ -213,6 +218,7 @@ async fn genesis_with_stable_rkey_uses_put_record() {
     let leaf = LeafLevel {
         mode: genesis_mode(&leaf_seed, Some(stable_rkey.to_owned())),
         entries: vec![],
+        is_workspace_root: true,
     };
 
     execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
@@ -251,10 +257,12 @@ async fn replace_child_with_missing_prior_uri_errors() {
             prior_child_uri: prior_leaf_uri.clone(),
         },
         entries: prior_root.entries.clone(),
+        is_workspace_root: false,
     }];
     let leaf = LeafLevel {
         mode: supersede_mode(&prior_leaf_uri, &prior_leaf),
         entries: vec![],
+        is_workspace_root: false,
     };
 
     let err = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")

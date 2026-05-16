@@ -8,9 +8,9 @@ function WorkspaceNewEditor() {
   const { rkey } = Route.useParams();
   const { directoryUri } = Route.useSearch();
   const { data: workspaces } = useWorkspaces();
-  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
+  const workspace = workspaces.find((w) => rkeyFromUri(w.workspaceId) === rkey);
 
-  const { snapshot } = useDirectory(workspace?.uri ?? null, null);
+  const { snapshot } = useDirectory(workspace?.headUri ?? null, null);
   const pathSuffix = directoryUri && snapshot ? directoryPathSuffix(snapshot, directoryUri) : null;
   const returnPath = pathSuffix
     ? `/cabinet/workspace/${rkey}/${pathSuffix}`
@@ -27,7 +27,7 @@ function WorkspaceNewEditor() {
   return (
     <EditorView
       mode="new"
-      context={{ kind: "workspace", keyringUri: workspace.uri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri }}
       returnPath={returnPath}
       directoryUri={directoryUri}
     />

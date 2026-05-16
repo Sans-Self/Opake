@@ -149,6 +149,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             entries: new_entries,
             supersedes: Some(prior.uri),
             workspace_id: Some(workspace_uri.to_owned()),
+            // Root-atomic delete: this supersede targets the workspace root,
+            // so the new record stays in the root chain.
+            is_workspace_root: true,
             created_at: now.to_owned(),
             modified_at: Some(now.to_owned()),
         };
@@ -230,6 +233,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             entries: new_parent_entries,
             supersedes: Some(parent_record.uri.clone()),
             workspace_id: Some(workspace_uri.to_owned()),
+            // Deep cascade leaf supersedes the parent directory directly above
+            // the doc — workspace-root status carries over from the prior
+            // record (typically false; true only when parent_directory_uri
+            // happens to be a one-level workspace, but that hits the atomic
+            // path above instead).
+            is_workspace_root: parent_record.record.is_workspace_root,
             created_at: now.to_owned(),
             modified_at: Some(now.to_owned()),
         };
@@ -282,6 +291,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 entries: new_entries,
                 supersedes: Some(ancestor.uri.clone()),
                 workspace_id: Some(workspace_uri.to_owned()),
+                // Inherit so the topmost ancestor (the workspace root) stays
+                // flagged across the supersede.
+                is_workspace_root: ancestor.record.is_workspace_root,
                 created_at: now.to_owned(),
                 modified_at: Some(now.to_owned()),
             };

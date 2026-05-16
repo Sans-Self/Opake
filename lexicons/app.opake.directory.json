@@ -43,6 +43,10 @@
             "format": "at-uri",
             "description": "Genesis keyring URI of the workspace this directory belongs to. Absent on cabinet directories. Carried explicitly so any reader can resolve workspace identity without walking the keyring chain back to genesis."
           },
+          "isWorkspaceRoot": {
+            "type": "boolean",
+            "description": "True if this directory is part of the workspace-root chain. Stamped by the writer on every record in the chain (genesis + every supersede). The indexer enforces that only managers may set it, that the value never flips across a supersede, and that each workspace has at most one active root chain. Replaces the prior deterministic `ws-{keyringRkey}` rkey convention so root directories can be TID-rkeyed and freely deleted/recreated."
+          },
           "createdAt": { "type": "string", "format": "datetime" },
           "modifiedAt": { "type": "string", "format": "datetime" }
         }

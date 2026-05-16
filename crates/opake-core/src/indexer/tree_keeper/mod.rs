@@ -28,7 +28,8 @@ use std::collections::HashMap;
 use crate::crypto::{ContentKey, X25519PrivateKey};
 use crate::directories::{DecryptionCtx, DirectoryTree, TreeChange};
 use crate::error::Error;
-use crate::indexer::sse::events::{SseDirectoryRecord, SseEvent};
+use crate::indexer::sse::events::SseEvent;
+use crate::indexer::types::IndexerEnvelope;
 
 /// Callback fired when a watched directory's tree state changes.
 ///
@@ -320,62 +321,25 @@ impl TreeKeeper {
     /// watchers. Events for contexts not yet installed are dropped.
     pub fn apply_event(&mut self, event: &SseEvent) -> Result<(), Error> {
         match event {
-            SseEvent::DirectoryUpsert(record) => self.apply_directory_upsert(record)?,
+            SseEvent::DirectoryUpsert(envelope) => self.apply_directory_upsert(envelope, false)?,
             SseEvent::DirectoryDelete(payload) => {
-                if let Some(uri) = payload.best_uri() {
-                    self.apply_directory_delete(uri)?;
-                }
+                self.apply_directory_delete(&payload.uri)?;
             }
-            // Document upsert: documents aren't in the DirectoryTree — they're
-            // leaf URIs referenced from parents — so no tree mutation runs.
-            // But a document's encrypted metadata may have changed (rename,
-            // tag edit, description update) and watchers need to know so
-            // consumers can refetch metadata. Route by scope and fire every
-            // watcher in that scope with the unchanged tree; the reload
-            // debounce on the consumer side picks up the metadata delta.
-            SseEvent::DocumentUpsert(record) => {
-                let scope = Self::scope_from_keyring_uri(record.keyring_uri.as_deref());
+            SseEvent::DocumentUpsert(envelope) => {
+                let scope = Self::scope_from_keyring_uri(envelope.record.workspace_id.as_deref());
                 self.notify_scope(&scope);
             }
-            // Document delete: under normal flow the companion
-            // `DirectoryUpsert` that removes the entry from the parent
-            // directory covers this — watchers see the structural
-            // change and refetch. But `remove_document` in the core
-            // client is not atomic: it calls `delete_record` then
-            // `remove_entry`, and if the second call fails (network
-            // blip, DPoP nonce race, etc.) the document is deleted
-            // on the PDS but the parent still lists it. Firing
-            // watchers here too gives the UI a defensive refresh
-            // signal so the stale entry gets culled on the next
-            // reload pass, even when the parent-update event never
-            // arrives.
-            //
-            // `SseDeletePayload` doesn't carry `keyring_uri`, so we
-            // can't route by scope; fire all watchers.
             SseEvent::DocumentDelete(_) => {
                 self.notify_all_watchers();
             }
-            // Keyring upsert: if the rotation counter bumped on an
-            // installed workspace, the cached decrypted directory names
-            // were produced with the prior content key and are now stale.
-            // Wipe them and fire watchers so consumers re-decrypt via
-            // the FileManager (which holds the freshly-rotated group
-            // key). Non-rotation upserts — member adds, metadata edits
-            // — don't affect name plaintext, so no-op. Cabinet keyrings
-            // don't apply here; those events carry a workspace keyring
-            // URI in `uri`.
-            //
-            // Rotation comparison is strictly monotonic: an equal value
-            // is an SSE echo of the rotation we already applied, a lower
-            // value is an out-of-order replay from after we bootstrapped
-            // past it. Both are no-ops. A lower value with a *different*
-            // content under the same rotation number would be a protocol
-            // violation — log it so it surfaces in traces.
-            SseEvent::KeyringUpsert(record) => {
-                let Some(new_rotation) = record.rotation else {
-                    return Ok(());
-                };
-                let Some(held) = self.workspaces.get_mut(&record.uri) else {
+            SseEvent::KeyringUpsert(envelope) => {
+                let new_rotation = envelope.record.rotation;
+                let keyring_uri = envelope
+                    .record
+                    .workspace_id
+                    .as_deref()
+                    .unwrap_or(envelope.uri.as_str());
+                let Some(held) = self.workspaces.get_mut(keyring_uri) else {
                     return Ok(());
                 };
                 let HeldTree::Workspace { rotation, tree, .. } = held else {
@@ -389,7 +353,7 @@ impl TreeKeeper {
                     if new_rotation < *rotation {
                         log::debug!(
                             "[tree_keeper] ignoring backward keyring rotation on {}: held={}, received={}",
-                            record.uri,
+                            keyring_uri,
                             *rotation,
                             new_rotation
                         );
@@ -397,24 +361,12 @@ impl TreeKeeper {
                     false
                 };
                 if should_notify {
-                    let scope = TreeScope::Workspace(record.uri.clone());
+                    let scope = TreeScope::Workspace(keyring_uri.to_string());
                     self.notify_scope(&scope);
                 }
             }
-            // Keyring delete: the workspace tree becomes unreadable
-            // anyway once the consumer removes it from the workspace
-            // list. TreeKeeper can keep the (now-orphaned) tree around
-            // until `uninstall_workspace` is called explicitly — cheap,
-            // avoids a race where events land between delete and
-            // uninstall.
             SseEvent::KeyringDelete(_) => {}
-            // Grant events: don't affect the tree. Consumers can react
-            // separately for sharing UI updates.
             SseEvent::GrantUpsert(_) | SseEvent::GrantDelete(_) => {}
-            // Chain-fork notifications belong to the SDK retry layer, not
-            // TreeKeeper — but until that wiring lands they must not be
-            // silently swallowed. Surfacing as a warn makes the regression
-            // path visible in logs and crash reports.
             SseEvent::ChainForked(fork) => {
                 log::warn!(
                     "chain forked: workspace={} scope={} path={:?} your={} fork_point={} winner={} winner_cid={}",
@@ -427,9 +379,6 @@ impl TreeKeeper {
                     fork.winner_cid,
                 );
             }
-            // Reconnect: callers handle full-sync out-of-band. We just
-            // fire all watchers so the UI repaints from current state
-            // (which is stale until a full sync lands).
             SseEvent::Reconnect => {
                 self.notify_all_watchers();
             }
@@ -437,11 +386,13 @@ impl TreeKeeper {
         Ok(())
     }
 
-    fn apply_directory_upsert(&mut self, record: &SseDirectoryRecord) -> Result<(), Error> {
-        let scope = Self::scope_from_keyring_uri(record.keyring_uri.as_deref());
+    fn apply_directory_upsert(
+        &mut self,
+        envelope: &IndexerEnvelope<crate::records::Directory>,
+        deleted: bool,
+    ) -> Result<(), Error> {
+        let scope = Self::scope_from_keyring_uri(envelope.record.workspace_id.as_deref());
 
-        // Split the borrow across held's disjoint fields so apply_directory_delta
-        // can take &mut tree while DecryptionCtx borrows &private_key and &group_keys.
         let did = self.did.as_str();
         let held = match &scope {
             TreeScope::Cabinet => self.cabinet.as_mut(),
@@ -451,37 +402,53 @@ impl TreeKeeper {
         let Some(held) = held else {
             log::debug!(
                 "[tree_keeper] dropping event for unloaded context: {}",
-                record.directory_uri
+                envelope.uri
             );
             return Ok(());
         };
 
-        let change = match held {
-            HeldTree::Cabinet { tree, keys } => {
-                let bundle = crate::crypto::PrivateKeyBundle {
-                    x25519: &keys.x25519,
-                    ml_kem: &keys.ml_kem,
-                };
-                tree.apply_directory_delta(record, &DecryptionCtx::cabinet(did, &bundle))?
+        let change = if deleted {
+            // Delete path doesn't need decryption context.
+            match held {
+                HeldTree::Cabinet { tree, .. } => tree.apply_directory_delete(&envelope.uri),
+                HeldTree::Workspace { tree, .. } => tree.apply_directory_delete(&envelope.uri),
             }
-            HeldTree::Workspace {
-                tree,
-                group_key,
-                rotation,
-                historical_keys,
-            } => {
-                let view = crate::workspace::GroupKeys {
-                    current_rotation: *rotation,
-                    current: group_key,
-                    historical: historical_keys,
-                };
-                let mut keys_map = HashMap::new();
-                let keyring_uri = match &scope {
-                    TreeScope::Workspace(uri) => uri.clone(),
-                    _ => unreachable!("workspace HeldTree always implies Workspace scope"),
-                };
-                keys_map.insert(keyring_uri, view);
-                tree.apply_directory_delta(record, &DecryptionCtx::workspace(did, &keys_map))?
+        } else {
+            match held {
+                HeldTree::Cabinet { tree, keys } => {
+                    let bundle = crate::crypto::PrivateKeyBundle {
+                        x25519: &keys.x25519,
+                        ml_kem: &keys.ml_kem,
+                    };
+                    tree.apply_directory_delta(
+                        &envelope.uri,
+                        &envelope.record,
+                        &DecryptionCtx::cabinet(did, &bundle),
+                    )?
+                }
+                HeldTree::Workspace {
+                    tree,
+                    group_key,
+                    rotation,
+                    historical_keys,
+                } => {
+                    let view = crate::workspace::GroupKeys {
+                        current_rotation: *rotation,
+                        current: group_key,
+                        historical: historical_keys,
+                    };
+                    let mut keys_map = HashMap::new();
+                    let keyring_uri = match &scope {
+                        TreeScope::Workspace(uri) => uri.clone(),
+                        _ => unreachable!("workspace HeldTree always implies Workspace scope"),
+                    };
+                    keys_map.insert(keyring_uri, view);
+                    tree.apply_directory_delta(
+                        &envelope.uri,
+                        &envelope.record,
+                        &DecryptionCtx::workspace(did, &keys_map),
+                    )?
+                }
             }
         };
 
@@ -490,61 +457,27 @@ impl TreeKeeper {
     }
 
     fn apply_directory_delete(&mut self, uri: &str) -> Result<(), Error> {
-        // Delete payload has no keyring_uri. Try each context; only the
-        // one containing the URI will report a change (others NoOp).
-        let delete_payload = SseDirectoryRecord {
-            directory_uri: uri.to_string(),
-            owner_did: String::new(),
-            entries: Vec::new(),
-            encrypted_metadata: None,
-            key_wrapping: None,
-            keyring_uri: None,
-            deleted_at: Some(String::new()),
-            indexed_at: None,
-        };
-
-        let did = self.did.as_str();
-
-        if let Some(HeldTree::Cabinet { tree, keys }) = self.cabinet.as_mut() {
-            let bundle = crate::crypto::PrivateKeyBundle {
-                x25519: &keys.x25519,
-                ml_kem: &keys.ml_kem,
-            };
-            let change =
-                tree.apply_directory_delta(&delete_payload, &DecryptionCtx::cabinet(did, &bundle))?;
+        // Delete payload has no workspace_id — we don't know which scope the
+        // removed record belonged to. Try each in turn and notify when one
+        // reports an effective change.
+        if let Some(HeldTree::Cabinet { tree, .. }) = self.cabinet.as_mut() {
+            let change = tree.apply_directory_delete(uri);
             if change.is_effective() {
                 self.notify_watchers_for_change(&TreeScope::Cabinet, &change);
                 return Ok(());
             }
         }
 
-        // Collect workspace keys upfront to avoid borrowing conflicts.
         let keyring_uris: Vec<String> = self.workspaces.keys().cloned().collect();
         for keyring_uri in keyring_uris {
             let change = {
                 let Some(held) = self.workspaces.get_mut(&keyring_uri) else {
                     continue;
                 };
-                let HeldTree::Workspace {
-                    tree,
-                    group_key,
-                    rotation,
-                    historical_keys,
-                } = held
-                else {
+                let HeldTree::Workspace { tree, .. } = held else {
                     continue;
                 };
-                let view = crate::workspace::GroupKeys {
-                    current_rotation: *rotation,
-                    current: group_key,
-                    historical: historical_keys,
-                };
-                let mut keys_map = HashMap::new();
-                keys_map.insert(keyring_uri.clone(), view);
-                tree.apply_directory_delta(
-                    &delete_payload,
-                    &DecryptionCtx::workspace(did, &keys_map),
-                )?
+                tree.apply_directory_delete(uri)
             };
             if change.is_effective() {
                 self.notify_watchers_for_change(

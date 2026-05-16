@@ -4,7 +4,13 @@
 export { OpakeProvider, useOpake } from "./provider";
 
 // Shared helpers (for custom hooks)
-export { withFileManager, treeKeyFor, useTreeMutation } from "./hooks/use-tree-mutation";
+export {
+  withFileManager,
+  treeKeyFor,
+  useTreeMutation,
+  type ForkRetryState,
+  type TreeMutationResult,
+} from "./hooks/use-tree-mutation";
 
 // Subscription hooks (SSE-driven, live updates) — preferred for reads
 export { useFileManager } from "./hooks/use-file-manager";

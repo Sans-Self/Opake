@@ -139,7 +139,7 @@ function Inbox() {
       {inbox.map((grant) => (
         <li key={grant.uri}>
           <code>{grant.documentUri}</code>{" "}
-          <small>from {grant.ownerDid}</small>
+          <small>from {grant.authorDid}</small>
         </li>
       ))}
     </ul>

@@ -1,7 +1,7 @@
 defmodule OpakeIndexer.Firehose do
   @moduledoc """
-  Dispatches parsed Jetstream events to query modules and maintains the
-  shared `OpakeIndexer.Firehose.State`.
+  Dispatches parsed Jetstream events to the records / chain_heads tables
+  and broadcasts envelopes onto SSE topics.
 
   ## Per-event flow
 
@@ -9,44 +9,39 @@ defmodule OpakeIndexer.Firehose do
         ↓
       Event.parse/1          (single Jason.decode + tagged tuple)
         ↓
-      bump counters + last_event_at
+      bump counters
         ↓
       dispatch (if not :ignore)
         ↓
-      maybe_save_cursor      (time-throttled, see @cursor_save_interval_ms)
+      maybe_save_cursor      (time-throttled, monotonic)
         ↓
-      :telemetry.execute     (see :opake_indexer events below)
+      :telemetry.execute
 
-  ## Chain dispatch
+  ## Uniform record path
 
-  Keyrings and directory-root records participate in supersede chains. On
-  upsert the dispatch decides one of:
+  Every indexed `app.opake.*` record follows the same pipeline:
+
+    1. Authority check (for chain-bearing supersedes — keyring + root
+       directory chains).
+    2. Insert/update the `records` row with the verbatim record_jsonb
+       and the indexer-managed metadata (`indexed_at`).
+    3. Update `chain_heads` if this record participates in a tracked
+       chain (keyring genesis/supersede, workspace-root genesis/supersede).
+       Same DB transaction as the record insert.
+    4. Broadcast the envelope onto the appropriate SSE topics.
+
+  Chain dispatch decides one of:
 
     * **Genesis** — no `supersedes` field. Create the chain head row.
     * **Advance** — `supersedes` matches the current head URI. Compare-
-      and-set the head row (`*ChainQueries.advance/4`), refresh
-      membership / root pointer.
+      and-set the head.
     * **Fork** — `supersedes` points at a non-head URI. Persist the
-      record but don't advance; broadcast a `chain:forked` SSE event so
-      clients can retry their write.
-    * **Orphan** — `supersedes` points at a record the indexer hasn't
-      seen. Persist the record; no chain action. Heals naturally when
-      the missing predecessor arrives.
+      record but don't advance; broadcast a `chain:forked` event.
+    * **Orphan** — `supersedes` points at a record we haven't seen.
+      Persist the record; no chain action. Heals when predecessor arrives.
 
-  Authority validation (`OpakeIndexer.Authority`) runs *before* chain
-  advancement on every supersede.
-
-  Documents don't drive chains — the parent directory's listing entry is
-  the canonical pointer. Documents carry `supersedes` as a history
-  annotation only.
-
-  ## Chain head bookkeeping
-
-  `keyring_chains` and `workspace_roots` are hand-rolled materialized
-  views maintained inline by this dispatch. They will drift if any code
-  path writes to `keyrings` or workspace-root `directories` without
-  going through here. See `OpakeIndexer.Queries.KeyringChainQueries`
-  module docs for the full discipline contract.
+  Documents and grants don't drive chains. They get an upsert into
+  `records` and a broadcast; that's it.
   """
 
   require Logger
@@ -56,18 +51,20 @@ defmodule OpakeIndexer.Firehose do
   alias OpakeIndexer.Firehose.State
 
   alias OpakeIndexer.Queries.{
+    ChainHeadQueries,
     CursorQueries,
-    DirectoryQueries,
-    DocumentQueries,
-    GrantQueries,
-    KeyringChainQueries,
-    KeyringQueries,
-    WorkspaceRootQueries
+    RecordQueries
   }
 
   alias OpakeIndexer.SSE.Broadcaster
 
   @telemetry_prefix [:opake_indexer, :indexer]
+
+  @directory_collection "app.opake.directory"
+  @document_collection "app.opake.document"
+  @keyring_collection "app.opake.keyring"
+  @grant_collection "app.opake.grant"
+  @account_config_collection "app.opake.accountConfig"
 
   # -- State init --
 
@@ -107,198 +104,30 @@ defmodule OpakeIndexer.Firehose do
     event_count + 1
   end
 
-  # -- Dispatch --
+  # -- Dispatch -------------------------------------------------------
 
-  defp dispatch({:upsert_grant, attrs}, _time_us, now) do
-    Logger.info(
-      "[Indexer] grant upsert: #{attrs.uri} (author=#{attrs.author_did}, recipient=#{attrs.recipient_did})"
-    )
+  defp dispatch({:upsert_record, attrs}, _time_us, now) do
+    case attrs.collection do
+      @keyring_collection ->
+        dispatch_keyring_upsert(attrs, now)
 
-    result =
-      GrantQueries.upsert_grant(%{
-        uri: attrs.uri,
-        author_did: attrs.author_did,
-        recipient_did: attrs.recipient_did,
-        document_uri: attrs.document_uri,
-        created_at: attrs.created_at,
-        indexed_at: now
-      })
+      @directory_collection ->
+        dispatch_directory_upsert(attrs, now)
 
-    log_query_error(result, "grant upsert", attrs.uri)
-    emit_event_telemetry("app.opake.grant", :upsert, status_of(result))
-    Broadcaster.broadcast_grant(attrs, :upsert)
-  end
+      @document_collection ->
+        dispatch_document_upsert(attrs, now)
 
-  defp dispatch({:delete_grant, %{uri: uri}}, _time_us, _now) do
-    Logger.info("[Indexer] grant delete: #{uri}")
-
-    parties = GrantQueries.grant_parties(uri)
-    GrantQueries.delete_grant(uri)
-    emit_event_telemetry("app.opake.grant", :delete, :ok)
-
-    attrs =
-      case parties do
-        {author_did, recipient_did} ->
-          %{uri: uri, author_did: author_did, recipient_did: recipient_did}
-
-        nil ->
-          %{uri: uri}
-      end
-
-    Broadcaster.broadcast_grant(attrs, :delete)
-  end
-
-  # -- Keyring chain dispatch --
-
-  defp dispatch({:upsert_keyring, attrs}, _time_us, _now) do
-    workspace_id = resolve_workspace_id_keyring(attrs)
-
-    if is_nil(workspace_id) do
-      Logger.warning(
-        "[Indexer] keyring upsert with unresolvable workspace_id: #{attrs.uri} (supersedes #{inspect(attrs.supersedes_uri)})"
-      )
-
-      # Persist the record so it can be picked up later when the chain heals.
-      KeyringQueries.upsert_keyring_record(attrs)
-      emit_event_telemetry("app.opake.keyring", :upsert, :error)
-    else
-      attrs_with_workspace = Map.put(attrs, :workspace_id, workspace_id)
-
-      Logger.info(
-        "[Indexer] keyring upsert: #{attrs.uri} workspace=#{workspace_id} supersedes=#{inspect(attrs.supersedes_uri)} members=#{length(attrs.member_entries)}"
-      )
-
-      record_result = KeyringQueries.upsert_keyring_record(attrs_with_workspace)
-      log_query_error(record_result, "keyring record upsert", attrs.uri)
-
-      chain_outcome =
-        case attrs.supersedes_uri do
-          nil ->
-            handle_keyring_genesis(workspace_id, attrs)
-
-          prior_uri ->
-            handle_keyring_supersede(workspace_id, prior_uri, attrs)
-        end
-
-      emit_event_telemetry(
-        "app.opake.keyring",
-        :upsert,
-        worst_status([record_result, chain_outcome])
-      )
-
-      if chain_outcome == :ok do
-        Broadcaster.broadcast_keyring(attrs_with_workspace, :upsert)
-      end
-    end
-  end
-
-  defp dispatch({:delete_keyring, %{uri: uri}}, _time_us, _now) do
-    Logger.info("[Indexer] keyring delete: #{uri}")
-
-    # Explicit keyring deletion is rare — supersedes are the normal mutation
-    # path. When it happens we tear down the whole workspace's indexed state.
-    case KeyringQueries.lookup(uri) do
-      nil ->
-        :ok
-
-      %{workspace_id: workspace_id} when is_binary(workspace_id) ->
-        KeyringQueries.delete_workspace(workspace_id)
-        KeyringChainQueries.delete(workspace_id)
-        WorkspaceRootQueries.delete(workspace_id)
+      @grant_collection ->
+        dispatch_grant_upsert(attrs, now)
 
       _ ->
         :ok
     end
-
-    emit_event_telemetry("app.opake.keyring", :delete, :ok)
-    Broadcaster.broadcast_keyring(%{uri: uri}, :delete)
   end
 
-  # -- Directory chain dispatch --
-
-  defp dispatch({:upsert_directory, attrs}, _time_us, now) do
-    workspace_id = resolve_workspace_id_directory(attrs)
-    chain_genesis_uri = resolve_directory_chain_genesis(attrs)
-
-    Logger.info(
-      "[Indexer] directory upsert: #{attrs.uri} workspace=#{inspect(workspace_id)} supersedes=#{inspect(attrs.supersedes_uri)}"
-    )
-
-    full_attrs = %{
-      uri: attrs.uri,
-      workspace_id: workspace_id,
-      chain_genesis_uri: chain_genesis_uri,
-      author_did: attrs.author_did,
-      entries_json: attrs.entries_json,
-      encrypted_metadata: attrs.encrypted_metadata,
-      key_wrapping: attrs.key_wrapping,
-      supersedes_uri: attrs.supersedes_uri,
-      modified_at: attrs[:modified_at],
-      deleted_at: nil,
-      indexed_at: now
-    }
-
-    record_result = DirectoryQueries.upsert_directory(full_attrs)
-    log_query_error(record_result, "directory upsert", attrs.uri)
-
-    chain_outcome =
-      if workspace_id && workspace_root_chain?(workspace_id, chain_genesis_uri) do
-        dispatch_workspace_root(workspace_id, attrs)
-      else
-        :ok
-      end
-
-    emit_event_telemetry(
-      "app.opake.directory",
-      :upsert,
-      worst_status([record_result, chain_outcome])
-    )
-
-    if chain_outcome == :ok do
-      Broadcaster.broadcast_directory(full_attrs, :upsert)
-    end
+  defp dispatch({:delete_record, %{uri: uri}}, _time_us, now) do
+    dispatch_delete(uri, now)
   end
-
-  defp dispatch({:delete_directory, %{uri: uri}}, _time_us, now) do
-    Logger.info("[Indexer] directory delete (soft): #{uri}")
-    DirectoryQueries.soft_delete_directory(uri, now)
-    emit_event_telemetry("app.opake.directory", :delete, :ok)
-    Broadcaster.broadcast_directory(%{uri: uri}, :delete)
-  end
-
-  # -- Document dispatch (no chain advancement) --
-
-  defp dispatch({:upsert_document, attrs}, _time_us, now) do
-    Logger.info("[Indexer] document upsert: #{attrs.uri}")
-
-    full_attrs = %{
-      uri: attrs.uri,
-      workspace_id: attrs[:workspace_id],
-      author_did: attrs.author_did,
-      rotation: attrs.rotation,
-      encrypted_metadata: attrs.encrypted_metadata,
-      encryption: attrs.encryption,
-      blob_ref: attrs.blob_ref,
-      supersedes_uri: attrs[:supersedes_uri],
-      modified_at: attrs[:modified_at],
-      deleted_at: nil,
-      indexed_at: now
-    }
-
-    result = DocumentQueries.upsert_document(full_attrs)
-    log_query_error(result, "document upsert", attrs.uri)
-    emit_event_telemetry("app.opake.document", :upsert, status_of(result))
-    Broadcaster.broadcast_document(full_attrs, :upsert)
-  end
-
-  defp dispatch({:delete_document, %{uri: uri}}, _time_us, now) do
-    Logger.info("[Indexer] document delete (soft): #{uri}")
-    DocumentQueries.soft_delete_document(uri, now)
-    emit_event_telemetry("app.opake.document", :delete, :ok)
-    Broadcaster.broadcast_document(%{uri: uri}, :delete)
-  end
-
-  # -- Heartbeat --
 
   defp dispatch({:account_config_seen, %{did: did, op: op}}, _time_us, _now) do
     Logger.info("[Indexer] accountConfig #{op}: #{did}")
@@ -310,204 +139,334 @@ defmodule OpakeIndexer.Firehose do
         "delete" -> :delete
       end
 
-    emit_event_telemetry("app.opake.accountConfig", action, :ok)
+    emit_event_telemetry(@account_config_collection, action, :ok)
   end
 
-  # -- Chain helpers --
+  # -- Keyring upsert -------------------------------------------------
 
-  defp handle_keyring_genesis(workspace_id, attrs) do
-    case KeyringChainQueries.create(workspace_id, attrs.uri, attrs.cid || "") do
-      {:ok, _} ->
-        KeyringQueries.replace_members(workspace_id, attrs.member_entries)
-        :ok
+  defp dispatch_keyring_upsert(attrs, now) do
+    workspace_id = attrs.workspace_id
+    prior_uri = attrs.supersedes_uri
 
-      :already_exists ->
-        Logger.warning(
-          "[Indexer] duplicate genesis keyring for workspace #{workspace_id}: #{attrs.uri}"
-        )
+    if is_nil(workspace_id) do
+      Logger.warning(
+        "[Indexer] keyring upsert with unresolvable workspace_id: #{attrs.uri} (supersedes #{inspect(prior_uri)})"
+      )
 
-        :error
+      # Persist as orphan; heals when predecessor arrives.
+      _ = upsert_record(attrs, now)
+      emit_event_telemetry(@keyring_collection, :upsert, :error)
+    else
+      Logger.info(
+        "[Indexer] keyring upsert: #{attrs.uri} workspace=#{workspace_id} supersedes=#{inspect(prior_uri)}"
+      )
 
-      {:error, reason} ->
-        Logger.warning("[Indexer] keyring chain create failed: #{inspect(reason)}")
-        :error
-    end
-  end
-
-  defp handle_keyring_supersede(workspace_id, prior_uri, attrs) do
-    case Authority.check_keyring_supersede(workspace_id, prior_uri, attrs.author_did) do
-      :ok ->
-        case KeyringChainQueries.advance(workspace_id, attrs.uri, attrs.cid || "", prior_uri) do
-          {:ok, _} ->
-            KeyringQueries.replace_members(workspace_id, attrs.member_entries)
-            :ok
-
-          :fork_detected ->
-            current = KeyringChainQueries.get(workspace_id)
-
+      with :ok <- Authority.check_keyring_supersede(workspace_id, prior_uri, attrs.author_did),
+           {:ok, _} <- upsert_record(attrs, now) do
+        chain_outcome = advance_or_create_chain(
+          "keyring",
+          workspace_id,
+          attrs.uri,
+          attrs.cid,
+          prior_uri,
+          fn fork ->
             Broadcaster.broadcast_chain_forked(%{
               workspace_id: workspace_id,
               scope: "keyring",
               path: nil,
               your_uri: attrs.uri,
               fork_point_uri: prior_uri,
-              winner_uri: current.head_uri,
-              winner_cid: current.head_cid
+              winner_uri: fork.head_uri,
+              winner_cid: fork.head_cid
             })
-
-            Logger.warning(
-              "[Indexer] keyring fork at #{workspace_id}: attempted #{attrs.uri} (supersedes #{prior_uri}) but head is #{current.head_uri}"
-            )
-
-            :ok
-
-          :no_chain ->
-            Logger.warning(
-              "[Indexer] keyring supersede with no chain head: workspace=#{workspace_id} uri=#{attrs.uri}"
-            )
-
-            :error
-        end
-
-      {:rejected, reason} ->
-        Logger.warning(
-          "[Indexer] keyring authority rejection (#{reason}): #{attrs.uri} by #{attrs.author_did} in #{workspace_id}"
+          end
         )
 
-        :error
+        emit_event_telemetry(@keyring_collection, :upsert, status_of_chain(chain_outcome))
+
+        if chain_outcome == :ok do
+          broadcast_record_envelope(attrs, now)
+        end
+      else
+        {:rejected, reason} ->
+          Logger.warning(
+            "[Indexer] keyring authority rejection (#{reason}): #{attrs.uri} by #{attrs.author_did} in #{workspace_id}"
+          )
+
+          emit_event_telemetry(@keyring_collection, :upsert, :rejected)
+
+        {:error, changeset} ->
+          log_query_error({:error, changeset}, "keyring record upsert", attrs.uri)
+          emit_event_telemetry(@keyring_collection, :upsert, :error)
+      end
     end
   end
 
-  defp dispatch_workspace_root(workspace_id, attrs) do
-    case attrs.supersedes_uri do
-      nil ->
-        case WorkspaceRootQueries.create(workspace_id, attrs.uri, attrs.cid || "") do
-          {:ok, _} -> :ok
-          :already_exists -> :error
-          {:error, reason} ->
-            Logger.warning("[Indexer] workspace root create failed: #{inspect(reason)}")
-            :error
-        end
+  # -- Directory upsert -----------------------------------------------
 
-      prior_uri ->
-        case Authority.check_directory_supersede(
-               workspace_id,
-               prior_uri,
-               attrs.author_did,
-               attrs.entries_json
-             ) do
-          :ok ->
-            case WorkspaceRootQueries.advance(
-                   workspace_id,
-                   attrs.uri,
-                   attrs.cid || "",
-                   prior_uri
-                 ) do
-              {:ok, _} ->
-                :ok
+  defp dispatch_directory_upsert(attrs, now) do
+    workspace_id = attrs.workspace_id
+    prior_uri = attrs.supersedes_uri
 
-              :fork_detected ->
-                current = WorkspaceRootQueries.get(workspace_id)
+    Logger.info(
+      "[Indexer] directory upsert: #{attrs.uri} workspace=#{inspect(workspace_id)} supersedes=#{inspect(prior_uri)} root=#{attrs.is_workspace_root}"
+    )
 
+    prior_record = if prior_uri, do: RecordQueries.lookup(prior_uri), else: nil
+
+    new_entries = attrs.record_jsonb["entries"] || []
+
+    flag_check = Authority.check_workspace_root_flag(prior_record, attrs.is_workspace_root)
+
+    auth_check =
+      cond do
+        # Cabinet directories — no workspace, no chain, no authority check.
+        is_nil(workspace_id) -> :ok
+        # Workspace directories — authority depends on supersede vs genesis.
+        true ->
+          Authority.check_directory_supersede(
+            workspace_id,
+            prior_uri,
+            attrs.author_did,
+            new_entries
+          )
+      end
+
+    with :ok <- flag_check,
+         :ok <- auth_check,
+         {:ok, _} <- upsert_record(attrs, now) do
+      chain_outcome =
+        cond do
+          is_nil(workspace_id) ->
+            :ok
+
+          attrs.is_workspace_root ->
+            advance_or_create_chain(
+              "workspace_root",
+              workspace_id,
+              attrs.uri,
+              attrs.cid,
+              prior_uri,
+              fn fork ->
                 Broadcaster.broadcast_chain_forked(%{
                   workspace_id: workspace_id,
                   scope: "directory",
                   path: "/",
                   your_uri: attrs.uri,
                   fork_point_uri: prior_uri,
-                  winner_uri: current.head_uri,
-                  winner_cid: current.head_cid
+                  winner_uri: fork.head_uri,
+                  winner_cid: fork.head_cid
                 })
-
-                Logger.warning(
-                  "[Indexer] workspace root fork at #{workspace_id}: attempted #{attrs.uri} but head is #{current.head_uri}"
-                )
-
-                :ok
-
-              :no_chain ->
-                Logger.warning(
-                  "[Indexer] workspace root supersede with no chain: workspace=#{workspace_id} uri=#{attrs.uri}"
-                )
-
-                :error
-            end
-
-          {:rejected, reason} ->
-            Logger.warning(
-              "[Indexer] directory authority rejection (#{reason}): #{attrs.uri} by #{attrs.author_did} in #{workspace_id}"
+              end
             )
 
-            :error
+          true ->
+            :ok
         end
-    end
-  end
 
-  # -- Workspace ID resolution --
+      emit_event_telemetry(@directory_collection, :upsert, status_of_chain(chain_outcome))
 
-  defp resolve_workspace_id_keyring(%{uri: uri, workspace_id: nil, supersedes_uri: nil}), do: uri
-
-  defp resolve_workspace_id_keyring(%{workspace_id: workspace_id})
-       when is_binary(workspace_id),
-       do: workspace_id
-
-  defp resolve_workspace_id_keyring(%{supersedes_uri: prior_uri}) when is_binary(prior_uri) do
-    # Fall back to walking via the indexed predecessor.
-    case KeyringQueries.lookup(prior_uri) do
-      %{workspace_id: workspace_id} when is_binary(workspace_id) -> workspace_id
-      _ -> nil
-    end
-  end
-
-  defp resolve_workspace_id_keyring(_), do: nil
-
-  defp resolve_workspace_id_directory(%{workspace_id: workspace_id})
-       when is_binary(workspace_id),
-       do: workspace_id
-
-  defp resolve_workspace_id_directory(%{keyring_uri: keyring_uri}) when is_binary(keyring_uri) do
-    case KeyringQueries.lookup(keyring_uri) do
-      %{workspace_id: workspace_id} when is_binary(workspace_id) -> workspace_id
-      _ -> nil
-    end
-  end
-
-  defp resolve_workspace_id_directory(_), do: nil
-
-  defp resolve_directory_chain_genesis(%{supersedes_uri: nil, uri: uri}), do: uri
-
-  defp resolve_directory_chain_genesis(%{supersedes_uri: prior_uri, uri: uri})
-       when is_binary(prior_uri) do
-    case DirectoryQueries.lookup(prior_uri) do
-      %{chain_genesis_uri: genesis} when is_binary(genesis) -> genesis
-      _ -> uri
-    end
-  end
-
-  defp resolve_directory_chain_genesis(%{uri: uri}), do: uri
-
-  # The workspace root chain's genesis URI is at://<creator>/app.opake.directory/ws-{keyring_rkey}
-  # where keyring_rkey is the genesis keyring's rkey (extracted from workspace_id).
-  defp workspace_root_chain?(workspace_id, chain_genesis_uri)
-       when is_binary(workspace_id) and is_binary(chain_genesis_uri) do
-    with {:ok, kr_rkey} <- extract_rkey(workspace_id),
-         {:ok, dir_rkey} <- extract_rkey(chain_genesis_uri) do
-      dir_rkey == "ws-" <> kr_rkey
+      if chain_outcome == :ok do
+        broadcast_record_envelope(attrs, now)
+      end
     else
-      _ -> false
+      {:rejected, reason} ->
+        Logger.warning(
+          "[Indexer] directory rejection (#{reason}): #{attrs.uri} by #{attrs.author_did}"
+        )
+
+        emit_event_telemetry(@directory_collection, :upsert, :rejected)
+
+      {:error, changeset} ->
+        log_query_error({:error, changeset}, "directory record upsert", attrs.uri)
+        emit_event_telemetry(@directory_collection, :upsert, :error)
     end
   end
 
-  defp workspace_root_chain?(_, _), do: false
+  # -- Document / Grant upsert (no chain) -----------------------------
 
-  defp extract_rkey(uri) do
-    case String.split(uri, "/") do
-      parts when length(parts) >= 5 -> {:ok, List.last(parts)}
-      _ -> :error
+  defp dispatch_document_upsert(attrs, now) do
+    Logger.info("[Indexer] document upsert: #{attrs.uri}")
+
+    case upsert_record(attrs, now) do
+      {:ok, _} ->
+        emit_event_telemetry(@document_collection, :upsert, :ok)
+        broadcast_record_envelope(attrs, now)
+
+      {:error, changeset} ->
+        log_query_error({:error, changeset}, "document record upsert", attrs.uri)
+        emit_event_telemetry(@document_collection, :upsert, :error)
     end
   end
 
-  # -- Cursor save (time-throttled + monotonic) --
+  defp dispatch_grant_upsert(attrs, now) do
+    Logger.info("[Indexer] grant upsert: #{attrs.uri}")
+
+    case upsert_record(attrs, now) do
+      {:ok, _} ->
+        emit_event_telemetry(@grant_collection, :upsert, :ok)
+        broadcast_record_envelope(attrs, now)
+
+      {:error, changeset} ->
+        log_query_error({:error, changeset}, "grant record upsert", attrs.uri)
+        emit_event_telemetry(@grant_collection, :upsert, :error)
+    end
+  end
+
+  # -- Delete ---------------------------------------------------------
+
+  defp dispatch_delete(uri, now) do
+    case RecordQueries.lookup(uri) do
+      nil ->
+        # Unknown record; nothing to do beyond logging.
+        Logger.info("[Indexer] delete for unknown record: #{uri}")
+        emit_event_telemetry(nil, :delete, :ok)
+
+      %{collection: collection} = record ->
+        RecordQueries.soft_delete(uri, now)
+        maybe_rollback_chain(record)
+        emit_event_telemetry(collection, :delete, :ok)
+        broadcast_record_delete(record)
+    end
+  end
+
+  defp maybe_rollback_chain(%{collection: @keyring_collection, workspace_id: workspace_id, uri: uri})
+       when is_binary(workspace_id) do
+    case ChainHeadQueries.get(workspace_id, "keyring") do
+      %{head_uri: ^uri} ->
+        case predecessor_record(uri) do
+          {:ok, pred} ->
+            ChainHeadQueries.rollback(
+              workspace_id,
+              "keyring",
+              uri,
+              pred.uri,
+              pred.cid
+            )
+
+          :none ->
+            # Genesis keyring deleted — tear down the entire workspace's
+            # tracked chains. Records stay (soft-deleted) for audit.
+            ChainHeadQueries.delete_all(workspace_id)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp maybe_rollback_chain(%{collection: @directory_collection, workspace_id: workspace_id, uri: uri, is_workspace_root: true})
+       when is_binary(workspace_id) do
+    case ChainHeadQueries.get(workspace_id, "workspace_root") do
+      %{head_uri: ^uri} ->
+        case predecessor_record(uri) do
+          {:ok, pred} ->
+            ChainHeadQueries.rollback(
+              workspace_id,
+              "workspace_root",
+              uri,
+              pred.uri,
+              pred.cid
+            )
+
+          :none ->
+            ChainHeadQueries.delete(workspace_id, "workspace_root")
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp maybe_rollback_chain(_), do: :ok
+
+  defp predecessor_record(uri) do
+    case RecordQueries.lookup(uri) do
+      %{record_jsonb: %{"supersedes" => prior}} when is_binary(prior) ->
+        case RecordQueries.lookup(prior) do
+          nil -> :none
+          pred -> {:ok, pred}
+        end
+
+      _ ->
+        :none
+    end
+  end
+
+  # -- Shared chain helpers -------------------------------------------
+
+  defp upsert_record(attrs, now) do
+    RecordQueries.upsert(Map.put(attrs, :indexed_at, now))
+  end
+
+  defp advance_or_create_chain(kind, workspace_id, head_uri, head_cid, nil, _fork_cb) do
+    case ChainHeadQueries.create(workspace_id, kind, head_uri, head_cid) do
+      {:ok, _} ->
+        :ok
+
+      :already_exists ->
+        Logger.warning(
+          "[Indexer] duplicate genesis for #{kind} chain workspace=#{workspace_id}: #{head_uri}"
+        )
+
+        :error
+
+      {:error, reason} ->
+        Logger.warning("[Indexer] chain create failed: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp advance_or_create_chain(kind, workspace_id, head_uri, head_cid, prior_uri, fork_cb)
+       when is_binary(prior_uri) do
+    case ChainHeadQueries.advance(workspace_id, kind, head_uri, head_cid, prior_uri) do
+      {:ok, _} ->
+        :ok
+
+      :fork_detected ->
+        case ChainHeadQueries.get(workspace_id, kind) do
+          %{head_uri: winner_uri, head_cid: winner_cid} ->
+            fork_cb.(%{head_uri: winner_uri, head_cid: winner_cid})
+
+          _ ->
+            :ok
+        end
+
+        Logger.warning(
+          "[Indexer] #{kind} fork at #{workspace_id}: #{head_uri} tried to supersede #{prior_uri}"
+        )
+
+        :ok
+
+      :no_chain ->
+        Logger.warning(
+          "[Indexer] #{kind} supersede with no chain head: workspace=#{workspace_id} uri=#{head_uri}"
+        )
+
+        :error
+    end
+  end
+
+  defp status_of_chain(:ok), do: :ok
+  defp status_of_chain(_), do: :error
+
+  # -- Broadcast helpers ----------------------------------------------
+
+  defp broadcast_record_envelope(attrs, now) do
+    envelope = %{
+      uri: attrs.uri,
+      record: attrs.record_jsonb,
+      indexedAt: DateTime.to_iso8601(now)
+    }
+
+    Broadcaster.broadcast_record_upsert(attrs, envelope)
+  end
+
+  defp broadcast_record_delete(record) do
+    Broadcaster.broadcast_record_delete(record)
+  end
+
+  # -- Cursor save (time-throttled + monotonic) -----------------------
 
   defp maybe_save_cursor(nil), do: :ok
 
@@ -538,24 +497,10 @@ defmodule OpakeIndexer.Firehose do
     end
   end
 
-  # -- Helpers --
-
-  defp log_query_error({:ok, _}, _label, _uri), do: :ok
+  # -- Misc helpers ---------------------------------------------------
 
   defp log_query_error({:error, reason}, label, uri) do
     Logger.warning("Failed #{label} for #{uri}: #{inspect(reason)}")
-  end
-
-  defp log_query_error(_, _, _), do: :ok
-
-  defp status_of({:ok, _}), do: :ok
-  defp status_of({:error, _}), do: :error
-  defp status_of(_), do: :ok
-
-  defp worst_status(results) do
-    if Enum.any?(results, fn r -> match?({:error, _}, r) or r == :error end),
-      do: :error,
-      else: :ok
   end
 
   defp emit_event_telemetry(collection, action, status) do

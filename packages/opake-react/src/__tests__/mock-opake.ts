@@ -6,7 +6,14 @@
 // call counts, arguments, and throw behaviors.
 
 import { vi, type Mock } from "vitest";
-import type { DirectoryTreeSnapshot, DirectoryWatcher, FileManager, Opake } from "@opake/sdk";
+import type {
+  ChainForkedEvent,
+  ChainForkWatcher,
+  DirectoryTreeSnapshot,
+  DirectoryWatcher,
+  FileManager,
+  Opake,
+} from "@opake/sdk";
 
 /** A minimal Opake shim — only the methods the React hooks call. */
 export interface MockOpake {
@@ -15,6 +22,9 @@ export interface MockOpake {
   startSseConsumer: Mock<(indexerUrl?: string) => Promise<void>>;
   stopSseConsumer: Mock<() => void>;
   wipeState: Mock<() => void>;
+  watchChainForks: Mock<(handler: (event: ChainForkedEvent) => void) => ChainForkWatcher>;
+  /** Fire the most recently installed chain-fork handler. */
+  emitChainFork: (event: ChainForkedEvent) => void;
   /** Inspect the last FileManager handed out (for cabinet). */
   lastCabinetFm: MockFileManager | null;
   /** Inspect last FM per workspace keyring. */
@@ -115,12 +125,18 @@ export function createMockFileManager(initialTree?: DirectoryTreeSnapshot): Mock
  * cast via `as unknown as Opake` at the provider boundary.
  */
 export function createMockOpake(): MockOpake {
+  let chainForkHandler: ((event: ChainForkedEvent) => void) | null = null;
+
   const mock: MockOpake = {
     cabinet: vi.fn(),
     workspace: vi.fn(),
     startSseConsumer: vi.fn(async () => {}),
     stopSseConsumer: vi.fn(),
     wipeState: vi.fn(),
+    watchChainForks: vi.fn(),
+    emitChainFork: (event) => {
+      if (chainForkHandler) chainForkHandler(event);
+    },
     lastCabinetFm: null,
     workspaceFms: new Map(),
   };
@@ -135,6 +151,15 @@ export function createMockOpake(): MockOpake {
     const fm = createMockFileManager();
     mock.workspaceFms.set(keyringUri, fm);
     return fm;
+  });
+
+  mock.watchChainForks.mockImplementation((handler) => {
+    chainForkHandler = handler;
+    return {
+      close: () => {
+        if (chainForkHandler === handler) chainForkHandler = null;
+      },
+    };
   });
 
   return mock;

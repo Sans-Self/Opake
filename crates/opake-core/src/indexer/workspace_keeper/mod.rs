@@ -38,7 +38,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
-use crate::records::{EncryptedMetadata, KeyringMember};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,8 +60,11 @@ pub struct WorkspaceWatcherHandle(u64);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspaceEntry {
-    pub uri: String,
-    pub owner_did: String,
+    /// The workspace's stable identity (genesis keyring URI).
+    pub workspace_id: String,
+    /// The current chain-head keyring URI. Equal to `workspace_id` for
+    /// an un-superseded workspace; differs after a manager supersede.
+    pub head_uri: String,
     pub rotation: u64,
     pub member_count: usize,
     pub created_at: Option<String>,
@@ -131,16 +133,16 @@ impl WorkspaceKeeper {
         self.watchers.len()
     }
 
-    /// Look up a single entry by keyring URI.
-    pub fn get(&self, uri: &str) -> Option<&WorkspaceEntry> {
-        self.entries.get(uri)
+    /// Look up a single entry by workspace ID.
+    pub fn get(&self, workspace_id: &str) -> Option<&WorkspaceEntry> {
+        self.entries.get(workspace_id)
     }
 
-    /// Build a fresh snapshot. Entries are sorted by URI for stable
-    /// iteration order.
+    /// Build a fresh snapshot. Entries are sorted by workspace ID for
+    /// stable iteration order.
     pub fn snapshot(&self) -> WorkspaceSnapshot {
         let mut entries: Vec<WorkspaceEntry> = self.entries.values().cloned().collect();
-        entries.sort_by(|a, b| a.uri.cmp(&b.uri));
+        entries.sort_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
         WorkspaceSnapshot {
             entries,
             loaded: self.loaded,
@@ -152,7 +154,10 @@ impl WorkspaceKeeper {
     /// Replace the entire entry set. Called after a full-list fetch
     /// from the indexer.
     pub fn bootstrap(&mut self, entries: Vec<WorkspaceEntry>) {
-        self.entries = entries.into_iter().map(|e| (e.uri.clone(), e)).collect();
+        self.entries = entries
+            .into_iter()
+            .map(|e| (e.workspace_id.clone(), e))
+            .collect();
         self.loaded = true;
         self.notify();
     }
@@ -161,20 +166,20 @@ impl WorkspaceKeeper {
     /// existing one, no watchers fire — handles idempotent SSE echoes
     /// after a local write gracefully.
     pub fn upsert(&mut self, entry: WorkspaceEntry) {
-        let uri = entry.uri.clone();
-        if let Some(existing) = self.entries.get(&uri) {
+        let workspace_id = entry.workspace_id.clone();
+        if let Some(existing) = self.entries.get(&workspace_id) {
             if existing == &entry {
                 return;
             }
         }
-        self.entries.insert(uri, entry);
+        self.entries.insert(workspace_id, entry);
         self.notify();
     }
 
-    /// Remove an entry by URI. No-op (no watcher fire) if it wasn't
-    /// tracked.
-    pub fn delete(&mut self, uri: &str) {
-        if self.entries.remove(uri).is_some() {
+    /// Remove an entry by workspace ID. No-op (no watcher fire) if it
+    /// wasn't tracked.
+    pub fn delete(&mut self, workspace_id: &str) {
+        if self.entries.remove(workspace_id).is_some() {
             self.notify();
         }
     }
@@ -183,10 +188,10 @@ impl WorkspaceKeeper {
     /// record event. `None` means the caller isn't a member (e.g.
     /// they were just rotated out) — we `delete` in that case so the
     /// sidebar drops the workspace.
-    pub fn apply_keyring_record(&mut self, uri: &str, entry: Option<WorkspaceEntry>) {
+    pub fn apply_keyring_record(&mut self, workspace_id: &str, entry: Option<WorkspaceEntry>) {
         match entry {
             Some(e) => self.upsert(e),
-            None => self.delete(uri),
+            None => self.delete(workspace_id),
         }
     }
 
@@ -258,50 +263,35 @@ impl Default for WorkspaceKeeper {
 /// The metadata-decrypt step is independently best-effort: if the member
 /// list unwraps but the encrypted metadata blob can't be decoded, the
 /// visible fields are `None` for the same reason.
-#[allow(clippy::too_many_arguments)]
 pub fn try_build_entry(
-    uri: &str,
-    owner_did: &str,
-    rotation: u64,
-    raw_members: &[serde_json::Value],
-    encrypted_metadata: Option<&serde_json::Value>,
-    created_at: Option<&str>,
+    envelope: &crate::indexer::types::IndexerEnvelope<crate::records::Keyring>,
     my_did: &str,
     private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<WorkspaceEntry> {
-    // Parse member records. Anything that doesn't round-trip through the
-    // `KeyringMember` shape is dropped — matches the existing
-    // `listWorkspaces` behavior.
-    let parsed_members: Vec<KeyringMember> = raw_members
-        .iter()
-        .filter_map(|v| serde_json::from_value(v.clone()).ok())
-        .collect();
+    let keyring = &envelope.record;
+    let head_uri = envelope.uri.as_str();
+    let workspace_id = keyring.workspace_id.as_deref().unwrap_or(head_uri);
 
-    // Locate our member entry. If not found, we're definitely not a
-    // member — return None so the caller deletes from the keeper.
-    let my_member = parsed_members.iter().find(|m| m.did() == my_did)?;
+    // Locate our member entry. If not found, we're not a member.
+    let my_member = keyring.members.iter().find(|m| m.did() == my_did)?;
     let my_role = my_member.role;
+    let member_count = keyring.members.len();
 
-    // Inlined rather than calling `Opake::unwrap_workspace_key`: that
-    // method lives on the generic `impl<T, R, S> Opake<T, R, S>` block,
-    // so calling it as a free function would require naming dummy
-    // generics. The logic is two lines; duplicating avoids the dance.
+    // Wrap context is bound to the URI used at wrap time — that's the
+    // head URI (the keyring record actually carrying these members).
     let group_key = match crypto::unwrap_key(
         &my_member.wrapped_key,
         private_keys,
-        &crypto::WrapContext::Keyring { uri },
+        &crypto::WrapContext::Keyring { uri: head_uri },
     ) {
         Ok(k) => k,
         Err(_) => {
-            // Unwrap failed — corrupt data or wrong key material.
-            // Keep the workspace visible without metadata; the next SSE
-            // event or full bootstrap will reconcile.
             return Some(WorkspaceEntry {
-                uri: uri.to_string(),
-                owner_did: owner_did.to_string(),
-                rotation,
-                member_count: raw_members.len(),
-                created_at: created_at.map(str::to_string),
+                workspace_id: workspace_id.to_string(),
+                head_uri: head_uri.to_string(),
+                rotation: keyring.rotation,
+                member_count,
+                created_at: Some(keyring.created_at.clone()),
                 name: None,
                 description: None,
                 icon: None,
@@ -310,75 +300,23 @@ pub fn try_build_entry(
         }
     };
 
-    // Best-effort metadata decrypt.
-    let (name, description, icon) = match encrypted_metadata {
-        Some(em_json) => {
-            let decoded = serde_json::from_value::<EncryptedMetadata>(em_json.clone())
-                .ok()
-                .and_then(|em| crypto::decrypt_metadata::<KeyringMetadata>(&group_key, &em).ok());
-            match decoded {
-                Some(meta) => (Some(meta.name), meta.description, meta.icon),
-                None => (None, None, None),
-            }
-        }
-        None => (None, None, None),
-    };
+    let (name, description, icon) =
+        match crypto::decrypt_metadata::<KeyringMetadata>(&group_key, &keyring.encrypted_metadata) {
+            Ok(meta) => (Some(meta.name), meta.description, meta.icon),
+            Err(_) => (None, None, None),
+        };
 
     Some(WorkspaceEntry {
-        uri: uri.to_string(),
-        owner_did: owner_did.to_string(),
-        rotation,
-        member_count: raw_members.len(),
-        created_at: created_at.map(str::to_string),
+        workspace_id: workspace_id.to_string(),
+        head_uri: head_uri.to_string(),
+        rotation: keyring.rotation,
+        member_count,
+        created_at: Some(keyring.created_at.clone()),
         name,
         description,
         icon,
         my_role: Some(my_role.to_string()),
     })
-}
-
-/// Convenience wrapper: build an entry from an [`IndexerKeyring`].
-///
-/// [`IndexerKeyring`]: crate::indexer::IndexerKeyring
-pub fn try_build_entry_from_indexer_keyring(
-    keyring: &crate::indexer::IndexerKeyring,
-    my_did: &str,
-    private_keys: &PrivateKeyBundle<'_>,
-) -> Option<WorkspaceEntry> {
-    try_build_entry(
-        &keyring.uri,
-        &keyring.owner_did,
-        keyring.rotation,
-        &keyring.members,
-        keyring.encrypted_metadata.as_ref(),
-        keyring.created_at.as_deref(),
-        my_did,
-        private_keys,
-    )
-}
-
-/// Convenience wrapper: build an entry from an [`SseKeyringRecord`].
-///
-/// `rotation` defaults to `0` when absent from the SSE payload (a
-/// well-formed broadcaster always emits it, but the field is `Option`
-/// in the wire type so we handle the gap defensively).
-///
-/// [`SseKeyringRecord`]: crate::indexer::sse::events::SseKeyringRecord
-pub fn try_build_entry_from_sse_record(
-    record: &crate::indexer::sse::events::SseKeyringRecord,
-    my_did: &str,
-    private_keys: &PrivateKeyBundle<'_>,
-) -> Option<WorkspaceEntry> {
-    try_build_entry(
-        &record.uri,
-        &record.owner_did,
-        record.rotation.unwrap_or(0),
-        &record.member_entries,
-        record.encrypted_metadata.as_ref(),
-        record.created_at.as_deref(),
-        my_did,
-        private_keys,
-    )
 }
 
 // ---------------------------------------------------------------------------

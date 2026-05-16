@@ -23,6 +23,7 @@
 use std::rc::Rc;
 
 use futures_util::lock::Mutex;
+use opake_core::indexer::chain_fork_keeper::ChainForkKeeper;
 use opake_core::indexer::inbox_keeper::{self as ik, InboxKeeper};
 use opake_core::indexer::tree_keeper::TreeKeeper;
 use opake_core::indexer::workspace_keeper::WorkspaceKeeper;
@@ -57,6 +58,10 @@ pub struct WasmOpakeHandle {
     /// incrementally from SSE `grant:upsert` / `grant:delete` events.
     /// JS subscribes via `watchInbox`.
     pub(crate) inbox_keeper: Rc<Mutex<InboxKeeper>>,
+    /// Pub-sub for `chain:forked` SSE events. Holds no state; just fans
+    /// dispatch out to subscribers (typically the React mutation-retry
+    /// layer). JS subscribes via `watchChainForks`.
+    pub(crate) chain_fork_keeper: Rc<Mutex<ChainForkKeeper>>,
     /// `true` while an SSE consumer task is alive. Doubles as both the
     /// idempotency gate on `startSseConsumer` and the cancellation
     /// signal read by the consumer loop — `stopSseConsumer` clears it,
@@ -82,6 +87,7 @@ impl WasmOpakeHandle {
             tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
             workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
             inbox_keeper: Rc::new(Mutex::new(InboxKeeper::new())),
+            chain_fork_keeper: Rc::new(Mutex::new(ChainForkKeeper::new())),
             sse_started: Rc::new(std::cell::Cell::new(false)),
         })
     }
@@ -159,9 +165,13 @@ impl WasmOpakeHandle {
         // Optimistic insert — the sidebar shows the new workspace immediately
         // rather than waiting 1–4s for the SSE echo to arrive. The echo
         // produces an equal entry and the keeper's dedup short-circuits.
+        //
+        // At creation time, head_uri == workspace_id (genesis). Membership
+        // is single-self-as-manager; rotation 1 reflects the first
+        // emitted record.
         let optimistic = opake_core::indexer::workspace_keeper::WorkspaceEntry {
-            uri: keyring_uri.clone(),
-            owner_did: opake.did().to_string(),
+            workspace_id: keyring_uri.clone(),
+            head_uri: keyring_uri.clone(),
             rotation: 1,
             member_count: 1,
             created_at: Some(opake.now()),
@@ -204,8 +214,8 @@ impl WasmOpakeHandle {
         let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
         let did = opake.did().to_string();
 
-        let keyrings = opake
-            .discover_member_keyrings()
+        let workspaces = opake
+            .discover_member_workspaces()
             .await
             .map_err(wasm_err)?;
         drop(opake);
@@ -215,12 +225,10 @@ impl WasmOpakeHandle {
         // WorkspaceEntry values — any shape divergence between them
         // would cause spurious watcher re-fires after SSE echoes.
         let bundle = private_keys.bundle();
-        let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = keyrings
+        let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = workspaces
             .iter()
-            .filter_map(|kr| {
-                opake_core::indexer::workspace_keeper::try_build_entry_from_indexer_keyring(
-                    kr, &did, &bundle,
-                )
+            .filter_map(|envelope| {
+                opake_core::indexer::workspace_keeper::try_build_entry(envelope, &did, &bundle)
             })
             .collect();
 
@@ -232,9 +240,8 @@ impl WasmOpakeHandle {
             keeper.bootstrap(entries.clone());
         }
 
-        // Wire-format for backward compatibility with the existing Zod
-        // schema — `{ keyrings: [...] }` with snake_case fields.
-        to_js(&serde_json::json!({ "keyrings": entries }))
+        // JS-side wire format. Matches `workspaceEntrySchema` in the SDK.
+        to_js(&serde_json::json!({ "workspaces": entries }))
     }
 
     /// Add a member to a workspace. Resolves both the keyring's group key
@@ -258,10 +265,7 @@ impl WasmOpakeHandle {
             .add_workspace_member(keyring_uri, &ws.key, member_did, role)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
     #[wasm_bindgen(js_name = leaveWorkspace)]
@@ -304,9 +308,7 @@ impl WasmOpakeHandle {
 
     /// Update workspace metadata (name, description, icon). Resolves the
     /// keyring + group key internally so the key never crosses the WASM/JS
-    /// boundary.
-    ///
-    /// Owner: applies directly. Non-owner: creates a keyringUpdate proposal.
+    /// boundary. Writes a keyring supersede on the caller's PDS.
     #[wasm_bindgen(js_name = updateWorkspaceMetadata)]
     pub async fn update_workspace_metadata(
         &self,
@@ -330,13 +332,11 @@ impl WasmOpakeHandle {
             )
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
-    /// Update a workspace member's role.
+    /// Update a workspace member's role. Writes a keyring supersede on the
+    /// caller's PDS — manager-authority required at the indexer.
     #[wasm_bindgen(js_name = updateMemberRole)]
     pub async fn update_member_role(
         &self,
@@ -350,10 +350,7 @@ impl WasmOpakeHandle {
             .update_member_role(keyring_uri, member_did, role)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
     /// Download and decrypt a file using a grant (cross-PDS, recipient side).
@@ -607,23 +604,12 @@ impl WasmOpakeHandle {
         opake.publish_public_key().await.map_err(wasm_err)
     }
 
-    /// Fetch workspace documents from the Indexer.
-    #[wasm_bindgen(js_name = listWorkspaceDocuments)]
-    pub async fn list_workspace_documents(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
+    /// Discover workspaces the user is a member of (across all PDSes).
+    #[wasm_bindgen(js_name = discoverMemberWorkspaces)]
+    pub async fn discover_member_workspaces(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let docs = opake
-            .list_workspace_documents(keyring_uri)
-            .await
-            .map_err(wasm_err)?;
-        to_js(&docs)
-    }
-
-    /// Discover keyrings the user is a member of (across all PDSes).
-    #[wasm_bindgen(js_name = discoverMemberKeyrings)]
-    pub async fn discover_member_keyrings(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let keyrings = opake.discover_member_keyrings().await.map_err(wasm_err)?;
-        to_js(&keyrings)
+        let workspaces = opake.discover_member_workspaces().await.map_err(wasm_err)?;
+        to_js(&workspaces)
     }
 
     /// Request a short-lived SSE token from the Indexer.
@@ -644,11 +630,14 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listInbox)]
     pub async fn list_inbox(&self) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
+        let my_did = opake.did().to_string();
         let grants = opake.list_inbox().await.map_err(wasm_err)?;
         drop(opake);
 
-        let entries: Vec<opake_core::indexer::inbox_keeper::InboxEntry> =
-            grants.iter().map(ik::entry_from_indexer_grant).collect();
+        let entries: Vec<opake_core::indexer::inbox_keeper::InboxEntry> = grants
+            .iter()
+            .filter_map(|envelope| ik::try_build_entry_from_envelope(envelope, &my_did))
+            .collect();
 
         {
             let mut keeper = self.inbox_keeper.lock().await;

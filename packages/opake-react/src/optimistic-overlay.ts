@@ -1,16 +1,20 @@
 // Per-scope optimistic overlay for directory-tree mutations.
 //
 // useDirectory subscribes to FileManager.watchDirectory for the base
-// snapshot, which updates when SSE events arrive. That delivery has a
-// ~1s PDS-write-to-SSE-echo latency, during which a user's mutation
-// has already succeeded on the server but the local UI still shows
-// the pre-mutation tree. This overlay bridges that gap: mutation hooks
-// push a patch (delete this entry, insert this placeholder) on
-// onMutate, and useDirectory applies the patch onto the base snapshot
-// at render time. The patch is released ~2s after the mutation settles
-// so the SSE echo has time to update the base — after which the patch
-// would be redundant at best and a double-display at worst (for
-// non-idempotent patches like uploads).
+// snapshot, which updates when SSE events arrive. The overlay bridges
+// the in-flight window: mutation hooks push a patch (delete this entry,
+// insert this placeholder) on onMutate, and useDirectory applies the
+// patch onto the base snapshot at render time. The patch is released
+// on onSettled so the SSE echo can refresh the base snapshot without
+// duplicating entries (an upload patch held past the echo would show
+// the same file twice).
+//
+// Federation: writes commit synchronously inside the SDK call, so
+// onSettled implies the cascade is on the writer's PDS. The SSE echo
+// for the matching directory:upsert typically arrives within ~1s; the
+// brief window between release and echo is acceptable. Chain-fork
+// retry (see use-tree-mutation.ts) re-runs the cascade if the indexer
+// detected a concurrent supersede racing this one.
 //
 // Scope keys are (keyringUri | "cabinet"). All patches for a scope
 // compose as a left-fold; order of application matches order of apply().

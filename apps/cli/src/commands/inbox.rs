@@ -21,7 +21,7 @@ pub struct InboxCommand {
 fn format_short(grants: &[InboxGrant]) -> String {
     grants
         .iter()
-        .map(|g| format!("{}\t{}", g.owner_did, g.uri))
+        .map(|g| format!("{}\t{}", g.author_did, g.uri))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -32,7 +32,7 @@ fn format_long(grants: &[InboxGrant]) -> String {
         .map(|g| {
             format!(
                 "  {}  {}\n           doc: {}\n           grant: {}",
-                g.created_at, g.owner_did, g.document_uri, g.uri,
+                g.created_at, g.author_did, g.document_uri, g.uri,
             )
         })
         .collect::<Vec<_>>()
@@ -73,11 +73,11 @@ impl Execute for InboxCommand {
 mod tests {
     use super::*;
 
-    fn grant(owner: &str, doc_suffix: &str) -> InboxGrant {
+    fn grant(author: &str, doc_suffix: &str) -> InboxGrant {
         InboxGrant {
-            uri: "at://did:plc:owner/app.opake.grant/g1".into(),
-            owner_did: owner.into(),
-            document_uri: format!("at://did:plc:owner/app.opake.document/{doc_suffix}"),
+            uri: "at://did:plc:author/app.opake.grant/g1".into(),
+            author_did: author.into(),
+            document_uri: format!("at://did:plc:author/app.opake.document/{doc_suffix}"),
             created_at: "2026-03-01T12:00:00Z".into(),
         }
     }

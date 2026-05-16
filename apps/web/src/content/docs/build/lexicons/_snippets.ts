@@ -92,26 +92,3 @@ export const keyringRecordShape = `{
   "encryptedMetadata": { /* name, description, icon */ },
   "createdAt": "2026-04-20T15:00:00Z"
 }`;
-
-export const documentUpdateShape = `{
-  "$type": "app.opake.documentUpdate",
-  "opakeVersion": 1,
-  "target": "at://did:plc:owner/app.opake.document/xyz789",
-  "keyring": "at://did:plc:owner/app.opake.keyring/abc123",
-  "actionType": "replaceContent",      // or "replaceMetadata"
-  "newBlob": { /* blob ref */ },
-  "newNonce": "<bytes>",
-  "encryptedMetadata": { /* optional */ },
-  "createdAt": "2026-04-24T10:10:00Z"
-}`;
-
-export const directoryUpdateShape = `{
-  "$type": "app.opake.directoryUpdate",
-  "opakeVersion": 1,
-  "keyring": "at://did:plc:owner/app.opake.keyring/abc123",
-  "actionType": "move",                // or "create" / "rename" / "delete" / "placement"
-  "target": "at://did:plc:owner/app.opake.directory/old-parent",
-  "entry": "at://did:plc:owner/app.opake.document/xyz789",
-  "newParent": "at://did:plc:owner/app.opake.directory/new-parent",
-  "createdAt": "2026-04-24T10:15:00Z"
-}`;

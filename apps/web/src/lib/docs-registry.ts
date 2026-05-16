@@ -175,7 +175,7 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
     title: "Workspaces",
     icon: "group",
     description:
-      "Create, list, and manage shared encrypted folders. Membership roles, key rotation, and the proposal model.",
+      "Create, list, and manage shared encrypted folders. Membership roles, key rotation, and the federation chain model.",
   },
   {
     slug: "events",

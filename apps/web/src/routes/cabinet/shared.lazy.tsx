@@ -79,7 +79,7 @@ function SharedWithMePage() {
       const metaResults = await Promise.allSettled(
         batch.map((g) => getOpake().resolveGrantMetadata(g.uri)),
       );
-      const ownerDids = [...new Set(batch.map((g) => g.ownerDid).filter((d) => !handleByDid[d]))];
+      const ownerDids = [...new Set(batch.map((g) => g.authorDid).filter((d) => !handleByDid[d]))];
       const ownerResults = await Promise.allSettled(
         ownerDids.map((did) => getOpake().resolveIdentity(did)),
       );
@@ -143,7 +143,7 @@ function SharedWithMePage() {
     if (isLoading) return [];
     return grants.map((grant) => {
       const metadata = metadataByUri[grant.uri] ?? null;
-      const ownerHandle = handleByDid[grant.ownerDid] ?? null;
+      const ownerHandle = handleByDid[grant.authorDid] ?? null;
       const err = failedByUri[grant.uri];
       if (metadata) return { grant, metadata, ownerHandle, status: "resolved" as const };
       if (err) return { grant, metadata: null, ownerHandle, status: "error" as const, error: err };
@@ -228,7 +228,7 @@ interface SharedRowProps {
 function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps) {
   const { grant, metadata, ownerHandle, status, error } = entry;
   const displayName = metadata?.name ?? "Encrypted file";
-  const ownerLabel = ownerHandle ? `@${ownerHandle}` : grant.ownerDid;
+  const ownerLabel = ownerHandle ? `@${ownerHandle}` : grant.authorDid;
 
   return (
     <li className="border-base-300/40 hover:bg-base-200/40 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 transition-colors">

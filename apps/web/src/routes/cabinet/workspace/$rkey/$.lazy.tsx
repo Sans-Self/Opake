@@ -6,7 +6,7 @@ import { rkeyFromUri } from "@/lib/atUri";
 function WorkspaceFiles() {
   const { rkey, _splat } = Route.useParams();
   const { data: workspaces } = useWorkspaces();
-  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
+  const workspace = workspaces.find((w) => rkeyFromUri(w.workspaceId) === rkey);
 
   if (!workspace) {
     return (
@@ -22,7 +22,7 @@ function WorkspaceFiles() {
     <FileView
       rootLabel={workspace.name || "Workspace"}
       pathSegments={segments}
-      context={{ kind: "workspace", keyringUri: workspace.uri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri }}
       basePath={`/cabinet/workspace/${rkey}`}
     />
   );

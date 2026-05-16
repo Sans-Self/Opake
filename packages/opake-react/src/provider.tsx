@@ -19,13 +19,15 @@
 
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Opake } from "@opake/sdk";
+import type { ChainForkWatcher, Opake } from "@opake/sdk";
+import { ChainForkBus } from "./chain-fork-bus";
 import { FileManagerCache } from "./file-manager-cache";
 import { OptimisticOverlay } from "./optimistic-overlay";
 
 const OpakeContext = createContext<Opake | null>(null);
 const FileManagerCacheContext = createContext<FileManagerCache | null>(null);
 const OptimisticOverlayContext = createContext<OptimisticOverlay | null>(null);
+const ChainForkBusContext = createContext<ChainForkBus | null>(null);
 
 /**
  * Access the Opake instance from context.
@@ -73,6 +75,20 @@ export function useOptimisticOverlay(): OptimisticOverlay {
     throw new Error("useOptimisticOverlay must be used within an OpakeProvider");
   }
   return overlay;
+}
+
+/**
+ * Access the shared ChainForkBus. Internal — consumed by
+ * `useTreeMutation` to register chain-fork-retry handlers.
+ *
+ * @internal
+ */
+export function useChainForkBus(): ChainForkBus {
+  const bus = useContext(ChainForkBusContext);
+  if (!bus) {
+    throw new Error("useChainForkBus must be used within an OpakeProvider");
+  }
+  return bus;
 }
 
 interface OpakeProviderProps {
@@ -143,6 +159,11 @@ export function OpakeProvider({
   // previous identity don't project onto the next user's trees.
   const overlay = useMemo(() => new OptimisticOverlay(), [opake]);
 
+  // Chain-fork bus has the same lifetime: a fresh Opake means a fresh
+  // bus so retry handlers registered for the previous identity stop
+  // firing when the new SSE stream is connected.
+  const bus = useMemo(() => new ChainForkBus(), [opake]);
+
   // Dispose cached FileManagers when the cache is replaced or the
   // provider unmounts.
   useEffect(() => {
@@ -180,11 +201,25 @@ export function OpakeProvider({
     };
   }, [opake, disableSseAutoStart]);
 
+  // Bridge chain-fork events from the SDK watcher into the React bus.
+  // One subscription per provider lifetime, fans out to every interested
+  // mutation hook. Independent of the SSE consumer lifecycle effect: a
+  // detached subscription would no-op gracefully if the consumer's
+  // stopped, and re-fire as soon as it's restarted.
+  useEffect(() => {
+    const watcher: ChainForkWatcher = opake.watchChainForks((event) => {
+      bus.dispatch(event);
+    });
+    return () => watcher.close();
+  }, [opake, bus]);
+
   return (
     <QueryClientProvider client={activeClient}>
       <OpakeContext value={opake}>
         <FileManagerCacheContext value={cache}>
-          <OptimisticOverlayContext value={overlay}>{children}</OptimisticOverlayContext>
+          <OptimisticOverlayContext value={overlay}>
+            <ChainForkBusContext value={bus}>{children}</ChainForkBusContext>
+          </OptimisticOverlayContext>
         </FileManagerCacheContext>
       </OpakeContext>
     </QueryClientProvider>

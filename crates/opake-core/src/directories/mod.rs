@@ -26,7 +26,7 @@ pub(crate) use chain::fetch_with_cache;
 pub use create::create_directory;
 pub(crate) use delete::delete_directory;
 pub(crate) use entries::{add_entry, prepare_add_entry, prepare_remove_entry};
-pub(crate) use get_or_create_root::{get_or_create_root, get_or_create_workspace_root};
+pub(crate) use get_or_create_root::get_or_create_root;
 pub use move_entry::{check_cycle, move_entry, MoveResult};
 pub use remove::{remove, RemoveResult};
 pub use tree::{
@@ -36,26 +36,14 @@ pub use tree::{
 pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";
 pub const ROOT_DIRECTORY_NAME: &str = "/";
-pub const WORKSPACE_ROOT_RKEY_PREFIX: &str = "ws-";
 
-/// AT-URI for a DID's root directory (`at://{did}/app.opake.directory/self`).
+/// AT-URI for a DID's cabinet root directory (`at://{did}/app.opake.directory/self`).
+///
+/// Cabinet roots use the atproto singleton-rkey convention because the cabinet
+/// is single-writer and has no chain. Workspace roots are TID-rkeyed and
+/// discovered via the indexer's `chain_heads` table.
 pub fn root_directory_uri(did: &str) -> String {
     format!("at://{did}/{DIRECTORY_COLLECTION}/{ROOT_DIRECTORY_RKEY}")
-}
-
-/// Deterministic rkey for a workspace's root directory.
-///
-/// Derived from the keyring AT-URI: `ws-{keyring_rkey}`. This allows
-/// idempotent `put_record` for workspace root creation.
-pub(crate) fn workspace_root_rkey(keyring_uri: &str) -> String {
-    let rkey = keyring_uri.rsplit('/').next().unwrap_or("unknown");
-    format!("{WORKSPACE_ROOT_RKEY_PREFIX}{rkey}")
-}
-
-/// AT-URI for a workspace's root directory on the owner's PDS.
-pub fn workspace_root_directory_uri(did: &str, keyring_uri: &str) -> String {
-    let rkey = workspace_root_rkey(keyring_uri);
-    format!("at://{did}/{DIRECTORY_COLLECTION}/{rkey}")
 }
 
 /// Build a direct key wrapping envelope for a directory.
@@ -318,31 +306,6 @@ pub(crate) mod tests {
             headers: vec![],
             body: br#"{"error":"RecordNotFound","message":"no such record"}"#.to_vec(),
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // workspace_root_rkey
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn workspace_root_rkey_deterministic() {
-        let uri = "at://did:plc:owner/app.opake.keyring/3lf2a4k2brs2s";
-        assert_eq!(workspace_root_rkey(uri), "ws-3lf2a4k2brs2s");
-    }
-
-    #[test]
-    fn workspace_root_rkey_stable_across_calls() {
-        let uri = "at://did:plc:owner/app.opake.keyring/abc123";
-        assert_eq!(workspace_root_rkey(uri), workspace_root_rkey(uri));
-    }
-
-    #[test]
-    fn workspace_root_directory_uri_format() {
-        let uri = workspace_root_directory_uri(
-            "did:plc:owner",
-            "at://did:plc:owner/app.opake.keyring/abc123",
-        );
-        assert_eq!(uri, "at://did:plc:owner/app.opake.directory/ws-abc123");
     }
 
     // -----------------------------------------------------------------------

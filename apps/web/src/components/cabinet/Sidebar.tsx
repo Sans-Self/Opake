@@ -66,7 +66,7 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
           )}
         </div>
         {workspaceEntries.map((ws) => {
-          const wsRkey = rkeyFromUri(ws.uri);
+          const wsRkey = rkeyFromUri(ws.workspaceId);
           const active = Boolean(
             matchRoute({ to: "/cabinet/workspace/$rkey", params: { rkey: wsRkey }, fuzzy: true }),
           );
@@ -74,7 +74,7 @@ export function Sidebar({ onNavigate, onCreateWorkspace }: SidebarProps) {
 
           return (
             <Link
-              key={ws.uri}
+              key={ws.workspaceId}
               to="/cabinet/workspace/$rkey"
               params={{ rkey: wsRkey }}
               onClick={onNavigate}

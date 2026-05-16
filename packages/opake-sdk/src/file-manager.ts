@@ -68,8 +68,6 @@ type WasmFileManager = {
     permissions: string,
     note: string | null,
   ): Promise<string>;
-  syncAndApplyProposals(): Promise<number>;
-  isOwner(): boolean;
   watchDirectory(
     directoryUri: string,
     callback: (snapshot: unknown) => void,
@@ -563,30 +561,6 @@ export class FileManager {
     note: string | null,
   ): Promise<string> {
     return this.requireHandle().createPendingShare(documentUri, recipient, permissions, note);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Proposals
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Whether this FileManager's context is the owner of the workspace/cabinet.
-   *
-   * Owners apply mutations directly. Non-owners create proposals.
-   */
-  @wrapWasmErrors
-  isOwner(): boolean {
-    return this.requireHandle().isOwner();
-  }
-
-  /**
-   * Sync and apply pending proposals from workspace members.
-   *
-   * Only meaningful for workspace owners. Returns the number of proposals applied.
-   */
-  @wrapWasmErrors
-  syncAndApplyProposals(): Promise<number> {
-    return this.requireHandle().syncAndApplyProposals();
   }
 
   // ---------------------------------------------------------------------------

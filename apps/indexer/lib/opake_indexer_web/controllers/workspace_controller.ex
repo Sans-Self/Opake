@@ -6,25 +6,14 @@ defmodule OpakeIndexerWeb.WorkspaceController do
 
   ## Endpoints
 
-    * `GET /workspace` — flat document list (legacy)
-    * `GET /workspace/snapshot` — full tree
-    * `GET /workspace/sync?since=<iso8601>` — delta tree since a timestamp
-    * `GET /workspace/chain-head` — current keyring + root directory chain heads
-
-  Federation-era: there are no `*-updates` endpoints. Member mutations
-  route through curatorial supersedes on the same record types; the
-  current head pointers live in `keyring_chains` and `workspace_roots`.
+    * `GET /workspace/snapshot` — full tree (directories + documents)
+    * `GET /workspace/sync?since=<iso8601>` — delta tree since timestamp
+    * `GET /workspace/chain-head` — current keyring + workspace-root heads
   """
 
   use OpakeIndexerWeb, :controller
 
-  alias OpakeIndexer.Queries.{
-    DirectoryQueries,
-    DocumentQueries,
-    KeyringChainQueries,
-    KeyringQueries,
-    WorkspaceRootQueries
-  }
+  alias OpakeIndexer.Queries.{ChainHeadQueries, RecordQueries}
 
   import OpakeIndexerWeb.TreeHelpers
 
@@ -34,7 +23,7 @@ defmodule OpakeIndexerWeb.WorkspaceController do
 
     with {:ok, workspace_id} <- require_workspace_id(params),
          :ok <- check_membership(workspace_id, did) do
-      {directories, documents} = DirectoryQueries.workspace_tree(workspace_id)
+      {directories, documents} = RecordQueries.workspace_tree(workspace_id)
       server_time = DateTime.utc_now()
 
       json(
@@ -58,8 +47,7 @@ defmodule OpakeIndexerWeb.WorkspaceController do
     with {:ok, workspace_id} <- require_workspace_id(params),
          :ok <- check_membership(workspace_id, did),
          {:ok, since} <- parse_since(params) do
-      {directories, documents} =
-        DirectoryQueries.workspace_changes_since(workspace_id, since)
+      {directories, documents} = RecordQueries.workspace_changes_since(workspace_id, since)
 
       server_time = DateTime.utc_now()
 
@@ -77,41 +65,10 @@ defmodule OpakeIndexerWeb.WorkspaceController do
     end
   end
 
-  @spec documents(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def documents(conn, params) do
-    did = conn.assigns.authenticated_did
-
-    with {:ok, workspace_id} <- require_workspace_id(params),
-         :ok <- check_membership(workspace_id, did) do
-      docs = DocumentQueries.list_documents(workspace_id)
-
-      response = %{
-        documents:
-          Enum.map(docs, fn d ->
-            %{
-              uri: d.uri,
-              workspace_id: d.workspace_id,
-              author_did: d.author_did,
-              rotation: d.rotation,
-              indexed_at: DateTime.to_iso8601(d.indexed_at)
-            }
-          end)
-      }
-
-      json(conn, response)
-    else
-      {:error, status, message} ->
-        conn |> put_status(status) |> json(%{error: message})
-
-      {:error, message} ->
-        conn |> put_status(400) |> json(%{error: message})
-    end
-  end
-
   @doc """
   Return the workspace's current chain head pointers (keyring + root
-  directory). Used by clients writing supersedes to find what URI to
-  point `supersedes` at.
+  directory). Clients use this to discover what URI to point `supersedes`
+  at when writing the next mutation.
   """
   @spec chain_head(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def chain_head(conn, params) do
@@ -119,8 +76,8 @@ defmodule OpakeIndexerWeb.WorkspaceController do
 
     with {:ok, workspace_id} <- require_workspace_id(params),
          :ok <- check_membership(workspace_id, did) do
-      keyring = KeyringChainQueries.get(workspace_id)
-      root = WorkspaceRootQueries.get(workspace_id)
+      keyring = ChainHeadQueries.get(workspace_id, "keyring")
+      root = ChainHeadQueries.get(workspace_id, "workspace_root")
 
       json(conn, %{
         workspace_id: workspace_id,
@@ -136,7 +93,7 @@ defmodule OpakeIndexerWeb.WorkspaceController do
     end
   end
 
-  # -- Helpers --
+  # -- Helpers --------------------------------------------------------
 
   @spec require_workspace_id(map()) :: {:ok, String.t()} | {:error, String.t()}
   defp require_workspace_id(%{"workspace_id" => id})
@@ -153,7 +110,7 @@ defmodule OpakeIndexerWeb.WorkspaceController do
 
   @spec check_membership(String.t(), String.t()) :: :ok | {:error, non_neg_integer(), String.t()}
   defp check_membership(workspace_id, did) do
-    if KeyringQueries.is_member?(workspace_id, did) do
+    if RecordQueries.is_member?(workspace_id, did) do
       :ok
     else
       {:error, 403, "not a member of this workspace"}

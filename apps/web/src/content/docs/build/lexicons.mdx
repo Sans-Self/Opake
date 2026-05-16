@@ -6,8 +6,6 @@ import {
   documentRecordShape,
   grantRecordShape,
   keyringRecordShape,
-  documentUpdateShape,
-  directoryUpdateShape,
 } from "./lexicons/_snippets";
 
 <ChapterHeader title="Lexicon reference" />
@@ -31,9 +29,6 @@ import {
 | `app.opake.grant` | record | One-to-one share grant |
 | `app.opake.keyring` | record | Workspace (named group with a shared symmetric key) |
 | `app.opake.pendingShare` | record | Queued share waiting for recipient to publish their key |
-| `app.opake.documentUpdate` | record | Proposed content or metadata change to another member's document |
-| `app.opake.directoryUpdate` | record | Proposed structural change to a workspace directory |
-| `app.opake.keyringUpdate` | record | Proposed membership / role / metadata change to a keyring |
 | `app.opake.invitation` | record | Workspace invitation with token and role |
 | `app.opake.invitationAcceptance` | record | Acceptance of a workspace invitation |
 | `app.opake.pairRequest` | record | New-device identity-transfer request |
@@ -133,27 +128,6 @@ Per-document content keys and blobs aren't touched. The removed member could sti
 decrypt anything uploaded under a prior rotation with a cached copy of the old group
 key — "no revocation guarantee for historical access" is called out up front; apps
 that need forward-secret removal must re-upload documents after rotation.
-
-### `app.opake.documentUpdate`
-
-<CodeBlock language="json" title="documentUpdate" code={documentUpdateShape} />
-
-Workspace proposals. When a member who isn't the owner wants to update a document,
-they write this record to their own PDS. The indexer sees it via firehose, validates
-the proposer's role against the target keyring, and surfaces it for the owner to
-apply. Once the owner applies (writing the updated document to their own PDS), the
-proposal record is deleted from the member's PDS.
-
-`actionType` distinguishes `replaceContent` (new blob + nonce) from `replaceMetadata`
-(only the encrypted metadata envelope changed).
-
-### `app.opake.directoryUpdate`
-
-<CodeBlock language="json" title="directoryUpdate" code={directoryUpdateShape} />
-
-Same pattern as `documentUpdate` but for structural changes — move entries between
-directories, rename, create, delete. The indexer validates, the owner applies,
-proposal gets cleaned up.
 
 ## Indexing
 

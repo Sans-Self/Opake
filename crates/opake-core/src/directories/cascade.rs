@@ -77,6 +77,11 @@ pub struct AncestorLevel {
     /// Initial entries before child-pointer patching. Typically a copy
     /// of the prior head's entries; the walker patches in place.
     pub entries: Vec<ListingEntry>,
+    /// True iff this level is part of the workspace-root chain. For a
+    /// deep cascade, that's the topmost ancestor only. Stamped onto the
+    /// new `Directory` record so the indexer can recognise the root
+    /// chain without rkey heuristics.
+    pub is_workspace_root: bool,
 }
 
 /// The deepest level — its `entries` carry the caller's final intent
@@ -86,6 +91,10 @@ pub struct AncestorLevel {
 pub struct LeafLevel {
     pub mode: LevelMode,
     pub entries: Vec<ListingEntry>,
+    /// True iff this level is part of the workspace-root chain. True
+    /// when the cascade only touches the root (RootGenesis or
+    /// RootSupersede in `upload_workspace::UploadTarget`).
+    pub is_workspace_root: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -143,8 +152,15 @@ pub async fn execute_cascade<T: Transport>(
 
     // Leaf first — no child to thread, entries are exactly as supplied.
     trace!("cascade leaf (depth from leaf: 0)");
-    let leaf_head =
-        write_level(client, workspace_id, leaf.mode, leaf.entries, modified_at).await?;
+    let leaf_head = write_level(
+        client,
+        workspace_id,
+        leaf.mode,
+        leaf.entries,
+        leaf.is_workspace_root,
+        modified_at,
+    )
+    .await?;
     let leaf_uri = leaf_head.new_head.uri.clone();
     let leaf_cid = leaf_head.new_head.cid.clone();
     steps.push(leaf_head);
@@ -157,7 +173,15 @@ pub async fn execute_cascade<T: Transport>(
         trace!("cascade ancestor {depth_from_root} (depth from leaf: {depth_from_leaf})");
 
         let entries = patch_child_pointer(ancestor.entries, &ancestor.linkage, &child_link)?;
-        let step = write_level(client, workspace_id, ancestor.mode, entries, modified_at).await?;
+        let step = write_level(
+            client,
+            workspace_id,
+            ancestor.mode,
+            entries,
+            ancestor.is_workspace_root,
+            modified_at,
+        )
+        .await?;
         child_link = (step.new_head.uri.clone(), step.new_head.cid.clone());
         steps.push(step);
     }
@@ -170,6 +194,7 @@ async fn write_level<T: Transport>(
     workspace_id: &str,
     mode: LevelMode,
     entries: Vec<ListingEntry>,
+    is_workspace_root: bool,
     modified_at: &str,
 ) -> Result<CascadeStep, Error> {
     let (key_wrapping, encrypted_metadata, supersedes, rkey) = unpack_mode(mode);
@@ -181,6 +206,7 @@ async fn write_level<T: Transport>(
         entries,
         supersedes: supersedes.clone(),
         workspace_id: Some(workspace_id.to_owned()),
+        is_workspace_root,
         created_at: modified_at.to_owned(),
         modified_at: Some(modified_at.to_owned()),
     };
@@ -281,7 +307,11 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
         );
     }
 
-    // Leaf — last element of the chain.
+    // Leaf — last element of the chain. Inherits `is_workspace_root` from
+    // the prior record so the indexer's "never flip" check passes. In
+    // practice the leaf is workspace-root only when the cascade has zero
+    // ancestors (root-only supersede); deep cascades have a subdirectory
+    // leaf.
     let leaf_node = records.pop().expect("non-empty chain");
     let leaf = LeafLevel {
         mode: LevelMode::Supersede {
@@ -290,6 +320,7 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
             encrypted_metadata: leaf_node.record.encrypted_metadata,
         },
         entries: new_leaf_entries,
+        is_workspace_root: leaf_node.record.is_workspace_root,
     };
 
     // Ancestors — root → second-to-leaf. Each links to the URI of the
@@ -319,6 +350,10 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
                 prior_child_uri: child_uri,
             },
             entries: ancestor_node.record.entries,
+            // Inherit so the indexer's "never flip" invariant holds across
+            // the supersede. The topmost ancestor in a deep cascade is the
+            // workspace root.
+            is_workspace_root: ancestor_node.record.is_workspace_root,
         });
     }
 

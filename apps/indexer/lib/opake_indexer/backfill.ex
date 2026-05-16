@@ -25,8 +25,11 @@ defmodule OpakeIndexer.Backfill do
 
   require Logger
 
+  import Ecto.Query
+
   alias OpakeIndexer.Firehose
-  alias OpakeIndexer.Queries.KeyringQueries
+  alias OpakeIndexer.Repo
+  alias OpakeIndexer.Schemas.Record, as: RecordSchema
 
   @keyring_collection "app.opake.keyring"
   @directory_collection "app.opake.directory"
@@ -77,7 +80,7 @@ defmodule OpakeIndexer.Backfill do
 
   @spec backfill_known_dids() :: :ok
   def backfill_known_dids do
-    dids = KeyringQueries.all_member_dids()
+    dids = all_known_dids()
     Logger.info("[Backfill] #{length(dids)} known DID(s)")
 
     Enum.each(dids, fn did ->
@@ -86,6 +89,12 @@ defmodule OpakeIndexer.Backfill do
         {:error, reason} -> Logger.warning("[Backfill] failed for #{did}: #{inspect(reason)}")
       end
     end)
+  end
+
+  # Pulls every DID we've ever indexed a record for. Useful for ops-level
+  # "rebuild from PDSes" flows; not on any hot path.
+  defp all_known_dids do
+    Repo.all(from(r in RecordSchema, select: r.author_did, distinct: true))
   end
 
   # -- Per-collection backfill --

@@ -19,6 +19,9 @@ use std::time::Duration;
 
 use futures_util::lock::Mutex;
 use opake_core::directories::DirectoryTree;
+use opake_core::indexer::chain_fork_keeper::{
+    ChainForkKeeper, ChainForkWatcherCallback, ChainForkWatcherHandle,
+};
 use opake_core::indexer::inbox_keeper::{
     self as ik, InboxKeeper, InboxSnapshot, InboxWatcherCallback, InboxWatcherHandle,
 };
@@ -112,6 +115,30 @@ impl WasmInboxWatcher {
 }
 
 // ---------------------------------------------------------------------------
+// WasmChainForkWatcher — returned by watchChainForks, exposes close()
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen(js_name = ChainForkWatcher)]
+pub struct WasmChainForkWatcher {
+    chain_fork_keeper: Rc<Mutex<ChainForkKeeper>>,
+    handle: ChainForkWatcherHandle,
+    closed: Rc<std::cell::Cell<bool>>,
+}
+
+#[wasm_bindgen(js_class = ChainForkWatcher)]
+impl WasmChainForkWatcher {
+    /// Stop receiving notifications. Idempotent.
+    pub async fn close(&self) {
+        if self.closed.get() {
+            return;
+        }
+        self.closed.set(true);
+        let mut keeper = self.chain_fork_keeper.lock().await;
+        keeper.unwatch(self.handle);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WasmOpakeHandle::watchWorkspaces
 // ---------------------------------------------------------------------------
 
@@ -170,6 +197,31 @@ impl WasmOpakeHandle {
         let handle = keeper.install_watcher(cb);
         Ok(WasmInboxWatcher {
             inbox_keeper: Rc::clone(&self.inbox_keeper),
+            handle,
+            closed: Rc::new(std::cell::Cell::new(false)),
+        })
+    }
+
+    /// Subscribe to `chain:forked` SSE events.
+    ///
+    /// Unlike `watchWorkspaces` / `watchInbox`, this watcher receives
+    /// transient signal events — there's no replay of "current state" on
+    /// install (forks have no persistent state to project). The callback
+    /// fires once per `chain:forked` event the consumer observes, with
+    /// the full event payload shape from `SseChainForked`.
+    ///
+    /// React's `useTreeMutation` consumes this to retry mutations that
+    /// raced with a concurrent supersede.
+    #[wasm_bindgen(js_name = watchChainForks)]
+    pub async fn watch_chain_forks(
+        &self,
+        callback: js_sys::Function,
+    ) -> Result<WasmChainForkWatcher, JsError> {
+        let cb = js_chain_fork_watcher_callback(callback);
+        let mut keeper = self.chain_fork_keeper.lock().await;
+        let handle = keeper.install_watcher(cb);
+        Ok(WasmChainForkWatcher {
+            chain_fork_keeper: Rc::clone(&self.chain_fork_keeper),
             handle,
             closed: Rc::new(std::cell::Cell::new(false)),
         })
@@ -346,6 +398,7 @@ impl WasmOpakeHandle {
         let tree_keeper_rc = Rc::clone(&self.tree_keeper);
         let workspace_keeper_rc = Rc::clone(&self.workspace_keeper);
         let inbox_keeper_rc = Rc::clone(&self.inbox_keeper);
+        let chain_fork_keeper_rc = Rc::clone(&self.chain_fork_keeper);
         let started_flag = Rc::clone(&self.sse_started);
 
         let token_fetcher = make_token_fetcher(Rc::clone(&opake_rc), resolved_url.clone());
@@ -416,9 +469,16 @@ impl WasmOpakeHandle {
                 apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &started_flag, &event)
                     .await;
 
-                // Federation rewrite: editor proposal-cleanup heuristic
-                // is gone. Chain-fork retry replaces it; that dispatch
-                // lands with the cascade-aware SDK migration.
+                // Chain-fork dispatch: fan out to any registered
+                // mutation-retry subscribers. The keeper holds no state,
+                // so each event is purely transient.
+                if let SseEvent::ChainForked(ref fork) = event {
+                    let mut keeper = chain_fork_keeper_rc.lock().await;
+                    if !started_flag.get() {
+                        break;
+                    }
+                    keeper.dispatch(fork);
+                }
             }
             // Task exited — clear the flag in case we broke on a
             // transport error rather than an explicit stop, so a
@@ -458,6 +518,7 @@ impl WasmOpakeHandle {
         let tree_keeper = Rc::clone(&self.tree_keeper);
         let workspace_keeper = Rc::clone(&self.workspace_keeper);
         let inbox_keeper = Rc::clone(&self.inbox_keeper);
+        let chain_fork_keeper = Rc::clone(&self.chain_fork_keeper);
         wasm_bindgen_futures::spawn_local(async move {
             let mut tk = tree_keeper.lock().await;
             tk.uninstall_all();
@@ -467,8 +528,11 @@ impl WasmOpakeHandle {
             drop(wk);
             let mut ik = inbox_keeper.lock().await;
             ik.uninstall_all();
+            drop(ik);
+            let mut cfk = chain_fork_keeper.lock().await;
+            cfk.uninstall_all();
             log::debug!(
-                "[sse] tree_keeper + workspace_keeper + inbox_keeper drained on wipeState"
+                "[sse] tree_keeper + workspace_keeper + inbox_keeper + chain_fork_keeper drained on wipeState"
             );
         });
     }
@@ -542,8 +606,7 @@ async fn apply_keyring_to_workspace_keeper(
     event: &SseEvent,
 ) {
     match event {
-        SseEvent::KeyringUpsert(record) => {
-            // Build the entry under the opake lock only.
+        SseEvent::KeyringUpsert(envelope) => {
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
@@ -554,22 +617,20 @@ async fn apply_keyring_to_workspace_keeper(
                         return;
                     }
                 };
-                wk::try_build_entry_from_sse_record(record, &did, &private_keys.bundle())
+                wk::try_build_entry(envelope, &did, &private_keys.bundle())
             };
             let mut keeper = workspace_keeper_rc.lock().await;
             if !started_flag.get() {
                 return;
             }
-            keeper.apply_keyring_record(&record.uri, maybe_entry);
+            keeper.apply_keyring_record(&envelope.uri, maybe_entry);
         }
         SseEvent::KeyringDelete(payload) => {
-            if let Some(uri) = payload.best_uri() {
-                let mut keeper = workspace_keeper_rc.lock().await;
-                if !started_flag.get() {
-                    return;
-                }
-                keeper.delete(uri);
+            let mut keeper = workspace_keeper_rc.lock().await;
+            if !started_flag.get() {
+                return;
             }
+            keeper.delete(&payload.uri);
         }
         _ => {}
     }
@@ -586,13 +647,9 @@ async fn apply_grant_to_inbox_keeper(
     event: &SseEvent,
 ) {
     match event {
-        SseEvent::GrantUpsert(record) => {
-            // Fetch the DID under the opake lock, then drop it before
-            // acquiring the keeper lock (matches the workspace keeper
-            // pattern — keeps the opake mutex free for SSE throughput).
+        SseEvent::GrantUpsert(envelope) => {
             let my_did = opake_rc.lock().await.did().to_string();
-            let Some(entry) = ik::try_build_entry_from_sse_record(record, &my_did) else {
-                // Not for us — silently drop.
+            let Some(entry) = ik::try_build_entry_from_envelope(envelope, &my_did) else {
                 return;
             };
             let mut keeper = inbox_keeper_rc.lock().await;
@@ -602,13 +659,11 @@ async fn apply_grant_to_inbox_keeper(
             keeper.upsert(entry);
         }
         SseEvent::GrantDelete(payload) => {
-            if let Some(uri) = payload.best_uri() {
-                let mut keeper = inbox_keeper_rc.lock().await;
-                if !started_flag.get() {
-                    return;
-                }
-                keeper.delete(uri);
+            let mut keeper = inbox_keeper_rc.lock().await;
+            if !started_flag.get() {
+                return;
             }
+            keeper.delete(&payload.uri);
         }
         _ => {}
     }
@@ -630,6 +685,27 @@ fn js_inbox_watcher_callback(callback: js_sys::Function) -> InboxWatcherCallback
             log::warn!("[sse] inbox watcher callback threw: {e:?}");
         }
     })
+}
+
+/// Wrap a JS function as a [`ChainForkWatcherCallback`]. The payload is
+/// emitted in snake_case to match how the broadcaster wire format is
+/// surfaced elsewhere — Zod schemas on the JS side reshape to camelCase.
+fn js_chain_fork_watcher_callback(callback: js_sys::Function) -> ChainForkWatcherCallback {
+    Box::new(
+        move |event: &opake_core::indexer::sse::events::SseChainForked| {
+            let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+            let event_js = match event.serialize(&serializer) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("[sse] chain-fork event serialize failed: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = callback.call1(&JsValue::NULL, &event_js) {
+                log::warn!("[sse] chain-fork watcher callback threw: {e:?}");
+            }
+        },
+    )
 }
 
 /// Wrap a JS function as a [`WorkspaceWatcherCallback`] that serializes

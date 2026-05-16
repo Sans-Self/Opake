@@ -61,27 +61,26 @@ pub fn decrypt_keyring_name_from_record(
 ///
 /// Returns `None` if the DID isn't a member, deserialization fails,
 /// unwrapping fails, or metadata decryption fails.
-pub fn decrypt_indexer_keyring_name(
-    keyring: &crate::indexer::IndexerKeyring,
+pub fn decrypt_indexer_workspace_name(
+    envelope: &crate::indexer::types::IndexerEnvelope<crate::records::Keyring>,
     did: &str,
     private_keys: &PrivateKeyBundle<'_>,
 ) -> Option<String> {
-    let members: Vec<crate::records::KeyringMember> = keyring
-        .members
-        .iter()
-        .filter_map(|v| serde_json::from_value(v.clone()).ok())
-        .collect();
-    let member = members.iter().find(|m| m.did() == did)?;
+    let keyring = &envelope.record;
+    let member = keyring.members.iter().find(|m| m.did() == did)?;
     let group_key = crypto::unwrap_key(
         &member.wrapped_key,
         private_keys,
-        &crypto::WrapContext::Keyring { uri: &keyring.uri },
+        // Wrap context is bound to the URI used at wrap time. For an
+        // un-superseded workspace head_uri == workspace_id; after a
+        // supersede the manager re-wraps under the new head URI.
+        &crypto::WrapContext::Keyring {
+            uri: &envelope.uri,
+        },
     )
     .ok()?;
-    let encrypted_metadata: crate::records::EncryptedMetadata =
-        serde_json::from_value(keyring.encrypted_metadata.clone()?).ok()?;
     let metadata: KeyringMetadata =
-        crypto::decrypt_metadata(&group_key, &encrypted_metadata).ok()?;
+        crypto::decrypt_metadata(&group_key, &keyring.encrypted_metadata).ok()?;
     Some(metadata.name)
 }
 
@@ -90,24 +89,24 @@ pub fn decrypt_indexer_keyring_name(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod indexer_keyring_tests {
+mod indexer_workspace_tests {
     use super::*;
     use crate::crypto::{generate_content_key, wrap_key, OsRng};
-    use crate::indexer::IndexerKeyring;
-    use crate::records::KeyringMember;
+    use crate::indexer::types::IndexerEnvelope;
+    use crate::records::{Keyring, KeyringMember};
     use crate::test_utils::TestKeys;
 
-    /// Build an `IndexerKeyring` with real hybrid crypto: a group key wrapped
-    /// to `member`'s public-key bundle and a `KeyringMetadata { name }`
-    /// encrypted under the group key. Returns the keyring plus the caller's
-    /// owned hybrid keys so tests can attempt decryption.
+    /// Build a keyring envelope with real hybrid crypto: a group key
+    /// wrapped to `member`'s public-key bundle and a
+    /// [`KeyringMetadata { name }`] encrypted under the group key.
+    /// `uri` is used as the envelope URI — the test fixtures model a
+    /// genesis-only workspace (no supersedes yet).
     fn fixture(
         name: &str,
-        owner_did: &str,
         member: &TestKeys,
         member_did: &str,
         uri: &str,
-    ) -> IndexerKeyring {
+    ) -> IndexerEnvelope<Keyring> {
         let group_key = generate_content_key(&mut OsRng);
         let wrapped = wrap_key(
             &group_key,
@@ -134,14 +133,22 @@ mod indexer_keyring_tests {
             role: crate::records::Role::Editor,
         };
 
-        IndexerKeyring {
+        IndexerEnvelope {
             uri: uri.into(),
-            owner_did: owner_did.into(),
-            rotation: 0,
-            members: vec![serde_json::to_value(&member_record).unwrap()],
-            encrypted_metadata: Some(serde_json::to_value(&encrypted).unwrap()),
-            created_at: Some("2026-04-14T00:00:00Z".into()),
-            indexed_at: Some("2026-04-14T00:00:00Z".into()),
+            record: Keyring {
+                opake_version: crate::records::SCHEMA_VERSION,
+                algo: "aes-256-gcm".into(),
+                members: vec![member_record],
+                rotation: 0,
+                key_history: Vec::new(),
+                encrypted_metadata: encrypted,
+                supersedes: None,
+                workspace_id: None,
+                created_at: "2026-04-14T00:00:00Z".into(),
+                modified_at: None,
+            },
+            indexed_at: "2026-04-14T00:00:00Z".into(),
+            deleted_at: None,
         }
     }
 
@@ -151,13 +158,12 @@ mod indexer_keyring_tests {
         let member = TestKeys::generate(member_did);
         let keyring = fixture(
             "family-photos",
-            "did:plc:owner",
             &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
+        let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
         assert_eq!(name.as_deref(), Some("family-photos"));
     }
 
@@ -167,7 +173,6 @@ mod indexer_keyring_tests {
         let member = TestKeys::generate(member_did);
         let keyring = fixture(
             "family-photos",
-            "did:plc:owner",
             &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
@@ -176,7 +181,7 @@ mod indexer_keyring_tests {
         // A DID not present in the members list — we use unrelated keys
         // so that even if the DID matched, unwrap_key would fail.
         let stranger = TestKeys::generate("did:plc:stranger");
-        let name = decrypt_indexer_keyring_name(
+        let name = decrypt_indexer_workspace_name(
             &keyring,
             "did:plc:stranger",
             &stranger.private_keys(),
@@ -190,7 +195,6 @@ mod indexer_keyring_tests {
         let member = TestKeys::generate(member_did);
         let keyring = fixture(
             "family-photos",
-            "did:plc:owner",
             &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
@@ -199,7 +203,7 @@ mod indexer_keyring_tests {
         // DID matches a member entry, but we unwrap with the wrong private key
         // — simulates an identity mismatch or corrupted local storage.
         let wrong = TestKeys::generate(member_did);
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &wrong.private_keys());
+        let name = decrypt_indexer_workspace_name(&keyring, member_did, &wrong.private_keys());
         assert!(name.is_none());
     }
 
@@ -209,14 +213,13 @@ mod indexer_keyring_tests {
         let member = TestKeys::generate(member_did);
         let mut keyring = fixture(
             "family-photos",
-            "did:plc:owner",
             &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
         );
         keyring.encrypted_metadata = None;
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
+        let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
         assert!(name.is_none());
     }
 
@@ -226,7 +229,6 @@ mod indexer_keyring_tests {
         let member = TestKeys::generate(member_did);
         let mut keyring = fixture(
             "family-photos",
-            "did:plc:owner",
             &member,
             member_did,
             "at://did:plc:owner/app.opake.keyring/abc",
@@ -236,7 +238,7 @@ mod indexer_keyring_tests {
         // it silently and no member matches the DID.
         keyring.members = vec![serde_json::json!({"garbage": true})];
 
-        let name = decrypt_indexer_keyring_name(&keyring, member_did, &member.private_keys());
+        let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
         assert!(name.is_none());
     }
 }

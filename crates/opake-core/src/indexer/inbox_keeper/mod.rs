@@ -44,7 +44,7 @@ pub struct InboxWatcherHandle(u64);
 #[serde(rename_all = "snake_case")]
 pub struct InboxEntry {
     pub uri: String,
-    pub owner_did: String,
+    pub author_did: String,
     pub document_uri: String,
     pub created_at: String,
 }
@@ -195,41 +195,34 @@ impl Default for InboxKeeper {
 // Entry builder
 // ---------------------------------------------------------------------------
 
-/// Construct an [`InboxEntry`] from an SSE grant record event.
+/// Construct an [`InboxEntry`] from a grant envelope (used by both the SSE
+/// upsert path and HTTP bootstrap). The envelope carries the verbatim PDS
+/// grant record; the URI lives at the envelope level.
 ///
-/// `recipient_did`: the caller's DID — we use it to filter out events
-/// where the caller is NOT the recipient (the broadcaster already
-/// routes by DID topic, but defense-in-depth is cheap here).
-pub fn try_build_entry_from_sse_record(
-    record: &crate::indexer::sse::events::SseGrantRecord,
+/// `recipient_did`: the caller's DID. Returns `None` when the grant isn't
+/// for the caller (defense-in-depth — the indexer also routes by topic).
+pub fn try_build_entry_from_envelope(
+    envelope: &crate::indexer::types::IndexerEnvelope<crate::records::Grant>,
     recipient_did: &str,
 ) -> Option<InboxEntry> {
-    // If the grant event carries an explicit recipient, verify it matches.
-    // When absent (older payloads), trust the broadcaster's topic routing.
-    if let Some(ref r) = record.recipient_did {
-        if r != recipient_did {
-            return None;
-        }
+    if envelope.record.recipient != recipient_did {
+        return None;
     }
+
+    // Author DID is the authority portion of the grant URI.
+    let author_did = envelope
+        .uri
+        .strip_prefix("at://")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or_default()
+        .to_string();
 
     Some(InboxEntry {
-        uri: record.uri.clone(),
-        owner_did: record.owner_did.clone(),
-        document_uri: record.document_uri.clone(),
-        created_at: record.created_at.clone().unwrap_or_default(),
+        uri: envelope.uri.clone(),
+        author_did,
+        document_uri: envelope.record.document.clone(),
+        created_at: envelope.record.created_at.clone(),
     })
-}
-
-/// Convenience wrapper: build an entry from an indexer [`InboxGrant`].
-///
-/// [`InboxGrant`]: crate::indexer::InboxGrant
-pub fn entry_from_indexer_grant(grant: &crate::indexer::InboxGrant) -> InboxEntry {
-    InboxEntry {
-        uri: grant.uri.clone(),
-        owner_did: grant.owner_did.clone(),
-        document_uri: grant.document_uri.clone(),
-        created_at: grant.created_at.clone(),
-    }
 }
 
 // ---------------------------------------------------------------------------

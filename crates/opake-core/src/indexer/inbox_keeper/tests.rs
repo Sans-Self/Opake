@@ -8,7 +8,7 @@ use super::*;
 fn sample_entry(uri: &str, owner: &str) -> InboxEntry {
     InboxEntry {
         uri: uri.to_string(),
-        owner_did: owner.to_string(),
+        author_did: owner.to_string(),
         document_uri: format!("at://{owner}/app.opake.document/doc1"),
         created_at: "2026-04-17T00:00:00Z".to_string(),
     }
@@ -151,7 +151,7 @@ fn uninstall_all_drains_and_resets() {
 fn try_build_entry_filters_non_recipient() {
     let record = crate::indexer::sse::events::SseGrantRecord {
         uri: "at://a/app.opake.grant/g1".to_string(),
-        owner_did: "did:plc:alice".to_string(),
+        author_did: "did:plc:alice".to_string(),
         recipient_did: Some("did:plc:bob".to_string()),
         document_uri: "at://a/app.opake.document/d1".to_string(),
         created_at: Some("2026-04-17T00:00:00Z".to_string()),
@@ -167,7 +167,7 @@ fn try_build_entry_filters_non_recipient() {
 fn try_build_entry_defaults_created_at_when_absent() {
     let record = crate::indexer::sse::events::SseGrantRecord {
         uri: "at://a/app.opake.grant/g1".to_string(),
-        owner_did: "did:plc:alice".to_string(),
+        author_did: "did:plc:alice".to_string(),
         recipient_did: None,
         document_uri: "at://a/app.opake.document/d1".to_string(),
         created_at: None,

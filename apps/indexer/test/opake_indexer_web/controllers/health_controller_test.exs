@@ -1,7 +1,7 @@
 defmodule OpakeIndexerWeb.HealthControllerTest do
   use OpakeIndexerWeb.ConnCase, async: true
 
-  alias OpakeIndexer.Queries.GrantQueries
+  alias OpakeIndexer.Queries.RecordQueries
 
   test "returns health status", %{conn: conn} do
     conn = get(conn, "/api/health")
@@ -22,13 +22,22 @@ defmodule OpakeIndexerWeb.HealthControllerTest do
 
   test "health omits row counts (those are internal metrics)", %{conn: conn} do
     {:ok, _} =
-      GrantQueries.upsert_grant(%{
+      RecordQueries.upsert(%{
         uri: "at://did:plc:owner/app.opake.grant/3abc",
+        collection: "app.opake.grant",
         author_did: "did:plc:owner",
-        recipient_did: "did:plc:me",
-        document_uri: "at://did:plc:owner/app.opake.document/3xyz",
-        created_at: "2026-03-01T12:00:00Z",
-        indexed_at: DateTime.utc_now()
+        workspace_id: nil,
+        supersedes_uri: nil,
+        is_workspace_root: false,
+        cid: "bafytest",
+        indexed_at: DateTime.utc_now(),
+        deleted_at: nil,
+        record_jsonb: %{
+          "opakeVersion" => 1,
+          "document" => "at://did:plc:owner/app.opake.document/3xyz",
+          "recipient" => "did:plc:me",
+          "createdAt" => "2026-03-01T12:00:00Z"
+        }
       })
 
     conn = get(conn, "/api/health")

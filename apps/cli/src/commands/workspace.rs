@@ -116,9 +116,9 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     // member of — owned workspaces included, since the owner is always a
     // member of their own. Staleness window exists after `workspace
     // create` until Jetstream delivers the commit to the indexer's firehose consumer.
-    let keyrings = opake.discover_member_keyrings().await?;
+    let workspaces = opake.discover_member_workspaces().await?;
 
-    if keyrings.is_empty() {
+    if workspaces.is_empty() {
         println!("no workspaces");
         return Ok(None);
     }
@@ -127,10 +127,13 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
     let did = opake.did();
     let bundle = private_keys.bundle();
 
-    for kr in &keyrings {
-        let name = keyrings::decrypt_indexer_keyring_name(kr, did, &bundle)
+    for ws in &workspaces {
+        let name = keyrings::decrypt_indexer_workspace_name(ws, did, &bundle)
             .unwrap_or_else(|| "<encrypted>".into());
-        let role_tag = if kr.owner_did == did {
+        // The head URI's authority is the DID currently hosting the
+        // keyring chain head. For an un-superseded workspace that's the
+        // original creator; matches the pre-federation "owner" idea.
+        let role_tag = if ws.head_pds_did() == did {
             ""
         } else {
             "\t(member)"
@@ -140,17 +143,17 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
             println!(
                 "{}\t{} member(s)\trotation:{}\t{}{}",
                 name,
-                kr.members.len(),
-                kr.rotation,
-                kr.uri,
+                ws.members.len(),
+                ws.rotation,
+                ws.head_uri,
                 role_tag,
             );
         } else {
-            println!("{}\t{} member(s){}", name, kr.members.len(), role_tag);
+            println!("{}\t{} member(s){}", name, ws.members.len(), role_tag);
         }
     }
 
-    println!("\n{} workspace(s)", keyrings.len());
+    println!("\n{} workspace(s)", workspaces.len());
     Ok(None)
 }
 

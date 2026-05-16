@@ -66,7 +66,6 @@ impl WasmFileManagerHandle {
 
         to_js(&MutationResultDto {
             uri: Some(result.uri),
-            proposed: false,
         })
     }
 
@@ -92,10 +91,7 @@ impl WasmFileManagerHandle {
             .delete(document_uri, parent_directory_uri)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
     #[wasm_bindgen(js_name = moveEntry)]
@@ -111,10 +107,7 @@ impl WasmFileManagerHandle {
             .move_entry(entry_uri, source_dir, target_dir)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
     #[wasm_bindgen(js_name = createDirectory)]
@@ -131,7 +124,6 @@ impl WasmFileManagerHandle {
             .map_err(wasm_err)?;
         to_js(&MutationResultDto {
             uri: Some(result.uri),
-            proposed: false,
         })
     }
 
@@ -152,7 +144,7 @@ impl WasmFileManagerHandle {
         to_js(&serde_json::json!({ "snapshot": snapshot }))
     }
 
-    /// Load tree + metadata (read-only, no proposal application).
+    /// Load tree + metadata (read-only).
     #[wasm_bindgen(js_name = loadTreeWithMetadata)]
     pub async fn load_tree_with_metadata(
         &self,
@@ -195,7 +187,8 @@ impl WasmFileManagerHandle {
         }))
     }
 
-    /// Load tree, apply proposals, resolve metadata — the full sync cycle.
+    /// Load tree + resolve metadata. Reads only — federation cascades
+    /// are committed directly on write, no separate "apply" pass needed.
     #[wasm_bindgen(js_name = syncAndLoadTree)]
     pub async fn sync_and_load_tree(
         &self,
@@ -206,7 +199,7 @@ impl WasmFileManagerHandle {
         let tree = mgr.load_tree().await.map_err(wasm_err)?;
         let snapshot = build_snapshot(&tree);
 
-        let mut metadata = if let Some(ref dir_uri) = metadata_for_dir {
+        let metadata = if let Some(ref dir_uri) = metadata_for_dir {
             if dir_uri == "*" {
                 let mut all = std::collections::HashMap::new();
                 for uri in tree.all_directory_uris() {
@@ -222,41 +215,20 @@ impl WasmFileManagerHandle {
                 } else {
                     dir_uri.as_str()
                 };
-                let m = mgr
-                    .resolve_document_metadata_in(&tree, target)
-                    .await
-                    .map_err(wasm_err)?;
-                Some(m)
+                Some(
+                    mgr.resolve_document_metadata_in(&tree, target)
+                        .await
+                        .map_err(wasm_err)?,
+                )
             }
         } else {
             None
         };
 
-        // Federation rewrite: proposal apply/cleanup is replaced by
-        // curatorial-supersede cascades — every writer mutates their own
-        // PDS directly, so nothing accumulates on the manager's PDS for
-        // batch processing. SDK callers keep the `proposals` /
-        // `proposals_applied` keys for backwards-compatible JSON shape;
-        // both are now stably empty/zero.
-        let _ = &mut metadata;
-
         to_js(&serde_json::json!({
             "snapshot": snapshot,
             "metadata": metadata,
-            "proposals": Vec::<serde_json::Value>::new(),
-            "proposals_applied": 0usize,
         }))
-    }
-
-    /// Stub of the legacy `syncAndApplyProposals` entry point.
-    ///
-    /// Always returns 0 under the federation model — proposals are gone.
-    /// Kept on the public surface only to keep older SDK builds from
-    /// hard-failing while the SDK migration lands; remove once consumers
-    /// have moved off it.
-    #[wasm_bindgen(js_name = syncAndApplyProposals)]
-    pub async fn sync_and_apply_proposals(&self) -> Result<usize, JsError> {
-        Ok(0)
     }
 
     // -- Editor operations --
@@ -273,10 +245,7 @@ impl WasmFileManagerHandle {
             .rename_directory(directory_uri, new_name)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto {
-            uri: None,
-            proposed: false,
-        })
+        to_js(&MutationResultDto { uri: None })
     }
 
     #[wasm_bindgen(js_name = updateMetadata)]
@@ -451,15 +420,6 @@ impl WasmFileManagerHandle {
             result.document.modified_at,
         );
         to_js(&resolved)
-    }
-
-    #[wasm_bindgen(js_name = isOwner)]
-    pub fn is_owner(&self) -> Result<bool, JsError> {
-        let guard = self
-            .opake
-            .try_lock()
-            .ok_or_else(|| JsError::new("Opake is busy — an operation is in progress"))?;
-        Ok(guard.did() == self.context.owner_did())
     }
 
     /// Lock the Mutex and return the Opake + FileContext.

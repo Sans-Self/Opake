@@ -10,10 +10,10 @@ use std::rc::Rc;
 use super::*;
 use crate::crypto::{CryptoRng, RngCore};
 
-fn sample_entry(uri: &str, rotation: u64) -> WorkspaceEntry {
+fn sample_entry(workspace_id: &str, rotation: u64) -> WorkspaceEntry {
     WorkspaceEntry {
-        uri: uri.to_string(),
-        owner_did: "did:plc:alice".to_string(),
+        workspace_id: workspace_id.to_string(),
+        head_uri: workspace_id.to_string(),
         rotation,
         member_count: 2,
         created_at: Some("2026-04-17T00:00:00Z".to_string()),
@@ -126,7 +126,7 @@ fn delete_removes_entry_and_fires() {
     let snaps = captured.borrow();
     assert_eq!(snaps.len(), 2);
     assert_eq!(snaps[1].entries.len(), 1);
-    assert_eq!(snaps[1].entries[0].uri, "at://a/kr/2");
+    assert_eq!(snaps[1].entries[0].workspace_id, "at://a/kr/2");
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn snapshot_entries_are_sorted_by_uri() {
         sample_entry("at://a/kr/b", 1),
     ]);
     let snap = keeper.snapshot();
-    let uris: Vec<&str> = snap.entries.iter().map(|e| e.uri.as_str()).collect();
+    let uris: Vec<&str> = snap.entries.iter().map(|e| e.workspace_id.as_str()).collect();
     assert_eq!(uris, vec!["at://a/kr/a", "at://a/kr/b", "at://a/kr/c"]);
 }
 
@@ -270,8 +270,9 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     let wrong_keys = TestKeys::generate("did:plc:alice");
 
     let entry = try_build_entry(
+        // workspace_id == head_uri for genesis (un-superseded) workspaces.
         "at://did:plc:alice/app.opake.keyring/abc",
-        "did:plc:alice",
+        "at://did:plc:alice/app.opake.keyring/abc",
         1,
         &[member_json],
         None,
@@ -281,7 +282,7 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     );
 
     let entry = entry.expect("unwrap failure must return Some, not None");
-    assert_eq!(entry.uri, "at://did:plc:alice/app.opake.keyring/abc");
+    assert_eq!(entry.workspace_id, "at://did:plc:alice/app.opake.keyring/abc");
     assert!(
         entry.name.is_none(),
         "name should be None when unwrap fails"

@@ -269,16 +269,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// A `workspace ls` immediately after `workspace create` may miss the
     /// new entry until Jetstream delivers the commit.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
-        let keyrings = self.discover_member_keyrings().await?;
+        let workspaces = self.discover_member_workspaces().await?;
         let private_keys = self.private_keys_from_cache();
-        let matches: Vec<String> = keyrings
+        let matches: Vec<String> = workspaces
             .iter()
-            .filter(|kr| {
-                keyrings::decrypt_indexer_keyring_name(kr, &self.did, &private_keys.bundle())
+            .filter(|ws| {
+                keyrings::decrypt_indexer_workspace_name(ws, &self.did, &private_keys.bundle())
                     .as_deref()
                     == Some(name)
             })
-            .map(|kr| kr.uri.clone())
+            // Resolve by head URI — the envelope's URI IS the current
+            // canonical keyring record (after any manager supersede).
+            .map(|env| env.uri.clone())
             .collect();
 
         match matches.as_slice() {
@@ -527,18 +529,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(result)
     }
 
-    /// Sync all workspaces: apply proposals (owned) + cleanup stale records (member).
+    /// Sync all workspaces: load the chain head tree for each.
     ///
     /// Discovers all workspaces via the Indexer (includes both owned and member
-    /// workspaces). For each:
-    /// - Syncs the tree from Indexer
-    /// - Cleans up the caller's own applied proposal records from their PDS
-    /// - Applies pending proposals if the caller is the owner
-    ///
-    /// Returns the total number of proposals applied across all workspaces.
+    /// workspaces). Loads the tree for each so SSE consumers have a baseline to
+    /// patch from. Returns the number of workspaces processed.
     pub async fn sync_owned_workspaces(&mut self) -> Result<usize, Error> {
         let results = self.sync_owned_workspaces_detailed().await?;
-        Ok(results.iter().map(|r| r.proposals_applied).sum())
+        Ok(results.len())
     }
 
     /// Sync all workspaces with per-workspace result visibility.
@@ -550,35 +548,42 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
     ) -> Result<Vec<crate::indexer::daemon::WorkspaceSyncResult>, Error> {
         log::trace!("sync: discovering workspaces for {}", self.did);
-        let indexer_keyrings = self.discover_member_keyrings().await?;
-        log::trace!("sync: found {} workspaces", indexer_keyrings.len());
+        let workspaces = self.discover_member_workspaces().await?;
+        log::trace!("sync: found {} workspaces", workspaces.len());
         let private_keys = self.private_keys_from_cache();
 
-        let mut results = Vec::with_capacity(indexer_keyrings.len());
-        for kr in &indexer_keyrings {
-            results.push(self.sync_single_workspace(kr, &private_keys.bundle()).await);
+        let mut results = Vec::with_capacity(workspaces.len());
+        for ws in &workspaces {
+            results.push(self.sync_single_workspace(ws, &private_keys.bundle()).await);
         }
 
         self.auto_persist_session().await?;
         Ok(results)
     }
 
-    /// Sync a single workspace identified by its keyring URI.
+    /// Sync a single workspace identified by its workspace ID (genesis
+    /// keyring URI).
     ///
-    /// Fetches all member keyrings from the indexer (same as the full sync),
-    /// finds the target, and syncs only that one. Returns `None` if the
-    /// keyring URI wasn't found in the member list.
+    /// Fetches all member workspaces from the indexer (same as the
+    /// full sync), finds the target, and syncs only that one. Returns
+    /// `None` if the workspace wasn't found in the member list.
     pub async fn sync_workspace_by_uri(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &str,
     ) -> Result<Option<crate::indexer::daemon::WorkspaceSyncResult>, Error> {
-        let indexer_keyrings = self.discover_member_keyrings().await?;
-        let target = indexer_keyrings.iter().find(|kr| kr.uri == keyring_uri);
-        let Some(kr) = target else { return Ok(None) };
+        let workspaces = self.discover_member_workspaces().await?;
+        let target = workspaces.iter().find(|env| {
+            env.record
+                .workspace_id
+                .as_deref()
+                .unwrap_or(env.uri.as_str())
+                == workspace_id
+        });
+        let Some(ws) = target else { return Ok(None) };
 
         let private_keys = self.private_keys_from_cache();
         let result = self
-            .sync_single_workspace(kr, &private_keys.bundle())
+            .sync_single_workspace(ws, &private_keys.bundle())
             .await;
 
         self.auto_persist_session().await?;
@@ -594,40 +599,50 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// their own PDS, so there's nothing to apply on someone else's behalf.
     async fn sync_single_workspace(
         &mut self,
-        kr: &crate::indexer::IndexerKeyring,
+        envelope: &crate::indexer::types::IndexerEnvelope<crate::records::Keyring>,
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
     ) -> crate::indexer::daemon::WorkspaceSyncResult {
         use crate::indexer::daemon::WorkspaceSyncResult;
 
-        let is_owner = kr.owner_did == self.did;
-        log::trace!("sync: processing {} (owner={is_owner})", kr.uri);
+        let head_uri = envelope.uri.clone();
+        let workspace_id = envelope
+            .record
+            .workspace_id
+            .clone()
+            .unwrap_or_else(|| head_uri.clone());
 
-        let members: Vec<crate::records::KeyringMember> = kr
-            .members
-            .iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect();
+        // The head's authoring DID lives in the at-uri authority position.
+        let head_pds_did = head_uri
+            .strip_prefix("at://")
+            .and_then(|rest| rest.split('/').next())
+            .unwrap_or("")
+            .to_string();
+        let is_owner = head_pds_did == self.did;
+        log::trace!("sync: processing {head_uri} (owner={is_owner})");
 
-        let group_key = match Self::unwrap_workspace_key(&members, &self.did, &kr.uri, private_keys) {
+        let group_key = match Self::unwrap_workspace_key(
+            &envelope.record.members,
+            &self.did,
+            &head_uri,
+            private_keys,
+        ) {
             Ok(k) => k,
             Err(e) => {
                 return WorkspaceSyncResult {
-                    keyring_uri: kr.uri.clone(),
+                    keyring_uri: head_uri,
                     is_owner,
-                    proposals_applied: 0,
-                    proposals_cleaned_up: 0,
                     error: Some(format!("key unwrap: {e}")),
                 };
             }
         };
 
         let workspace = crate::workspace::Workspace::from_keyring(
-            kr.uri.clone(),
+            workspace_id,
             String::new(),
             None,
-            kr.owner_did.clone(),
+            head_pds_did,
             group_key,
-            kr.rotation,
+            envelope.record.rotation,
             Vec::new(),
         );
         let ctx = crate::manager::FileContext::Workspace(workspace);
@@ -638,10 +653,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         };
 
         WorkspaceSyncResult {
-            keyring_uri: kr.uri.clone(),
+            keyring_uri: head_uri,
             is_owner,
-            proposals_applied: 0,
-            proposals_cleaned_up: 0,
             error,
         }
     }
@@ -1139,37 +1152,30 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     // -- Inbox (incoming grants via Indexer) --
 
     /// Fetch all incoming grants from the Indexer.
-    pub async fn list_inbox(&mut self) -> Result<Vec<crate::indexer::InboxGrant>, Error> {
+    pub async fn list_inbox(
+        &mut self,
+    ) -> Result<
+        Vec<crate::indexer::types::IndexerEnvelope<crate::records::Grant>>,
+        Error,
+    > {
         let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
         crate::indexer::fetch_inbox_all(self.client.transport(), &url, &self.did, &signing_key)
             .await
     }
 
-    /// Fetch workspace documents from the Indexer.
-    pub async fn list_workspace_documents(
+    /// Fetch all workspaces the user is a member of. Each envelope's
+    /// `record` is the current keyring chain head, including the full
+    /// member list.
+    pub async fn discover_member_workspaces(
         &mut self,
-        keyring_uri: &str,
-    ) -> Result<Vec<crate::indexer::WorkspaceDocument>, Error> {
+    ) -> Result<
+        Vec<crate::indexer::types::IndexerEnvelope<crate::records::Keyring>>,
+        Error,
+    > {
         let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
-        crate::indexer::fetch_workspace_documents(
-            self.client.transport(),
-            &url,
-            &self.did,
-            &signing_key,
-            keyring_uri,
-        )
-        .await
-    }
-
-    /// Fetch all keyrings the user is a member of, with full record data.
-    pub async fn discover_member_keyrings(
-        &mut self,
-    ) -> Result<Vec<crate::indexer::IndexerKeyring>, Error> {
-        let signing_key = self.require_signing_key()?;
-        let url = self.resolve_indexer_url();
-        crate::indexer::fetch_member_keyrings(
+        crate::indexer::fetch_member_workspaces(
             self.client.transport(),
             &url,
             &self.did,

@@ -68,51 +68,24 @@ All FileManager methods (upload, download, move, createDirectory, etc.)
 work identically in workspace context. The difference is in what happens
 on the PDS.
 
-## Owner vs. Member
+## Federated writes
 
-### Owner
-
-When you own the workspace, mutations are applied directly to your PDS:
-
-```typescript
-const result = await ws.upload(data, "file.txt", "text/plain");
-console.log(result.proposed);  // false — applied directly
-```
-
-### Member (non-owner)
-
-When you're a member but not the owner, mutations become **proposals** —
-`directoryUpdate` records written to *your* PDS, not the owner's:
+Every member writes to their own PDS. There is no proposal flow — every
+mutation is a direct write. Document records land on the writer's PDS;
+directory chains are coordinative supersedes that pass curatorial
+authority forward across PDSes; the keyring chain is a manager-only
+supersede line.
 
 ```typescript
 const result = await ws.upload(data, "file.txt", "text/plain");
-console.log(result.proposed);  // true — proposed, not applied
+console.log(result.uri);  // doc URI on YOUR PDS
 ```
 
-The owner's daemon picks up proposals and applies them. Use
-`ws.isOwner()` to check which path you're on.
-
-## Proposals and Sync
-
-### For Owners
-
-The daemon automatically applies pending proposals from members. You can
-also trigger this manually:
-
-```typescript
-// Full sync: apply proposals + resolve metadata
-const { snapshot, metadata } = await ws.syncAndLoadTree("*");
-
-// Lightweight: just apply proposals, no metadata
-const applied = await ws.syncAndApplyProposals();
-console.log(`Applied ${applied} proposals`);
-```
-
-### For Members
-
-Your proposals are cleaned up automatically once the owner applies them.
-Call `loadTree()` to see the current state — the Indexer tracks what's
-been applied.
+Concurrent supersedes against the same chain head race. The loser
+receives a `chain:forked` SSE event carrying the winning URI/CID; clients
+refetch and replay against the new head with bounded retries. The retry
+loop is handled by `useTreeMutation` in `@opake/react`; outside React,
+subscribe to `opake.watchChainForks` to react manually.
 
 ## Member Management
 

@@ -12,8 +12,7 @@ use crate::atproto;
 use crate::crypto::{self, DirectoryMetadata, PrivateKeyBundle};
 use crate::documents::DOCUMENT_COLLECTION;
 use crate::error::Error;
-use crate::indexer::sse::events::SseDirectoryRecord;
-use crate::indexer::TreeDirectory;
+use crate::indexer::types::IndexerEnvelope;
 use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 use crate::storage::CachedRecord;
 
@@ -122,6 +121,13 @@ struct DirectoryInfo {
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     entries: Vec<String>,
+    /// AT-URI of the directory this record supersedes, if any.
+    supersedes_uri: Option<String>,
+    /// `true` iff this record is part of a workspace-root chain. Stamped
+    /// by writers; the indexer enforces the flag never flips across a
+    /// supersede. Used to detect the workspace root at bootstrap (the
+    /// flagged record with no successor).
+    is_workspace_root: bool,
 }
 
 #[derive(Debug)]
@@ -158,19 +164,41 @@ impl DirectoryTree {
                         key_wrapping: dir.key_wrapping,
                         encrypted_metadata: dir.encrypted_metadata,
                         entries: dir.entries.into_iter().map(|e| e.target).collect(),
+                        supersedes_uri: dir.supersedes,
+                        is_workspace_root: dir.is_workspace_root,
                     },
                 )
             })
             .collect();
 
+        // Two root-detection rules:
+        //   * Cabinet: the directory at rkey "self".
+        //   * Workspace: the directory in the workspace-root chain that
+        //     has no successor superseding it. We project to chain heads
+        //     by finding records whose URI doesn't appear as anyone
+        //     else's `supersedes_uri`, then keep the one with
+        //     `is_workspace_root: true`.
+        let superseded_uris: std::collections::HashSet<&str> = directories
+            .values()
+            .filter_map(|d| d.supersedes_uri.as_deref())
+            .collect();
+
         let root_uri = directories
-            .keys()
-            .find(|uri| {
-                atproto::parse_at_uri(uri)
-                    .map(|u| u.rkey == ROOT_DIRECTORY_RKEY)
-                    .unwrap_or(false)
+            .iter()
+            .find(|(uri, info)| {
+                info.is_workspace_root && !superseded_uris.contains(uri.as_str())
             })
-            .cloned();
+            .map(|(uri, _)| uri.clone())
+            .or_else(|| {
+                directories
+                    .keys()
+                    .find(|uri| {
+                        atproto::parse_at_uri(uri)
+                            .map(|u| u.rkey == ROOT_DIRECTORY_RKEY)
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+            });
 
         trace!(
             "built tree: {} directories, root={}",
@@ -196,8 +224,30 @@ impl DirectoryTree {
     /// `contains_key` made the workspace root silently unmarked during
     /// the load→install→first-SSE-event window, which surfaced as
     /// `snapshot.rootUri === undefined` in the JS consumer.
+    ///
+    /// Walks the supersede chain forward: callers pass the deterministic
+    /// genesis URI, and this method advances `root_uri` to the head of
+    /// the chain by following any record whose `supersedes_uri` points at
+    /// the current candidate. Necessary at bootstrap because the indexer
+    /// returns every record in the chain, not just the head — without the
+    /// walk, `root_uri` would pin to the (immutable, superseded) genesis
+    /// and stale entries would leak into the snapshot. Cycle-safe: bounded
+    /// by `directories.len()` iterations.
     pub fn set_root(&mut self, uri: &str) {
-        self.root_uri = Some(uri.to_owned());
+        let mut current = uri.to_owned();
+        let bound = self.directories.len().saturating_add(1);
+        for _ in 0..bound {
+            let next = self
+                .directories
+                .iter()
+                .find(|(_, info)| info.supersedes_uri.as_deref() == Some(current.as_str()))
+                .map(|(succ_uri, _)| succ_uri.clone());
+            match next {
+                Some(succ) => current = succ,
+                None => break,
+            }
+        }
+        self.root_uri = Some(current);
     }
 
     /// Load the directory hierarchy from the PDS (test use only).
@@ -833,80 +883,90 @@ impl DirectoryTree {
     // Incremental mutation (for SSE-driven tree patching)
     // -----------------------------------------------------------------------
 
+    /// Remove a directory record by URI. If the deleted URI was the root,
+    /// clear `root_uri`. Returns the resulting tree change.
+    pub fn apply_directory_delete(&mut self, uri: &str) -> TreeChange {
+        if self.directories.remove(uri).is_none() {
+            return TreeChange::NoOp;
+        }
+        if self.root_uri.as_deref() == Some(uri) {
+            self.root_uri = None;
+        }
+        TreeChange::Removed { uri: uri.to_string() }
+    }
+
     /// Apply a single indexed directory record to the in-memory tree.
     ///
-    /// This is the incremental sibling of [`from_records`] and
-    /// [`with_delta`]. SSE-driven consumers call it per event to keep
-    /// a persistent tree in sync without rebuilding from scratch.
+    /// SSE-driven consumers call this per event to keep a persistent
+    /// tree in sync without rebuilding from scratch. `uri` identifies
+    /// the record (at-uri); `dir` is the verbatim PDS record.
     ///
-    /// The record's name is decrypted in place using `ctx`, so
-    /// subsequent reads see the correct plaintext name. If decryption
-    /// fails (wrong key, missing keyring), the name falls back to `"?"`
-    /// — consistent with [`decrypt_names_with_group_keys`].
-    ///
-    /// Returns a [`TreeChange`] describing the effect. Callers use this
-    /// to decide whether to fire watcher notifications.
+    /// The record's name is decrypted in place using `ctx`. If
+    /// decryption fails (wrong key, missing keyring), the name falls
+    /// back to `"?"`.
     pub fn apply_directory_delta(
         &mut self,
-        dir: &SseDirectoryRecord,
+        uri: &str,
+        dir: &Directory,
         ctx: &DecryptionCtx<'_>,
     ) -> Result<TreeChange, Error> {
-        let uri = &dir.directory_uri;
-
-        // Handle deletion first.
-        if dir.deleted_at.is_some() {
-            if self.directories.remove(uri).is_none() {
-                return Ok(TreeChange::NoOp);
-            }
-            // Clear root_uri if we just removed the root.
-            if self.root_uri.as_deref() == Some(uri.as_str()) {
-                self.root_uri = None;
-            }
-            return Ok(TreeChange::Removed { uri: uri.clone() });
-        }
-
-        // Upsert path. Parse key_wrapping and encrypted_metadata from the
-        // raw JSON values — the SSE payload mirrors the PDS record shape.
-        let key_wrapping = parse_key_wrapping(dir.key_wrapping.as_ref())?;
-        let encrypted_metadata = parse_encrypted_metadata(dir.encrypted_metadata.as_ref())?;
-
-        // NoOp detection happens at the TreeKeeper layer via snapshot
-        // comparison — DirectoryInfo's nested types don't all derive Eq,
-        // and structural equality on encrypted bytes isn't meaningful
-        // anyway (two apply calls of the same record always match).
         let existed = self.directories.contains_key(uri);
 
-        // Build the new DirectoryInfo.
+        // Project the record into the tree's internal shape. Entries become
+        // bare target URIs (the cascade-pinned CIDs live on the record but
+        // aren't load-bearing for in-memory navigation).
+        let entries: Vec<String> = dir
+            .entries
+            .iter()
+            .map(|e| e.target.clone())
+            .collect();
+
         let mut info = DirectoryInfo {
             name: String::new(),
-            key_wrapping,
-            encrypted_metadata,
-            entries: dir.entries.clone(),
+            key_wrapping: dir.key_wrapping.clone(),
+            encrypted_metadata: dir.encrypted_metadata.clone(),
+            entries,
+            supersedes_uri: dir.supersedes.clone(),
+            is_workspace_root: dir.is_workspace_root,
         };
 
-        // Decrypt name in place. Errors fall through to "?".
         info.name = decrypt_directory_name(&info, ctx).unwrap_or_else(|| "?".into());
 
-        self.directories.insert(uri.clone(), info);
+        self.directories.insert(uri.to_string(), info);
 
-        // Detect root by rkey=="self" unless we already have a root set
-        // via set_root() (workspace case, where root is ws-<keyring_rkey>).
+        // Advance `root_uri` when this record supersedes the current root,
+        // OR when it carries the `isWorkspaceRoot` flag and we have no root
+        // set yet. The flag is authoritative — the indexer rejects supersedes
+        // that flip it, so seeing it true is sufficient.
+        if let Some(prior) = dir.supersedes.as_deref() {
+            if self.root_uri.as_deref() == Some(prior) {
+                self.root_uri = Some(uri.to_string());
+                if let Some(entry) = self.directories.get_mut(uri) {
+                    entry.name = ROOT_DIRECTORY_NAME.into();
+                }
+            }
+        }
+
         if self.root_uri.is_none() {
-            if let Ok(parsed) = atproto::parse_at_uri(uri) {
-                if parsed.rkey == ROOT_DIRECTORY_RKEY {
-                    self.root_uri = Some(uri.clone());
-                    // Override the just-decrypted name with the canonical root name.
-                    if let Some(entry) = self.directories.get_mut(uri) {
-                        entry.name = ROOT_DIRECTORY_NAME.into();
-                    }
+            // Cabinet: rkey "self" is the root by convention.
+            // Workspace: the writer stamps `isWorkspaceRoot: true` on every
+            // record in the root chain.
+            let is_root = dir.is_workspace_root
+                || atproto::parse_at_uri(uri)
+                    .map(|u| u.rkey == ROOT_DIRECTORY_RKEY)
+                    .unwrap_or(false);
+            if is_root {
+                self.root_uri = Some(uri.to_string());
+                if let Some(entry) = self.directories.get_mut(uri) {
+                    entry.name = ROOT_DIRECTORY_NAME.into();
                 }
             }
         }
 
         if existed {
-            Ok(TreeChange::Updated { uri: uri.clone() })
+            Ok(TreeChange::Updated { uri: uri.to_string() })
         } else {
-            Ok(TreeChange::Inserted { uri: uri.clone() })
+            Ok(TreeChange::Inserted { uri: uri.to_string() })
         }
     }
 
@@ -920,31 +980,40 @@ impl DirectoryTree {
         }
     }
 
-    /// Apply a delta from the Indexer to cached records, returning a new set.
+    /// Apply a delta from the indexer to cached records, returning a new set.
     ///
     /// Deleted directories are filtered out. New/updated directories replace
     /// existing records by URI. Pure function — no mutation.
     pub fn with_delta(
         records: &[CachedRecord],
-        directories: &[TreeDirectory],
+        envelopes: &[IndexerEnvelope<Directory>],
     ) -> Vec<CachedRecord> {
         use std::collections::HashSet;
 
-        let deleted: HashSet<&str> = directories
+        let deleted: HashSet<&str> = envelopes
             .iter()
-            .filter(|d| d.deleted_at.is_some())
-            .map(|d| d.directory_uri.as_str())
+            .filter(|e| e.deleted_at.is_some())
+            .map(|e| e.uri.as_str())
             .collect();
 
-        let upserted: HashMap<&str, CachedRecord> = directories
+        let upserted: HashMap<&str, CachedRecord> = envelopes
             .iter()
-            .filter(|d| d.deleted_at.is_none())
-            .map(|d| (d.directory_uri.as_str(), d.to_cached_record()))
+            .filter(|e| e.deleted_at.is_none())
+            .filter_map(|e| {
+                let value = serde_json::to_value(&e.record).ok()?;
+                Some((
+                    e.uri.as_str(),
+                    CachedRecord {
+                        uri: e.uri.clone(),
+                        cid: String::new(),
+                        value,
+                    },
+                ))
+            })
             .collect();
 
         let updated_uris: HashSet<&str> = upserted.keys().copied().collect();
 
-        // Keep existing records that aren't deleted or replaced, then append upserts
         records
             .iter()
             .filter(|r| !deleted.contains(r.uri.as_str()))
@@ -958,21 +1027,6 @@ impl DirectoryTree {
 // ---------------------------------------------------------------------------
 // Incremental-apply helpers
 // ---------------------------------------------------------------------------
-
-fn parse_key_wrapping(value: Option<&serde_json::Value>) -> Result<KeyWrapping, Error> {
-    let value = value
-        .ok_or_else(|| Error::InvalidRecord("SSE directory event missing key_wrapping".into()))?;
-    serde_json::from_value(value.clone())
-        .map_err(|e| Error::InvalidRecord(format!("invalid key_wrapping: {e}")))
-}
-
-fn parse_encrypted_metadata(value: Option<&serde_json::Value>) -> Result<EncryptedMetadata, Error> {
-    let value = value.ok_or_else(|| {
-        Error::InvalidRecord("SSE directory event missing encrypted_metadata".into())
-    })?;
-    serde_json::from_value(value.clone())
-        .map_err(|e| Error::InvalidRecord(format!("invalid encrypted_metadata: {e}")))
-}
 
 /// Decrypt a single directory's name using the decryption context.
 ///

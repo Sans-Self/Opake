@@ -13,14 +13,14 @@ function WorkspaceEditor() {
   const { rkey, docRkey } = Route.useParams();
   const did = useAuthStore((s) => (s.session.status === "active" ? s.session.did : null));
   const { data: workspaces } = useWorkspaces();
-  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
+  const workspace = workspaces.find((w) => rkeyFromUri(w.workspaceId) === rkey);
 
   // Workspace documents aren't owned by the current viewer — they live at
   // the uploader's DID, so we can't synthesize the full URI from `did +
   // docRkey` the way the cabinet editor does. Resolve the full URI from
   // the tree snapshot instead. Null until the snapshot arrives, which
   // triggers the loading path below.
-  const { snapshot } = useDirectory(workspace?.uri ?? null, null);
+  const { snapshot } = useDirectory(workspace?.headUri ?? null, null);
   const uri = snapshot ? findDocumentUriByRkey(snapshot, docRkey) : null;
   const parentUri = uri && snapshot ? findParentUri(snapshot, uri) : null;
   const pathSuffix = parentUri && snapshot ? directoryPathSuffix(snapshot, parentUri) : null;
@@ -55,7 +55,7 @@ function WorkspaceEditor() {
     <EditorView
       mode="edit"
       documentUri={uri}
-      context={{ kind: "workspace", keyringUri: workspace.uri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri }}
       returnPath={returnPath}
       parentDirectoryUri={parentUri}
     />

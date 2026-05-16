@@ -8,7 +8,6 @@
 // Keyring is crypto plumbing. Workspace is the domain concept.
 
 use crate::crypto::{self, ContentKey, PrivateKeyBundle};
-use crate::directories::{workspace_root_directory_uri, workspace_root_rkey};
 use crate::records::Keyring;
 
 /// One historical group key, retained so documents encrypted under a
@@ -81,16 +80,6 @@ impl Workspace {
     /// The underlying keyring AT-URI.
     pub fn keyring_uri(&self) -> &str {
         &self.uri
-    }
-
-    /// Deterministic rkey for this workspace's root directory: `ws-{keyring_rkey}`.
-    pub fn root_rkey(&self) -> String {
-        workspace_root_rkey(&self.uri)
-    }
-
-    /// AT-URI for this workspace's root directory on the owner's PDS.
-    pub fn root_directory_uri(&self) -> String {
-        workspace_root_directory_uri(&self.owner_did, &self.uri)
     }
 
     /// Resolve the group key for a given rotation. Returns `None` when the

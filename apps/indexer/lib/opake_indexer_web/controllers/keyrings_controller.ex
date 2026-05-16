@@ -1,54 +1,25 @@
 defmodule OpakeIndexerWeb.KeyringsController do
   @moduledoc """
-  Returns the current head of each workspace the authenticated DID is a
-  member of, joined with that head's member list (so clients receive
-  everything they need in one call).
+  Returns the current keyring head envelope for every workspace the
+  authenticated DID is a member of. Each envelope is the verbatim
+  on-PDS record JSON (camelCase, members array intact) plus indexer
+  metadata.
+
+  Pagination is currently not exposed — the member-workspace count is
+  bounded by atproto practicalities (a few hundred at most). If real
+  workloads grow beyond that, add keyset pagination on
+  `(chain_heads.workspace_id, indexed_at)`.
   """
 
   use OpakeIndexerWeb, :controller
 
-  alias OpakeIndexer.Queries.KeyringQueries
-  import OpakeIndexerWeb.PaginationHelpers
+  alias OpakeIndexer.Queries.RecordQueries
+  import OpakeIndexerWeb.TreeHelpers, only: [envelope: 1]
 
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def index(conn, params) do
+  def index(conn, _params) do
     did = conn.assigns.authenticated_did
-
-    with {:ok, limit} <- parse_limit(params) do
-      cursor = params["cursor"]
-      {pairs, next_cursor} = KeyringQueries.list_workspaces_full(did, limit: limit, cursor: cursor)
-
-      response =
-        %{
-          workspaces:
-            Enum.map(pairs, fn {k, members} ->
-              %{
-                workspace_id: k.workspace_id,
-                head_uri: k.uri,
-                rotation: k.rotation,
-                supersedes_uri: k.supersedes_uri,
-                members:
-                  Enum.map(members, fn m ->
-                    %{
-                      "wrappedKey" => m.wrapped_key,
-                      "role" => m.role
-                    }
-                  end),
-                encrypted_metadata: k.encrypted_metadata,
-                created_at: k.created_at,
-                modified_at: k.modified_at,
-                indexed_at: DateTime.to_iso8601(k.indexed_at)
-              }
-            end)
-        }
-        |> maybe_put_cursor(next_cursor)
-
-      json(conn, response)
-    else
-      {:error, message} ->
-        conn
-        |> put_status(400)
-        |> json(%{error: message})
-    end
+    keyrings = RecordQueries.workspaces_for_member(did)
+    json(conn, %{workspaces: Enum.map(keyrings, &envelope/1)})
   end
 end

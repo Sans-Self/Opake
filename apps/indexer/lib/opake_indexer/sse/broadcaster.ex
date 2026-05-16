@@ -1,100 +1,81 @@
 defmodule OpakeIndexer.SSE.Broadcaster do
   @moduledoc """
-  Broadcasts indexed events to SSE subscribers via Phoenix PubSub.
+  Emits SSE events onto Phoenix.PubSub topics.
 
-  Called from the indexer after each successful DB write. Fire-and-forget —
-  broadcast failures are logged at warning level but never propagate.
+  Two event families:
 
-  Formatting uses bracket-access (`attrs[:key]`) because the indexer passes
-  raw event attrs (plain maps from the firehose parser), not Ecto schema
-  structs.
+    * **Record envelopes** — `{collection}:upsert` and `{collection}:delete`.
+      The payload is `{record: <verbatim PDS JSON>, indexedAt}` for upserts
+      and `{uri}` for deletes. No reshaping happens here — the JSON that
+      the PDS signed is the JSON we forward.
 
-  Federation rewrite: the `*_update` broadcasts are gone with the proposal
-  lexicons. Member writes route through curatorial supersedes on the same
-  record types (directory / keyring), and forks surface via
-  `chain:forked`.
+    * **Notifications** — `chain:forked`. Flat payload describing a
+      detected fork race for client-side retry. Not record-shaped.
+
+  Topics:
+
+    * Workspace topics — every workspace-scoped record goes onto
+      `Topics.workspace(workspace_id)`.
+    * Personal topics — keyring upserts fan out to every member's
+      personal topic so a recipient sees workspaces they belong to.
+      Grants fan out to author + recipient personal topics.
+    * Cabinet (no workspace_id) records go onto the author's personal
+      topic.
+
+  This module never touches the indexer DB — it's a fan-out helper.
   """
 
   require Logger
 
   alias OpakeIndexer.SSE.Topics
-  alias OpakeIndexerWeb.TreeHelpers
 
   @pubsub OpakeIndexer.PubSub
 
-  # -- Public API --
+  @directory_collection "app.opake.directory"
+  @document_collection "app.opake.document"
+  @keyring_collection "app.opake.keyring"
+  @grant_collection "app.opake.grant"
 
-  def broadcast_directory(attrs, action) do
-    payload =
-      case action do
-        :upsert -> format_directory(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
+  # -- Record upsert / delete -----------------------------------------
 
-    broadcast_owned(attrs, "directory", action, payload)
+  @doc """
+  Broadcast a record upsert envelope. `attrs` is the dispatch attrs
+  (carries collection, workspace_id, author_did, record_jsonb); `envelope`
+  is the prebuilt `{record, indexedAt}` map.
+  """
+  def broadcast_record_upsert(attrs, envelope) do
+    event_type = "#{attrs.collection}:upsert"
+
+    fan_out(attrs, event_type, envelope)
   rescue
-    e -> Logger.warning("[Broadcaster] directory broadcast failed: #{inspect(e)}")
-  end
-
-  def broadcast_document(attrs, action) do
-    payload =
-      case action do
-        :upsert -> format_document(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
-
-    broadcast_owned(attrs, "document", action, payload)
-  rescue
-    e -> Logger.warning("[Broadcaster] document broadcast failed: #{inspect(e)}")
-  end
-
-  def broadcast_keyring(attrs, action) do
-    uri = get(attrs, :uri)
-    workspace_id = get(attrs, :workspace_id)
-
-    payload =
-      case action do
-        :upsert -> format_keyring(attrs)
-        :delete -> %{uri: uri}
-      end
-
-    event_type = "keyring:#{action}"
-
-    if workspace_id, do: broadcast(Topics.workspace(workspace_id), event_type, payload)
-
-    if action == :upsert do
-      for entry <- get(attrs, :member_entries) || [] do
-        did = entry[:did] || entry["did"]
-        if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
-      end
-    end
-  rescue
-    e -> Logger.warning("[Broadcaster] keyring broadcast failed: #{inspect(e)}")
-  end
-
-  def broadcast_grant(attrs, action) do
-    payload =
-      case action do
-        :upsert -> TreeHelpers.format_grant(attrs)
-        :delete -> %{uri: get(attrs, :uri)}
-      end
-
-    if author = get(attrs, :author_did),
-      do: broadcast(Topics.personal(author), "grant:#{action}", payload)
-
-    maybe_broadcast_recipient(attrs, payload, action)
-  rescue
-    e -> Logger.warning("[Broadcaster] grant broadcast failed: #{inspect(e)}")
+    e -> Logger.warning("[Broadcaster] record upsert broadcast failed: #{inspect(e)}")
   end
 
   @doc """
-  Announce a chain fork to the workspace topic. `payload` should be a map
-  with workspace_id, scope ("keyring" | "directory"), path (nullable),
-  your_uri (the supersede that lost), fork_point_uri (the URI both
-  supersedes targeted), and the winning head's URI + CID.
+  Broadcast a record delete tombstone. Payload is just the URI; clients
+  remove the record from their local view.
+  """
+  def broadcast_record_delete(record) do
+    event_type = "#{record.collection}:delete"
+    payload = %{uri: record.uri}
+
+    fan_out(record, event_type, payload)
+  rescue
+    e -> Logger.warning("[Broadcaster] record delete broadcast failed: #{inspect(e)}")
+  end
+
+  @doc """
+  Broadcast a `chain:forked` notification on the workspace topic.
+  Payload shape:
+
+      %{
+        workspace_id, scope ("keyring" | "directory"),
+        path (nullable), your_uri, fork_point_uri,
+        winner_uri, winner_cid
+      }
   """
   def broadcast_chain_forked(payload) do
-    workspace_id = get(payload, :workspace_id)
+    workspace_id = payload[:workspace_id] || payload["workspace_id"]
 
     if workspace_id do
       broadcast(Topics.workspace(workspace_id), "chain:forked", payload)
@@ -103,73 +84,57 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     e -> Logger.warning("[Broadcaster] chain:forked broadcast failed: #{inspect(e)}")
   end
 
-  # -- Internal --
+  # -- Internal -------------------------------------------------------
 
-  defp broadcast_owned(attrs, prefix, action, payload) do
-    event_type = "#{prefix}:#{action}"
+  # Routes a record event to the correct set of topics based on
+  # collection and workspace membership.
+  defp fan_out(%{collection: @keyring_collection} = attrs, event_type, payload) do
+    # Workspace topic — every workspace-scoped event lands here.
+    if attrs.workspace_id,
+      do: broadcast(Topics.workspace(attrs.workspace_id), event_type, payload)
 
-    case get(attrs, :workspace_id) do
-      nil ->
-        if did = get(attrs, :author_did),
-          do: broadcast(Topics.personal(did), event_type, payload)
+    # Personal topics — fan out to every member's personal topic so
+    # workspaces show up in their workspace list even before they
+    # subscribe to the workspace topic.
+    record = record_jsonb_from(attrs, payload)
 
-      workspace_id ->
-        broadcast(Topics.workspace(workspace_id), event_type, payload)
+    for entry <- (record["members"] || []) do
+      did = get_in(entry, ["wrappedKey", "did"])
+      if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
     end
   end
+
+  defp fan_out(%{collection: @grant_collection} = attrs, event_type, payload) do
+    record = record_jsonb_from(attrs, payload)
+    recipient = record["recipient"]
+    author = attrs[:author_did] || record["author_did"]
+
+    if is_binary(recipient), do: broadcast(Topics.personal(recipient), event_type, payload)
+    if is_binary(author), do: broadcast(Topics.personal(author), event_type, payload)
+  end
+
+  defp fan_out(%{collection: c} = attrs, event_type, payload)
+       when c in [@directory_collection, @document_collection] do
+    case attrs[:workspace_id] do
+      nil ->
+        if did = attrs[:author_did],
+          do: broadcast(Topics.personal(did), event_type, payload)
+
+      ws ->
+        broadcast(Topics.workspace(ws), event_type, payload)
+    end
+  end
+
+  defp fan_out(_attrs, _event_type, _payload), do: :ok
+
+  # Best-effort fetch of the record JSONB. For upsert events the payload
+  # is `%{record: ..., indexedAt: ...}`; for delete events the payload is
+  # `%{uri: ...}` and there's no record body — callers that need a JSONB
+  # field (member list, recipient) can pass it via attrs[:record_jsonb].
+  defp record_jsonb_from(_attrs, %{record: r}) when is_map(r), do: r
+  defp record_jsonb_from(attrs, _), do: attrs[:record_jsonb] || %{}
 
   defp broadcast(topic, event_type, payload) do
     Phoenix.PubSub.broadcast(@pubsub, topic, {:sse_event, event_type, payload})
-  end
-
-  defp maybe_broadcast_recipient(attrs, payload, action) do
-    if recipient = get(attrs, :recipient_did) do
-      broadcast(Topics.personal(recipient), "grant:#{action}", payload)
-    end
-  end
-
-  defp get(attrs, key), do: attrs[key]
-
-  # -- Formatters (bracket-access safe for raw indexer attrs) --
-
-  defp format_directory(attrs) do
-    %{
-      uri: get(attrs, :uri),
-      author_did: get(attrs, :author_did),
-      entries: get(attrs, :entries_json) || []
-    }
-    |> TreeHelpers.maybe_put(:workspace_id, get(attrs, :workspace_id))
-    |> TreeHelpers.maybe_put(:chain_genesis_uri, get(attrs, :chain_genesis_uri))
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-    |> TreeHelpers.maybe_put(:key_wrapping, get(attrs, :key_wrapping))
-    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
-    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
-  end
-
-  defp format_document(attrs) do
-    %{
-      uri: get(attrs, :uri),
-      author_did: get(attrs, :author_did)
-    }
-    |> TreeHelpers.maybe_put(:workspace_id, get(attrs, :workspace_id))
-    |> TreeHelpers.maybe_put(:rotation, get(attrs, :rotation))
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-    |> TreeHelpers.maybe_put(:encryption, get(attrs, :encryption))
-    |> TreeHelpers.maybe_put(:blob_ref, get(attrs, :blob_ref))
-    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
-    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
-  end
-
-  defp format_keyring(attrs) do
-    %{
-      uri: get(attrs, :uri),
-      workspace_id: get(attrs, :workspace_id),
-      rotation: get(attrs, :rotation),
-      member_entries: get(attrs, :member_entries) || []
-    }
-    |> TreeHelpers.maybe_put(:encrypted_metadata, get(attrs, :encrypted_metadata))
-    |> TreeHelpers.maybe_put(:supersedes_uri, get(attrs, :supersedes_uri))
-    |> TreeHelpers.maybe_put(:created_at, get(attrs, :created_at))
-    |> TreeHelpers.maybe_put(:modified_at, get(attrs, :modified_at))
   end
 end

@@ -33,15 +33,6 @@ interface MenuItem {
   readonly onClick?: () => void;
 }
 
-function buildProposalItems(props: FileActionMenuProps): readonly MenuItem[] {
-  return [
-    ...(props.onPreview ? [{ icon: EyeIcon, label: "Preview", onClick: props.onPreview }] : []),
-    ...(props.item.kind !== "folder"
-      ? [{ icon: DownloadSimpleIcon, label: "Download", onClick: props.onDownload }]
-      : []),
-  ];
-}
-
 function buildFolderItems(props: FileActionMenuProps): readonly MenuItem[] {
   return [
     { icon: PencilSimpleIcon, label: "Rename", onClick: props.onRename },
@@ -95,12 +86,7 @@ export function FileActionMenu(props: FileActionMenuProps) {
     );
   }
 
-  const isProposal = item.proposal != null;
-  const items = isProposal
-    ? buildProposalItems(props)
-    : item.kind === "folder"
-      ? buildFolderItems(props)
-      : buildFileItems(props);
+  const items = item.kind === "folder" ? buildFolderItems(props) : buildFileItems(props);
 
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- stopPropagation wrapper to prevent folder row navigation

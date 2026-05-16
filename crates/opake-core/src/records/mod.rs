@@ -33,7 +33,7 @@ pub use defs::{
     DirectKeyWrapping, EncryptedMetadata, EncryptionEnvelope, KeyWrapping, KeyringKeyWrapping,
     KeyringMember, KeyringRef, Role, WrappedKey,
 };
-pub use directory::{Directory, ListingEntry};
+pub use directory::{entry_target_uri, Directory, ListingEntry};
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
 pub use grant::Grant;
 pub use invitation::{Invitation, INVITATION_COLLECTION};

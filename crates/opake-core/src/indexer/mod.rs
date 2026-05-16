@@ -15,6 +15,7 @@
 //     stores patched by SSE events + bootstrapped from list endpoints
 
 pub mod auth;
+pub mod chain_fork_keeper;
 pub mod client;
 pub mod daemon;
 pub mod inbox_keeper;

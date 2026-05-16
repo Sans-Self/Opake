@@ -44,13 +44,11 @@ defmodule OpakeIndexer.Release do
       Ecto.Migrator.with_repo(OpakeIndexer.Repo, fn repo ->
         cursor = repo.get(OpakeIndexer.Schemas.Cursor, 1)
 
-        grant_count =
-          repo.aggregate(OpakeIndexer.Schemas.Grant, :count)
-
-        keyring_count =
-          repo.one(
-            Ecto.Query.from(km in OpakeIndexer.Schemas.KeyringMember,
-              select: count(km.keyring_uri, :distinct)
+        counts =
+          repo.all(
+            Ecto.Query.from(r in OpakeIndexer.Schemas.Record,
+              group_by: r.collection,
+              select: {r.collection, count(r.uri)}
             )
           )
 
@@ -71,8 +69,10 @@ defmodule OpakeIndexer.Release do
         end
 
         IO.puts("\nCounts:")
-        IO.puts("  Grants: #{grant_count}")
-        IO.puts("  Keyrings: #{keyring_count}")
+
+        Enum.each(counts, fn {collection, count} ->
+          IO.puts("  #{collection}: #{count}")
+        end)
       end)
   end
 

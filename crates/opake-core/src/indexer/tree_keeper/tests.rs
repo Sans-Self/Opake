@@ -66,12 +66,19 @@ fn cabinet_keeper() -> TreeKeeper {
 fn sse_dir_upsert(uri: &str, name: &str, entries: Vec<String>) -> SseEvent {
     let dir = dummy_directory_with_entries(name, entries);
     SseEvent::DirectoryUpsert(SseDirectoryRecord {
-        directory_uri: uri.into(),
-        owner_did: TEST_DID.into(),
-        entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
+        uri: uri.into(),
+        author_did: TEST_DID.into(),
+        entries: dir
+            .entries
+            .iter()
+            .map(|e| serde_json::to_value(e).unwrap())
+            .collect(),
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-        keyring_uri: None,
+        workspace_id: None,
+        chain_genesis_uri: None,
+        supersedes_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     })
@@ -315,13 +322,15 @@ fn uninstall_all_drains_every_scope() {
 fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
     use crate::indexer::sse::events::SseDocumentRecord;
     SseEvent::DocumentUpsert(SseDocumentRecord {
-        document_uri: uri.into(),
-        owner_did: TEST_DID.into(),
+        uri: uri.into(),
+        author_did: TEST_DID.into(),
         encrypted_metadata: None,
         encryption: None,
         blob_ref: None,
-        keyring_uri: keyring_uri.map(str::to_owned),
+        workspace_id: keyring_uri.map(str::to_owned),
         rotation: None,
+        supersedes_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     })
@@ -480,13 +489,20 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     let dir = dummy_directory_with_entries("Root", vec![]);
     tree.apply_directory_delta(
         &SseDirectoryRecord {
-            directory_uri: WS_ROOT_URI.into(),
-            owner_did: TEST_DID.into(),
-            entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
+            uri: WS_ROOT_URI.into(),
+            author_did: TEST_DID.into(),
+            entries: dir
+                .entries
+                .iter()
+                .map(|e| serde_json::to_value(e).unwrap())
+                .collect(),
             encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
             key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-            keyring_uri: Some(WS_URI.into()),
-                deleted_at: None,
+            workspace_id: Some(WS_URI.into()),
+            chain_genesis_uri: None,
+            supersedes_uri: None,
+            modified_at: None,
+            deleted_at: None,
             indexed_at: None,
         },
         &DecryptionCtx {
@@ -511,7 +527,9 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     keeper
         .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
             uri: WS_URI.into(),
-            owner_did: TEST_DID.into(),
+            workspace_id: Some(WS_URI.into()),
+            supersedes_uri: None,
+            modified_at: None,
             rotation: Some(2),
             member_entries: vec![],
             encrypted_metadata: None,
@@ -556,7 +574,9 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
     keeper
         .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
             uri: WS_URI.into(),
-            owner_did: TEST_DID.into(),
+            workspace_id: Some(WS_URI.into()),
+            supersedes_uri: None,
+            modified_at: None,
             rotation: Some(5), // unchanged
             member_entries: vec![],
             encrypted_metadata: None,

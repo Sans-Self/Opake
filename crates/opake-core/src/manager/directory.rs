@@ -40,25 +40,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 )
                 .await
             }
-            FileContext::Workspace(ws) => {
-                let (kw, meta) = directories::encrypt_keyring_directory_envelope(
-                    directories::ROOT_DIRECTORY_NAME,
-                    None,
-                    &ws.uri,
-                    &ws.key,
-                    ws.rotation,
-                    &mut self.opake.rng,
-                )?;
-                directories::get_or_create_workspace_root(
-                    &mut self.opake.client,
-                    &ws.owner_did,
-                    &ws.uri,
-                    &ws.uri,
-                    kw,
-                    meta,
-                    &now,
-                )
-                .await
+            FileContext::Workspace(_) => {
+                // Workspace roots are TID-rkeyed and created on-demand via
+                // the upload / create-directory cascade (which threads
+                // `LevelMode::Genesis { rkey: None, .. }` with
+                // `is_workspace_root: true`). Pre-creating via this path is
+                // no longer supported — the cascade entry points either
+                // find the indexed root head and supersede it, or write a
+                // genesis cascade if none exists yet.
+                let _ = now;
+                Err(Error::InvalidRecord(
+                    "ensure_root is cabinet-only; workspaces create the root via the upload/create cascade".into(),
+                ))
             }
         }
     }
@@ -66,8 +59,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Create a new directory.
     ///
     /// If `parent_uri` is `None`, the directory is created under the root.
-    /// For workspace members, the parent entry addition is proposed rather
-    /// than applied directly.
+    /// Cabinet: in-place applyWrites pairing the new directory record with
+    /// the parent's entry addition. Workspace: federation cascade — write the
+    /// new directory record, then cascade-supersede the parent and every
+    /// ancestor up to root on the caller's PDS.
     #[::opake_derive::signoff]
     pub async fn create_directory(
         &mut self,
@@ -196,6 +191,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 entries,
                 supersedes: Some(prior.uri),
                 workspace_id: Some(workspace_uri.clone()),
+                // Root-targeted supersede stays in the root chain.
+                is_workspace_root: true,
                 created_at: now.to_owned(),
                 modified_at: Some(now.to_owned()),
             };
@@ -403,6 +400,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 entries: new_entries,
                 supersedes: Some(prior.uri),
                 workspace_id: Some(workspace_uri),
+                // Root-targeted directory delete: this supersede stays in
+                // the root chain.
+                is_workspace_root: true,
                 created_at: now.to_owned(),
                 modified_at: Some(now.to_owned()),
             };
@@ -480,6 +480,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             entries: new_parent_entries,
             supersedes: Some(parent_record.uri.clone()),
             workspace_id: Some(workspace_uri.to_owned()),
+            // Deep cascade leaf — inherit so the indexer's "never flip"
+            // invariant holds. Typically false (leaf is a subdirectory).
+            is_workspace_root: parent_record.record.is_workspace_root,
             created_at: now.to_owned(),
             modified_at: Some(now.to_owned()),
         };
@@ -528,6 +531,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 entries: new_entries,
                 supersedes: Some(ancestor.uri.clone()),
                 workspace_id: Some(workspace_uri.to_owned()),
+                // Topmost ancestor is the workspace root; inherit.
+                is_workspace_root: ancestor.record.is_workspace_root,
                 created_at: now.to_owned(),
                 modified_at: Some(now.to_owned()),
             };

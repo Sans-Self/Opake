@@ -48,7 +48,9 @@ pub struct UploadRequest<'a> {
 pub struct UploadResult {
     /// AT-URI of the created record.
     pub uri: String,
-    /// Whether the mutation was applied directly or proposed.
+    /// Outcome marker for the cascade. Kept as a typed enum (rather than
+    /// `()`) so future variants — `Reused` for a deduped genesis, `Skipped`
+    /// for a no-op — can land without rippling through the call sites.
     pub outcome: MutationOutcome,
 }
 

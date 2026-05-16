@@ -618,14 +618,21 @@ use crate::indexer::sse::events::SseDirectoryRecord;
 /// Convert a test `Directory` into the SSE payload shape. Mirrors how the
 /// indexer broadcaster formats directory records — `key_wrapping` and
 /// `encrypted_metadata` go through as opaque JSON values.
-fn sse_record(uri: &str, dir: &Directory, keyring_uri: Option<&str>) -> SseDirectoryRecord {
+fn sse_record(uri: &str, dir: &Directory, workspace_id: Option<&str>) -> SseDirectoryRecord {
     SseDirectoryRecord {
-        directory_uri: uri.into(),
-        owner_did: TEST_DID.into(),
-        entries: dir.entries.iter().map(|e| e.target.clone()).collect(),
+        uri: uri.into(),
+        author_did: TEST_DID.into(),
+        entries: dir
+            .entries
+            .iter()
+            .map(|e| serde_json::to_value(e).unwrap())
+            .collect(),
         encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
         key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-        keyring_uri: keyring_uri.map(String::from),
+        workspace_id: workspace_id.map(String::from),
+        chain_genesis_uri: None,
+        supersedes_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     }
@@ -633,12 +640,15 @@ fn sse_record(uri: &str, dir: &Directory, keyring_uri: Option<&str>) -> SseDirec
 
 fn sse_deleted(uri: &str) -> SseDirectoryRecord {
     SseDirectoryRecord {
-        directory_uri: uri.into(),
-        owner_did: TEST_DID.into(),
+        uri: uri.into(),
+        author_did: TEST_DID.into(),
         entries: Vec::new(),
         encrypted_metadata: None,
         key_wrapping: None,
-        keyring_uri: None,
+        workspace_id: None,
+        chain_genesis_uri: None,
+        supersedes_uri: None,
+        modified_at: None,
         deleted_at: Some("2026-04-11T12:00:00Z".into()),
         indexed_at: None,
     }
@@ -835,12 +845,15 @@ fn apply_directory_delta_missing_key_wrapping_errors() {
     let kp = test_keypair();
 
     let malformed = SseDirectoryRecord {
-        directory_uri: DIR_PHOTOS_URI.into(),
-        owner_did: TEST_DID.into(),
+        uri: DIR_PHOTOS_URI.into(),
+        author_did: TEST_DID.into(),
         entries: Vec::new(),
         encrypted_metadata: Some(serde_json::json!({"ciphertext": "", "nonce": ""})),
         key_wrapping: None, // missing
-        keyring_uri: None,
+        workspace_id: None,
+        chain_genesis_uri: None,
+        supersedes_uri: None,
+        modified_at: None,
         deleted_at: None,
         indexed_at: None,
     };

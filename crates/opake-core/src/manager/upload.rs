@@ -2,8 +2,8 @@ use crate::atproto::CidLink;
 use crate::client::Transport;
 use crate::crypto::{CryptoRng, RngCore};
 use crate::directories::{
-    self, build_deep_cascade_levels, fetch_chain_node, workspace_root_rkey, AncestorLevel,
-    CascadeOutcome, ChainHeadProvider, LeafLevel, LevelMode, WorkspaceChainHeads,
+    self, build_deep_cascade_levels, fetch_chain_node, AncestorLevel, CascadeOutcome,
+    ChainHeadProvider, LeafLevel, LevelMode, WorkspaceChainHeads,
 };
 use crate::documents;
 use crate::error::Error;
@@ -208,6 +208,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         encrypted_metadata: prior.record.encrypted_metadata,
                     },
                     entries,
+                    is_workspace_root: true,
                 };
                 (Vec::new(), leaf)
             }
@@ -274,10 +275,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Build the leaf level for a workspace root genesis cascade.
     ///
     /// Used when the workspace has no indexed root yet (workspace just
-    /// created, first contributor authors the root). Stable rkey
-    /// `ws-{keyring_rkey}` makes retries idempotent on the same PDS;
-    /// non-owner genesis writes (racing the owner) also use this rkey
-    /// on their own PDS — AT-URIs are DID-scoped so no conflict.
+    /// created, first contributor authors the root). The record is
+    /// TID-rkeyed — `isWorkspaceRoot: true` on the record itself is
+    /// the indexer's marker for "this is the workspace root chain",
+    /// no deterministic rkey required. Multiple concurrent genesis
+    /// attempts (writers racing the first upload) all stamp
+    /// `isWorkspaceRoot: true`; the indexer's `chain_heads` table
+    /// compare-and-set picks one winner via `WorkspaceRootQueries.create`,
+    /// the others become orphan chain heads and self-heal on retry.
     async fn build_root_genesis_leaf(
         &mut self,
         ws: &Workspace,
@@ -295,9 +300,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             mode: LevelMode::Genesis {
                 key_wrapping: kw,
                 encrypted_metadata: meta,
-                rkey: Some(workspace_root_rkey(&ws.uri)),
+                rkey: None,
             },
             entries,
+            is_workspace_root: true,
         })
     }
 
@@ -362,28 +368,31 @@ enum UploadTarget {
 fn classify_upload_target(
     requested_target: Option<&str>,
     chain_heads: &WorkspaceChainHeads,
-    workspace_uri: &str,
-    ws: &Workspace,
+    _workspace_uri: &str,
+    _ws: &Workspace,
 ) -> Result<UploadTarget, Error> {
-    let _ = workspace_uri;
     match (requested_target, &chain_heads.root_directory) {
         // Implicit root, indexed.
         (None, Some(head)) => Ok(UploadTarget::RootSupersede(head.uri.clone())),
         // Implicit root, no indexed root → genesis.
         (None, None) => Ok(UploadTarget::RootGenesis),
-        // Explicit target.
+        // Explicit target matches indexed root head → supersede.
         (Some(uri), Some(head)) if uri == head.uri => {
             Ok(UploadTarget::RootSupersede(head.uri.clone()))
         }
+        // Explicit target, different from root → subdirectory cascade.
         (Some(uri), Some(head)) => Ok(UploadTarget::Subdirectory {
             root_head_uri: head.uri.clone(),
             target_uri: uri.to_owned(),
         }),
-        // Explicit target with no indexed root: only valid if it's the
-        // deterministic owner-side genesis URI.
-        (Some(uri), None) if uri == ws.root_directory_uri() => Ok(UploadTarget::RootGenesis),
+        // Explicit target with no indexed root: the caller can't be
+        // targeting a specific subdirectory before the root exists,
+        // and the root URI isn't derivable client-side anymore. Reject
+        // and let the caller retry with `None` (implicit root) which
+        // routes to genesis.
         (Some(uri), None) => Err(Error::NotFound(format!(
-            "workspace has no indexed root yet; cannot upload to {uri}"
+            "workspace has no indexed root yet; cannot upload to {uri}. \
+             Retry with `directory_uri = None` to author the genesis root."
         ))),
     }
 }

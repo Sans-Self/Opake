@@ -459,13 +459,10 @@ pub(crate) struct DirectoryTreeSnapshot {
     pub(crate) directories: HashMap<String, DirectorySnapshotEntry>,
 }
 
-/// Return the workspace root directory URI for a keyring.
-///
-/// Deterministic: `at://{did}/app.opake.directory/ws-{keyring_rkey}`.
-#[wasm_bindgen(js_name = workspaceRootDirectoryUri)]
-pub fn workspace_root_directory_uri(did: &str, keyring_uri: &str) -> String {
-    opake_core::directories::workspace_root_directory_uri(did, keyring_uri)
-}
+// `workspace_root_directory_uri` removed — workspace roots are now TID-rkeyed
+// and discovered via the indexer's `chain_heads` table rather than derived
+// client-side. JS callers that previously synthesised the URI should fetch
+// `chainHead(workspaceId)` and read `root_directory.head_uri`.
 
 // ---------------------------------------------------------------------------
 // Account config exports

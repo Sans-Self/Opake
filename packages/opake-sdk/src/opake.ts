@@ -29,6 +29,7 @@ import type {
 } from "./types";
 import { OpakeError, parseWasmError, wrapWasmErrors } from "./errors";
 import {
+  chainForkedEventSchema,
   resolvedIdentitySchema,
   createWorkspaceResultSchema,
   downloadResultSchema,
@@ -39,6 +40,7 @@ import {
   resolvedGrantMetadataSchema,
   syncSingleResultSchema,
   workspaceSnapshotSchema,
+  type ChainForkedEvent,
   type WorkspaceSnapshot,
 } from "./schemas";
 import { initWasm } from "./wasm";
@@ -72,11 +74,26 @@ type WasmInboxWatcherHandle = {
   free(): void;
 };
 
+/** Internal shape of the WASM `ChainForkWatcher` object. */
+type WasmChainForkWatcherHandle = {
+  close(): Promise<void>;
+  free(): void;
+};
+
 /**
  * Handle returned by `Opake.watchWorkspaces`. Call `.close()` to
  * unsubscribe — typically from a React useEffect cleanup.
  */
 export interface WorkspaceWatcher {
+  /** Stop receiving notifications. Idempotent. */
+  close(): void;
+}
+
+/**
+ * Handle returned by `Opake.watchChainForks`. Call `.close()` to
+ * unsubscribe — typically from a React useEffect cleanup.
+ */
+export interface ChainForkWatcher {
   /** Stop receiving notifications. Idempotent. */
   close(): void;
 }
@@ -630,22 +647,18 @@ export class Opake {
   }
 
   /**
-   * Remove a member from a workspace.
+   * Remove a member from a workspace. Manager-authority required.
    *
-   * For owners: rotates the group key in-place inside WASM and returns
-   * the new `rotation` number. For non-owners: creates a proposal. The
-   * rotated key bytes never cross into JS — the next workspace operation
-   * re-resolves via the keyring URI.
+   * Rotates the group key in-place inside WASM, re-wraps for remaining
+   * members, and writes a keyring supersede on the caller's PDS. Returns
+   * the new rotation number. The rotated key bytes never cross into JS —
+   * the next workspace operation re-resolves via the keyring URI.
    */
   @wrapWasmErrors
   @withTokenGuard
-  removeWorkspaceMember(
-    keyringUri: string,
-    memberDid: string,
-  ): Promise<{ rotation?: number; proposed: boolean }> {
+  removeWorkspaceMember(keyringUri: string, memberDid: string): Promise<{ rotation: number }> {
     return this.requireContext().removeWorkspaceMember(keyringUri, memberDid) as Promise<{
-      rotation?: number;
-      proposed: boolean;
+      rotation: number;
     }>;
   }
 
@@ -877,6 +890,68 @@ export class Opake {
       },
       (err: unknown) => {
         console.warn("[opake-sdk] watchWorkspaces registration failed:", err);
+      },
+    );
+
+    return {
+      close: () => {
+        if (closed) return;
+        closed = true;
+        if (wasmWatcher) {
+          void wasmWatcher.close();
+          wasmWatcher = null;
+        }
+      },
+    };
+  }
+
+  /**
+   * Subscribe to `chain:forked` SSE events.
+   *
+   * Fired when a federation supersede on the caller's PDS lost a race
+   * against another writer's supersede targeting the same chain head.
+   * Unlike `watchWorkspaces` / `watchInbox`, no initial snapshot is
+   * delivered — the keeper holds no state, only fans out signals as they
+   * arrive.
+   *
+   * The React layer's `useTreeMutation` consumes this to retry mutations
+   * with exponential backoff. Headless consumers (CLI, scripts) can
+   * subscribe directly if they need the same retry behaviour.
+   *
+   * Must be paired with `opake.startSseConsumer()` — without it, the
+   * underlying event stream isn't running and no chain-fork events will
+   * fire.
+   */
+  watchChainForks(handler: (event: ChainForkedEvent) => void): ChainForkWatcher {
+    const adapter = (raw: unknown) => {
+      let event: ChainForkedEvent;
+      try {
+        event = chainForkedEventSchema.parse(raw);
+      } catch (err) {
+        console.warn("[opake-sdk] watchChainForks event parse failed:", err);
+        return;
+      }
+      try {
+        handler(event);
+      } catch (err) {
+        console.warn("[opake-sdk] watchChainForks handler threw:", err);
+      }
+    };
+
+    const pending = this.requireContext().watchChainForks(adapter);
+    let closed = false;
+    let wasmWatcher: WasmChainForkWatcherHandle | null = null;
+
+    pending.then(
+      (w) => {
+        if (closed) {
+          void w.close();
+          return;
+        }
+        wasmWatcher = w as WasmChainForkWatcherHandle;
+      },
+      (err: unknown) => {
+        console.warn("[opake-sdk] watchChainForks registration failed:", err);
       },
     );
 

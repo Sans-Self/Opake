@@ -1,115 +1,107 @@
 // Client-side response types for the indexer JSON API.
 //
-// These mirror the indexer's server-side types but only carry Deserialize —
-// this crate doesn't need to serialize them.
+// Every record-returning endpoint emits envelope-shaped JSON:
+//
+//     { "record": <verbatim PDS JSON>, "indexedAt": "...", "deletedAt": "..." }
+//
+// `IndexerEnvelope<T>` deserializes that shape into a strongly-typed
+// inner record (one of `records::Directory`/`Document`/`Keyring`/`Grant`).
+// The Rust crate uses the same struct family for both the PDS read path
+// and the indexer read path — there are no parallel `Sse*Record` or
+// `Tree*` shadow types.
 
 use serde::{Deserialize, Serialize};
 
+use crate::records::{Directory, Document, Grant, Keyring};
+
+/// Indexer envelope. Carries the verbatim on-PDS record JSON plus
+/// indexer-managed metadata as siblings. `T` is the record type
+/// (typically a `records::*` struct).
+///
+/// The `uri` field lives at the envelope level rather than inside the
+/// record because atproto records don't carry their own AT-URI — the
+/// URI is identity metadata, not content. Keeping it on the envelope
+/// preserves the Pillar-1 invariant that `record` is byte-identical to
+/// what the PDS holds.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct InboxGrant {
+#[serde(rename_all = "camelCase")]
+pub struct IndexerEnvelope<T> {
+    /// The record's AT-URI.
     pub uri: String,
-    pub owner_did: String,
-    pub document_uri: String,
-    pub created_at: String,
+    /// Byte-identical to what the PDS holds (modulo JSON key ordering).
+    pub record: T,
+    /// Server-side timestamp at which the indexer committed the record.
+    pub indexed_at: String,
+    /// Soft-delete tombstone; `None` for live records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
 }
+
+impl<T> IndexerEnvelope<T> {
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inbox
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InboxResponse {
-    pub grants: Vec<InboxGrant>,
-    pub cursor: Option<String>,
-}
-
-/// A workspace document from the /api/workspace endpoint.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct WorkspaceDocument {
-    pub document_uri: String,
-    pub keyring_uri: String,
-    pub owner_did: String,
-    pub rotation: u64,
-    pub indexed_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct WorkspaceResponse {
-    pub documents: Vec<WorkspaceDocument>,
-    pub cursor: Option<String>,
-}
-
-/// A keyring the user is a member of, from /api/keyrings.
-///
-/// The Indexer indexes full keyring data from the firehose so clients
-/// don't need raw XRPC listRecords calls.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IndexerKeyring {
-    pub uri: String,
-    pub owner_did: String,
-    pub rotation: u64,
+    pub grants: Vec<IndexerEnvelope<Grant>>,
     #[serde(default)]
-    pub members: Vec<serde_json::Value>,
-    pub encrypted_metadata: Option<serde_json::Value>,
-    pub created_at: Option<String>,
-    pub indexed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct KeyringsResponse {
-    pub keyrings: Vec<IndexerKeyring>,
     pub cursor: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
-// Tree sync types — delta broker responses
+// Workspaces (member listing)
 // ---------------------------------------------------------------------------
 
-/// A directory record from the Indexer tree/sync endpoints.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TreeDirectory {
-    pub directory_uri: String,
-    pub owner_did: String,
-    #[serde(default)]
-    pub entries: Vec<String>,
-    pub encrypted_metadata: Option<serde_json::Value>,
-    pub key_wrapping: Option<serde_json::Value>,
-    pub deleted_at: Option<String>,
-    pub indexed_at: String,
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspacesResponse {
+    pub workspaces: Vec<IndexerEnvelope<Keyring>>,
 }
 
-/// A document record from the Indexer tree/sync endpoints.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TreeDocument {
-    pub document_uri: String,
-    pub owner_did: String,
-    pub encrypted_metadata: Option<serde_json::Value>,
-    pub encryption: Option<serde_json::Value>,
-    pub blob_ref: Option<serde_json::Value>,
-    pub deleted_at: Option<String>,
-    pub indexed_at: String,
-}
+// ---------------------------------------------------------------------------
+// Tree sync — snapshots and deltas
+// ---------------------------------------------------------------------------
 
-/// Response from /api/cabinet/tree, /api/cabinet/sync,
-/// /api/workspace/tree, /api/workspace/sync.
-///
-/// Pre-federation this also carried `proposals` / `keyringProposals` /
-/// `documentProposals` arrays for the three `*Update` collections; the
-/// federation rewrite drops those collections entirely.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// Response from `/cabinet/snapshot`, `/cabinet/sync`, `/workspace/snapshot`,
+/// `/workspace/sync`. Directories and documents are envelopes carrying the
+/// verbatim PDS record JSON.
+#[derive(Debug, Clone, Deserialize)]
 pub struct TreeDelta {
-    pub directories: Vec<TreeDirectory>,
-    pub documents: Vec<TreeDocument>,
+    pub directories: Vec<IndexerEnvelope<Directory>>,
+    pub documents: Vec<IndexerEnvelope<Document>>,
     pub server_time: String,
+    /// Present only on the workspace endpoint.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
 }
 
-/// A single chain head pointer as returned by `/api/workspace/chain-head`.
+impl TreeDelta {
+    /// The server timestamp to pass as `since` on the next sync request.
+    pub fn sync_cursor(&self) -> &str {
+        &self.server_time
+    }
+
+    /// Local staleness marker for the cache.
+    pub fn fetched_at_millis(&self) -> u64 {
+        crate::client::time::unix_now_millis()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chain heads
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ChainHeadResponse {
     pub head_uri: String,
     pub head_cid: String,
 }
 
-/// Response from `/api/workspace/chain-head`.
-///
-/// Both pointers may be `None`: a freshly created workspace's root
-/// directory is lazy — it doesn't exist until the first cascade lands.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkspaceChainHeadResponse {
     pub workspace_id: String,
@@ -119,110 +111,47 @@ pub struct WorkspaceChainHeadResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Cache conversions
+// Tests
 // ---------------------------------------------------------------------------
-
-impl TreeDirectory {
-    /// Convert an Indexer directory into a `CachedRecord` for local storage.
-    ///
-    /// Reconstructs a PDS-compatible record JSON so `DirectoryTree::from_cached_records`
-    /// can deserialize it as a `Directory`.
-    pub fn to_cached_record(&self) -> crate::storage::CachedRecord {
-        let value = serde_json::json!({
-            "opakeVersion": 1,
-            "keyWrapping": self.key_wrapping,
-            "encryptedMetadata": self.encrypted_metadata,
-            "entries": self.entries,
-            "createdAt": self.indexed_at,
-        });
-        crate::storage::CachedRecord {
-            uri: self.directory_uri.clone(),
-            cid: String::new(),
-            value,
-        }
-    }
-}
-
-impl TreeDocument {
-    /// Convert an Indexer document into a `CachedRecord` for local storage.
-    pub fn to_cached_record(&self) -> crate::storage::CachedRecord {
-        let value = serde_json::json!({
-            "opakeVersion": 1,
-            "encryption": self.encryption,
-            "encryptedMetadata": self.encrypted_metadata,
-            "blob": self.blob_ref,
-            "createdAt": self.indexed_at,
-        });
-        crate::storage::CachedRecord {
-            uri: self.document_uri.clone(),
-            cid: String::new(),
-            value,
-        }
-    }
-}
-
-impl TreeDelta {
-    /// Convert all directory entries into cached records.
-    pub fn directory_cache_records(&self) -> Vec<crate::storage::CachedRecord> {
-        self.directories
-            .iter()
-            .filter(|d| d.deleted_at.is_none())
-            .map(|d| d.to_cached_record())
-            .collect()
-    }
-
-    /// Convert all document entries into cached records.
-    pub fn document_cache_records(&self) -> Vec<crate::storage::CachedRecord> {
-        self.documents
-            .iter()
-            .filter(|d| d.deleted_at.is_none())
-            .map(|d| d.to_cached_record())
-            .collect()
-    }
-
-    /// Parse `server_time` as epoch milliseconds for `CachedCollection.fetched_at`.
-    ///
-    /// Uses current system time as the timestamp — what matters is that the
-    /// next sync passes this value back as `since`, and the server handles
-    /// the ISO8601 format. The millis value is just a local staleness marker.
-    pub fn fetched_at_millis(&self) -> u64 {
-        crate::client::time::unix_now_millis()
-    }
-
-    /// The server timestamp to pass as `since` on the next sync request.
-    pub fn sync_cursor(&self) -> &str {
-        &self.server_time
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn deserialize_full_response() {
+    fn deserialize_inbox_envelope() {
         let json = r#"{
-            "grants": [{
-                "uri": "at://did:plc:owner/app.opake.grant/tid1",
-                "owner_did": "did:plc:owner",
-                "document_uri": "at://did:plc:owner/app.opake.document/doc1",
-                "created_at": "2026-03-01T12:00:00Z"
-            }],
+            "grants": [
+                {
+                    "record": {
+                        "opakeVersion": 1,
+                        "document": "at://did:plc:author/app.opake.document/doc1",
+                        "recipient": "did:plc:me",
+                        "wrappedKey": {
+                            "did": "did:plc:me",
+                            "ciphertext": "AAAA",
+                            "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+                        },
+                        "encryptedMetadata": {
+                            "ciphertext": "AAAA",
+                            "nonce": "BBBB"
+                        },
+                        "createdAt": "2026-03-01T12:00:00Z"
+                    },
+                    "indexedAt": "2026-03-01T12:00:01Z"
+                }
+            ],
             "cursor": "next-page"
         }"#;
 
         let resp: InboxResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.grants.len(), 1);
-        assert_eq!(resp.grants[0].owner_did, "did:plc:owner");
-        assert_eq!(
-            resp.grants[0].document_uri,
-            "at://did:plc:owner/app.opake.document/doc1"
-        );
+        assert_eq!(resp.grants[0].record.recipient, "did:plc:me");
         assert_eq!(resp.cursor.as_deref(), Some("next-page"));
     }
 
     #[test]
-    fn deserialize_empty_response() {
+    fn deserialize_empty_inbox() {
         let json = r#"{"grants": []}"#;
         let resp: InboxResponse = serde_json::from_str(json).unwrap();
         assert!(resp.grants.is_empty());

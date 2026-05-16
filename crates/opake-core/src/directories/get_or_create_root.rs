@@ -4,7 +4,7 @@ use crate::client::{Transport, XrpcClient};
 use crate::error::Error;
 use crate::records::{Directory, EncryptedMetadata, KeyWrapping};
 
-use super::{workspace_root_rkey, DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
+use super::{DIRECTORY_COLLECTION, ROOT_DIRECTORY_RKEY};
 
 /// Get the root directory's AT-URI, creating it if it doesn't exist.
 ///
@@ -41,39 +41,12 @@ pub async fn get_or_create_root(
     }
 }
 
-/// Get or create a workspace's root directory.
-///
-/// Same pattern as [`get_or_create_root`] but uses a deterministic rkey
-/// derived from the keyring URI (`ws-{keyring_rkey}`) and stamps the
-/// `workspace_id` field on the genesis root.
-pub async fn get_or_create_workspace_root(
-    client: &mut XrpcClient<impl Transport>,
-    did: &str,
-    keyring_uri: &str,
-    workspace_id: &str,
-    key_wrapping: KeyWrapping,
-    encrypted_metadata: EncryptedMetadata,
-    created_at: &str,
-) -> Result<String, Error> {
-    let rkey = workspace_root_rkey(keyring_uri);
-    trace!("checking for workspace root directory (rkey: {})", rkey);
-    match client.get_record(did, DIRECTORY_COLLECTION, &rkey).await {
-        Ok(entry) => {
-            trace!("workspace root exists: {}", entry.uri);
-            Ok(entry.uri)
-        }
-        Err(Error::NotFound(_)) => {
-            trace!("workspace root not found, creating");
-            let root = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string())
-                .with_workspace_id(workspace_id);
-            let record_ref = client
-                .put_record(DIRECTORY_COLLECTION, &rkey, &root)
-                .await?;
-            Ok(record_ref.uri)
-        }
-        Err(e) => Err(e),
-    }
-}
+// Note: `get_or_create_workspace_root` (previously did a deterministic-rkey
+// `put_record`) has been removed. Workspace root creation now happens through
+// the cascade pipeline (`upload::build_root_genesis_leaf`) which writes a
+// TID-rkeyed record with `isWorkspaceRoot: true`. Concurrent first-uploaders
+// each get a different TID; the indexer's `WorkspaceRoot.create` picks one
+// winner via compare-and-set.
 
 #[cfg(test)]
 mod tests {

@@ -54,8 +54,11 @@ function WorkspaceSettingsPage() {
 
   // Workspace metadata — mirrors whatever the WorkspaceKeeper has loaded.
   const { data: workspaces } = useWorkspaces();
-  const workspace = workspaces.find((w) => rkeyFromUri(w.uri) === rkey);
-  const keyringUri = workspace?.uri ?? null;
+  const workspace = workspaces.find((w) => rkeyFromUri(w.workspaceId) === rkey);
+  // Pass the chain head URI when mutating — that's the record the
+  // supersede chain is currently pinned at. Equal to workspaceId on
+  // a genesis-only workspace.
+  const keyringUri = workspace?.headUri ?? null;
 
   // Members — fetched on-demand for this page. The workspace group key
   // never enters JS state; every mutation re-resolves it inside WASM via
@@ -90,8 +93,10 @@ function WorkspaceSettingsPage() {
 
   const role = useMemo(() => members.find((m) => m.did === myDid)?.role ?? null, [members, myDid]);
   const isManager = role === "manager";
-  const isOwner = myDid !== null && myDid === workspace?.ownerDid;
-  const canManage = isOwner || isManager;
+  // Federation has no distinct "owner" role; manager == authoritative.
+  // Pre-federation `isOwner` was used to allow workspace deletion + some
+  // settings — collapse to manager-only for now.
+  const canManage = isManager;
 
   // -----------------------------------------------------------------
   // Loaders
@@ -222,8 +227,8 @@ function WorkspaceSettingsPage() {
       const done = loading("remove-workspace-member");
       (async () => {
         try {
-          const result = await getOpake().removeWorkspaceMember(uri, memberDid);
-          toastSuccess(result.proposed ? "Removal proposed" : "Member removed, key rotated");
+          await getOpake().removeWorkspaceMember(uri, memberDid);
+          toastSuccess("Member removed, key rotated");
           await refreshAfterMemberChange(uri);
         } catch (err) {
           toastError(err instanceof Error ? err.message : "Failed to remove member");
@@ -484,8 +489,8 @@ function WorkspaceSettingsPage() {
         <section>
           <h2 className="text-error mb-3 text-sm font-semibold">Danger zone</h2>
           <div className="border-error/20 space-y-4 rounded-lg border p-4">
-            {/* Leave — non-owners only */}
-            {!isOwner && (
+            {/* Leave — non-managers can leave; managers must delete instead */}
+            {!isManager && (
               <div>
                 <p className="text-caption text-text-muted mb-2">
                   Leave this workspace. Your access will be revoked.
@@ -501,8 +506,8 @@ function WorkspaceSettingsPage() {
               </div>
             )}
 
-            {/* Delete — owner only */}
-            {isOwner && (
+            {/* Delete — managers only */}
+            {isManager && (
               <div>
                 <p className="text-caption text-text-muted mb-2">
                   Permanently delete this workspace and all its files. This cannot be undone.
