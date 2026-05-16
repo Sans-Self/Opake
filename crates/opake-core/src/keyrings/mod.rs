@@ -207,38 +207,8 @@ mod indexer_workspace_tests {
         assert!(name.is_none());
     }
 
-    #[test]
-    fn returns_none_when_encrypted_metadata_missing() {
-        let member_did = "did:plc:member";
-        let member = TestKeys::generate(member_did);
-        let mut keyring = fixture(
-            "family-photos",
-            &member,
-            member_did,
-            "at://did:plc:owner/app.opake.keyring/abc",
-        );
-        keyring.encrypted_metadata = None;
-
-        let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
-        assert!(name.is_none());
-    }
-
-    #[test]
-    fn returns_none_when_member_json_wrong_shape() {
-        let member_did = "did:plc:member";
-        let member = TestKeys::generate(member_did);
-        let mut keyring = fixture(
-            "family-photos",
-            &member,
-            member_did,
-            "at://did:plc:owner/app.opake.keyring/abc",
-        );
-        // Replace the (well-formed) member entry with valid JSON that
-        // doesn't match the `KeyringMember` shape — `filter_map` drops
-        // it silently and no member matches the DID.
-        keyring.members = vec![serde_json::json!({"garbage": true})];
-
-        let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
-        assert!(name.is_none());
-    }
+    // `encrypted_metadata` and `members` JSON-shape tolerance tests have been
+    // dropped along with the loose `IndexerWorkspace` DTO. The envelope now
+    // wraps a strongly-typed `Keyring`; either deserialization succeeds and
+    // both fields are well-formed, or the envelope never reaches this layer.
 }

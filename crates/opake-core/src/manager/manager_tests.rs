@@ -334,17 +334,36 @@ mod workspace_upload_cascade {
             .url
             .contains(&format!("workspace_id={KEYRING_URI}")));
 
-        let put_root_idx = reqs
+        // Genesis is now TID-rkeyed via createRecord; the writer stamps
+        // `isWorkspaceRoot: true` on the record so the indexer can claim
+        // the chain head via compare-and-set.
+        let create_root_idx = reqs
             .iter()
-            .position(|r| r.url.contains("putRecord"))
-            .expect("genesis root must use putRecord (stable rkey)");
-        match &reqs[put_root_idx].body {
+            .enumerate()
+            .filter_map(|(idx, r)| {
+                if !r.url.contains("createRecord") {
+                    return None;
+                }
+                let body = match &r.body {
+                    Some(RequestBody::Json(v)) => v,
+                    _ => return None,
+                };
+                if body["collection"] == "app.opake.directory" {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .expect("genesis root must use createRecord with isWorkspaceRoot");
+
+        match &reqs[create_root_idx].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["rkey"], "ws-ws1");
                 assert_eq!(v["collection"], "app.opake.directory");
                 let written: Directory =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert!(written.supersedes.is_none(), "genesis has no supersedes");
+                assert!(written.is_workspace_root, "genesis must be flagged as root");
                 assert_eq!(written.workspace_id.as_deref(), Some(KEYRING_URI));
                 assert_eq!(written.entries.len(), 1);
                 assert_eq!(written.entries[0].target, doc_uri);

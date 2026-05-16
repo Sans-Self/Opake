@@ -25,37 +25,6 @@ fn from_keyring_preserves_fields() {
     assert_eq!(ws.rotation, 3);
 }
 
-#[test]
-fn root_rkey_derives_from_keyring_uri() {
-    let gk = generate_content_key(&mut OsRng);
-    let ws = Workspace::from_keyring(
-        "at://did:plc:owner/app.opake.keyring/abc123".into(),
-        "Test".into(),
-        None,
-        "did:plc:owner".into(),
-        gk,
-        1,
-        Vec::new(),
-    );
-
-    assert_eq!(ws.root_rkey(), "ws-abc123");
-}
-
-#[test]
-fn root_directory_uri_is_deterministic() {
-    let gk = generate_content_key(&mut OsRng);
-    let ws = Workspace::from_keyring(
-        "at://did:plc:owner/app.opake.keyring/abc123".into(),
-        "Test".into(),
-        None,
-        "did:plc:owner".into(),
-        gk,
-        1,
-        Vec::new(),
-    );
-
-    assert_eq!(
-        ws.root_directory_uri(),
-        "at://did:plc:owner/app.opake.directory/ws-abc123"
-    );
-}
+// `root_rkey` and `root_directory_uri` were removed in the lean federation
+// pivot. Workspace roots are now TID-rkeyed and discovered via the indexer's
+// `chain_heads` table; there's no deterministic derivation to assert against.

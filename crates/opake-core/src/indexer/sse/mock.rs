@@ -131,11 +131,7 @@ mod tests {
     use crate::indexer::sse::events::SseDeletePayload;
 
     fn delete_event(uri: &str) -> SseEvent {
-        SseEvent::KeyringDelete(SseDeletePayload {
-            uri: Some(uri.into()),
-            directory_uri: None,
-            document_uri: None,
-        })
+        SseEvent::KeyringDelete(SseDeletePayload { uri: uri.into() })
     }
 
     #[tokio::test]
@@ -152,13 +148,13 @@ mod tests {
         let first = conn.next_event().await.unwrap().unwrap();
         assert!(matches!(
             first,
-            SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://a")
+            SseEvent::KeyringDelete(ref d) if d.uri == "at://a"
         ));
 
         let second = conn.next_event().await.unwrap().unwrap();
         assert!(matches!(
             second,
-            SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://b")
+            SseEvent::KeyringDelete(ref d) if d.uri == "at://b"
         ));
     }
 
@@ -212,7 +208,7 @@ mod tests {
         let evt = conn.next_event().await.unwrap().unwrap();
         assert!(matches!(
             evt,
-            SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://shared")
+            SseEvent::KeyringDelete(ref d) if d.uri == "at://shared"
         ));
     }
 }

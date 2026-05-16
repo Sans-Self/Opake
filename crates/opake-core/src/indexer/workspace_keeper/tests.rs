@@ -224,35 +224,53 @@ fn multiple_watchers_all_receive_updates() {
 // try_build_entry — unwrap-failure semantics (#2)
 // ---------------------------------------------------------------------------
 
-fn make_member_json(
-    did: &str,
+fn make_keyring_envelope(
+    uri: &str,
+    member_did: &str,
     role: crate::records::Role,
     rng: &mut (impl CryptoRng + RngCore),
-) -> serde_json::Value {
+) -> crate::indexer::types::IndexerEnvelope<crate::records::Keyring> {
+    use crate::atproto::AtBytes;
     use crate::crypto::{generate_content_key, wrap_key, WrapContext};
-    use crate::records::KeyringMember;
+    use crate::records::{EncryptedMetadata, Keyring, KeyringMember, SCHEMA_VERSION};
     use crate::test_utils::TestKeys;
 
-    let keys = TestKeys::generate(did);
+    let keys = TestKeys::generate(member_did);
     let gk = generate_content_key(rng);
-    // Test fixtures bind to a stable test keyring URI; the test that
-    // exercises unwrap-failure feeds garbage keys, so this URI is just
-    // ceremony to satisfy the wrap signature.
     let wrapped = wrap_key(
         &gk,
         &keys.public_keys(),
-        did,
-        &WrapContext::Keyring {
-            uri: "at://did:plc:test/app.opake.keyring/test",
-        },
+        member_did,
+        &WrapContext::Keyring { uri },
         rng,
     )
     .unwrap();
-    serde_json::to_value(KeyringMember {
-        wrapped_key: wrapped,
-        role,
-    })
-    .unwrap()
+
+    crate::indexer::types::IndexerEnvelope {
+        uri: uri.to_string(),
+        record: Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: vec![KeyringMember {
+                wrapped_key: wrapped,
+                role,
+            }],
+            rotation: 1,
+            key_history: Vec::new(),
+            // Garbage metadata — tests that exercise unwrap-failure feed
+            // wrong keys, so decryption fails before we get here either way.
+            encrypted_metadata: EncryptedMetadata {
+                ciphertext: AtBytes { encoded: String::new() },
+                nonce: AtBytes { encoded: String::new() },
+            },
+            supersedes: None,
+            workspace_id: None,
+            created_at: "2026-04-17T00:00:00Z".into(),
+            modified_at: None,
+        },
+        indexed_at: "2026-04-17T00:00:01Z".into(),
+        deleted_at: None,
+    }
 }
 
 /// A wrong private key causes unwrap to fail. The entry must still be
@@ -264,29 +282,21 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    let member_json = make_member_json("did:plc:alice", crate::records::Role::Manager, &mut rng);
+    let envelope = make_keyring_envelope(
+        "at://did:plc:alice/app.opake.keyring/abc",
+        "did:plc:alice",
+        crate::records::Role::Manager,
+        &mut rng,
+    );
 
     // Completely different keypair — unwrap will fail.
     let wrong_keys = TestKeys::generate("did:plc:alice");
 
-    let entry = try_build_entry(
-        // workspace_id == head_uri for genesis (un-superseded) workspaces.
-        "at://did:plc:alice/app.opake.keyring/abc",
-        "at://did:plc:alice/app.opake.keyring/abc",
-        1,
-        &[member_json],
-        None,
-        None,
-        "did:plc:alice",
-        &wrong_keys.private_keys(),
-    );
+    let entry = try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys());
 
     let entry = entry.expect("unwrap failure must return Some, not None");
     assert_eq!(entry.workspace_id, "at://did:plc:alice/app.opake.keyring/abc");
-    assert!(
-        entry.name.is_none(),
-        "name should be None when unwrap fails"
-    );
+    assert!(entry.name.is_none(), "name should be None when unwrap fails");
     assert!(
         entry.description.is_none(),
         "description should be None when unwrap fails"
@@ -305,20 +315,15 @@ fn try_build_entry_non_member_returns_none() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    // alice is a member; bob is the caller.
-    let member_json = make_member_json("did:plc:alice", crate::records::Role::Manager, &mut rng);
-    let bob = TestKeys::generate("did:plc:bob");
-
-    let result = try_build_entry(
+    let envelope = make_keyring_envelope(
         "at://did:plc:alice/app.opake.keyring/abc",
         "did:plc:alice",
-        1,
-        &[member_json],
-        None,
-        None,
-        "did:plc:bob",
-        &bob.private_keys(),
+        crate::records::Role::Manager,
+        &mut rng,
     );
+
+    let bob = TestKeys::generate("did:plc:bob");
+    let result = try_build_entry(&envelope, "did:plc:bob", &bob.private_keys());
 
     assert!(result.is_none(), "non-member DID must return None");
 }

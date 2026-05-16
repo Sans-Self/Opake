@@ -4,7 +4,8 @@ use std::rc::Rc;
 use super::*;
 use crate::crypto::ContentKey;
 use crate::directories::tests::{dummy_directory_with_entries, test_keypair, TEST_DID};
-use crate::indexer::sse::events::{SseDeletePayload, SseDirectoryRecord, SseEvent};
+use crate::indexer::sse::events::{SseDeletePayload, SseEvent};
+use crate::indexer::types::IndexerEnvelope;
 
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
@@ -65,31 +66,16 @@ fn cabinet_keeper() -> TreeKeeper {
 
 fn sse_dir_upsert(uri: &str, name: &str, entries: Vec<String>) -> SseEvent {
     let dir = dummy_directory_with_entries(name, entries);
-    SseEvent::DirectoryUpsert(SseDirectoryRecord {
+    SseEvent::DirectoryUpsert(IndexerEnvelope {
         uri: uri.into(),
-        author_did: TEST_DID.into(),
-        entries: dir
-            .entries
-            .iter()
-            .map(|e| serde_json::to_value(e).unwrap())
-            .collect(),
-        encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
-        key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-        workspace_id: None,
-        chain_genesis_uri: None,
-        supersedes_uri: None,
-        modified_at: None,
+        record: dir,
+        indexed_at: "2026-04-17T00:00:00Z".into(),
         deleted_at: None,
-        indexed_at: None,
     })
 }
 
 fn sse_dir_delete(uri: &str) -> SseEvent {
-    SseEvent::DirectoryDelete(SseDeletePayload {
-        uri: None,
-        directory_uri: Some(uri.into()),
-        document_uri: None,
-    })
+    SseEvent::DirectoryDelete(SseDeletePayload { uri: uri.into() })
 }
 
 // -- Tests --
@@ -320,29 +306,50 @@ fn uninstall_all_drains_every_scope() {
 }
 
 fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
-    use crate::indexer::sse::events::SseDocumentRecord;
-    SseEvent::DocumentUpsert(SseDocumentRecord {
-        uri: uri.into(),
-        author_did: TEST_DID.into(),
-        encrypted_metadata: None,
-        encryption: None,
-        blob_ref: None,
+    use crate::atproto::{AtBytes, BlobRef, CidLink};
+    use crate::records::{
+        DirectEncryption, Document, EncryptedMetadata, Encryption, EncryptionEnvelope,
+        SCHEMA_VERSION,
+    };
+
+    // Minimal document fixture — tests only care about `workspace_id`. The
+    // blob and crypto fields are ceremony to satisfy the struct shape.
+    let doc = Document {
+        opake_version: SCHEMA_VERSION,
+        blob: BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink { cid: "bafyfake".into() },
+            mime_type: "application/octet-stream".into(),
+            size: 0,
+        },
+        encryption: Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes { encoded: String::new() },
+                keys: Vec::new(),
+            },
+        }),
+        encrypted_metadata: EncryptedMetadata {
+            ciphertext: AtBytes { encoded: String::new() },
+            nonce: AtBytes { encoded: String::new() },
+        },
+        supersedes: None,
         workspace_id: keyring_uri.map(str::to_owned),
-        rotation: None,
-        supersedes_uri: None,
+        created_at: "2026-04-17T00:00:00Z".into(),
         modified_at: None,
+    };
+
+    SseEvent::DocumentUpsert(IndexerEnvelope {
+        uri: uri.into(),
+        record: doc,
+        indexed_at: "2026-04-17T00:00:00Z".into(),
         deleted_at: None,
-        indexed_at: None,
     })
 }
 
 fn sse_doc_delete(uri: &str) -> SseEvent {
     use crate::indexer::sse::events::SseDeletePayload;
-    SseEvent::DocumentDelete(SseDeletePayload {
-        uri: None,
-        directory_uri: None,
-        document_uri: Some(uri.into()),
-    })
+    SseEvent::DocumentDelete(SseDeletePayload { uri: uri.into() })
 }
 
 #[test]
@@ -472,14 +479,38 @@ fn multiple_watchers_same_directory_all_fire() {
     assert_eq!(c.count(), c0 + 1);
 }
 
+fn keyring_upsert_event(uri: &str, rotation: u64) -> SseEvent {
+    use crate::atproto::AtBytes;
+    use crate::records::{EncryptedMetadata, Keyring, SCHEMA_VERSION};
+
+    SseEvent::KeyringUpsert(IndexerEnvelope {
+        uri: uri.into(),
+        record: Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: Vec::new(),
+            rotation,
+            key_history: Vec::new(),
+            encrypted_metadata: EncryptedMetadata {
+                ciphertext: AtBytes { encoded: String::new() },
+                nonce: AtBytes { encoded: String::new() },
+            },
+            supersedes: None,
+            workspace_id: Some(uri.into()),
+            created_at: "2026-04-17T00:00:00Z".into(),
+            modified_at: None,
+        },
+        indexed_at: "2026-04-17T00:00:00Z".into(),
+        deleted_at: None,
+    })
+}
+
 #[test]
 fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     // A KeyringUpsert with a higher rotation than the installed workspace
     // means the group key just rotated — the names cached on the tree
     // were produced with the prior key. Invalidate them so consumers
     // re-decrypt via the fresh group key the FileManager already holds.
-    use crate::indexer::sse::events::SseKeyringRecord;
-
     const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
     const WS_ROOT_URI: &str = "at://did:plc:test/app.opake.directory/ws-abc";
 
@@ -488,23 +519,8 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     let mut tree = DirectoryTree::from_records(std::iter::empty());
     let dir = dummy_directory_with_entries("Root", vec![]);
     tree.apply_directory_delta(
-        &SseDirectoryRecord {
-            uri: WS_ROOT_URI.into(),
-            author_did: TEST_DID.into(),
-            entries: dir
-                .entries
-                .iter()
-                .map(|e| serde_json::to_value(e).unwrap())
-                .collect(),
-            encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
-            key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-            workspace_id: Some(WS_URI.into()),
-            chain_genesis_uri: None,
-            supersedes_uri: None,
-            modified_at: None,
-            deleted_at: None,
-            indexed_at: None,
-        },
+        WS_ROOT_URI,
+        &dir,
         &DecryptionCtx {
             did: TEST_DID,
             private_keys: None,
@@ -523,19 +539,8 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
     keeper.watch_workspace(WS_URI.into(), WS_ROOT_URI.into(), sink.callback());
     let fire_count_before = sink.count();
 
-    // Fire a rotation bump.
     keeper
-        .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
-            uri: WS_URI.into(),
-            workspace_id: Some(WS_URI.into()),
-            supersedes_uri: None,
-            modified_at: None,
-            rotation: Some(2),
-            member_entries: vec![],
-            encrypted_metadata: None,
-            created_at: None,
-                indexed_at: None,
-        }))
+        .apply_event(&keyring_upsert_event(WS_URI, 2))
         .unwrap();
 
     // Watcher fired once, cached name wiped to empty.
@@ -548,10 +553,6 @@ fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
 
 #[test]
 fn keyring_upsert_without_rotation_bump_is_noop() {
-    // Member adds and metadata edits arrive as KeyringUpsert with the
-    // same rotation. They don't invalidate the tree.
-    use crate::indexer::sse::events::SseKeyringRecord;
-
     const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
 
     let mut keeper = cabinet_keeper();
@@ -572,17 +573,7 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
     let before = sink.count();
 
     keeper
-        .apply_event(&SseEvent::KeyringUpsert(SseKeyringRecord {
-            uri: WS_URI.into(),
-            workspace_id: Some(WS_URI.into()),
-            supersedes_uri: None,
-            modified_at: None,
-            rotation: Some(5), // unchanged
-            member_entries: vec![],
-            encrypted_metadata: None,
-            created_at: None,
-                indexed_at: None,
-        }))
+        .apply_event(&keyring_upsert_event(WS_URI, 5))
         .unwrap();
 
     assert_eq!(sink.count(), before, "no watcher fire expected");

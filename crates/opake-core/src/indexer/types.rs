@@ -123,18 +123,19 @@ mod tests {
         let json = r#"{
             "grants": [
                 {
+                    "uri": "at://did:plc:author/app.opake.grant/tid1",
                     "record": {
                         "opakeVersion": 1,
                         "document": "at://did:plc:author/app.opake.document/doc1",
                         "recipient": "did:plc:me",
                         "wrappedKey": {
                             "did": "did:plc:me",
-                            "ciphertext": "AAAA",
+                            "ciphertext": {"$bytes": "AAAA"},
                             "algo": "x25519-mlkem768-hkdf-a256kw-v2"
                         },
                         "encryptedMetadata": {
-                            "ciphertext": "AAAA",
-                            "nonce": "BBBB"
+                            "ciphertext": {"$bytes": "AAAA"},
+                            "nonce": {"$bytes": "BBBB"}
                         },
                         "createdAt": "2026-03-01T12:00:00Z"
                     },
@@ -147,6 +148,10 @@ mod tests {
         let resp: InboxResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.grants.len(), 1);
         assert_eq!(resp.grants[0].record.recipient, "did:plc:me");
+        assert_eq!(
+            resp.grants[0].uri,
+            "at://did:plc:author/app.opake.grant/tid1"
+        );
         assert_eq!(resp.cursor.as_deref(), Some("next-page"));
     }
 

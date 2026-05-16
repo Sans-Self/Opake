@@ -193,11 +193,7 @@ mod tests {
     use std::rc::Rc;
 
     fn delete(uri: &str) -> SseEvent {
-        SseEvent::KeyringDelete(SseDeletePayload {
-            uri: Some(uri.into()),
-            directory_uri: None,
-            document_uri: None,
-        })
+        SseEvent::KeyringDelete(SseDeletePayload { uri: uri.into() })
     }
 
     /// Build a consumer that uses deterministic jitter (always 0.5 → no
@@ -241,7 +237,7 @@ mod tests {
         let event = consumer.next_event().await.unwrap();
         match event {
             SseEvent::KeyringDelete(d) => {
-                assert_eq!(d.best_uri(), Some("at://a"));
+                assert_eq!(d.uri, "at://a");
             }
             _ => panic!("expected KeyringDelete"),
         }
@@ -258,7 +254,7 @@ mod tests {
 
         for uri in ["at://a", "at://b", "at://c"] {
             match consumer.next_event().await.unwrap() {
-                SseEvent::KeyringDelete(d) => assert_eq!(d.best_uri(), Some(uri)),
+                SseEvent::KeyringDelete(d) => assert_eq!(d.uri.as_str(), uri),
                 _ => panic!("expected KeyringDelete"),
             }
         }
@@ -277,7 +273,7 @@ mod tests {
 
         // First real event — flips was_connected.
         let e1 = consumer.next_event().await.unwrap();
-        assert!(matches!(e1, SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://a")));
+        assert!(matches!(e1, SseEvent::KeyringDelete(ref d) if d.uri == "at://a"));
 
         // Connection drops (internal loop reconnects), synthetic Reconnect
         // arrives before the next real event.
@@ -286,7 +282,7 @@ mod tests {
 
         // Next real event.
         let e3 = consumer.next_event().await.unwrap();
-        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://b")));
+        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.uri == "at://b"));
     }
 
     #[tokio::test]
@@ -304,7 +300,7 @@ mod tests {
         // no synthetic Reconnect is emitted.
         let event = consumer.next_event().await.unwrap();
         match event {
-            SseEvent::KeyringDelete(d) => assert_eq!(d.best_uri(), Some("at://a")),
+            SseEvent::KeyringDelete(d) => assert_eq!(d.uri, "at://a"),
             SseEvent::Reconnect => panic!("unexpected synthetic reconnect on initial failure"),
             _ => panic!("unexpected event type"),
         }
@@ -328,7 +324,7 @@ mod tests {
         // then deliver the event. No error surfaces to the caller.
         let event = consumer.next_event().await.unwrap();
         match event {
-            SseEvent::KeyringDelete(d) => assert_eq!(d.best_uri(), Some("at://a")),
+            SseEvent::KeyringDelete(d) => assert_eq!(d.uri, "at://a"),
             _ => panic!("expected KeyringDelete"),
         }
     }
@@ -343,13 +339,13 @@ mod tests {
         let mut consumer = build_consumer(transport, vec![]);
 
         let e1 = consumer.next_event().await.unwrap();
-        assert!(matches!(e1, SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://a")));
+        assert!(matches!(e1, SseEvent::KeyringDelete(ref d) if d.uri == "at://a"));
 
         let e2 = consumer.next_event().await.unwrap();
         assert!(matches!(e2, SseEvent::Reconnect));
 
         let e3 = consumer.next_event().await.unwrap();
-        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://b")));
+        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.uri == "at://b"));
     }
 
     #[tokio::test]
@@ -419,6 +415,6 @@ mod tests {
         assert!(matches!(e2, SseEvent::Reconnect));
 
         let e3 = consumer.next_event().await.unwrap();
-        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.best_uri() == Some("at://b")));
+        assert!(matches!(e3, SseEvent::KeyringDelete(ref d) if d.uri == "at://b"));
     }
 }

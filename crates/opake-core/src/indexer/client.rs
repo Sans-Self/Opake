@@ -376,18 +376,19 @@ mod tests {
     fn grant_envelope_json(suffix: &str, recipient: &str) -> String {
         format!(
             r#"{{
+                "uri": "at://did:plc:author/app.opake.grant/{suffix}",
                 "record": {{
                     "opakeVersion": 1,
                     "document": "at://did:plc:author/app.opake.document/doc-{suffix}",
                     "recipient": "{recipient}",
                     "wrappedKey": {{
                         "did": "{recipient}",
-                        "ciphertext": "AAAA",
+                        "ciphertext": {{"$bytes": "AAAA"}},
                         "algo": "x25519-mlkem768-hkdf-a256kw-v2"
                     }},
                     "encryptedMetadata": {{
-                        "ciphertext": "AAAA",
-                        "nonce": "BBBB"
+                        "ciphertext": {{"$bytes": "AAAA"}},
+                        "nonce": {{"$bytes": "BBBB"}}
                     }},
                     "createdAt": "2026-03-01T12:00:00Z"
                 }},

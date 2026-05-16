@@ -613,47 +613,6 @@ fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
 // Incremental mutation via apply_directory_delta (SSE path)
 // ---------------------------------------------------------------------------
 
-use crate::indexer::sse::events::SseDirectoryRecord;
-
-/// Convert a test `Directory` into the SSE payload shape. Mirrors how the
-/// indexer broadcaster formats directory records — `key_wrapping` and
-/// `encrypted_metadata` go through as opaque JSON values.
-fn sse_record(uri: &str, dir: &Directory, workspace_id: Option<&str>) -> SseDirectoryRecord {
-    SseDirectoryRecord {
-        uri: uri.into(),
-        author_did: TEST_DID.into(),
-        entries: dir
-            .entries
-            .iter()
-            .map(|e| serde_json::to_value(e).unwrap())
-            .collect(),
-        encrypted_metadata: Some(serde_json::to_value(&dir.encrypted_metadata).unwrap()),
-        key_wrapping: Some(serde_json::to_value(&dir.key_wrapping).unwrap()),
-        workspace_id: workspace_id.map(String::from),
-        chain_genesis_uri: None,
-        supersedes_uri: None,
-        modified_at: None,
-        deleted_at: None,
-        indexed_at: None,
-    }
-}
-
-fn sse_deleted(uri: &str) -> SseDirectoryRecord {
-    SseDirectoryRecord {
-        uri: uri.into(),
-        author_did: TEST_DID.into(),
-        entries: Vec::new(),
-        encrypted_metadata: None,
-        key_wrapping: None,
-        workspace_id: None,
-        chain_genesis_uri: None,
-        supersedes_uri: None,
-        modified_at: None,
-        deleted_at: Some("2026-04-11T12:00:00Z".into()),
-        indexed_at: None,
-    }
-}
-
 fn cabinet_ctx<'a>(
     private_keys: &'a crate::crypto::PrivateKeyBundle<'a>,
 ) -> DecryptionCtx<'a> {
@@ -666,10 +625,9 @@ fn apply_directory_delta_inserts_new_directory() {
     let kp = test_keypair();
 
     let photos_dir = dummy_directory_with_entries("Photos", vec![DOC_BEACH_URI.into()]);
-    let record = sse_record(DIR_PHOTOS_URI, &photos_dir, None);
 
     let change = tree
-        .apply_directory_delta(&record, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(DIR_PHOTOS_URI, &photos_dir, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
 
     match change {
@@ -677,7 +635,6 @@ fn apply_directory_delta_inserts_new_directory() {
         other => panic!("expected Inserted, got {other:?}"),
     }
 
-    // The name should have been decrypted in place.
     assert_eq!(tree.directory_name(DIR_PHOTOS_URI), Some("Photos"));
     assert_eq!(
         tree.entries_for(DIR_PHOTOS_URI),
@@ -691,15 +648,13 @@ fn apply_directory_delta_detects_root_by_self_rkey() {
     let kp = test_keypair();
 
     let root_dir = dummy_directory_with_entries("/", vec![]);
-    let record = sse_record(ROOT_URI, &root_dir, None);
 
     let change = tree
-        .apply_directory_delta(&record, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(ROOT_URI, &root_dir, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
     assert!(matches!(change, TreeChange::Inserted { .. }));
 
     assert_eq!(tree.root_uri(), Some(ROOT_URI));
-    // Root directory always renders as "/" regardless of the decrypted name.
     assert_eq!(tree.directory_name(ROOT_URI), Some("/"));
 }
 
@@ -708,20 +663,16 @@ fn apply_directory_delta_updates_existing_directory() {
     let mut tree = DirectoryTree::from_records(std::iter::empty());
     let kp = test_keypair();
 
-    // First insert.
     let initial = dummy_directory_with_entries("Photos", vec![DOC_BEACH_URI.into()]);
-    let record = sse_record(DIR_PHOTOS_URI, &initial, None);
     let change = tree
-        .apply_directory_delta(&record, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(DIR_PHOTOS_URI, &initial, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
     assert!(matches!(change, TreeChange::Inserted { .. }));
 
-    // Second apply: same URI, different entries.
     let updated =
         dummy_directory_with_entries("Photos", vec![DOC_BEACH_URI.into(), DOC_NOTES_URI.into()]);
-    let record2 = sse_record(DIR_PHOTOS_URI, &updated, None);
     let change = tree
-        .apply_directory_delta(&record2, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(DIR_PHOTOS_URI, &updated, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
 
     match change {
@@ -736,23 +687,16 @@ fn apply_directory_delta_updates_existing_directory() {
 }
 
 #[test]
-fn apply_directory_delta_removes_directory_on_deleted_at() {
+fn apply_directory_delete_removes_directory() {
     let mut tree = DirectoryTree::from_records(std::iter::empty());
     let kp = test_keypair();
 
-    // Insert first.
     let photos = dummy_directory_with_entries("Photos", vec![]);
-    tree.apply_directory_delta(
-        &sse_record(DIR_PHOTOS_URI, &photos, None),
-        &cabinet_ctx(&kp.private_keys()),
-    )
-    .unwrap();
+    tree.apply_directory_delta(DIR_PHOTOS_URI, &photos, &cabinet_ctx(&kp.private_keys()))
+        .unwrap();
     assert!(tree.is_directory(DIR_PHOTOS_URI));
 
-    // Now apply a deleted delta.
-    let change = tree
-        .apply_directory_delta(&sse_deleted(DIR_PHOTOS_URI), &cabinet_ctx(&kp.private_keys()))
-        .unwrap();
+    let change = tree.apply_directory_delete(DIR_PHOTOS_URI);
 
     match change {
         TreeChange::Removed { uri } => assert_eq!(uri, DIR_PHOTOS_URI),
@@ -763,33 +707,26 @@ fn apply_directory_delta_removes_directory_on_deleted_at() {
 }
 
 #[test]
-fn apply_directory_delta_delete_on_missing_is_noop() {
+fn apply_directory_delete_on_missing_is_noop() {
     let mut tree = DirectoryTree::from_records(std::iter::empty());
-    let kp = test_keypair();
 
-    let change = tree
-        .apply_directory_delta(&sse_deleted(DIR_PHOTOS_URI), &cabinet_ctx(&kp.private_keys()))
-        .unwrap();
+    let change = tree.apply_directory_delete(DIR_PHOTOS_URI);
 
     assert_eq!(change, TreeChange::NoOp);
     assert!(!change.is_effective());
 }
 
 #[test]
-fn apply_directory_delta_removing_root_clears_root_uri() {
+fn apply_directory_delete_root_clears_root_uri() {
     let mut tree = DirectoryTree::from_records(std::iter::empty());
     let kp = test_keypair();
 
     let root_dir = dummy_directory_with_entries("/", vec![]);
-    tree.apply_directory_delta(
-        &sse_record(ROOT_URI, &root_dir, None),
-        &cabinet_ctx(&kp.private_keys()),
-    )
-    .unwrap();
+    tree.apply_directory_delta(ROOT_URI, &root_dir, &cabinet_ctx(&kp.private_keys()))
+        .unwrap();
     assert_eq!(tree.root_uri(), Some(ROOT_URI));
 
-    tree.apply_directory_delta(&sse_deleted(ROOT_URI), &cabinet_ctx(&kp.private_keys()))
-        .unwrap();
+    tree.apply_directory_delete(ROOT_URI);
     assert_eq!(tree.root_uri(), None);
 }
 
@@ -799,19 +736,16 @@ fn apply_directory_delta_idempotent_repeat_apply_preserves_state() {
     let kp = test_keypair();
 
     let dir = dummy_directory_with_entries("Photos", vec![DOC_BEACH_URI.into()]);
-    let record = sse_record(DIR_PHOTOS_URI, &dir, None);
 
     // First apply — inserts.
     let c1 = tree
-        .apply_directory_delta(&record, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(DIR_PHOTOS_URI, &dir, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
     assert!(matches!(c1, TreeChange::Inserted { .. }));
 
-    // Second apply of the same record — counts as Updated (at the
-    // DirectoryTree layer we don't dedupe; TreeKeeper dedupes via
-    // snapshot comparison). State should remain identical.
+    // Second apply — counts as Updated (the tree layer doesn't dedupe).
     let c2 = tree
-        .apply_directory_delta(&record, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(DIR_PHOTOS_URI, &dir, &cabinet_ctx(&kp.private_keys()))
         .unwrap();
     assert!(matches!(c2, TreeChange::Updated { .. }));
 
@@ -824,44 +758,18 @@ fn apply_directory_delta_idempotent_repeat_apply_preserves_state() {
 
 #[test]
 fn apply_directory_delta_falls_back_to_question_mark_on_missing_key() {
-    // Build a DecryptionCtx with a different DID than the one the
-    // directory was encrypted for. Decryption fails, name becomes "?".
     let mut tree = DirectoryTree::from_records(std::iter::empty());
     let kp = test_keypair();
 
     let dir = dummy_directory_with_entries("Photos", vec![]);
-    let record = sse_record(DIR_PHOTOS_URI, &dir, None);
 
     let private_keys = kp.private_keys();
     let wrong_ctx = DecryptionCtx::cabinet("did:plc:wrong", &private_keys);
-    let change = tree.apply_directory_delta(&record, &wrong_ctx).unwrap();
+    let change = tree
+        .apply_directory_delta(DIR_PHOTOS_URI, &dir, &wrong_ctx)
+        .unwrap();
     assert!(matches!(change, TreeChange::Inserted { .. }));
     assert_eq!(tree.directory_name(DIR_PHOTOS_URI), Some("?"));
-}
-
-#[test]
-fn apply_directory_delta_missing_key_wrapping_errors() {
-    let mut tree = DirectoryTree::from_records(std::iter::empty());
-    let kp = test_keypair();
-
-    let malformed = SseDirectoryRecord {
-        uri: DIR_PHOTOS_URI.into(),
-        author_did: TEST_DID.into(),
-        entries: Vec::new(),
-        encrypted_metadata: Some(serde_json::json!({"ciphertext": "", "nonce": ""})),
-        key_wrapping: None, // missing
-        workspace_id: None,
-        chain_genesis_uri: None,
-        supersedes_uri: None,
-        modified_at: None,
-        deleted_at: None,
-        indexed_at: None,
-    };
-
-    let err = tree
-        .apply_directory_delta(&malformed, &cabinet_ctx(&kp.private_keys()))
-        .unwrap_err();
-    assert!(matches!(err, Error::InvalidRecord(_)));
 }
 
 #[test]
@@ -870,11 +778,8 @@ fn invalidate_decrypted_names_clears_all_names() {
     let kp = test_keypair();
 
     let dir = dummy_directory_with_entries("Photos", vec![]);
-    tree.apply_directory_delta(
-        &sse_record(DIR_PHOTOS_URI, &dir, None),
-        &cabinet_ctx(&kp.private_keys()),
-    )
-    .unwrap();
+    tree.apply_directory_delta(DIR_PHOTOS_URI, &dir, &cabinet_ctx(&kp.private_keys()))
+        .unwrap();
     assert_eq!(tree.directory_name(DIR_PHOTOS_URI), Some("Photos"));
 
     tree.invalidate_decrypted_names();

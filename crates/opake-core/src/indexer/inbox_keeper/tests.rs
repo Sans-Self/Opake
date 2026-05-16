@@ -147,32 +147,64 @@ fn uninstall_all_drains_and_resets() {
     assert_eq!(keeper.watcher_count(), 0);
 }
 
-#[test]
-fn try_build_entry_filters_non_recipient() {
-    let record = crate::indexer::sse::events::SseGrantRecord {
-        uri: "at://a/app.opake.grant/g1".to_string(),
-        author_did: "did:plc:alice".to_string(),
-        recipient_did: Some("did:plc:bob".to_string()),
-        document_uri: "at://a/app.opake.document/d1".to_string(),
-        created_at: Some("2026-04-17T00:00:00Z".to_string()),
-    };
+fn fixture_envelope(
+    uri: &str,
+    recipient: &str,
+    document: &str,
+    created_at: &str,
+) -> crate::indexer::types::IndexerEnvelope<crate::records::Grant> {
+    use crate::atproto::AtBytes;
+    use crate::records::{EncryptedMetadata, Grant, WrappedKey, SCHEMA_VERSION};
 
-    // Caller is carol — shouldn't see bob's grant.
-    assert!(try_build_entry_from_sse_record(&record, "did:plc:carol").is_none());
-    // Caller is bob — should see it.
-    assert!(try_build_entry_from_sse_record(&record, "did:plc:bob").is_some());
+    crate::indexer::types::IndexerEnvelope {
+        uri: uri.to_string(),
+        record: Grant {
+            opake_version: SCHEMA_VERSION,
+            document: document.to_string(),
+            recipient: recipient.to_string(),
+            wrapped_key: WrappedKey {
+                did: recipient.to_string(),
+                ciphertext: AtBytes { encoded: String::new() },
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".to_string(),
+            },
+            expires_at: None,
+            encrypted_metadata: EncryptedMetadata {
+                ciphertext: AtBytes { encoded: String::new() },
+                nonce: AtBytes { encoded: String::new() },
+            },
+            created_at: created_at.to_string(),
+        },
+        indexed_at: "2026-04-17T00:00:01Z".into(),
+        deleted_at: None,
+    }
 }
 
 #[test]
-fn try_build_entry_defaults_created_at_when_absent() {
-    let record = crate::indexer::sse::events::SseGrantRecord {
-        uri: "at://a/app.opake.grant/g1".to_string(),
-        author_did: "did:plc:alice".to_string(),
-        recipient_did: None,
-        document_uri: "at://a/app.opake.document/d1".to_string(),
-        created_at: None,
-    };
+fn try_build_entry_filters_non_recipient() {
+    let envelope = fixture_envelope(
+        "at://did:plc:alice/app.opake.grant/g1",
+        "did:plc:bob",
+        "at://did:plc:alice/app.opake.document/d1",
+        "2026-04-17T00:00:00Z",
+    );
 
-    let entry = try_build_entry_from_sse_record(&record, "did:plc:bob").unwrap();
-    assert_eq!(entry.created_at, "");
+    // Caller is carol — shouldn't see bob's grant.
+    assert!(try_build_entry_from_envelope(&envelope, "did:plc:carol").is_none());
+    // Caller is bob — should see it.
+    assert!(try_build_entry_from_envelope(&envelope, "did:plc:bob").is_some());
+}
+
+#[test]
+fn try_build_entry_pulls_author_did_from_uri() {
+    let envelope = fixture_envelope(
+        "at://did:plc:alice/app.opake.grant/g1",
+        "did:plc:bob",
+        "at://did:plc:alice/app.opake.document/d1",
+        "2026-04-17T00:00:00Z",
+    );
+
+    let entry = try_build_entry_from_envelope(&envelope, "did:plc:bob").unwrap();
+    assert_eq!(entry.author_did, "did:plc:alice");
+    assert_eq!(entry.document_uri, "at://did:plc:alice/app.opake.document/d1");
+    assert_eq!(entry.created_at, "2026-04-17T00:00:00Z");
 }
