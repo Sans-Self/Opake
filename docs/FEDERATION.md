@@ -25,14 +25,6 @@ graph LR
     UI -->|read canonical state| Indexer
 ```
 
-## What's gone
-
-This model replaces a coordinator pattern that used three sub-lexicons (`documentUpdate`, `directoryUpdate`, `keyringUpdate`) to ship proposed mutations from editors to the owner's daemon for application. None of those exist any more.
-
-- **The `*Update` lexicons** are removed. Nothing to apply, nothing to clean up, nothing to dispatch on.
-- **The daemon-as-applier** is gone. Maintenance still runs (re-encryption on rotation, stale pair-request cleanup) but on session-start triggers, not as a long-running authority.
-- **Owner-as-gatekeeper for content** is gone. Managers update the keyring directly via supersede. The "owner" role is gone entirely — the workspace creator authors the genesis keyring as a one-time act and is thereafter a manager among managers.
-
 ## Authority
 
 | Role    | Documents (own) | Directories                                                          | Keyring   |
@@ -57,9 +49,7 @@ Single-canonical chain. The genesis keyring is written by the workspace creator 
 at://{author-did}/app.opake.keyring/{rkey}
 ```
 
-Carries member set, wrapped group keys, rotation counter, key history, and (for non-genesis keyrings) a `supersedes` field referencing the prior keyring URI. No discriminator — every supersede is the same operation conceptually ("the keyring got updated"), even when the update is a rotation, a member change, or a workspace rename. Workspace identity is anchored at the **genesis keyring's rkey** — that string never changes for the lifetime of the workspace, even as the keyring is superseded onto different PDSes.
-
-The lexicon's `owner` field is **removed**. The genesis keyring's authoring DID lives in its at-uri; that's enough to identify the creator if needed.
+Carries member set, wrapped group keys, rotation counter, key history, and (for non-genesis keyrings) a `supersedes` field referencing the prior keyring URI. No discriminator — every supersede is the same operation conceptually ("the keyring got updated"), even when the update is a rotation, a member change, or a workspace rename. **Workspace identity is the genesis keyring's at-uri** — an opaque string the indexer treats as immortal. The string remains valid even after the genesis keyring record itself is deleted from the originating PDS; it identifies the workspace, not a live record.
 
 ### Directory
 
@@ -69,17 +59,19 @@ Single-canonical chain per path. Each curatorial write produces a new directory 
 at://{author-did}/app.opake.directory/{rkey}
 ```
 
-The workspace-root directory uses a deterministic rkey: `ws-{genesisKeyringRkey}`. Subdirectory records use `tid` rkeys.
+Every directory record uses a PDS-assigned `tid` rkey, including the workspace-root chain. There are no deterministic URIs anywhere in the model. Records in the workspace-root chain are marked by an explicit `isWorkspaceRoot: true` flag (see [The workspace root](#the-workspace-root)).
 
 The directory record carries:
 
 ```
 {
   opakeVersion,
+  workspaceId: <genesis keyring at-uri>,  // omitted for cabinet records
   keyWrapping: { keyringKeyWrapping: { keyringRef } },
   encryptedMetadata: <directory's own name, encrypted under group key>,
   entries: [{ target: at-uri, targetCid: cid }, ...],
   supersedes: <prior canonical URI>,    // omitted for genesis at this path
+  isWorkspaceRoot: true,                // omitted (= false) for non-root directories
   createdAt,
 }
 ```
@@ -98,15 +90,17 @@ Documents may carry an optional `supersedes` field for history annotation (e.g.,
 
 ## The workspace root
 
-The workspace-root directory chain is anchored at:
+The workspace-root has no anchor URI. Every record in the workspace-root chain — genesis and every subsequent supersede — is an ordinary directory record with a PDS-assigned `tid` rkey, carrying `isWorkspaceRoot: true` and `workspaceId: <genesis keyring at-uri>`. The chain alternates PDSes as different members take curatorial turns.
 
-```
-at://{author-did}/app.opake.directory/ws-{genesisKeyringRkey}
-```
+Genesis creation is an ordinary directory write: the workspace creator writes a directory record on their PDS with empty `entries`, `isWorkspaceRoot: true`, no `supersedes`, and the genesis keyring's at-uri as `workspaceId`. The indexer recognizes it as the workspace-root genesis purely from the flag.
 
-The genesis workspace-root is created at workspace creation by the workspace creator on their PDS, with empty `entries`. Subsequent contributors write their curatorial supersedes at the same rkey on their own PDSes, each pointing at the prior canonical via `supersedes`. The chain alternates PDSes as different members take curatorial turns.
+The indexer enforces:
 
-Finding the current workspace-root: walk the supersede chain forward to head. The indexer maintains a `path_index` with the current canonical URI per (workspace, path) for O(1) lookup, so clients ask the indexer rather than walking themselves.
+- Only managers may write a record with `isWorkspaceRoot: true`.
+- At most one active root chain per workspace at a time, via compare-and-set on `chain_heads (workspace_id, kind='workspace_root')`. Concurrent genesis attempts resolve into a fork the same way directory races elsewhere do.
+- `isWorkspaceRoot` must not flip relative to predecessor in a supersede; mismatch is rejected.
+
+Finding the current workspace-root: query the indexer for the chain head at `(workspace_id, kind='workspace_root')`. The indexer's `chain_heads` table is the source of truth — clients never reconstruct the head URI from a deterministic convention.
 
 ## Identity and naming
 
@@ -159,7 +153,7 @@ Both records exist; both supersede the same target. Resolution:
 4. Indexer fires a `chain-forked` SSE event for the affected workspace.
 5. Loser's client receives the event, refetches new canonical, replays its intended change on top, writes a new supersede.
 
-This is optimistic concurrency control with retry. In Opake's storage workload, races on the same directory should be rare in practice. Pathological concurrency (many simultaneous writers on one path) is out of scope for this rewrite — true collaborative-editing primitives layer on top later, with a CRDT/OT merge instead of last-write-wins.
+This is optimistic concurrency control with retry. In Opake's storage workload, races on the same directory are rare in practice. Pathological concurrency (many simultaneous writers on one path) is out of scope — true collaborative-editing primitives would layer on top later, with a CRDT/OT merge instead of last-write-wins.
 
 ## Snapshots
 
@@ -175,7 +169,7 @@ A workspace snapshot at time T captures two CIDs:
 
 Cascade-with-CID makes `workspaceRootCid` content-address the entire workspace tree deterministically. Walking down via cascade-pinned target CIDs reaches every reachable record.
 
-Resolvability depends on PDSes retaining the snapshotted record versions. atproto repos retain rev history by default, but the protocol does not mandate retention forever. Snapshots are useful as a primitive (recovery, audit, future fork-readiness) but are not load-bearing for any current operation in this rewrite.
+Resolvability depends on PDSes retaining the snapshotted record versions. atproto repos retain rev history by default, but the protocol does not mandate retention forever. Snapshots are a primitive available for recovery, audit, and future fork-readiness — they are not load-bearing for any current operation.
 
 ## Keyring supersede
 
@@ -208,10 +202,6 @@ There is no `kind` discriminator — every supersede is conceptually the same op
 
 Manager+ at the supersede's `createdAt`, validated against the keyring state in effect immediately before. Demoted-after-write does not retroactively invalidate historical supersedes.
 
-### Forking, deferred
-
-Forking — divergent-branch operations where a workspace splits into two independently-evolving lineages — is **not** part of this rewrite. The supersede primitive could in principle support a `kind: fork` extension with a snapshot embedded as the divergence anchor, but no current Opake use case requires it. The original motivation (recovering from a creator's PDS being unreachable) is fully covered by ordinary keyring supersede. Fork is on the future-work list.
-
 ## Self-delete
 
 When a member deletes their own records:
@@ -220,16 +210,16 @@ When a member deletes their own records:
 - **Mid-chain self-delete on a directory record** creates a gap in the supersede chain. Live state is unaffected (the head is still resolvable). Snapshots that pinned the deleted CID are unresolvable — accepted as historical lossy.
 - **Self-delete on the head canonical directory** rolls the chain back to the prior version. Anyone with authority can supersede the rolled-back-to head.
 
-**Orphan documents.** Mid-chain directory deletion (or a sloppy doc-delete-without-paired-directory-update) can leave doc records that are no longer referenced by any canonical directory. These persist on their authors' PDSes as floating content. Garbage collection — finding and removing orphans — is **future work**, not part of this rewrite.
+**Orphan documents.** Mid-chain directory deletion (or a sloppy doc-delete-without-paired-directory-update) can leave doc records that are no longer referenced by any canonical directory. These persist on their authors' PDSes as floating content. Garbage collection — finding and removing orphans — is future work.
 
 ## Indexer responsibilities
 
-The indexer is load-bearing for correctness in this model. Its responsibilities:
+The indexer is load-bearing for correctness in this model:
 
-1. **Follow chains.** For every directory chain and the keyring chain, maintain the head URI per workspace.
+1. **Follow chains.** Maintain `chain_heads (workspace_id, kind, path) → (head_uri, head_cid)` for every keyring chain, workspace-root chain, and nested directory chain. Updated in-transaction with each record insert via compare-and-set against the prior head.
 2. **Validate authority.** At each supersede write, validate against the keyring state at the supersede's `createdAt`. Editor writes must pass the additivity check.
 3. **Detect fork conflicts** and emit `chain-forked` events for client retry.
-4. **Path index.** `(workspace_id, path) → canonical_uri` for O(1) parent traversal and direct lookup.
+4. **Path lookup.** Clients ask the indexer for the canonical URI at any `(workspace_id, path)` directly; the head is always available in `chain_heads` without traversing the supersede chain.
 5. **Filter dangling at-uri references** in canonical listings (silent filter with a debug-flag for tooling).
 
 ### Authority validation timing
@@ -240,9 +230,9 @@ Authority is validated against the keyring state at the **superseding record's `
 
 A fresh indexer with an empty database can build current state for any known keyring URI without history queries:
 
-1. Fetch the keyring at the head of the supersede chain. If given a non-current URI, follow `supersedes` forward to head.
-2. From the keyring's supersede chain, get the genesis keyring's rkey.
-3. Walk the workspace-root directory chain to head: starting from any known record at `ws-{genesisKeyringRkey}` (most likely the workspace creator's, since the genesis lives there), follow forward `supersedes` links across PDSes.
+1. Fetch the keyring at the head of its supersede chain. If given a non-current URI, follow `supersedes` forward to head.
+2. The workspace's identity is the genesis keyring's at-uri (walking the keyring chain back to the record with no `supersedes` field).
+3. Look up the workspace-root directory: query `chain_heads` for `(workspace_id, kind='workspace_root')`. The indexer's chain follower tracks every directory write tagged with `isWorkspaceRoot: true` and `workspaceId: <this workspace>`, so the head is always known without traversing the directory chain by hand.
 4. From the head workspace-root, walk down via cascade-pinned target CIDs.
 
 Cost: O(records reachable in the canonical tree) plus the chain walks. Chain walk length is bounded by total curatorial activity (roughly upload-count). Tree-walk is fully parallelizable; each chain-walk is sequential but per-chain.
@@ -251,69 +241,26 @@ Discoverability of which keyrings to bootstrap is separate: typically firehose s
 
 ## Upward traversal
 
-Directory records carry **no `parent` field**. The indexer's `path_index` resolves parent queries: compute the parent path string from the current path, look up the canonical at that path. One index hit per breadcrumb level.
+Directory records carry **no `parent` field**. The indexer's `chain_heads` table resolves parent queries: compute the parent path string from the current path, look up the canonical head at that `(workspace_id, path)`. One index hit per breadcrumb level.
 
-This was a deliberate choice. Storing `parent: at-uri` on records makes them fragile under any record-identity change (e.g., supersede), forcing children to be rewritten whenever a parent's identity changes. Indexer-resolved parents survive supersede chains transparently.
+Storing `parent: at-uri` on records would make them fragile under any record-identity change (e.g., supersede), forcing children to be rewritten whenever a parent's identity changes. Indexer-resolved parents survive supersede chains transparently.
 
 ## What this gives up
 
-- **Pre-publish moderation.** No content write requires manager approval before becoming visible. Moderation is social: misbehaving editors are removed from the keyring (any manager can do this via keyring supersede).
-- **Veto-individual-writes.** Same point in different framing. Client-side review layers (non-cryptographic, opt-in) can enforce it at UI level.
+- **Pre-publish moderation.** No content write requires manager approval before becoming visible. Moderation is social: misbehaving editors are removed from the keyring (any manager can do this via keyring supersede). Client-side review layers (non-cryptographic, opt-in) can enforce write-vetoes at UI level if a workspace wants them.
 - **Atomic cross-PDS writes.** Two members writing concurrently cannot commit together. Last-write-wins + retry is the only available conflict-resolution mechanism.
-- **Multi-writer real-time collaboration.** Pathological concurrency on the same path produces high retry rates. Real-time collaborative editing requires CRDT/OT layered on top of the supersede primitive — out of scope.
+- **Multi-writer real-time collaboration.** Many simultaneous writers on one path produce high retry rates. Real-time collaborative editing would need CRDT/OT layered on top of the supersede primitive.
 
-## Implementation scope
+## Future work
 
-This rewrite delivers the architecture in a single piece. There is no phase split: doc federation, single-canonical directory chains, and keyring supersede all ship together.
+Items deliberately out of scope:
 
-In scope:
-
-- Document federation: docs on writers' own PDSes.
-- Single-canonical directory chains with curatorial supersede.
-- Editor-additive vs manager-unrestricted authority enforced indexer-side.
-- Cascade-with-CID on listings.
-- Keyring supersede (no `kind` discriminator; uniform operation for membership / rotation / rename / relocation).
-- Workspace-root rkey anchored to the genesis keyring's rkey.
-- Concurrent-write race detection + `chain-forked` SSE events for client retry.
-
-Out of scope (future work):
-
-- **Forking.** Divergent-branch operations between independent workspace lineages. The supersede primitive could carry a `kind: fork` extension with a snapshot anchor, but no current use case requires it.
-- **Materialized forks.** Re-publishing snapshotted records under a fork's scope for retention guarantees beyond the parents' PDSes.
+- Forking — divergent-branch operations between independent workspace lineages. The supersede primitive could carry a `kind: fork` extension with a snapshot anchor, but no current use case requires it.
+- Materialized forks: re-publishing snapshotted records under a fork's scope for retention guarantees beyond the parents' PDSes.
 - Live collaborative document editing (CRDT/OT layer over the supersede primitive).
 - Cross-workspace document moves (custody transfer between distinct workspaces).
 - Garbage collection of orphan doc records.
 - Auto-merge resolution for chain-forked supersedes (currently last-write-wins + retry).
-
-## Migration from current shipped state
-
-Current production state (post-rollback `feature/workspace-doc-proposals`) has:
-
-- `*Update` lexicons in active use for proposed mutations.
-- Per-member-per-path directory records (introduced in the post-rollback federated branch).
-- Listings without `targetCid`.
-- No keyring supersede.
-
-The migration to this model:
-
-1. **Stop writing `*Update` records.** Clients update to write content directly.
-2. **Drain in-flight proposals.** Daemon applies any outstanding proposals; cleanup module removes them.
-3. **Consolidate per-member directory records into single-canonical chains.** For each path with multiple member contributions, write a single curatorial supersede (manager-authored) that consolidates all entries into one canonical. After this pass, every path has one canonical record at the head of its chain.
-4. **Add `targetCid` to all listings** during the consolidation pass.
-5. **Verify rkey stability.** For pre-existing workspaces, the genesis keyring's rkey IS the current keyring's rkey, so `ws-{genesisKeyringRkey}` resolves to the existing root record without renaming. The first keyring supersede after migration starts the chain.
-6. **Drop the keyring's `owner` field.** Existing keyring records written under the old lexicon retain it; a no-op supersede that simply omits the field can be issued by any manager to bring the keyring forward.
-7. **Indexer schema migration.** Indexer drops `*Update` event handlers and per-member-merge logic, adds chain-following + path_index, adds keyring-supersede chain following, adjusts merged-view computation to "canonical record fetch" instead of "merge across members."
-
-Migration is one-way; no rollback once consolidation runs. Coordinated release of client + indexer required.
-
-## Open questions
-
-These need answers before this rewrite ships:
-
-- **Chain-fork race detection details.** Specific SSE event shape, client retry strategy with exponential backoff and jitter, retry budget before surfacing user-visible error.
-- **Editor additivity check edge cases.** Reorder-preserving supersedes by an editor: allowed (no information loss) or rejected (strict ⊇)? Treatment of malformed entries in the prior canonical?
-- **Indexer schema details.** Concrete tables, indexes, and event-processing pipeline for chain-following + path_index + race detection.
-- **Optimistic overlay implementation.** SDK-level details for applying client-side updates immediately and reconciling with race-detected forks.
 
 ## References
 
@@ -321,4 +268,4 @@ These need answers before this rewrite ships:
 - [CRYPTO.md](CRYPTO.md) — algorithms, key wrapping, group keys
 - [STORAGE.md](STORAGE.md) — local cache, IndexedDB layout
 - [indexer.md](indexer.md) — indexer config, API, firehose details
-- [lexicons/README.md](../lexicons/README.md) — lexicon reference (will be updated alongside this rewrite)
+- [lexicons/README.md](../lexicons/README.md) — lexicon reference
