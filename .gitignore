@@ -61,6 +61,8 @@ e2e-tests/playwright-report/
 .claude/settings.local.json
 .claude/hooks/node_modules/
 .claude/worktrees
+.claude/scheduled_tasks.lock
+.playwright-mcp/
 
 # nix / direnv
 .direnv/
