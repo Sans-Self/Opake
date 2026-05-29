@@ -668,6 +668,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// The head record may live on any member's PDS; the lookup goes
     /// through the indexer's `chain-head` endpoint, then a cross-PDS
     /// `fetch_chain_node` to retrieve the record itself.
+    ///
+    /// The indexer is outside the TCB — it can lie about which URI is the
+    /// current head. We mitigate by walking the chain back from the
+    /// indexer's claimed head to genesis and verifying the genesis URI
+    /// equals the `workspace_id` we asked about. This closes the
+    /// "indexer points at a head from a different workspace's chain"
+    /// attack: PDS-signed records mean the indexer can't forge content,
+    /// only mislabel; the chain walk catches the mislabel.
+    ///
+    /// Note: this does *not* close staleness — a compromised indexer can
+    /// still point at an older-but-real head and hide a newer supersede.
+    /// Closing staleness requires out-of-band signals (polling each
+    /// member's `listRecords`), which is accepted as a distributed-systems
+    /// posture, not a security failure.
     async fn fetch_keyring_chain_head(
         &mut self,
         workspace_id: &str,
@@ -685,13 +699,25 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             Error::NotFound(format!("workspace {workspace_id} has no indexed keyring"))
         })?;
 
-        let node = crate::directories::fetch_chain_node::<crate::records::Keyring>(
+        // Walk the chain back from the indexer's claimed head to genesis
+        // and verify the genesis URI matches `workspace_id`. The returned
+        // chain is head→genesis ordered. `chain[0]` is the head record;
+        // `chain.last()` is the genesis (validated above).
+        let chain = crate::directories::verify_and_walk_chain::<crate::records::Keyring>(
             self.client.transport(),
             &head.uri,
+            workspace_id,
         )
         .await?;
-        crate::records::check_version(node.record.opake_version)?;
-        Ok((node.uri, node.record))
+
+        // Extract the head — the first node of the verified chain. Safe
+        // unwrap: verify_and_walk_chain returns Ok only when the chain
+        // is non-empty.
+        let head_node = chain.into_iter().next().ok_or_else(|| {
+            Error::InvalidRecord("verified chain returned empty result".to_owned())
+        })?;
+        crate::records::check_version(head_node.record.opake_version)?;
+        Ok((head_node.uri, head_node.record))
     }
 
     /// Client-side manager-authority check. The indexer is authoritative,

@@ -201,6 +201,60 @@ where
     Ok(nodes)
 }
 
+/// Walk a chain back from `head_uri` and verify it terminates at the
+/// expected genesis.
+///
+/// This is the integrity check that lets the client trust an indexer-
+/// supplied chain head despite the indexer being outside the TCB.
+/// `walk_back_to_genesis` guarantees the chain is well-formed (no cycles,
+/// no broken intermediates); this wrapper additionally pins the genesis
+/// URI to `expected_genesis_uri`, which closes the "indexer points at
+/// a head from a different workspace's chain" attack.
+///
+/// Returns the chain in head→genesis order on success. Callers
+/// implementing historical authority checks (e.g., "was the supersede's
+/// author a manager *at supersede time*?") can index back through the
+/// returned chain without paying the walk cost twice.
+///
+/// Errors:
+/// - `Error::ChainCycle` — back-edges form a loop.
+/// - `Error::NotFound` — an intermediate or genesis record is missing.
+/// - `Error::ChainGenesisMismatch` — the walk terminated at a URI other
+///   than `expected_genesis_uri`. Either the indexer returned a head
+///   from a different chain, or the chain's tail record carries a
+///   `supersedes` field set to a URI that turned out to be the actual
+///   genesis (the walk follows `supersedes` until it hits `None`, so a
+///   "broken tail" surfaces here too).
+pub async fn verify_and_walk_chain<R>(
+    transport: &impl Transport,
+    head_uri: &str,
+    expected_genesis_uri: &str,
+) -> Result<Vec<ChainNode<R>>, Error>
+where
+    R: DeserializeOwned + Superseding,
+{
+    let chain = walk_back_to_genesis::<R>(transport, head_uri).await?;
+
+    // `walk_back_to_genesis` guarantees the last node has
+    // `supersedes_uri() == None` — its loop terminates exactly when
+    // there's no next URI to follow. We rely on that here: the only
+    // verification step left is that the genesis URI matches.
+    let genesis = chain.last().ok_or_else(|| {
+        // Unreachable: walk_back_to_genesis always returns at least one
+        // node (the start), or an error. Defensive panic-replacement.
+        Error::InvalidRecord("chain walk returned empty result".to_owned())
+    })?;
+
+    if genesis.uri != expected_genesis_uri {
+        return Err(Error::ChainGenesisMismatch {
+            expected: expected_genesis_uri.to_owned(),
+            actual: genesis.uri.clone(),
+        });
+    }
+
+    Ok(chain)
+}
+
 #[cfg(test)]
 #[path = "chain_tests.rs"]
 mod tests;

@@ -58,6 +58,16 @@ pub enum Error {
     #[error("chain cycle detected at {uri}")]
     ChainCycle { uri: String },
 
+    /// A supersede chain walked back to a record other than the expected
+    /// genesis. The indexer either returned a head from a different
+    /// workspace's chain, or the chain is malformed at its tail. Either
+    /// way, the head can't be trusted — reject before any decrypt or
+    /// authority decision relies on it. `expected` is the workspace ID
+    /// (genesis URI) the caller asked about; `actual` is the URI the
+    /// chain walked back to.
+    #[error("chain genesis mismatch: expected {expected}, walk terminated at {actual}")]
+    ChainGenesisMismatch { expected: String, actual: String },
+
     /// A code path is recognised but not yet wired through. Distinct from
     /// `InvalidRecord` (which means "wire bytes are malformed") so callers
     /// can distinguish "this op makes no sense" from "this op makes sense

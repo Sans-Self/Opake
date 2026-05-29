@@ -214,6 +214,24 @@ mod keyring_supersede {
         }
     }
 
+    /// Stamp a keyring as a supersede of `WORKSPACE_ID`'s genesis — the
+    /// shape every steady-state workspace head record carries. Tests
+    /// that exercise a keyring-supersede write path (every test in this
+    /// module) build the prior head through this helper so the chain
+    /// walk in `fetch_keyring_chain_head` can verify the genesis.
+    fn as_supersede(mut k: Keyring) -> Keyring {
+        k.supersedes = Some(WORKSPACE_ID.to_string());
+        k.workspace_id = Some(WORKSPACE_ID.to_string());
+        k
+    }
+
+    /// Genesis keyring at `WORKSPACE_ID`. Members can be anything; the
+    /// chain walk only verifies the URI matches and `supersedes` is
+    /// `None` (which `keyring_with_members` already produces).
+    fn genesis_keyring(members: Vec<(&str, Role)>) -> Keyring {
+        keyring_with_members(members)
+    }
+
     fn opake_for(did: &str, mock: MockTransport) -> Opake<MockTransport, OsRng, NoopStorage> {
         let session = Session::Legacy(LegacySession {
             did: did.into(),
@@ -243,19 +261,25 @@ mod keyring_supersede {
     async fn update_member_role_writes_supersede_with_updated_role() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
 
-        let prior = keyring_with_members(vec![
+        let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
             (BOB_DID, Role::Editor),
-        ]);
+        ]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
 
         let mock = MockTransport::new();
         // 1. chain-head endpoint
         mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
-        // 2. DID doc resolve for the head's authority (alice)
+        // 2. DID doc resolve for the head's authority (alice). Cached
+        //    for the subsequent genesis fetch since both are on alice.
         mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
-        // 3. getRecord for the prior keyring
+        // 3. getRecord for the prior keyring (the head)
         mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
-        // 4. createRecord for the supersede write on alice's PDS
+        // 4. getRecord for the genesis — the chain walk follows `supersedes`
+        //    back from the head and verifies the genesis URI matches
+        //    WORKSPACE_ID before any authority logic runs.
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+        // 5. createRecord for the supersede write on alice's PDS
         let new_uri = format!("at://{ALICE_DID}/app.opake.keyring/3newsupersede");
         mock.enqueue(create_record_response(&new_uri, "bafynew"));
 
@@ -305,15 +329,17 @@ mod keyring_supersede {
     async fn update_member_role_rejects_non_manager_caller() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
 
-        let prior = keyring_with_members(vec![
+        let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
             (BOB_DID, Role::Editor),
-        ]);
+        ]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
         mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
         mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
 
         // Bob (editor, not manager) attempts to promote himself.
         let mut opake = opake_for(BOB_DID, mock);
@@ -333,12 +359,14 @@ mod keyring_supersede {
     async fn update_member_role_errors_when_member_absent() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
 
-        let prior = keyring_with_members(vec![(ALICE_DID, Role::Manager)]);
+        let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
         mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
         mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
 
         let mut opake = opake_for(ALICE_DID, mock);
         let err = opake

@@ -200,6 +200,110 @@ async fn walk_back_propagates_missing_intermediate() {
     assert!(matches!(err, Error::NotFound(_)));
 }
 
+// -- verify_and_walk_chain --
+//
+// The integrity wrapper around walk_back_to_genesis. Pins the chain
+// tail to an expected genesis URI so an indexer that lies about which
+// chain a head belongs to can't slip a foreign head past us.
+
+#[tokio::test]
+async fn verify_and_walk_chain_accepts_matching_genesis() {
+    let mock = MockTransport::new();
+    let genesis = dummy_directory("/");
+    let head = dir_superseding("/", URI_GENESIS);
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let chain: Vec<ChainNode<Directory>> =
+        verify_and_walk_chain(&mock, URI_HEAD, URI_GENESIS).await.unwrap();
+
+    assert_eq!(chain.len(), 2);
+    assert_eq!(chain[0].uri, URI_HEAD);
+    assert_eq!(chain[1].uri, URI_GENESIS);
+}
+
+#[tokio::test]
+async fn verify_and_walk_chain_accepts_genesis_only_chain() {
+    // Freshly-created workspace: head and genesis are the same record.
+    let mock = MockTransport::new();
+    let genesis = dummy_directory("/");
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let chain: Vec<ChainNode<Directory>> =
+        verify_and_walk_chain(&mock, URI_GENESIS, URI_GENESIS).await.unwrap();
+
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].uri, URI_GENESIS);
+    assert!(chain[0].record.supersedes.is_none());
+}
+
+#[tokio::test]
+async fn verify_and_walk_chain_rejects_wrong_genesis() {
+    // The indexer's claimed head walks back to a *real* genesis, but
+    // not the one the caller asked about. Classic "head from another
+    // workspace" attack.
+    let mock = MockTransport::new();
+    let genesis = dummy_directory("/");
+    let head = dir_superseding("/", URI_GENESIS);
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let other_workspace = "at://did:plc:other/app.opake.directory/elsewhere";
+    let err = verify_and_walk_chain::<Directory>(&mock, URI_HEAD, other_workspace)
+        .await
+        .unwrap_err();
+
+    match err {
+        Error::ChainGenesisMismatch { expected, actual } => {
+            assert_eq!(expected, other_workspace);
+            assert_eq!(actual, URI_GENESIS);
+        }
+        other => panic!("expected ChainGenesisMismatch, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn verify_and_walk_chain_propagates_broken_chain() {
+    // Walking back fails partway through. The verification wrapper
+    // should surface the underlying error rather than swallowing it.
+    let mock = MockTransport::new();
+    let head = dir_superseding("/", URI_GENESIS);
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(not_found());
+
+    let err = verify_and_walk_chain::<Directory>(&mock, URI_HEAD, URI_GENESIS)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::NotFound(_)));
+}
+
+#[tokio::test]
+async fn verify_and_walk_chain_propagates_cycle() {
+    // A → B → A cycle. ChainCycle should propagate through, not get
+    // hidden behind a generic mismatch.
+    let mock = MockTransport::new();
+    let head = dir_superseding("/", URI_MIDDLE);
+    let middle = dir_superseding("/", URI_HEAD);
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(did_doc(DID_B, PDS_B)));
+    mock.enqueue(ok(record_entry(URI_MIDDLE, "bafymiddle", &middle)));
+
+    let err = verify_and_walk_chain::<Directory>(&mock, URI_HEAD, URI_GENESIS)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::ChainCycle { .. }));
+}
+
 // -- ChainHeadProvider contract --
 //
 // The production impl lives in the indexer-client layer. The map-backed
