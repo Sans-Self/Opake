@@ -2,8 +2,7 @@
 import type { WorkspaceEntryDto } from "./WorkspaceEntry";
 
 /**
- * Mirrors [`opake_core::indexer::workspace_keeper::WorkspaceSnapshot`].
- * `entries` references the wrapper, not the core type, so the generated
- * TypeScript imports `WorkspaceEntry` from the sibling file.
+ * Mirrors `WorkspaceSnapshot` — full workspace list emitted to
+ * `watchWorkspaces`.
  */
 export type WorkspaceSnapshotDto = { entries: Array<WorkspaceEntryDto>, loaded: boolean, };

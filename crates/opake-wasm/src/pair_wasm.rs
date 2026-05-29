@@ -12,7 +12,6 @@ use opake_core::crypto::OsRng;
 use opake_core::error::Error;
 use opake_core::opake::authenticated_client;
 use opake_core::storage::Storage;
-use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::js_storage::{JsStorage, JsStorageAdapter};
@@ -42,21 +41,13 @@ pub async fn create_pair_request_js(
 
     persist_if_refreshed(&storage, &did, &client).await?;
 
-    // Snake_case on the wire matches the rest of the WASM surface; the SDK
-    // transforms to camelCase via `pairRequestResultSchema`. Both halves of
-    // the hybrid ephemeral pubkey go back to JS so callers can show
-    // fingerprints / display the request the same way the CLI does.
-    #[derive(Serialize)]
-    struct Dto {
-        uri: String,
-        rkey: String,
-        #[serde(with = "crate::wasm_util::serde_bytes")]
-        x25519_ephemeral_public_key: Vec<u8>,
-        #[serde(with = "crate::wasm_util::serde_bytes")]
-        ml_kem_ephemeral_public_key: Vec<u8>,
-    }
-
-    to_js(&Dto {
+    // Public halves only — the X25519 and ML-KEM-768 ephemeral *public*
+    // keys cross to JS for fingerprint display. The matching private
+    // keys stay inside WASM-owned Storage (persisted by
+    // `create_pair_request` above) and never leave the boundary. The
+    // SDK consumes `PairRequestResult.ts` (generated) and transforms
+    // snake_case → camelCase via `pairRequestResultSchema`.
+    to_js(&crate::bindings::PairRequestResultDto {
         uri: info.uri,
         rkey: info.rkey,
         x25519_ephemeral_public_key: info.x25519_ephemeral_public_key.to_vec(),

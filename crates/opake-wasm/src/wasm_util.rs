@@ -74,26 +74,10 @@ pub fn cabinet_context(opake: &WasmOpake) -> Result<FileContext, JsError> {
     opake.cabinet_context().map_err(wasm_err)
 }
 
-/// Result containing a decrypted document (filename + plaintext bytes).
-#[derive(Serialize)]
-pub struct DownloadResult {
-    pub filename: String,
-    #[serde(with = "serde_bytes")]
-    pub plaintext: Vec<u8>,
-}
-
-/// Serde helper: serialize `Vec<u8>` as `Uint8Array` via serde_wasm_bindgen.
-///
-/// Without this, serde serializes `Vec<u8>` element-by-element as a JS Array
-/// of Numbers. `serialize_bytes` triggers serde_wasm_bindgen's bytes path,
-/// producing a proper Uint8Array.
-pub mod serde_bytes {
-    use serde::Serializer;
-
-    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes)
-    }
-}
+// DownloadResult + serde_bytes moved to `crate::bindings`. Re-export to
+// keep existing import paths (`crate::wasm_util::DownloadResult`,
+// `crate::wasm_util::serde_bytes`) working without churning every site.
+pub use crate::bindings::{serde_bytes, DownloadResult};
 
 // ---------------------------------------------------------------------------
 // Shared serialization helpers (used by opake_context + file_manager)
@@ -125,6 +109,14 @@ pub fn parse_role(s: &str) -> Result<opake_core::records::Role, JsError> {
 /// it's `None` for mutations like deletes or member-list edits that produce
 /// no single artefact the caller would address.
 #[derive(Serialize)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-bindings",
+    ts(
+        export,
+        export_to = "../../../packages/opake-sdk/src/generated/MutationResult.ts"
+    )
+)]
 pub struct MutationResultDto {
     pub uri: Option<String>,
 }

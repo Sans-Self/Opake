@@ -187,18 +187,10 @@ impl WasmOpakeHandle {
             keeper.upsert(optimistic);
         }
 
-        #[derive(Serialize)]
-        struct R {
-            keyring_uri: String,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            key: Vec<u8>,
-        }
-
-        serde_wasm_bindgen::to_value(&R {
+        to_js(&crate::bindings::CreateWorkspaceResultDto {
             keyring_uri,
             key: key.0.to_vec(),
         })
-        .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// List all keyrings the user is a member of, with decrypted metadata.
@@ -240,8 +232,11 @@ impl WasmOpakeHandle {
             keeper.bootstrap(entries.clone());
         }
 
-        // JS-side wire format. Matches `workspaceEntrySchema` in the SDK.
-        to_js(&serde_json::json!({ "workspaces": entries }))
+        // JS-side wire format — `ListWorkspacesResultDto` is the named
+        // shape; the SDK consumes the generated TS type.
+        to_js(&crate::bindings::ListWorkspacesResultDto {
+            workspaces: entries.iter().map(crate::bindings::WorkspaceEntryDto::from).collect(),
+        })
     }
 
     /// Add a member to a workspace. Resolves both the keyring's group key
@@ -721,15 +716,9 @@ impl WasmOpakeHandle {
         let resolved =
             opake_core::manager::ResolvedDocumentMetadata::from_parts(metadata, created_at, modified_at);
 
-        #[derive(serde::Serialize)]
-        struct R {
-            name: String,
-            metadata: opake_core::manager::ResolvedDocumentMetadata,
-        }
-
-        to_js(&R {
+        to_js(&crate::bindings::ResolvedGrantMetadataDto {
             name,
-            metadata: resolved,
+            metadata: crate::bindings::DocumentMetadataDto::from(&resolved),
         })
     }
 

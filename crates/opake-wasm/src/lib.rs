@@ -1,6 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use std::collections::HashMap;
-
 use opake_core::client::dpop::DpopKeyPair;
 use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
@@ -8,7 +5,6 @@ use opake_core::crypto::{
     KeyringMetadata, OsRng,
 };
 use opake_core::storage::Identity;
-use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 // Bindings module — wrapper DTOs + ts-rs annotations. Not wasm32-gated
@@ -53,23 +49,8 @@ pub fn binding_check() -> String {
     opake_core::binding_check().to_owned()
 }
 
-/// DTO for EncryptedPayload that serializes the nonce as Vec<u8>
-/// so serde-wasm-bindgen produces a proper Uint8Array instead of
-/// a plain object with numeric keys (which is what [u8; 12] gives).
-#[derive(Serialize)]
-struct EncryptedPayloadDto {
-    ciphertext: Vec<u8>,
-    nonce: Vec<u8>,
-}
-
-impl From<EncryptedPayload> for EncryptedPayloadDto {
-    fn from(p: EncryptedPayload) -> Self {
-        Self {
-            ciphertext: p.ciphertext,
-            nonce: p.nonce.to_vec(),
-        }
-    }
-}
+// EncryptedPayloadDto moved to `bindings::EncryptedPayloadDto`.
+use bindings::EncryptedPayloadDto;
 
 #[wasm_bindgen(js_name = schemaVersion)]
 pub fn schema_version() -> u32 {
@@ -161,12 +142,8 @@ pub fn create_dpop_proof_js(
     .map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// DTO for PkceChallenge — the core type doesn't derive Serialize.
-#[derive(Serialize)]
-struct PkceChallengeDto {
-    verifier: String,
-    challenge: String,
-}
+// PkceChallengeDto moved to `bindings::PkceChallengeDto`.
+use bindings::PkceChallengeDto;
 
 #[wasm_bindgen(js_name = generatePkce)]
 pub fn generate_pkce_js() -> Result<JsValue, JsError> {
@@ -439,30 +416,10 @@ pub fn pds_from_did_document_js(doc_json: &[u8]) -> Result<String, JsError> {
 // and the FileManager / SSE bindings that emit tree snapshots to JS.
 // ---------------------------------------------------------------------------
 
-#[cfg(target_arch = "wasm32")]
-#[derive(Serialize)]
-pub(crate) struct TypedEntry {
-    pub(crate) uri: String,
-    #[serde(rename = "type")]
-    pub(crate) kind: &'static str,
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DirectorySnapshotEntry {
-    pub(crate) name: String,
-    pub(crate) entries: Vec<TypedEntry>,
-    pub(crate) parent_uri: Option<String>,
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DirectoryTreeSnapshot {
-    pub(crate) root_uri: Option<String>,
-    pub(crate) directories: HashMap<String, DirectorySnapshotEntry>,
-}
+// Directory tree DTOs moved to `bindings::*`. Re-export under the
+// crate root so existing call sites (`crate::TypedEntry`, etc.) keep
+// resolving without churning every file.
+pub use bindings::{DirectorySnapshotEntry, DirectoryTreeSnapshot, TypedEntry};
 
 // `workspace_root_directory_uri` removed — workspace roots are now TID-rkeyed
 // and discovered via the indexer's `chain_heads` table rather than derived
