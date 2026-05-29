@@ -52,6 +52,36 @@ Opake uses client-side encryption exclusively. The PDS never sees plaintext.
 
 The full encryption model, threat assumptions, and data flow are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Trust model
+
+Opake's federation design distributes authority across PDSes: each workspace member writes to their own PDS, and an indexer (AppView) aggregates the records into the view the client renders. Two distinct trust questions follow:
+
+- **Can a PDS forge content?** No. Every record carries a PDS commit signature; tampered records fail signature verification. A compromised PDS can drop writes or refuse reads, but it can't substitute readable plaintext or forge another member's signature.
+- **Can the indexer mislead the client?** Constrained. The indexer can lie about which records are canonical (which URI is the current head, which supersedes which) and which records exist, but it can't forge the records themselves. The client closes this gap by verifying the indexer's claims against the PDS-signed records on every read.
+
+The indexer is treated as a **service, not a source of truth**.
+
+### What the client verifies on every read
+
+1. **Chain integrity.** On every keyring chain-head fetch, the client walks back from the indexer's claimed head to the genesis record via the chain's `supersedes` pointers, and verifies the genesis URI equals the workspace's stable identity. Closes "indexer points at a head from a different workspace's chain." Surfaces as `Error::ChainGenesisMismatch` on failure.
+
+2. **Chain authority.** Walking the same chain, the client verifies every supersede in the keyring chain was authored by a manager of the immediately prior keyring. Closes "indexer accepted a supersede from a non-manager." Surfaces as `Error::ChainAuthorityViolation`.
+
+3. **Directory additivity.** On every workspace tree load, the client checks each editor-authored directory supersede against its prior canonical and rejects any that drop entries. Managers are exempt from this check (deletions are their prerogative). Closes "indexer accepted a non-additive editor write that erased entries from a shared directory." Surfaces as `Error::ChainAdditivityViolation`.
+
+These checks run client-side regardless of which indexer the client connects to. Swapping indexers is swapping caches, not swapping trust roots.
+
+### What the client still trusts the indexer for
+
+- **Freshness.** A compromised indexer can point at a real-but-older head and hide a newer supersede. This is unaddressable without out-of-band signals (polling every member's `listRecords`, defeating the indexer's bandwidth-aggregation purpose). Staleness is treated as a distributed-systems posture, not a security failure: the indexer can delay updates but can't fabricate them. Once the newer record is observed (via a different indexer, a re-sync after a cache eviction, or the firehose itself), the client's chain walk confirms it.
+- **Discovery and listing.** "What documents exist in this workspace" comes from the indexer's snapshot. A compromised indexer could omit records — same staleness category. The client can detect omissions on chain walks (a missing intermediate breaks the back-walk) but can't enumerate what _should_ exist without consulting every member's PDS.
+
+### What's out of scope of the trust checks
+
+- **Within a member's PDS.** Each member's PDS is in their own TCB. A compromised member-PDS can forge that member's signatures. The federated model intentionally accepts this: distributing authority means each authority is a separate trust root.
+- **Encryption keys on the device.** Client keys live on the device that holds them. Compromising the device compromises the keys it stores.
+- **Bluesky social graph.** PDS handle resolution goes through the AT Protocol DID and PLC directory. Compromising those affects identity resolution upstream of Opake.
+
 ## Response timeline
 
 This is a solo open-source project, not a security team with a pager. That said:
