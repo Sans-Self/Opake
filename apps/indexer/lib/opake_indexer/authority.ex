@@ -25,12 +25,30 @@ defmodule OpakeIndexer.Authority do
   via `RecordQueries.member_role/2` — pure JSONB read, no denormalized
   projection.
 
+  The set of valid role strings is owned by this module (`@known_roles`)
+  rather than by `RecordQueries`, because role semantics live with the
+  authority rules. `RecordQueries` returns whatever string the JSONB
+  contained; any value outside `@known_roles` is treated as
+  `:insufficient_role` *and* logged as a `Logger.warning` so schema drift
+  or data corruption surfaces in operations instead of silently rejecting
+  the supersede.
+
   All checks return `:ok` or `{:rejected, reason :: atom()}`.
   """
+
+  require Logger
 
   alias OpakeIndexer.Queries.RecordQueries
 
   @type result :: :ok | {:rejected, atom()}
+
+  # Canonical role strings as they appear in `app.opake.keyring` records
+  # (lexicon-defined; the Rust enum uses `serde(rename_all = "lowercase")`
+  # → `Role::Manager → "manager"`, etc.). Any role outside this set is an
+  # anomaly: lexicon drift, schema migration that didn't reach the indexer,
+  # or tampered data. We log on the way through so the anomaly is
+  # observable, then reject conservatively.
+  @known_roles ~w(manager editor viewer)
 
   # -- Keyring authority --
 
@@ -42,9 +60,11 @@ defmodule OpakeIndexer.Authority do
   def check_keyring_supersede(_workspace_id, nil, _author_did), do: :ok
 
   def check_keyring_supersede(workspace_id, _prior_uri, author_did) do
-    case RecordQueries.member_role(workspace_id, author_did) do
-      "manager" -> :ok
-      nil -> {:rejected, :not_a_member}
+    case classify_role(RecordQueries.member_role(workspace_id, author_did),
+           workspace_id: workspace_id
+         ) do
+      :manager -> :ok
+      :missing -> {:rejected, :not_a_member}
       _ -> {:rejected, :insufficient_role}
     end
   end
@@ -69,19 +89,67 @@ defmodule OpakeIndexer.Authority do
   def check_directory_supersede(_workspace_id, nil, _author_did, _new_entries), do: :ok
 
   def check_directory_supersede(workspace_id, prior_uri, author_did, new_entries) do
-    case RecordQueries.member_role(workspace_id, author_did) do
-      "manager" ->
+    case classify_role(RecordQueries.member_role(workspace_id, author_did),
+           workspace_id: workspace_id
+         ) do
+      :manager ->
         :ok
 
-      "editor" ->
+      :editor ->
         additivity_check(prior_uri, new_entries)
 
-      nil ->
+      :missing ->
         {:rejected, :not_a_member}
 
       _ ->
         {:rejected, :insufficient_role}
     end
+  end
+
+  # -- Role classification --
+
+  @doc """
+  Normalize the raw role string from JSONB into a tagged atom.
+
+  Known roles (`#{inspect(@known_roles)}`) map to their atom; `nil` means
+  the DID isn't in the members list; anything else is anomalous data and
+  gets logged via `Logger.warning` before being mapped to `:unknown` so
+  callers' catch-all branches reject it.
+
+  The `:workspace_id` option is included verbatim in the warning so the
+  anomalous record is locatable from the log. Callers from `check_*`
+  helpers pass the workspace they're validating; tests can pass any
+  identifier (or omit it via `[]`).
+  """
+  @spec classify_role(String.t() | nil, keyword()) ::
+          :manager | :editor | :viewer | :missing | :unknown
+  def classify_role(role, opts \\ [])
+
+  def classify_role(nil, _opts), do: :missing
+  def classify_role("manager", _opts), do: :manager
+  def classify_role("editor", _opts), do: :editor
+  def classify_role("viewer", _opts), do: :viewer
+
+  def classify_role(role, opts) when is_binary(role) do
+    workspace_id = Keyword.get(opts, :workspace_id, "<unknown>")
+
+    Logger.warning(
+      "[Authority] unknown role #{inspect(role)} in workspace #{workspace_id} — " <>
+        "expected one of #{inspect(@known_roles)}; rejecting as :insufficient_role"
+    )
+
+    :unknown
+  end
+
+  def classify_role(role, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id, "<unknown>")
+
+    Logger.warning(
+      "[Authority] non-string role #{inspect(role)} in workspace #{workspace_id} — " <>
+        "rejecting as :insufficient_role"
+    )
+
+    :unknown
   end
 
   defp additivity_check(prior_uri, new_entries) do

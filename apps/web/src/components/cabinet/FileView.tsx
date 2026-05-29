@@ -3,6 +3,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { NotFoundView } from "./NotFoundView";
 import {
   ListBulletsIcon,
   SquaresFourIcon,
@@ -12,6 +13,8 @@ import {
   GearIcon,
 } from "@phosphor-icons/react";
 import {
+  decodePendingUploadName,
+  opakeKeys,
   useAllShares,
   useCreateDirectory,
   useDelete,
@@ -23,6 +26,8 @@ import {
   useRenameDirectory,
   useUpload,
 } from "@opake/react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { DocumentMetadata } from "@opake/sdk";
 import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
@@ -37,7 +42,17 @@ import {
   snapshotToFileItems,
 } from "@/lib/fileContext";
 import { rkeyFromUri } from "@/lib/atUri";
-import { ancestorsOf, findParentUri, resolveDirectoryFromSplat } from "@/lib/directoryTree";
+import { ancestorsOf, findParentUri } from "@/lib/directoryTree";
+import {
+  buildSplatPath,
+  checkNameAvailability,
+  normalizeName,
+  partialResolveNamePath,
+  resolveDirectoryFromNamePath,
+  type DocumentNameLookup,
+  type NameAvailability,
+} from "@/lib/namePath";
+import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import { useForkRetryExhaustedToast } from "@/lib/useForkRetryExhaustedToast";
 import { triggerBrowserDownload } from "@/lib/download";
 import { toastError, toastSuccess } from "@/stores/toast";
@@ -52,6 +67,12 @@ import { isEditable, type FileItem } from "./types";
 interface FileViewProps {
   readonly rootLabel: string;
   readonly pathSegments: readonly string[];
+  /**
+   * File leaf from the URL when present (e.g. `/dir/f/foo.pdf` → "foo.pdf").
+   * When set, FileView resolves it within the current directory and opens
+   * a side-panel preview. Null means a plain directory view.
+   */
+  readonly fileSegment: string | null;
   readonly context: FileContext;
   readonly basePath: string;
 }
@@ -94,10 +115,56 @@ function ErrorBanner({ message, onRetry }: { readonly message: string; readonly 
 }
 
 // ---------------------------------------------------------------------------
+// Resolution status — directory view vs file preview vs not-found
+// ---------------------------------------------------------------------------
+
+type PathStatus =
+  | { readonly kind: "pending" }
+  | { readonly kind: "directory" }
+  | { readonly kind: "file-preview" }
+  | { readonly kind: "directory-not-found"; readonly resolvedDepth: number }
+  | { readonly kind: "file-not-found" };
+
+interface PathStatusInput {
+  readonly snapshot: DirectoryTreeSnapshot | null;
+  readonly isReady: boolean;
+  readonly pathSegments: readonly string[];
+  readonly fileSegment: string | null;
+  readonly metadata: Readonly<Record<string, unknown>> | undefined;
+  readonly previewItemExists: boolean;
+}
+
+function deriveStatus(input: PathStatusInput): PathStatus {
+  const { snapshot, isReady, pathSegments, fileSegment, metadata, previewItemExists } = input;
+  if (!snapshot || !isReady) return { kind: "pending" };
+
+  if (pathSegments.length > 0) {
+    const partial = partialResolveNamePath(snapshot, pathSegments);
+    if (partial.resolvedDepth < pathSegments.length) {
+      return { kind: "directory-not-found", resolvedDepth: partial.resolvedDepth };
+    }
+  }
+
+  if (fileSegment === null) return { kind: "directory" };
+  // Metadata for the parent dir must be loaded before we can resolve
+  // a file leaf — items is empty during the load window, and we'd
+  // flicker "not found" without this gate.
+  if (metadata === undefined) return { kind: "pending" };
+  return previewItemExists ? { kind: "file-preview" } : { kind: "file-not-found" };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function FileView({ rootLabel, pathSegments, context, basePath }: FileViewProps) {
+// eslint-disable-next-line sonarjs/cognitive-complexity -- orchestrating component: routes pathStatus / preview / mutation state to the right render branch
+export function FileView({
+  rootLabel,
+  pathSegments,
+  fileSegment,
+  context,
+  basePath,
+}: FileViewProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newFolderDialogRef = useRef<NewFolderDialogHandle>(null);
@@ -130,7 +197,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   useEffect(() => {
     if (!snapshot) return;
     const resolved =
-      pathSegments.length === 0 ? null : resolveDirectoryFromSplat(snapshot, pathSegments);
+      pathSegments.length === 0 ? null : resolveDirectoryFromNamePath(snapshot, pathSegments);
     if (resolved !== targetDirectoryUri) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- two-phase directory resolution; see comment above
       setTargetDirectoryUri(resolved);
@@ -204,25 +271,149 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
 
   // URI of the file currently open in the side-panel preview, or null.
   // Previews are keyed by URI; switching files evicts the previous cache
-  // entry on close so the decrypted bytes don't linger.
-  const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const previewItem = previewUri ? items.find((i) => i.uri === previewUri) : null;
+  // entry on close so the decrypted bytes don't linger. The active file
+  // is fully URL-driven — clicking a file navigates to `<dirs>/f/<name>`,
+  // and `fileSegment` here is the name-leaf from the URL.
+  const previewItem = useMemo(() => {
+    if (!fileSegment) return null;
+    return (
+      items.find((i) => i.kind !== "folder" && normalizeName(i.name) === fileSegment) ?? null
+    );
+  }, [fileSegment, items]);
+  const previewUri = previewItem?.uri ?? null;
+
+  // Evict the previous file's decrypted plaintext when previewUri changes.
+  // Without this, navigating through a sequence of files leaves one cache
+  // entry per file in the module-level Map until the user closes the
+  // pane — decrypted bytes accumulate on the JS heap.
+  const lastPreviewUriRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = lastPreviewUriRef.current;
+    if (prev && prev !== previewUri) evictPreviewCache(prev);
+    lastPreviewUriRef.current = previewUri;
+  }, [previewUri]);
+
+  // Resolution status drives the render branch (directory view vs file
+  // preview vs not-found). Depends on `previewItem`, so it has to land
+  // below the preview block.
+  const pathStatus = useMemo(
+    () =>
+      deriveStatus({
+        snapshot: snapshot ?? null,
+        isReady,
+        pathSegments,
+        fileSegment,
+        metadata,
+        previewItemExists: previewItem !== null,
+      }),
+    [snapshot, isReady, pathSegments, fileSegment, metadata, previewItem],
+  );
+
+  // -----------------------------------------------------------------
+  // Name-availability pre-check
+  // -----------------------------------------------------------------
+
+  const queryClient = useQueryClient();
+
+  // Fast synchronous variant — used by NewFolderDialog's keystroke
+  // validator and as a quick-reject before paying the warm cost. Treats
+  // a missing metadata cache for the target parent as "documents
+  // unverified": dir-name uniqueness still applies, document-name
+  // conflicts may slip through to fork-retry.
+  const checkAvailability = useCallback(
+    (
+      rawName: string,
+      parentUri: string,
+      options: { readonly excludeUri?: string } = {},
+    ): NameAvailability => {
+      const cached =
+        parentUri === currentDirectoryUri
+          ? metadata
+          : queryClient.getQueryData<Readonly<Record<string, DocumentMetadata>>>(
+              opakeKeys.metadata(parentUri),
+            );
+      return checkNameAvailability({
+        snapshot: snapshot ?? null,
+        parentUri,
+        rawName,
+        documentMetadata: cached ?? {},
+        excludeUri: options.excludeUri,
+        pendingNameResolver: decodePendingUploadName,
+      });
+    },
+    [snapshot, currentDirectoryUri, metadata, queryClient],
+  );
+
+  // Async warm-and-check — fetches metadata for the target parent on
+  // demand before running the conflict check. Cross-folder uploads and
+  // moves call through here so document-name collisions in a non-viewed
+  // parent are caught client-side instead of leaning on fork-retry.
+  //
+  // The fetch result populates the cache under `opakeKeys.metadata(parentUri)`
+  // so a subsequent `useDirectoryMetadata` mount picks up the warmed data
+  // without re-decrypting. `staleTime: 0` forces every warm to actually
+  // re-fetch rather than returning the cache — without this, the global
+  // default (`staleTime: 30_000`) would silently serve a 30-second-old
+  // snapshot, opening a window where a peer write since the last warm
+  // would be missed on the conflict check. Post-mutation `onSettled`
+  // invalidates all metadata keys, so cross-operation staleness is
+  // already bounded; the `staleTime: 0` here closes the per-operation
+  // freshness gap that the global default would otherwise leave open.
+  //
+  // Warm failures degrade to dir-name-only uniqueness — same fallback
+  // as the sync path. The post-write fork-retry remains the safety net
+  // for that narrow window.
+  const checkAvailabilityWithWarm = useCallback(
+    async (
+      rawName: string,
+      parentUri: string,
+      options: { readonly excludeUri?: string } = {},
+    ): Promise<NameAvailability> => {
+      const warmRemote = async (): Promise<DocumentNameLookup> => {
+        if (!fileManager) return {};
+        try {
+          return await queryClient.fetchQuery<Readonly<Record<string, DocumentMetadata>>>({
+            queryKey: opakeKeys.metadata(parentUri),
+            queryFn: async () => {
+              const result = await fileManager.loadTreeWithMetadata(parentUri);
+              return result.metadata;
+            },
+            staleTime: 0,
+          });
+        } catch {
+          // Warm failed — degrade to dir-name-only uniqueness; the
+          // post-write fork-retry remains the safety net.
+          return {};
+        }
+      };
+
+      const documentMetadata: DocumentNameLookup =
+        parentUri === currentDirectoryUri ? (metadata ?? {}) : await warmRemote();
+
+      return checkNameAvailability({
+        snapshot: snapshot ?? null,
+        parentUri,
+        rawName,
+        documentMetadata,
+        excludeUri: options.excludeUri,
+        pendingNameResolver: decodePendingUploadName,
+      });
+    },
+    [snapshot, currentDirectoryUri, metadata, fileManager, queryClient],
+  );
 
   // -----------------------------------------------------------------
   // Handlers
   // -----------------------------------------------------------------
 
-  const pathKey = pathSegments.join("/");
-
   const handleOpen = useCallback(
     (item: FileItem) => {
       if (item.kind === "folder") {
-        const rkey = rkeyFromUri(item.uri);
-        const newPath = pathSegments.length > 0 ? `${pathKey}/${rkey}` : rkey;
-        void navigate({ to: `${basePath}/$` as never, params: { _splat: newPath } as never });
+        const newSplat = buildSplatPath([...pathSegments, normalizeName(item.name)]);
+        void navigate({ to: `${basePath}/$` as never, params: { _splat: newSplat } as never });
       }
     },
-    [navigate, basePath, pathSegments, pathKey],
+    [navigate, basePath, pathSegments],
   );
 
   const handleEdit = useCallback(
@@ -275,32 +466,28 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     [fileManager],
   );
 
-  const handlePreview = useCallback((item: FileItem) => {
-    // Evict the previous preview's decrypted plaintext before overwriting
-    // the URI. Without this, opening a sequence of files leaves one cache
-    // entry per file in the module-level Map until the user closes the
-    // pane — decrypted bytes accumulate on the JS heap.
-    setPreviewUri((prev) => {
-      if (prev && prev !== item.uri) evictPreviewCache(prev);
-      return item.uri;
-    });
-  }, []);
+  const handlePreview = useCallback(
+    (item: FileItem) => {
+      const newSplat = buildSplatPath(pathSegments, normalizeName(item.name));
+      void navigate({ to: `${basePath}/$` as never, params: { _splat: newSplat } as never });
+    },
+    [navigate, basePath, pathSegments],
+  );
 
   const handleClosePreview = useCallback(() => {
-    setPreviewUri((prev) => {
-      if (prev) evictPreviewCache(prev);
-      return null;
-    });
-  }, []);
+    const newSplat = buildSplatPath(pathSegments);
+    void navigate({ to: `${basePath}/$` as never, params: { _splat: newSplat } as never });
+  }, [navigate, basePath, pathSegments]);
 
   // Flush the currently-shown preview's cache on unmount so a route
   // change away from the file browser doesn't leave decrypted bytes
   // behind under the previous URI.
   useEffect(
     () => () => {
-      if (previewUri) evictPreviewCache(previewUri);
+      const last = lastPreviewUriRef.current;
+      if (last) evictPreviewCache(last);
     },
-    [previewUri],
+    [],
   );
 
   // Decrypt thunk for the current preview. Stable per (fileManager, previewUri,
@@ -355,10 +542,28 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const handleUpdateMetadata = useCallback(
     (uri: string, changes: MetadataChanges) => {
       if (!fileManager) return;
+      if (!snapshot) {
+        toastError("Tree not loaded yet");
+        return;
+      }
+      const parent = findParentUri(snapshot, uri);
+      if (!parent) {
+        toastError("Parent directory not found in tree snapshot");
+        return;
+      }
+      // Name is always present in `changes` (callers re-send the
+      // existing name when only tags/description change). `excludeUri`
+      // makes renaming to the same name pass cleanly.
+      const check = checkAvailability(changes.name, parent, { excludeUri: uri });
+      if (!check.ok) {
+        toastError(check.message);
+        return;
+      }
+
       const done = loading("documents-metadata");
       void fileManager
         .updateMetadata(uri, {
-          filename: changes.name,
+          filename: check.normalized,
           tags: changes.tags ? [...changes.tags] : undefined,
           description: changes.description,
         })
@@ -368,7 +573,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         })
         .finally(() => done());
     },
-    [fileManager],
+    [fileManager, snapshot, checkAvailability],
   );
 
   const handleMoveEntry = useCallback(
@@ -379,38 +584,154 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         toastError("Cannot determine source or target directory");
         return;
       }
-      moveMut.mutate(
-        { entryUri, sourceDirUri, targetDirUri: resolvedTargetUri },
-        {
-          onSuccess: () => toastSuccess("Moved"),
-          onError: (err) => toastError(err instanceof Error ? err.message : "Move failed"),
-        },
-      );
+
+      // Resolve the entry's name to check against the target parent.
+      // Directory names live in the snapshot; document names live in
+      // metadata for the source dir (currently viewed → loaded).
+      const dirInfo = snapshot?.directories[entryUri];
+      const entryName = dirInfo ? dirInfo.name : (metadata?.[entryUri]?.name ?? null);
+
+      // Same-parent move is a no-op rather than a conflict — skip the
+      // check so dragging an entry onto its own folder doesn't surface
+      // a misleading "already exists" error.
+      const needsCheck =
+        entryName !== null && snapshot !== null && resolvedTargetUri !== sourceDirUri;
+
+      const fire = () => {
+        moveMut.mutate(
+          { entryUri, sourceDirUri, targetDirUri: resolvedTargetUri },
+          {
+            onSuccess: () => toastSuccess("Moved"),
+            onError: (err) => toastError(err instanceof Error ? err.message : "Move failed"),
+          },
+        );
+      };
+
+      if (!needsCheck) {
+        fire();
+        return;
+      }
+
+      void checkAvailabilityWithWarm(entryName, resolvedTargetUri)
+        .then((check) => {
+          if (!check.ok) {
+            toastError(check.message);
+            return;
+          }
+          fire();
+        })
+        .catch((err: unknown) => {
+          toastError(err instanceof Error ? err.message : "Move failed");
+        });
     },
-    [moveMut, currentDirectoryUri, snapshot],
+    [moveMut, currentDirectoryUri, snapshot, metadata, checkAvailabilityWithWarm],
   );
 
   const handleRenameDirectory = useCallback(
     (dirUri: string, newName: string) => {
+      if (!snapshot) {
+        toastError("Tree not loaded yet");
+        return;
+      }
+      const parent = findParentUri(snapshot, dirUri);
+      if (!parent) {
+        toastError("Parent directory not found in tree snapshot");
+        return;
+      }
+      const check = checkAvailability(newName, parent, { excludeUri: dirUri });
+      if (!check.ok) {
+        toastError(check.message);
+        return;
+      }
+
+      // When the renamed directory is anywhere in the user's current
+      // path chain (the directory itself, or an ancestor of it), the
+      // URL's old name no longer resolves against the optimistic
+      // snapshot — without an explicit navigation the route resolver
+      // returns null and lands the user at root. Rebuild the splat with
+      // the renamed segment patched in, and queue the nav alongside
+      // the mutation. On error we navigate back to the old URL so the
+      // user isn't stranded on a stale path.
+      const ancestorUris = ancestors.map((a) => a.uri);
+      const chain = currentDirectoryUri ? [...ancestorUris, currentDirectoryUri] : ancestorUris;
+      const idx = chain.indexOf(dirUri);
+      const inPath = idx !== -1 && idx < pathSegments.length;
+      const oldSplat = buildSplatPath(pathSegments, fileSegment ?? undefined);
+      const newSplat = inPath
+        ? buildSplatPath(
+            pathSegments.map((seg, i) => (i === idx ? check.normalized : seg)),
+            fileSegment ?? undefined,
+          )
+        : null;
+
       renameDirMut.mutate(
-        { directoryUri: dirUri, newName },
+        { directoryUri: dirUri, newName: check.normalized },
         {
           onSuccess: () => toastSuccess("Renamed"),
-          onError: (err) => toastError(err instanceof Error ? err.message : "Rename failed"),
+          onError: (err) => {
+            toastError(err instanceof Error ? err.message : "Rename failed");
+            if (inPath) {
+              void navigate({
+                to: `${basePath}/$` as never,
+                params: { _splat: oldSplat } as never,
+              });
+            }
+          },
         },
       );
+
+      if (newSplat !== null) {
+        void navigate({
+          to: `${basePath}/$` as never,
+          params: { _splat: newSplat } as never,
+        });
+      }
     },
-    [renameDirMut],
+    [
+      renameDirMut,
+      snapshot,
+      checkAvailability,
+      ancestors,
+      currentDirectoryUri,
+      pathSegments,
+      fileSegment,
+      navigate,
+      basePath,
+    ],
   );
 
   const handleCreateFolder = useCallback(() => {
     newFolderDialogRef.current?.show();
   }, []);
 
+  // Inline validator passed to NewFolderDialog. Mirrors what
+  // handleNewFolderConfirm checks before issuing the mutation, so the
+  // dialog gates the Create button on the same condition rather than
+  // surfacing a toast after the click.
+  const validateNewFolderName = useCallback(
+    (name: string): { readonly ok: true } | { readonly ok: false; readonly message: string } => {
+      const parent = currentDirectoryUri ?? snapshot?.rootUri;
+      if (!parent) return { ok: false, message: "Tree not loaded yet" };
+      const check = checkAvailability(name, parent);
+      return check.ok ? { ok: true } : { ok: false, message: check.message };
+    },
+    [currentDirectoryUri, snapshot, checkAvailability],
+  );
+
   const handleNewFolderConfirm = useCallback(
     (name: string) => {
+      const parent = currentDirectoryUri ?? snapshot?.rootUri;
+      if (!parent) {
+        toastError("Tree not loaded yet");
+        return;
+      }
+      const check = checkAvailability(name, parent);
+      if (!check.ok) {
+        toastError(check.message);
+        return;
+      }
       createDirMut.mutate(
-        { name, parentUri: currentDirectoryUri ?? undefined },
+        { name: check.normalized, parentUri: currentDirectoryUri ?? undefined },
         {
           onSuccess: () => toastSuccess("Folder created"),
           onError: (err) =>
@@ -418,7 +739,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         },
       );
     },
-    [createDirMut, currentDirectoryUri],
+    [createDirMut, currentDirectoryUri, snapshot, checkAvailability],
   );
 
   const handleUploadClick = useCallback(() => {
@@ -428,12 +749,26 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   const handleFileSelected = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      // Reset the input early so the same file can be selected again
+      // even when the upload short-circuits below.
+      e.target.value = "";
       if (!file) return;
+
+      const parent = currentDirectoryUri ?? snapshot?.rootUri;
+      if (!parent) {
+        toastError("Tree not loaded yet");
+        return;
+      }
+      const check = checkAvailability(file.name, parent);
+      if (!check.ok) {
+        toastError(check.message);
+        return;
+      }
       void file.arrayBuffer().then((buffer) => {
         uploadMut.mutate(
           {
             data: new Uint8Array(buffer),
-            filename: file.name,
+            filename: check.normalized,
             mimeType: file.type || "application/octet-stream",
             directoryUri: currentDirectoryUri ?? undefined,
           },
@@ -443,15 +778,76 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
           },
         );
       });
-      // Reset input so the same file can be selected again
-      e.target.value = "";
     },
-    [uploadMut, currentDirectoryUri],
+    [uploadMut, currentDirectoryUri, snapshot, checkAvailability],
   );
 
   // -----------------------------------------------------------------
   // Breadcrumbs
   // -----------------------------------------------------------------
+
+  // Breadcrumb crumbs derived from pathStatus. The happy path uses the
+  // resolved snapshot ancestors (whose decrypted names are authoritative).
+  // The not-found paths fall back to the URL segments — even the broken
+  // segment is shown so the user sees what they typed.
+  interface CrumbLink {
+    readonly key: string;
+    readonly label: string;
+    readonly splat: string;
+  }
+  interface CrumbTerminal {
+    readonly key: string;
+    readonly label: string;
+    readonly variant: "active" | "broken";
+  }
+
+  const crumbLinks: readonly CrumbLink[] = useMemo(() => {
+    if (pathStatus.kind === "directory" || pathStatus.kind === "file-preview") {
+      return ancestors.map((a, i) => ({
+        key: a.uri,
+        label: a.name,
+        splat: ancestors
+          .slice(0, i + 1)
+          .map((x) => normalizeName(x.name))
+          .join("/"),
+      }));
+    }
+    if (pathStatus.kind === "directory-not-found") {
+      return pathSegments.slice(0, pathStatus.resolvedDepth).map((seg, i) => ({
+        key: `seg-${String(i)}`,
+        label: seg,
+        splat: pathSegments.slice(0, i + 1).join("/"),
+      }));
+    }
+    if (pathStatus.kind === "file-not-found") {
+      return pathSegments.map((seg, i) => ({
+        key: `seg-${String(i)}`,
+        label: seg,
+        splat: pathSegments.slice(0, i + 1).join("/"),
+      }));
+    }
+    return [];
+  }, [pathStatus, ancestors, pathSegments]);
+
+  const crumbTerminal: CrumbTerminal | null = useMemo(() => {
+    if (pathStatus.kind === "directory" && currentDirName) {
+      return { key: "active", label: currentDirName, variant: "active" };
+    }
+    if (pathStatus.kind === "file-preview") {
+      if (currentDirName) {
+        return { key: "active", label: currentDirName, variant: "active" };
+      }
+      return null;
+    }
+    if (pathStatus.kind === "directory-not-found") {
+      const broken = pathSegments[pathStatus.resolvedDepth];
+      return broken ? { key: "broken", label: broken, variant: "broken" } : null;
+    }
+    if (pathStatus.kind === "file-not-found" && fileSegment) {
+      return { key: "broken", label: fileSegment, variant: "broken" };
+    }
+    return null;
+  }, [pathStatus, currentDirName, pathSegments, fileSegment]);
 
   const breadcrumbs = (
     <Breadcrumbs>
@@ -460,25 +856,25 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
           {rootLabel}
         </Link>
       </li>
-      {ancestors.map((a, i) => (
-        <li key={a.uri}>
+      {crumbLinks.map((c) => (
+        <li key={c.key}>
           <Link
             to={`${basePath}/$` as never}
-            params={
-              {
-                _splat: ancestors
-                  .slice(0, i + 1)
-                  .map((x) => x.rkey)
-                  .join("/"),
-              } as never
-            }
+            params={{ _splat: c.splat } as never}
             className="text-text-muted hover:text-base-content"
           >
-            {a.name}
+            {c.label}
           </Link>
         </li>
       ))}
-      {currentDirName && <BreadcrumbActive>{currentDirName}</BreadcrumbActive>}
+      {crumbTerminal &&
+        (crumbTerminal.variant === "active" ? (
+          <BreadcrumbActive>{crumbTerminal.label}</BreadcrumbActive>
+        ) : (
+          <li>
+            <span className="text-error font-medium">{crumbTerminal.label}</span>
+          </li>
+        ))}
     </Breadcrumbs>
   );
 
@@ -530,7 +926,12 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
     </>
   );
 
-  const footerText = `${items.length} ${items.length === 1 ? "item" : "items"} · End-to-end encrypted`;
+  const isNotFound =
+    pathStatus.kind === "directory-not-found" || pathStatus.kind === "file-not-found";
+
+  const footerText = isNotFound
+    ? "End-to-end encrypted"
+    : `${String(items.length)} ${items.length === 1 ? "item" : "items"} · End-to-end encrypted`;
 
   // Retry after a load error — bumps the useDirectory generation so the
   // effect re-runs loadTree and re-installs the watcher without a full
@@ -547,14 +948,7 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         <PreviewPaneHeader
           documentName={previewItem.name}
           onDownload={() => handleDownload(previewUri)}
-          onEdit={
-            isEditable(previewItem)
-              ? () => {
-                  handleEdit(previewItem);
-                  handleClosePreview();
-                }
-              : undefined
-          }
+          onEdit={isEditable(previewItem) ? () => handleEdit(previewItem) : undefined}
           onClose={handleClosePreview}
         />
         <Suspense fallback={<PreviewSkeleton />}>
@@ -571,21 +965,46 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
   // Render
   // -----------------------------------------------------------------
 
+  // The "go to parent" link in NotFoundView relies on knowing which
+  // segments of pathSegments resolved. Compute once per render.
+  const resolvedDirSegments =
+    pathStatus.kind === "directory-not-found"
+      ? pathSegments.slice(0, pathStatus.resolvedDepth)
+      : pathStatus.kind === "file-not-found"
+        ? pathSegments
+        : [];
+
   return (
     <TreeSnapshotProvider value={snapshot}>
       <PanelShell
         depth={1}
         breadcrumbs={breadcrumbs}
-        toolbar={toolbar}
+        toolbar={isNotFound ? undefined : toolbar}
         footer={footerText}
         sidePanel={sidePanel}
       >
-        {!isReady && !error ? (
-          <FileViewSkeleton />
-        ) : error ? (
+        {error ? (
           <ErrorBanner
             message={error.message || "Failed to load directory"}
             onRetry={handleRetry}
+          />
+        ) : pathStatus.kind === "pending" ? (
+          <FileViewSkeleton />
+        ) : pathStatus.kind === "directory-not-found" ? (
+          <NotFoundView
+            kind="folder"
+            missingName={pathSegments[pathStatus.resolvedDepth] ?? ""}
+            resolvedDirSegments={resolvedDirSegments}
+            rootLabel={rootLabel}
+            basePath={basePath}
+          />
+        ) : pathStatus.kind === "file-not-found" ? (
+          <NotFoundView
+            kind="file"
+            missingName={fileSegment ?? ""}
+            resolvedDirSegments={resolvedDirSegments}
+            rootLabel={rootLabel}
+            basePath={basePath}
           />
         ) : (
           <PanelContent
@@ -617,7 +1036,11 @@ export function FileView({ rootLabel, pathSegments, context, basePath }: FileVie
         aria-hidden="true"
       />
 
-      <NewFolderDialog ref={newFolderDialogRef} onConfirm={handleNewFolderConfirm} />
+      <NewFolderDialog
+        ref={newFolderDialogRef}
+        onConfirm={handleNewFolderConfirm}
+        validate={validateNewFolderName}
+      />
     </TreeSnapshotProvider>
   );
 }

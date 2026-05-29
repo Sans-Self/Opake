@@ -27,7 +27,11 @@ export { useDirectoryMetadata } from "./hooks/use-directory-metadata";
 export { useDownload } from "./hooks/use-download";
 
 // Mutation hooks
-export { useUpload } from "./hooks/use-upload";
+export {
+  useUpload,
+  decodePendingUploadName,
+  PENDING_UPLOAD_URI_PREFIX,
+} from "./hooks/use-upload";
 export { useDelete } from "./hooks/use-delete";
 export { useMove } from "./hooks/use-move";
 export {

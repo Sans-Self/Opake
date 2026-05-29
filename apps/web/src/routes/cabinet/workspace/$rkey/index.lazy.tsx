@@ -20,6 +20,7 @@ function WorkspaceIndex() {
     <FileView
       rootLabel={workspace.name || "Workspace"}
       pathSegments={[]}
+      fileSegment={null}
       context={{ kind: "workspace", keyringUri: workspace.headUri }}
       basePath={`/cabinet/workspace/${rkey}`}
     />

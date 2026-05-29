@@ -86,6 +86,24 @@ pub enum SseEvent {
     Reconnect,
 }
 
+/// Every wire-event name the indexer can emit. Used by transports that
+/// need to register listeners up front (browser `EventSource`) — every
+/// entry MUST match a branch in [`SseEvent::from_name_and_data`].
+///
+/// `Reconnect` is intentionally absent — it's a synthetic event emitted
+/// by the consumer, never by the server.
+pub const ALL_WIRE_EVENT_NAMES: &[&str] = &[
+    "app.opake.directory:upsert",
+    "app.opake.directory:delete",
+    "app.opake.document:upsert",
+    "app.opake.document:delete",
+    "app.opake.keyring:upsert",
+    "app.opake.keyring:delete",
+    "app.opake.grant:upsert",
+    "app.opake.grant:delete",
+    "chain:forked",
+];
+
 impl SseEvent {
     /// The event type string as emitted by the broadcaster (fully-qualified
     /// collection identifiers — `app.opake.directory:upsert` etc.).
@@ -250,5 +268,34 @@ mod tests {
     fn reconnect_synthetic_name() {
         let event = SseEvent::Reconnect;
         assert_eq!(event.event_name(), "__reconnect__");
+    }
+
+    /// `ALL_WIRE_EVENT_NAMES` is used by the browser SSE transport to
+    /// register `EventSource` listeners — one per name. If a name in
+    /// that list isn't recognized by `from_name_and_data`, the listener
+    /// fires but the payload is dropped. If a name `from_name_and_data`
+    /// accepts is missing from the list, the listener is never
+    /// registered and the event is silently lost. Either way: SSE
+    /// events vanish at the JS↔WASM boundary with no log line. Keep
+    /// the two sides linked.
+    #[test]
+    fn all_wire_event_names_are_decodable() {
+        for name in ALL_WIRE_EVENT_NAMES {
+            // We pass an empty JSON object: every variant will either
+            // accept it (if all fields are optional) or fail with a
+            // deserialization error. Both are fine — the test only
+            // verifies that the *name* is recognized, not that the
+            // payload validates. The one failure mode we're guarding
+            // against is "unknown event type", which is a distinct
+            // error message.
+            let err = SseEvent::from_name_and_data(name, b"{}");
+            if let Err(crate::error::Error::Sse(msg)) = &err {
+                assert!(
+                    !msg.contains("unknown event type"),
+                    "ALL_WIRE_EVENT_NAMES contains {name:?} but from_name_and_data \
+                     doesn't recognize it (got: {msg})",
+                );
+            }
+        }
     }
 }

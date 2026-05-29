@@ -3,11 +3,8 @@ import { useDirectory, useWorkspaces } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
 import { rkeyFromUri } from "@/lib/atUri";
-import {
-  directoryPathSuffix,
-  findDocumentUriByRkey,
-  findParentUri,
-} from "@/lib/directoryTree";
+import { findDocumentUriByRkey, findParentUri } from "@/lib/directoryTree";
+import { directoryNamePathSuffix } from "@/lib/namePath";
 
 function WorkspaceEditor() {
   const { rkey, docRkey } = Route.useParams();
@@ -21,9 +18,10 @@ function WorkspaceEditor() {
   // the tree snapshot instead. Null until the snapshot arrives, which
   // triggers the loading path below.
   const { snapshot } = useDirectory(workspace?.headUri ?? null, null);
-  const uri = snapshot ? findDocumentUriByRkey(snapshot, docRkey) : null;
+  const lookup = snapshot ? findDocumentUriByRkey(snapshot, docRkey) : null;
+  const uri = lookup?.kind === "found" ? lookup.uri : null;
   const parentUri = uri && snapshot ? findParentUri(snapshot, uri) : null;
-  const pathSuffix = parentUri && snapshot ? directoryPathSuffix(snapshot, parentUri) : null;
+  const pathSuffix = parentUri && snapshot ? directoryNamePathSuffix(snapshot, parentUri) : null;
   const returnPath = pathSuffix
     ? `/cabinet/workspace/${rkey}/${pathSuffix}`
     : `/cabinet/workspace/${rkey}`;
@@ -38,12 +36,27 @@ function WorkspaceEditor() {
     );
   }
 
-  if (!snapshot) {
+  if (!snapshot || !lookup) {
     // Still loading the tree — no UI yet.
     return null;
   }
 
-  if (!uri) {
+  if (lookup.kind === "ambiguous") {
+    // Multiple documents share this rkey — shouldn't happen given
+    // TID-format rkeys, but `findDocumentUriByRkey` refuses to guess
+    // rather than silently pick one. The console warning fires from
+    // the helper; surface a distinct message so the user knows this
+    // isn't an ordinary "404 — page not found" situation.
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-base-content/40 text-sm">
+          Document reference is ambiguous — multiple documents share this rkey
+        </p>
+      </div>
+    );
+  }
+
+  if (lookup.kind === "not-found" || !uri) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <p className="text-base-content/40 text-sm">Document not found in this workspace</p>

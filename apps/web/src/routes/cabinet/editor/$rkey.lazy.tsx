@@ -3,7 +3,8 @@ import { useDirectory } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
 import { documentUri } from "@/lib/atUri";
-import { directoryPathSuffix, findParentUri } from "@/lib/directoryTree";
+import { findParentUri } from "@/lib/directoryTree";
+import { directoryNamePathSuffix } from "@/lib/namePath";
 
 function Editor() {
   const { rkey } = Route.useParams();
@@ -17,7 +18,7 @@ function Editor() {
   // direct URL before the tree has decrypted (e.g. deep link into an editor).
   const { snapshot } = useDirectory(null, null);
   const parentUri = uri && snapshot ? findParentUri(snapshot, uri) : null;
-  const pathSuffix = parentUri && snapshot ? directoryPathSuffix(snapshot, parentUri) : null;
+  const pathSuffix = parentUri && snapshot ? directoryNamePathSuffix(snapshot, parentUri) : null;
   const returnPath = pathSuffix ? `/cabinet/files/${pathSuffix}` : "/cabinet/files";
 
   if (!did || !uri) {

@@ -6,6 +6,7 @@ function FilesIndex() {
     <FileView
       rootLabel="Your Cabinet"
       pathSegments={[]}
+      fileSegment={null}
       context={{ kind: "cabinet" }}
       basePath="/cabinet/files"
     />

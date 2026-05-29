@@ -2,7 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { useDirectory } from "@opake/react";
 import { EditorView } from "@/components/cabinet/EditorView";
 import { useAuthStore } from "@/stores/auth";
-import { directoryPathSuffix } from "@/lib/directoryTree";
+import { directoryNamePathSuffix } from "@/lib/namePath";
 
 function NewEditor() {
   const { directoryUri } = Route.useSearch();
@@ -12,7 +12,7 @@ function NewEditor() {
   // path suffix. The search param comes from the toolbar's "new note" entry
   // in FileView and identifies where the document will be created.
   const { snapshot } = useDirectory(null, null);
-  const pathSuffix = directoryUri && snapshot ? directoryPathSuffix(snapshot, directoryUri) : null;
+  const pathSuffix = directoryUri && snapshot ? directoryNamePathSuffix(snapshot, directoryUri) : null;
   const returnPath = pathSuffix ? `/cabinet/files/${pathSuffix}` : "/cabinet/files";
 
   if (!did) {

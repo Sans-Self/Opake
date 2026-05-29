@@ -152,7 +152,19 @@ defmodule OpakeIndexerWeb.EventsController do
 
   defp handle_keyring_membership(payload, state) do
     record = record_from_envelope(payload)
-    workspace_id = record["workspaceId"] || record["uri"]
+    # workspace_id resolution for keyring records:
+    #
+    #   * Superseded keyrings carry `workspaceId` in their record body
+    #     (the genesis URI of the workspace they belong to).
+    #
+    #   * Genesis keyrings have NO `workspaceId` field — they ARE the
+    #     workspace_id. Their own AT URI is the genesis URI, which lives
+    #     on the envelope's top-level `uri`, NOT in the record body
+    #     (records don't carry their own URI). Reading `record["uri"]`
+    #     here was always nil and silently dropped genesis subscriptions
+    #     for the creator's open SSE session — uploads to a freshly-
+    #     created workspace wouldn't surface until reconnect.
+    workspace_id = record["workspaceId"] || envelope_uri(payload)
 
     member_dids =
       (record["members"] || [])
@@ -180,6 +192,10 @@ defmodule OpakeIndexerWeb.EventsController do
   defp record_from_envelope(%{record: r}) when is_map(r), do: r
   defp record_from_envelope(%{"record" => r}) when is_map(r), do: r
   defp record_from_envelope(_), do: %{}
+
+  defp envelope_uri(%{uri: u}) when is_binary(u), do: u
+  defp envelope_uri(%{"uri" => u}) when is_binary(u), do: u
+  defp envelope_uri(_), do: nil
 
   # -- Helpers --------------------------------------------------------
 

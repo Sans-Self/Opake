@@ -181,7 +181,8 @@ defmodule OpakeIndexer.Queries.RecordQueries do
         on: r.uri == c.head_uri,
         where:
           c.kind == "keyring" and
-            fragment("? @> ?", r.record_jsonb, ^containment)
+            fragment("? @> ?", r.record_jsonb, ^containment),
+        select: r
       )
     )
   end

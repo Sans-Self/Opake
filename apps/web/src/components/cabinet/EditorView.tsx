@@ -11,15 +11,21 @@
 // shares the handle with any other hook watching the same context via the
 // provider's refcounted FileManagerCache.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
-import { useDirectoryMetadata, useFileManager } from "@opake/react";
+import {
+  decodePendingUploadName,
+  useDirectory,
+  useDirectoryMetadata,
+  useFileManager,
+} from "@opake/react";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { PanelShell } from "./PanelShell";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { loading } from "@/stores/app";
 import type { FileManager } from "@opake/sdk";
 import { type FileContext, keyringUriFor } from "@/lib/fileContext";
+import { checkNameAvailability, describeValidationReason, validateName } from "@/lib/namePath";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,10 +132,24 @@ export function EditorView(props: EditorViewProps) {
   // Subscribe to the parent directory's metadata so peer renames propagate
   // into the title input. MarkdownEditor won't clobber the user's keystrokes
   // while they're editing — it checks document.activeElement before syncing.
-  const { data: directoryMetadata } = useDirectoryMetadata(
-    keyringUriFor(context),
-    parentDirectoryUri,
+  const keyringUri = keyringUriFor(context);
+
+  // Tree snapshot for the uniqueness check. Watching null means
+  // "anchor at root" — the same call FileView's index route makes.
+  const { snapshot } = useDirectory(keyringUri, null);
+
+  // Destination dir for the uniqueness check. Edit-mode docs sit in
+  // `parentDirectoryUri`; new-mode docs target `directoryUri`. When the
+  // caller passes nothing (toolbar "new note" at root), the document
+  // lands in the workspace/cabinet root — so the check parent is the
+  // snapshot's rootUri. Pre-#4 this fell to null and skipped the check
+  // entirely, letting root-level duplicates slip through.
+  const checkParentUri = useMemo(
+    () => parentDirectoryUri ?? directoryUri ?? snapshot?.rootUri ?? null,
+    [parentDirectoryUri, directoryUri, snapshot],
   );
+
+  const { data: directoryMetadata } = useDirectoryMetadata(keyringUri, checkParentUri);
   const peerName = documentUri ? directoryMetadata?.[documentUri]?.name : undefined;
 
   // Sync displayName with the loaded document's name in edit mode. Two async
@@ -140,7 +160,6 @@ export function EditorView(props: EditorViewProps) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- external async sources, see comment
     if (peerName) setDisplayName(peerName);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- external async sources, see comment
     else if (loaded?.documentName) setDisplayName(loaded.documentName);
   }, [loaded, peerName]);
 
@@ -178,7 +197,40 @@ export function EditorView(props: EditorViewProps) {
       const gen = ++renameGenRef.current;
       setDisplayName(newName);
       if (!fm || !persistedUri) return;
-      fm.updateMetadata(persistedUri, { filename: newName })
+
+      // Uniqueness + name validation against siblings in the parent
+      // dir, excluding the current document so renaming back to its
+      // existing name is a no-op rather than a self-collision. When the
+      // snapshot hasn't hydrated, fall back to validate-only so trim +
+      // NFC + forbidden-char rejection still land — better than waiting
+      // silently for the tree.
+      const check: { readonly ok: true; readonly normalized: string } | { readonly ok: false; readonly message: string } =
+        checkParentUri && snapshot
+          ? checkNameAvailability({
+              snapshot,
+              parentUri: checkParentUri,
+              rawName: newName,
+              documentMetadata: directoryMetadata ?? {},
+              excludeUri: persistedUri,
+              pendingNameResolver: decodePendingUploadName,
+            })
+          : ((): { readonly ok: true; readonly normalized: string } | { readonly ok: false; readonly message: string } => {
+              const v = validateName(newName);
+              return v.ok
+                ? { ok: true, normalized: v.normalized }
+                : { ok: false, message: describeValidationReason(v.reason) };
+            })();
+      if (!check.ok) {
+        if (renameGenRef.current === gen) setDisplayName(previous);
+        toastError(check.message);
+        return;
+      }
+
+      // Use the normalized name on the wire so trim + NFC reach the
+      // PDS, and reflect that in the optimistic title.
+      if (renameGenRef.current === gen) setDisplayName(check.normalized);
+
+      fm.updateMetadata(persistedUri, { filename: check.normalized })
         .then(() => toastSuccess("Renamed"))
         .catch((err: unknown) => {
           if (renameGenRef.current === gen) {
@@ -187,7 +239,7 @@ export function EditorView(props: EditorViewProps) {
           toastError(err instanceof Error ? err.message : "Rename failed");
         });
     },
-    [fm, persistedUri, displayName],
+    [fm, persistedUri, displayName, snapshot, checkParentUri, directoryMetadata],
   );
 
   const handleSave = useCallback(
@@ -210,11 +262,36 @@ export function EditorView(props: EditorViewProps) {
           await fm.updateContent(uri, encoded);
           toastSuccess("Saved");
         } else {
-          const result = await fm.upload(encoded, filename, "text/markdown", {
+          // First save in "new" mode — pre-check the auto-derived
+          // filename against the target dir's siblings. Two new notes
+          // started in the same dir at the same time should not collide
+          // once both finish saving. When the snapshot hasn't hydrated,
+          // fall back to validate-only so the upload at least carries
+          // a trimmed + NFC-normalized filename.
+          const filenameCheck =
+            checkParentUri && snapshot
+              ? checkNameAvailability({
+                  snapshot,
+                  parentUri: checkParentUri,
+                  rawName: filename,
+                  documentMetadata: directoryMetadata ?? {},
+                  pendingNameResolver: decodePendingUploadName,
+                })
+              : ((): { readonly ok: true; readonly normalized: string } | { readonly ok: false; readonly message: string } => {
+                  const v = validateName(filename);
+                  return v.ok
+                    ? { ok: true, normalized: v.normalized }
+                    : { ok: false, message: describeValidationReason(v.reason) };
+                })();
+          if (!filenameCheck.ok) {
+            toastError(filenameCheck.message);
+            return;
+          }
+          const result = await fm.upload(encoded, filenameCheck.normalized, "text/markdown", {
             directoryUri: directoryUri ?? undefined,
           });
           setCreatedUri(result.uri);
-          setDisplayName(filename);
+          setDisplayName(filenameCheck.normalized);
           toastSuccess("Note created");
           // Don't navigate to the edit route — that would unmount this
           // component, lose cursor position + undo history, and trigger
@@ -232,7 +309,7 @@ export function EditorView(props: EditorViewProps) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `props` is stable per-render; we destructure what we need
-    [fm, mode, createdUri, directoryUri, displayName],
+    [fm, mode, createdUri, directoryUri, displayName, snapshot, checkParentUri, directoryMetadata],
   );
 
   // Determine what to show

@@ -2,6 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { useWorkspaces } from "@opake/react";
 import { FileView } from "@/components/cabinet/FileView";
 import { rkeyFromUri } from "@/lib/atUri";
+import { parseSplatPath } from "@/lib/namePath";
 
 function WorkspaceFiles() {
   const { rkey, _splat } = Route.useParams();
@@ -16,12 +17,13 @@ function WorkspaceFiles() {
     );
   }
 
-  const segments = (_splat ?? "").split("/").filter(Boolean);
+  const { dirSegments, fileSegment } = parseSplatPath(_splat);
 
   return (
     <FileView
       rootLabel={workspace.name || "Workspace"}
-      pathSegments={segments}
+      pathSegments={dirSegments}
+      fileSegment={fileSegment}
       context={{ kind: "workspace", keyringUri: workspace.headUri }}
       basePath={`/cabinet/workspace/${rkey}`}
     />

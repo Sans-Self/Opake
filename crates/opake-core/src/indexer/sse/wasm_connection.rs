@@ -25,28 +25,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Event, EventSource, MessageEvent};
 
 use crate::error::Error;
-use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::events::{SseEvent, ALL_WIRE_EVENT_NAMES};
 use crate::indexer::sse::transport::{SseConnection, SseTransport};
-
-/// Every named event the broadcaster can emit. Registered as individual
-/// listeners because `onmessage` only fires for untyped (`event: message`)
-/// frames, not typed ones.
-const NAMED_EVENTS: &[&str] = &[
-    "directory:upsert",
-    "directory:delete",
-    "document:upsert",
-    "document:delete",
-    "keyring:upsert",
-    "keyring:delete",
-    "grant:upsert",
-    "grant:delete",
-    "directory_update:upsert",
-    "directory_update:delete",
-    "keyring_update:upsert",
-    "keyring_update:delete",
-    "document_update:upsert",
-    "document_update:delete",
-];
 
 /// SSE transport for browser environments. Stateless — all per-connection
 /// state lives on [`WasmSseConnection`].
@@ -78,7 +58,7 @@ impl SseTransport for WasmSseTransport {
         let errored = Rc::new(RefCell::new(false));
 
         let mut message_closures: Vec<Closure<dyn FnMut(MessageEvent)>> = Vec::new();
-        for event_name in NAMED_EVENTS {
+        for event_name in ALL_WIRE_EVENT_NAMES {
             let tx_clone = tx.clone();
             let name = *event_name;
             let closure = Closure::wrap(Box::new(move |evt: MessageEvent| {

@@ -2,13 +2,14 @@
 // FileManager lifecycle, optimistic rollback, query invalidation, and
 // chain-fork retry.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { ChainForkedEvent, DirectoryTreeSnapshot, FileManager } from "@opake/sdk";
 import { useChainForkBus, useFileManagerCache, useOptimisticOverlay } from "../provider";
 import type { FileManagerCache } from "../file-manager-cache";
 import { scopeKey } from "../optimistic-overlay";
 import { opakeKeys } from "../keys";
+import { useWorkspaces } from "./use-workspaces";
 
 // Federation: writes commit on the caller's PDS in a single applyWrites
 // before the SDK call resolves. The optimistic patch only bridges the
@@ -105,13 +106,30 @@ interface MutationContext {
  *
  * Cabinet mutations are never workspace-forked — the cabinet's directory
  * chain runs entirely on the caller's PDS with no concurrent writers.
- * Workspace mutations are scoped by keyring URI; the SSE event's
- * `workspaceId` is the workspace's genesis keyring URI, which is what
- * the SDK's `keyringUri` parameter points at.
+ *
+ * Workspace mutations are scoped by the workspace's **genesis** URI,
+ * which is the value the indexer emits as `workspaceId` on a `chain:forked`
+ * event. The SDK's `keyringUri` parameter, by contrast, points at the
+ * current keyring chain head and advances on every rotation — those two
+ * URIs diverge the moment a workspace is superseded (member add/remove,
+ * key rotation). Comparing against the head would silently drop every
+ * fork event for any rotated workspace; the caller must supply the
+ * stable genesis URI as `workspaceId` so the comparison holds across
+ * rotations.
+ *
+ * `workspaceId` falls back to `keyringUri` only as a transitional
+ * compatibility shim — pre-rotation, the two are equal, so the lookup
+ * still resolves correctly. Hooks that have access to the full
+ * `WorkspaceEntry` should always pass `workspaceId` explicitly.
  */
-function forkAffectsScope(keyringUri: string | null, event: ChainForkedEvent): boolean {
+function forkAffectsScope(
+  keyringUri: string | null,
+  workspaceId: string | null,
+  event: ChainForkedEvent,
+): boolean {
   if (keyringUri === null) return false;
-  return event.workspaceId === keyringUri;
+  const scope = workspaceId ?? keyringUri;
+  return event.workspaceId === scope;
 }
 
 /** Exponential-backoff sleep with light jitter. */
@@ -144,6 +162,23 @@ export function useTreeMutation<TInput, TResult>(
   const key = treeKeyFor(options.keyringUri);
   const scope = scopeKey(options.keyringUri);
 
+  // Resolve the workspace's genesis URI for fork-scope matching.
+  // The caller passes `keyringUri = workspace.headUri` (advances on
+  // every rotation), but `chain:forked` events carry `workspaceId =
+  // genesis URI` (stable across the chain's lifetime). Map head → genesis
+  // via the live workspace list so the comparison survives rotation.
+  //
+  // Pre-rotation `workspaceId === headUri`, so the lookup misses on a
+  // fresh workspace — that's correct and harmless (fallback compares
+  // against keyringUri inside `forkAffectsScope`). Once the workspaces
+  // list resolves, subsequent renders pick up the right genesis URI.
+  const { data: workspaces } = useWorkspaces();
+  const workspaceId = useMemo<string | null>(() => {
+    if (options.keyringUri === null) return null;
+    const entry = workspaces.find((w) => w.headUri === options.keyringUri);
+    return entry?.workspaceId ?? null;
+  }, [options.keyringUri, workspaces]);
+
   // Replay state: when a mutation succeeds, we record what to replay
   // on fork. A chain-fork for this scope re-runs the mutation function
   // up to MAX_FORK_RETRIES times, with exponential backoff between
@@ -172,7 +207,7 @@ export function useTreeMutation<TInput, TResult>(
   // retry affordance.
   useEffect(() => {
     const unsubscribe = forkBus.subscribe((event) => {
-      if (!forkAffectsScope(options.keyringUri, event)) return;
+      if (!forkAffectsScope(options.keyringUri, workspaceId, event)) return;
       const replay = replayRef.current;
       if (!replay) return;
       if (replay.attempt >= MAX_FORK_RETRIES) {
@@ -219,7 +254,7 @@ export function useTreeMutation<TInput, TResult>(
       });
     });
     return unsubscribe;
-  }, [forkBus, options.keyringUri, key, cache, queryClient]);
+  }, [forkBus, options.keyringUri, workspaceId, key, cache, queryClient]);
 
   const mutation = useMutation<TResult, Error, TInput, MutationContext>({
     mutationFn: (input) =>

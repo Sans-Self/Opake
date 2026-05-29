@@ -1,11 +1,26 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useAuthStore } from "../../src/stores/auth";
+
+// jsdom doesn't ship a StorageManager. `requestPersistence` reads
+// `navigator.storage.persist` and crashes when the parent is undefined,
+// so install a no-op shim before any auth-store action that touches
+// the persistence helper.
+function shimNavigatorStorage() {
+  Object.defineProperty(globalThis.navigator, "storage", {
+    configurable: true,
+    value: {
+      persist: vi.fn(async () => true),
+      persisted: vi.fn(async () => true),
+    },
+  });
+}
 
 describe("auth store", () => {
   beforeEach(() => {
+    shimNavigatorStorage();
     useAuthStore.setState({
       session: { status: "none" },
-      identity: { status: "unchecked" },
+      identity: { status: "none" },
     });
   });
 
@@ -20,7 +35,7 @@ describe("auth store", () => {
     expect(state.session.status).toBe("none");
   });
 
-  it("logout returns to none session and unchecked identity", async () => {
+  it("logout returns to none session and none identity", async () => {
     useAuthStore.setState({
       session: {
         status: "active",
@@ -34,7 +49,7 @@ describe("auth store", () => {
     // IndexedDB, but the state transition should still happen
     await useAuthStore.getState().logout();
     expect(useAuthStore.getState().session.status).toBe("none");
-    expect(useAuthStore.getState().identity.status).toBe("unchecked");
+    expect(useAuthStore.getState().identity.status).toBe("none");
   });
 
   it("exposes all action methods", () => {
@@ -42,28 +57,11 @@ describe("auth store", () => {
     expect(typeof state.boot).toBe("function");
     expect(typeof state.startLogin).toBe("function");
     expect(typeof state.completeLogin).toBe("function");
-    expect(typeof state.checkIdentity).toBe("function");
-    expect(typeof state.generateAndPublishIdentity).toBe("function");
-    expect(typeof state.generateSeedPhrase).toBe("function");
-    expect(typeof state.confirmSeedPhrase).toBe("function");
-    expect(typeof state.recoverFromSeedPhrase).toBe("function");
     expect(typeof state.logout).toBe("function");
-  });
-
-  it("generateSeedPhrase is callable", () => {
-    const state = useAuthStore.getState();
     expect(typeof state.generateSeedPhrase).toBe("function");
-  });
-
-  it("confirmSeedPhrase is a no-op without active session", async () => {
-    useAuthStore.setState({ session: { status: "none" } });
-    await useAuthStore.getState().confirmSeedPhrase("test phrase");
-    expect(useAuthStore.getState().identity.status).toBe("unchecked");
-  });
-
-  it("recoverFromSeedPhrase returns mismatch false without active session", async () => {
-    useAuthStore.setState({ session: { status: "none" } });
-    const result = await useAuthStore.getState().recoverFromSeedPhrase("test phrase");
-    expect(result).toEqual({ mismatch: false });
+    expect(typeof state.validateSeedPhrase).toBe("function");
+    expect(typeof state.saveIdentity).toBe("function");
+    expect(typeof state.finalizePairing).toBe("function");
+    expect(typeof state.publishPublicKey).toBe("function");
   });
 });

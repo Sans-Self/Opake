@@ -4,6 +4,17 @@ import type { DirectoryTreeSnapshot } from "@/lib/pdsTypes";
 import { rkeyFromUri } from "@/lib/atUri";
 
 /**
+ * Result of {@link findDocumentUriByRkey}. Distinguishes the legitimate
+ * "no match" case from the data-integrity-anomalous "multiple documents
+ * share an rkey" case, which shouldn't be reachable in practice but
+ * surfaces a different UX (and gets logged) if it does.
+ */
+export type FindDocumentResult =
+  | { readonly kind: "found"; readonly uri: string }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "ambiguous"; readonly uris: readonly string[] };
+
+/**
  * Locate a document URI in a snapshot by its rkey.
  *
  * Cabinet documents are always owned by the current user, so
@@ -13,24 +24,32 @@ import { rkeyFromUri } from "@/lib/atUri";
  * or the current viewer's. Callers that only know the rkey must scan
  * the tree for the full URI.
  *
- * Returns null if no matching document is found, or if multiple
- * documents in the workspace share the rkey (which shouldn't happen
- * in practice since rkeys are locally generated TIDs, but we refuse
- * to guess rather than pick one silently).
+ * rkeys are TID-format (microsecond-clock-derived + a random tail), so
+ * cross-PDS collisions are astronomically unlikely. The "ambiguous"
+ * branch exists to refuse to silently pick a winner if the underlying
+ * data ever does collide — and to give the caller a distinct signal
+ * separate from "no match found". `console.warn` fires from here so
+ * the anomaly is at least observable in the JS console.
  */
 export function findDocumentUriByRkey(
   snapshot: DirectoryTreeSnapshot,
   rkey: string,
-): string | null {
-  const matches = new Set<string>();
-  for (const info of Object.values(snapshot.directories)) {
-    for (const entry of info.entries) {
-      if (entry.type === "document" && rkeyFromUri(entry.uri) === rkey) {
-        matches.add(entry.uri);
-      }
-    }
-  }
-  return matches.size === 1 ? matches.values().next().value ?? null : null;
+): FindDocumentResult {
+  const uris = [
+    ...new Set(
+      Object.values(snapshot.directories)
+        .flatMap((info) => info.entries)
+        .filter((entry) => entry.type === "document" && rkeyFromUri(entry.uri) === rkey)
+        .map((entry) => entry.uri),
+    ),
+  ];
+  if (uris.length === 0) return { kind: "not-found" };
+  if (uris.length === 1) return { kind: "found", uri: uris[0] };
+  console.warn(
+    `[opake] findDocumentUriByRkey: rkey "${rkey}" matches ${String(uris.length)} documents in the snapshot — refusing to guess`,
+    { rkey, uris },
+  );
+  return { kind: "ambiguous", uris };
 }
 
 /**
@@ -75,42 +94,3 @@ export function ancestorsOf(
   return collect(startDir?.parentUri ?? null, []);
 }
 
-/**
- * Build a URL path suffix for a directory URI in the form `"abc/def"`.
- * Returns null when the directory is the root or missing from the tree —
- * callers should fall back to the base route (e.g. `/cabinet/files`).
- */
-export function directoryPathSuffix(
-  snapshot: DirectoryTreeSnapshot,
-  directoryUri: string | null,
-): string | null {
-  if (!directoryUri || directoryUri === snapshot.rootUri) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
-  if (!snapshot.directories[directoryUri]) return null;
-  const ancestors = ancestorsOf(snapshot, directoryUri);
-  const segments = [...ancestors.map((a) => a.rkey), rkeyFromUri(directoryUri)];
-  return segments.join("/");
-}
-
-/**
- * Resolve a chain of rkey path segments to a directory URI by walking
- * the tree from the root. Returns null if any segment doesn't match.
- *
- * Example: `["abc", "def"]` → find child of root whose rkey is "abc",
- * then find child of that whose rkey is "def".
- */
-export function resolveDirectoryFromSplat(
-  snapshot: DirectoryTreeSnapshot,
-  rkeys: readonly string[],
-): string | null {
-  if (rkeys.length === 0 || !snapshot.rootUri) return null;
-
-  return rkeys.reduce<string | null>((currentUri, rkey) => {
-    if (!currentUri) return null;
-    const dir = snapshot.directories[currentUri];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
-    if (!dir) return null;
-    const child = dir.entries.find((e) => e.type === "directory" && rkeyFromUri(e.uri) === rkey);
-    return child?.uri ?? null;
-  }, snapshot.rootUri);
-}
