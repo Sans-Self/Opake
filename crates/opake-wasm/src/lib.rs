@@ -11,6 +11,11 @@ use opake_core::storage::Identity;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+// Bindings module — wrapper DTOs + ts-rs annotations. Not wasm32-gated
+// because the ts-rs export tests run on native. Wasm-side code uses the
+// wrappers via `From<&CoreType>` at the marshaling boundary.
+pub mod bindings;
+
 #[cfg(target_arch = "wasm32")]
 mod auth_wasm;
 #[cfg(target_arch = "wasm32")]

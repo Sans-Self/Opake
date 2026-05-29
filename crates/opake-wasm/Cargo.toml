@@ -8,6 +8,11 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Emit TypeScript declarations for cross-boundary DTOs into
+# packages/opake-sdk/src/generated/. Off by default; on via `just ts-bindings`.
+ts-bindings = ["dep:ts-rs"]
+
 [dependencies]
 opake-core = { path = "../opake-core", features = ["wasm-transport"] }
 wasm-bindgen = "0.2"
@@ -26,6 +31,8 @@ futures-util = { workspace = true }
 
 # OsRng on wasm32 needs crypto.getRandomValues()
 getrandom = { version = "0.2", features = ["js"] }
+
+ts-rs = { version = "10", optional = true }
 
 # wasm-pack post-process: explicit wasm-opt invocation.
 #

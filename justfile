@@ -48,6 +48,13 @@ wasm:
 wasm-dev:
     wasm-pack build {{ wasm_crate }} --target web --dev --out-dir ../../{{ wasm_out }} --out-name opake
 
+# Regenerate TypeScript bindings for cross-boundary DTOs into
+# packages/opake-sdk/src/generated/. Runs the ts-rs export tests in
+# opake-wasm with the `ts-bindings` feature on. Diff the generated dir
+# against git to detect drift between Rust DTOs and the SDK's view.
+ts-bindings:
+    cargo test -p opake-wasm --features ts-bindings --test ts_bindings
+
 # ---------------------------------------------------------------------------
 # SDK (@opake/sdk)
 # ---------------------------------------------------------------------------
