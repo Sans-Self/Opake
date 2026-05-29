@@ -80,6 +80,21 @@ pub enum Error {
     #[error("chain authority violation: {uri} authored by {author_did} who was not a manager at supersede time")]
     ChainAuthorityViolation { uri: String, author_did: String },
 
+    /// An editor-authored directory supersede dropped one or more entries
+    /// compared to the prior canonical. Editors may only add to a
+    /// directory; deletions are the manager's prerogative. Either the
+    /// indexer accepted a non-additive write (compromise / out-of-date)
+    /// or two concurrent additive writes raced and one was constructed
+    /// against a prior that's no longer canonical. In the latter case
+    /// the indexer would normally surface `chain-forked`; this error
+    /// catches the failure mode where it didn't.
+    #[error("chain additivity violation: {uri} (editor {author_did}) dropped entries {missing:?}")]
+    ChainAdditivityViolation {
+        uri: String,
+        author_did: String,
+        missing: Vec<String>,
+    },
+
     /// A code path is recognised but not yet wired through. Distinct from
     /// `InvalidRecord` (which means "wire bytes are malformed") so callers
     /// can distinguish "this op makes no sense" from "this op makes sense

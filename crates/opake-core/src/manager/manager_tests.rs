@@ -31,6 +31,7 @@ fn file_context_owner_did_workspace() {
         gk,
         1,
         Vec::new(),
+        vec!["did:plc:bob".into()],
     );
     let ctx = FileContext::Workspace(ws);
 
@@ -266,6 +267,7 @@ mod workspace_upload_cascade {
             group_key,
             1,
             Vec::new(),
+            vec![ALICE_DID.into()],
         )
     }
 
@@ -549,6 +551,7 @@ mod workspace_upload_cascade {
             generate_content_key(&mut OsRng),
             1,
             Vec::new(),
+            vec!["did:plc:alice".into()],
         );
         let ctx = FileContext::Workspace(workspace);
         let mut mgr = opake.file_manager(&ctx);
@@ -696,6 +699,7 @@ mod workspace_delete_cascade {
             generate_content_key(&mut OsRng),
             1,
             Vec::new(),
+            vec![ALICE_DID.into()],
         )
     }
 

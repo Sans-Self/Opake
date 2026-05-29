@@ -27,6 +27,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::ChainCycle { .. } => "ChainCycle",
         Error::ChainGenesisMismatch { .. } => "ChainGenesisMismatch",
         Error::ChainAuthorityViolation { .. } => "ChainAuthorityViolation",
+        Error::ChainAdditivityViolation { .. } => "ChainAdditivityViolation",
         Error::Unimplemented(_) => "Unimplemented",
         Error::Serialization(_) => "Serialization",
         Error::Mnemonic(_) => "Mnemonic",

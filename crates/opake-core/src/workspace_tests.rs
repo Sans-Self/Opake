@@ -13,6 +13,7 @@ fn from_keyring_preserves_fields() {
         gk,
         3,
         Vec::new(),
+        vec!["did:plc:owner".into()],
     );
 
     assert_eq!(

@@ -54,6 +54,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Cache-first: reads from local Storage cache if available, syncs
     /// deltas from the Indexer to keep it fresh. Falls back to PDS
     /// `listRecords` for bootstrap (first load with no cache).
+    ///
+    /// For workspace contexts, runs the additivity check on the loaded
+    /// directory chains before tree construction. An editor-authored
+    /// supersede that dropped entries (which the indexer should have
+    /// rejected but didn't) surfaces as `Error::ChainAdditivityViolation`
+    /// rather than silently rendering a missing-entries tree to the user.
+    /// Cabinet contexts skip the check — all entries come from the
+    /// caller themselves, who's treated as manager-equivalent.
     pub async fn load_tree(&mut self) -> Result<DirectoryTree, Error> {
         let scope = dir_scope_key(self.context);
         let did = self.opake.did.clone();
@@ -65,24 +73,66 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .cache_get_collection(&did, &scope)
             .await?;
 
-        let mut tree = if let Some(cached_coll) = cached {
+        let records = if let Some(cached_coll) = cached {
             trace!(
                 "loading tree from cache ({} records, fetched_at={})",
                 cached_coll.records.len(),
                 cached_coll.fetched_at,
             );
-
-            let records = self.try_sync_deltas(cached_coll).await?;
-            DirectoryTree::from_cached_records(&records)
+            self.try_sync_deltas(cached_coll).await?
         } else {
             trace!("no cache — bootstrapping tree");
-            let tree = self.bootstrap_tree().await?;
-            tree
+            return self.bootstrap_and_decrypt().await;
         };
 
-        // Set root and decrypt names based on context
+        // Run the additivity check before building the tree. For
+        // workspaces, this catches editor-authored supersedes that
+        // dropped entries — the indexer enforces additivity at write
+        // time, but we don't trust it alone. Skipped for cabinets
+        // (single-author, no need).
+        self.verify_directory_chain_additivity(&records)?;
+
+        let mut tree = DirectoryTree::from_cached_records(&records);
         self.decrypt_tree(&mut tree)?;
         Ok(tree)
+    }
+
+    /// Bootstrap from PDS + decrypt — used when no cache is present.
+    /// Extracted so the cache hit path can early-return cleanly.
+    async fn bootstrap_and_decrypt(&mut self) -> Result<DirectoryTree, Error> {
+        let mut tree = self.bootstrap_tree().await?;
+        self.decrypt_tree(&mut tree)?;
+        Ok(tree)
+    }
+
+    /// Run the directory-additivity check on cached records.
+    ///
+    /// Parses each `CachedRecord` as a `Directory`, drops the sync
+    /// sentinel, and calls `verify_directory_additivity` with the
+    /// workspace's current manager list. Cabinet contexts skip the
+    /// check (single-author, no concurrent writers).
+    fn verify_directory_chain_additivity(
+        &self,
+        records: &[CachedRecord],
+    ) -> Result<(), Error> {
+        let workspace = match self.context {
+            FileContext::Cabinet(_) => return Ok(()),
+            FileContext::Workspace(ws) => ws,
+        };
+
+        let directories: Vec<(String, crate::records::Directory)> = records
+            .iter()
+            .filter(|r| r.uri != "__sync__")
+            .filter_map(|r| {
+                let dir: crate::records::Directory =
+                    serde_json::from_value(r.value.clone()).ok()?;
+                Some((r.uri.clone(), dir))
+            })
+            .collect();
+
+        crate::directories::verify_directory_additivity(&directories, |did| {
+            workspace.is_manager(did)
+        })
     }
 
     /// Try to sync deltas from the Indexer. If Indexer is unavailable,

@@ -8,7 +8,20 @@
 // Keyring is crypto plumbing. Workspace is the domain concept.
 
 use crate::crypto::{self, ContentKey, PrivateKeyBundle};
-use crate::records::Keyring;
+use crate::records::{Keyring, Role};
+
+/// Extract the DIDs of every member with `Role::Manager` from a keyring
+/// record. Used at workspace-resolution time to populate the
+/// `Workspace::manager_dids` field, which the directory read path
+/// consults for the additivity check.
+pub(crate) fn manager_dids_from_keyring(keyring: &Keyring) -> Vec<String> {
+    keyring
+        .members
+        .iter()
+        .filter(|m| matches!(m.role, Role::Manager))
+        .map(|m| m.did().to_string())
+        .collect()
+}
 
 /// One historical group key, retained so documents encrypted under a
 /// previous rotation can still be decrypted after the keyring rotates.
@@ -47,6 +60,14 @@ pub struct Workspace {
     /// uploaded before a rotation reference their original rotation in
     /// `keyringRef.rotation` and need the historical key to decrypt.
     pub historical_keys: Vec<HistoricalKey>,
+    /// DIDs of every member with `Role::Manager` in the current keyring
+    /// head. Carried here so the directory read path can check the
+    /// additivity rule ("editor-authored supersedes must add to the
+    /// prior canonical's entry set; managers exempt") without re-fetching
+    /// the keyring. Populated from the keyring record's `members` list
+    /// at workspace-resolution time.
+    #[zeroize(skip)]
+    pub manager_dids: Vec<String>,
 }
 
 impl Workspace {
@@ -57,6 +78,9 @@ impl Workspace {
     /// don't match reality, and `FileManager` would happily encrypt with
     /// the wrong key. The supported entry points are `Opake::resolve_workspace`,
     /// `Opake::file_context`, and the daemon's workspace-resolution helpers.
+    #[allow(clippy::too_many_arguments)] // Constructor — every field is a
+    // workspace-identity-defining piece. Bundling into a struct would just
+    // move the arg list one call up.
     pub(crate) fn from_keyring(
         uri: String,
         name: String,
@@ -65,6 +89,7 @@ impl Workspace {
         key: ContentKey,
         rotation: u64,
         historical_keys: Vec<HistoricalKey>,
+        manager_dids: Vec<String>,
     ) -> Self {
         Self {
             uri,
@@ -74,7 +99,16 @@ impl Workspace {
             key,
             rotation,
             historical_keys,
+            manager_dids,
         }
+    }
+
+    /// True iff `did` is a manager of this workspace per the current
+    /// keyring head's member list. Used by the additivity check on
+    /// directory reads — managers are exempt from the "must add to
+    /// prior canonical" rule.
+    pub fn is_manager(&self, did: &str) -> bool {
+        self.manager_dids.iter().any(|m| m == did)
     }
 
     /// The underlying keyring AT-URI.

@@ -306,6 +306,87 @@ pub fn verify_keyring_chain_authority(
     Ok(())
 }
 
+/// Verify that every editor-authored directory supersede in `records`
+/// added to (or preserved) the prior canonical's entry set. Managers
+/// are exempt — they may add or delete freely.
+///
+/// `records` is the unfiltered set of directory records for a workspace
+/// (as the indexer's `/workspace/snapshot` endpoint returns it). The
+/// function groups records into chains by following `supersedes`
+/// pointers in-memory — no network calls — and runs the additivity
+/// check on each chain pair.
+///
+/// `is_manager` decides whether a given author DID is exempt from the
+/// additivity rule for a particular supersede. Callers pass a closure
+/// over the workspace's current manager list. For more precise
+/// historical authority (was-manager-at-supersede-time), this can be
+/// extended to consult the keyring chain — currently it's a snapshot
+/// against the head's members, which is conservative: a previously-
+/// manager-now-editor gets their writes checked for additivity, which
+/// is fine (additive writes are valid for everyone).
+///
+/// Returns `Ok(())` on success or `Error::ChainAdditivityViolation`
+/// pointing at the first non-additive supersede found.
+pub fn verify_directory_additivity(
+    records: &[(String, crate::records::Directory)],
+    is_manager: impl Fn(&str) -> bool,
+) -> Result<(), Error> {
+    // Build a URI → record index so we can look up priors without an
+    // O(N²) scan per chain. The Directory clone here is intentional —
+    // we don't borrow from `records` because we need to walk pointers
+    // across the whole set freely.
+    let by_uri: HashMap<&str, &crate::records::Directory> = records
+        .iter()
+        .map(|(uri, dir)| (uri.as_str(), dir))
+        .collect();
+
+    for (uri, dir) in records {
+        let Some(prior_uri) = dir.supersedes.as_deref() else {
+            continue; // Genesis records have no prior to compare against.
+        };
+
+        // Author DID is the URI's authority component.
+        let author_did = crate::atproto::parse_at_uri(uri)?.authority;
+        if is_manager(&author_did) {
+            continue; // Managers exempt from additivity.
+        }
+
+        let Some(prior) = by_uri.get(prior_uri) else {
+            // Prior isn't in the snapshot. Without it we can't verify;
+            // skip rather than reject — the indexer would normally
+            // surface this as a missing-record condition before the
+            // snapshot even reaches us.
+            continue;
+        };
+
+        let prior_targets: HashSet<&str> = prior
+            .entries
+            .iter()
+            .map(|e| e.target.as_str())
+            .collect();
+        let new_targets: HashSet<&str> = dir
+            .entries
+            .iter()
+            .map(|e| e.target.as_str())
+            .collect();
+
+        let missing: Vec<String> = prior_targets
+            .difference(&new_targets)
+            .map(|s| (*s).to_owned())
+            .collect();
+
+        if !missing.is_empty() {
+            return Err(Error::ChainAdditivityViolation {
+                uri: uri.clone(),
+                author_did,
+                missing,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "chain_tests.rs"]
 mod tests;

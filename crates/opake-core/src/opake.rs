@@ -329,6 +329,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 keyring_uri,
                 &private_keys.bundle(),
             );
+            let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
             Ok(Workspace::from_keyring(
                 keyring_uri.to_string(),
                 name,
@@ -337,6 +338,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 group_key,
                 keyring.rotation,
                 historical_keys,
+                manager_dids,
             ))
         } else {
             // Foreign keyring — resolve via public PDS endpoint
@@ -388,6 +390,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &private_keys.bundle(),
         );
 
+        let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
         Ok(Workspace::from_keyring(
             keyring_uri.to_string(),
             name,
@@ -396,6 +399,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             group_key,
             keyring.rotation,
             historical_keys,
+            manager_dids,
         ))
     }
 
@@ -636,6 +640,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             }
         };
 
+        let manager_dids = crate::workspace::manager_dids_from_keyring(&envelope.record);
         let workspace = crate::workspace::Workspace::from_keyring(
             workspace_id,
             String::new(),
@@ -644,6 +649,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             group_key,
             envelope.record.rotation,
             Vec::new(),
+            manager_dids,
         );
         let ctx = crate::manager::FileContext::Workspace(workspace);
         let mut mgr = self.file_manager(&ctx);

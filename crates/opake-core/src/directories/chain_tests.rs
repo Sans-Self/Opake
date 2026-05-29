@@ -513,6 +513,150 @@ mod keyring_authority {
     }
 }
 
+// -- verify_directory_additivity --
+//
+// Pure check: editor-authored supersedes must add to the prior
+// canonical's entry set; managers are exempt.
+
+mod directory_additivity {
+    use super::*;
+    use crate::records::{Directory, ListingEntry};
+
+    const ALICE_DID: &str = "did:plc:alice";
+    const BOB_DID: &str = "did:plc:bob";
+    const DIR_GENESIS: &str = "at://did:plc:alice/app.opake.directory/genesis";
+    const DIR_HEAD_BY_BOB: &str = "at://did:plc:bob/app.opake.directory/head";
+
+    fn entry(target: &str) -> ListingEntry {
+        // Minimal listing entry — only `target` matters for additivity.
+        ListingEntry {
+            target: target.into(),
+            target_cid: crate::records::CidLink {
+                cid: "bafyfake".into(),
+            },
+        }
+    }
+
+    fn dir(entries: Vec<&str>, supersedes: Option<&str>) -> Directory {
+        Directory {
+            opake_version: crate::records::SCHEMA_VERSION,
+            key_wrapping: crate::records::KeyWrapping::Direct(
+                crate::records::DirectKeyWrapping { keys: vec![] },
+            ),
+            encrypted_metadata: crate::test_utils::dummy_encrypted_metadata(),
+            entries: entries.into_iter().map(entry).collect(),
+            supersedes: supersedes.map(String::from),
+            workspace_id: None,
+            is_workspace_root: false,
+            created_at: "2026-03-01T00:00:00Z".into(),
+            modified_at: None,
+        }
+    }
+
+    fn no_managers(_: &str) -> bool {
+        false
+    }
+
+    fn alice_is_manager(did: &str) -> bool {
+        did == ALICE_DID
+    }
+
+    #[test]
+    fn passes_genesis_only() {
+        let records = vec![(DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None))];
+        verify_directory_additivity(&records, no_managers).unwrap();
+    }
+
+    #[test]
+    fn passes_editor_additive_supersede() {
+        // Bob (editor) adds "doc3" while preserving doc1 + doc2.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (
+                DIR_HEAD_BY_BOB.into(),
+                dir(vec!["doc1", "doc2", "doc3"], Some(DIR_GENESIS)),
+            ),
+        ];
+        verify_directory_additivity(&records, no_managers).unwrap();
+    }
+
+    #[test]
+    fn rejects_editor_non_additive_supersede() {
+        // Bob (editor) supersedes but drops doc2. Should reject.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (
+                DIR_HEAD_BY_BOB.into(),
+                dir(vec!["doc1", "doc3"], Some(DIR_GENESIS)),
+            ),
+        ];
+        let err = verify_directory_additivity(&records, no_managers).unwrap_err();
+        match err {
+            Error::ChainAdditivityViolation {
+                uri,
+                author_did,
+                missing,
+            } => {
+                assert_eq!(uri, DIR_HEAD_BY_BOB);
+                assert_eq!(author_did, BOB_DID);
+                assert_eq!(missing, vec!["doc2".to_string()]);
+            }
+            other => panic!("expected ChainAdditivityViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allows_manager_non_additive_supersede() {
+        // Alice (manager) deletes doc2. Allowed because managers are
+        // exempt from the additivity rule.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (
+                "at://did:plc:alice/app.opake.directory/head".into(),
+                dir(vec!["doc1"], Some(DIR_GENESIS)),
+            ),
+        ];
+        verify_directory_additivity(&records, alice_is_manager).unwrap();
+    }
+
+    #[test]
+    fn skips_supersedes_with_missing_prior() {
+        // If the prior isn't in the snapshot, we can't verify — skip
+        // rather than reject (the indexer would surface this elsewhere).
+        let records = vec![(
+            DIR_HEAD_BY_BOB.into(),
+            dir(vec!["doc1"], Some("at://did:plc:other/app.opake.directory/gone")),
+        )];
+        verify_directory_additivity(&records, no_managers).unwrap();
+    }
+
+    #[test]
+    fn checks_every_supersede_in_chain() {
+        // Three-record chain. Middle supersede is non-additive — must be
+        // caught even though the head IS additive vs. the middle.
+        let middle_uri = "at://did:plc:bob/app.opake.directory/middle";
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2", "doc3"], None)),
+            (
+                middle_uri.into(),
+                dir(vec!["doc1", "doc2"], Some(DIR_GENESIS)),
+            ),
+            (
+                DIR_HEAD_BY_BOB.into(),
+                dir(vec!["doc1", "doc2"], Some(middle_uri)),
+            ),
+        ];
+        let err = verify_directory_additivity(&records, no_managers).unwrap_err();
+        match err {
+            Error::ChainAdditivityViolation { uri, missing, .. } => {
+                assert_eq!(uri, middle_uri);
+                assert_eq!(missing, vec!["doc3".to_string()]);
+            }
+            other => panic!("expected ChainAdditivityViolation, got: {other:?}"),
+        }
+    }
+}
+
 // -- ChainHeadProvider contract --
 //
 // The production impl lives in the indexer-client layer. The map-backed
