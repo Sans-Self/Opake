@@ -670,12 +670,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// `fetch_chain_node` to retrieve the record itself.
     ///
     /// The indexer is outside the TCB — it can lie about which URI is the
-    /// current head. We mitigate by walking the chain back from the
-    /// indexer's claimed head to genesis and verifying the genesis URI
-    /// equals the `workspace_id` we asked about. This closes the
-    /// "indexer points at a head from a different workspace's chain"
-    /// attack: PDS-signed records mean the indexer can't forge content,
-    /// only mislabel; the chain walk catches the mislabel.
+    /// current head. We mitigate with two checks:
+    ///
+    /// 1. **Chain integrity** — walk back from the indexer's claimed head
+    ///    to genesis and verify the genesis URI equals the requested
+    ///    `workspace_id`. Closes "indexer points at a head from a
+    ///    different workspace's chain."
+    /// 2. **Chain authority** — verify every supersede in the chain was
+    ///    authored by a manager of the prior keyring. Closes "indexer
+    ///    accepted a non-manager's supersede" (e.g., a removed manager
+    ///    or a malicious member). Without this, a corrupted indexer
+    ///    could let a non-manager rewrite the workspace's authority.
+    ///
+    /// PDS-signed records mean the indexer can't forge content, only
+    /// mislabel or accept invalid writes; these two checks turn both
+    /// failure modes into hard rejects rather than silent corruption.
     ///
     /// Note: this does *not* close staleness — a compromised indexer can
     /// still point at an older-but-real head and hide a newer supersede.
@@ -709,6 +718,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             workspace_id,
         )
         .await?;
+
+        // Verify the authorization trail: every supersede must have been
+        // authored by a manager of the prior keyring. This runs on the
+        // already-fetched chain — no extra network cost.
+        crate::directories::verify_keyring_chain_authority(&chain)?;
 
         // Extract the head — the first node of the verified chain. Safe
         // unwrap: verify_and_walk_chain returns Ok only when the chain

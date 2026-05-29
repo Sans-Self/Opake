@@ -304,6 +304,215 @@ async fn verify_and_walk_chain_propagates_cycle() {
     assert!(matches!(err, Error::ChainCycle { .. }));
 }
 
+// -- verify_keyring_chain_authority --
+//
+// Authorization trail check on a fetched keyring chain. Verifies every
+// supersede was authored by a manager of the prior keyring. Pure
+// function over a pre-fetched chain — no network calls.
+
+mod keyring_authority {
+    use super::*;
+    use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION};
+    use crate::test_utils::dummy_encrypted_metadata;
+
+    const KEYRING_GENESIS: &str = "at://did:plc:alice/app.opake.keyring/genesis";
+    const KEYRING_HEAD: &str = "at://did:plc:alice/app.opake.keyring/head";
+    const KEYRING_HEAD_BOB: &str = "at://did:plc:bob/app.opake.keyring/head";
+
+    fn member(did: &str, role: Role) -> KeyringMember {
+        KeyringMember {
+            wrapped_key: WrappedKey {
+                did: did.into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+            },
+            role,
+        }
+    }
+
+    fn keyring(members: Vec<KeyringMember>, supersedes: Option<&str>) -> Keyring {
+        Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members,
+            rotation: 0,
+            key_history: Vec::new(),
+            encrypted_metadata: dummy_encrypted_metadata(),
+            supersedes: supersedes.map(String::from),
+            workspace_id: supersedes.map(|_| KEYRING_GENESIS.to_string()),
+            created_at: "2026-03-01T00:00:00Z".into(),
+            modified_at: None,
+        }
+    }
+
+    fn node(uri: &str, record: Keyring) -> ChainNode<Keyring> {
+        ChainNode {
+            uri: uri.into(),
+            cid: format!("bafy{uri}"),
+            record,
+        }
+    }
+
+    #[test]
+    fn accepts_genesis_only_chain() {
+        // A chain of length 1 is just the genesis. No supersedes means
+        // nothing to verify; pass cleanly.
+        let chain = vec![node(
+            KEYRING_GENESIS,
+            keyring(vec![member(DID_A, Role::Manager)], None),
+        )];
+        verify_keyring_chain_authority(&chain).unwrap();
+    }
+
+    #[test]
+    fn accepts_manager_authored_supersede() {
+        let chain = vec![
+            // Head authored by Alice (a manager in the genesis below).
+            node(
+                KEYRING_HEAD,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Editor)],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(vec![member(DID_A, Role::Manager)], None),
+            ),
+        ];
+        verify_keyring_chain_authority(&chain).unwrap();
+    }
+
+    #[test]
+    fn rejects_editor_authored_supersede() {
+        // Head is at Bob's DID; Bob is only an Editor in the prior
+        // keyring, not a Manager. Reject.
+        let chain = vec![
+            node(
+                KEYRING_HEAD_BOB,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Manager)],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Editor)],
+                    None,
+                ),
+            ),
+        ];
+        let err = verify_keyring_chain_authority(&chain).unwrap_err();
+        match err {
+            Error::ChainAuthorityViolation { uri, author_did } => {
+                assert_eq!(uri, KEYRING_HEAD_BOB);
+                assert_eq!(author_did, DID_B);
+            }
+            other => panic!("expected ChainAuthorityViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_non_member_authored_supersede() {
+        // Head is at Bob's DID; Bob is not in the prior keyring at all.
+        // Same rejection signal as the editor case — the chain is
+        // compromised regardless of "why" the author isn't authorized.
+        let chain = vec![
+            node(
+                KEYRING_HEAD_BOB,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Manager)],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(vec![member(DID_A, Role::Manager)], None),
+            ),
+        ];
+        let err = verify_keyring_chain_authority(&chain).unwrap_err();
+        match err {
+            Error::ChainAuthorityViolation { uri, author_did } => {
+                assert_eq!(uri, KEYRING_HEAD_BOB);
+                assert_eq!(author_did, DID_B);
+            }
+            other => panic!("expected ChainAuthorityViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_multi_hop_chain_with_proper_authority() {
+        // Three-record chain: each supersede authored by a manager in
+        // the immediately prior keyring. Walks the full chain to verify
+        // the loop doesn't accidentally skip intermediate pairs.
+        let middle_uri = "at://did:plc:alice/app.opake.keyring/middle";
+        let chain = vec![
+            node(
+                KEYRING_HEAD,
+                keyring(
+                    vec![member(DID_A, Role::Manager)],
+                    Some(middle_uri),
+                ),
+            ),
+            node(
+                middle_uri,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Editor)],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(vec![member(DID_A, Role::Manager)], None),
+            ),
+        ];
+        verify_keyring_chain_authority(&chain).unwrap();
+    }
+
+    #[test]
+    fn rejects_when_break_is_mid_chain() {
+        // Three-record chain where the middle supersede is authored by
+        // someone who became a manager only later. At supersede time
+        // they weren't a manager → reject. The check must catch this
+        // even though the head's author IS a manager.
+        let middle_uri = "at://did:plc:bob/app.opake.keyring/middle";
+        let chain = vec![
+            node(
+                KEYRING_HEAD,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Manager)],
+                    Some(middle_uri),
+                ),
+            ),
+            node(
+                middle_uri,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Manager)],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(
+                    vec![member(DID_A, Role::Manager), member(DID_B, Role::Editor)],
+                    None,
+                ),
+            ),
+        ];
+        let err = verify_keyring_chain_authority(&chain).unwrap_err();
+        match err {
+            Error::ChainAuthorityViolation { uri, author_did } => {
+                assert_eq!(uri, middle_uri);
+                assert_eq!(author_did, DID_B);
+            }
+            other => panic!("expected ChainAuthorityViolation, got: {other:?}"),
+        }
+    }
+}
+
 // -- ChainHeadProvider contract --
 //
 // The production impl lives in the indexer-client layer. The map-backed

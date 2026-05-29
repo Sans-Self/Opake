@@ -255,6 +255,57 @@ where
     Ok(chain)
 }
 
+/// Verify that every supersede in a keyring chain was authored by a
+/// manager of the prior keyring.
+///
+/// `chain` must be in head→genesis order (as `walk_back_to_genesis` and
+/// `verify_and_walk_chain` return). The genesis is exempt — there's no
+/// prior to check against, and whoever wrote it is the workspace
+/// creator by definition. For each non-genesis node, the supersede's
+/// author DID (extracted from the AT-URI's authority) must appear as
+/// a `Role::Manager` in the prior keyring's members.
+///
+/// This complements `verify_and_walk_chain`: that one checks structural
+/// integrity ("the chain is well-formed and terminates at the expected
+/// genesis"); this one checks the authorization trail ("every supersede
+/// was written by someone authorized at the time"). Together they close
+/// the indexer-trust gap on chain history — staleness (an indexer that
+/// hides a newer supersede behind an older head) is a separate concern.
+///
+/// Errors:
+/// - `Error::ChainAuthorityViolation` — a supersede was written by a
+///   DID that wasn't a manager in the prior keyring. The chain is
+///   compromised at that point.
+/// - `Error::InvalidRecord` — a supersede URI can't be parsed (the
+///   chain walk would normally catch malformed URIs, but defensively
+///   surfaced here too).
+pub fn verify_keyring_chain_authority(
+    chain: &[ChainNode<crate::records::Keyring>],
+) -> Result<(), Error> {
+    // Iterate adjacent pairs (supersede, prior). For a chain of length
+    // N, this produces N-1 pairs — exactly the set of supersedes that
+    // need their author checked against the prior keyring.
+    for window in chain.windows(2) {
+        let supersede = &window[0];
+        let prior = &window[1];
+        let author_did = crate::atproto::parse_at_uri(&supersede.uri)?.authority;
+
+        let is_manager = prior.record.members.iter().any(|m| {
+            m.did() == author_did
+                && matches!(m.role, crate::records::Role::Manager)
+        });
+
+        if !is_manager {
+            return Err(Error::ChainAuthorityViolation {
+                uri: supersede.uri.clone(),
+                author_did,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "chain_tests.rs"]
 mod tests;

@@ -68,6 +68,18 @@ pub enum Error {
     #[error("chain genesis mismatch: expected {expected}, walk terminated at {actual}")]
     ChainGenesisMismatch { expected: String, actual: String },
 
+    /// A supersede in the keyring chain was authored by a DID that was
+    /// not a manager of the prior keyring. Structurally the chain is
+    /// well-formed (no cycles, terminates at the expected genesis) but
+    /// the authorization trail is broken — somewhere up the chain a
+    /// non-manager wrote a supersede that should never have been
+    /// accepted. Either the indexer is compromised / outdated, or a
+    /// member's PDS was compromised. Distinct from `Auth` (which is the
+    /// caller's own credential failing) so callers can distinguish
+    /// "your auth failed" from "the chain you're reading is corrupt".
+    #[error("chain authority violation: {uri} authored by {author_did} who was not a manager at supersede time")]
+    ChainAuthorityViolation { uri: String, author_did: String },
+
     /// A code path is recognised but not yet wired through. Distinct from
     /// `InvalidRecord` (which means "wire bytes are malformed") so callers
     /// can distinguish "this op makes no sense" from "this op makes sense

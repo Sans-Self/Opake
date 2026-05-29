@@ -19,8 +19,9 @@ pub use cascade::{
     CascadeStep, LeafLevel, LevelMode,
 };
 pub use chain::{
-    fetch_chain_node, verify_and_walk_chain, walk_back_to_genesis, ChainHead, ChainHeadProvider,
-    ChainNode, Superseding, WorkspaceChainHeads,
+    fetch_chain_node, verify_and_walk_chain, verify_keyring_chain_authority,
+    walk_back_to_genesis, ChainHead, ChainHeadProvider, ChainNode, Superseding,
+    WorkspaceChainHeads,
 };
 pub(crate) use chain::fetch_with_cache;
 pub use create::create_directory;
