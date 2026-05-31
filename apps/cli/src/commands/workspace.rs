@@ -133,7 +133,10 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
         // The head URI's authority is the DID currently hosting the
         // keyring chain head. For an un-superseded workspace that's the
         // original creator; matches the pre-federation "owner" idea.
-        let role_tag = if ws.head_pds_did() == did {
+        let head_pds_did = atproto::parse_at_uri(&ws.uri)
+            .map(|u| u.authority)
+            .unwrap_or_default();
+        let role_tag = if head_pds_did == did {
             ""
         } else {
             "\t(member)"
@@ -143,13 +146,18 @@ async fn ls(ctx: &CommandContext, args: LsArgs) -> Result<Option<Session>> {
             println!(
                 "{}\t{} member(s)\trotation:{}\t{}{}",
                 name,
-                ws.members.len(),
-                ws.rotation,
-                ws.head_uri,
+                ws.record.members.len(),
+                ws.record.rotation,
+                ws.uri,
                 role_tag,
             );
         } else {
-            println!("{}\t{} member(s){}", name, ws.members.len(), role_tag);
+            println!(
+                "{}\t{} member(s){}",
+                name,
+                ws.record.members.len(),
+                role_tag
+            );
         }
     }
 

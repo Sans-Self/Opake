@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::Args;
+use opake_core::atproto;
 use opake_core::client::Session;
-use opake_core::indexer::InboxGrant;
+use opake_core::indexer::IndexerEnvelope;
+use opake_core::records::Grant;
 
 use crate::commands::Execute;
 use crate::session::CommandContext;
@@ -18,21 +20,34 @@ pub struct InboxCommand {
     indexer: Option<String>,
 }
 
-fn format_short(grants: &[InboxGrant]) -> String {
+/// The grant's author DID lives in the at-uri authority position; the
+/// indexer no longer hands it back as a flat field. Defaulting to the
+/// raw URI keeps the display path infallible if a malformed envelope
+/// ever slips through.
+fn author_did(envelope: &IndexerEnvelope<Grant>) -> String {
+    atproto::parse_at_uri(&envelope.uri)
+        .map(|u| u.authority)
+        .unwrap_or_else(|_| envelope.uri.clone())
+}
+
+fn format_short(grants: &[IndexerEnvelope<Grant>]) -> String {
     grants
         .iter()
-        .map(|g| format!("{}\t{}", g.author_did, g.uri))
+        .map(|g| format!("{}\t{}", author_did(g), g.uri))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_long(grants: &[InboxGrant]) -> String {
+fn format_long(grants: &[IndexerEnvelope<Grant>]) -> String {
     grants
         .iter()
         .map(|g| {
             format!(
                 "  {}  {}\n           doc: {}\n           grant: {}",
-                g.created_at, g.author_did, g.document_uri, g.uri,
+                g.record.created_at,
+                author_did(g),
+                g.record.document,
+                g.uri,
             )
         })
         .collect::<Vec<_>>()
@@ -72,13 +87,30 @@ impl Execute for InboxCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opake_core::atproto::AtBytes;
+    use opake_core::records::{EncryptedMetadata, WrappedKey, SCHEMA_VERSION};
 
-    fn grant(author: &str, doc_suffix: &str) -> InboxGrant {
-        InboxGrant {
-            uri: "at://did:plc:author/app.opake.grant/g1".into(),
-            author_did: author.into(),
-            document_uri: format!("at://did:plc:author/app.opake.document/{doc_suffix}"),
-            created_at: "2026-03-01T12:00:00Z".into(),
+    fn grant(author: &str, doc_suffix: &str) -> IndexerEnvelope<Grant> {
+        IndexerEnvelope {
+            uri: format!("at://{author}/app.opake.grant/g1"),
+            record: Grant {
+                opake_version: SCHEMA_VERSION,
+                document: format!("at://{author}/app.opake.document/{doc_suffix}"),
+                recipient: "did:plc:me".into(),
+                wrapped_key: WrappedKey {
+                    did: "did:plc:me".into(),
+                    ciphertext: AtBytes { encoded: String::new() },
+                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+                },
+                expires_at: None,
+                encrypted_metadata: EncryptedMetadata {
+                    ciphertext: AtBytes { encoded: String::new() },
+                    nonce: AtBytes { encoded: String::new() },
+                },
+                created_at: "2026-03-01T12:00:00Z".into(),
+            },
+            indexed_at: "2026-03-01T12:00:01Z".into(),
+            deleted_at: None,
         }
     }
 
