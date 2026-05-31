@@ -317,13 +317,17 @@ pub fn verify_keyring_chain_authority(
 /// check on each chain pair.
 ///
 /// `is_manager` decides whether a given author DID is exempt from the
-/// additivity rule for a particular supersede. Callers pass a closure
-/// over the workspace's current manager list. For more precise
-/// historical authority (was-manager-at-supersede-time), this can be
-/// extended to consult the keyring chain — currently it's a snapshot
-/// against the head's members, which is conservative: a previously-
-/// manager-now-editor gets their writes checked for additivity, which
-/// is fine (additive writes are valid for everyone).
+/// additivity rule for a particular supersede. The exemption is purely a
+/// function of the predicate the caller supplies — this function holds no
+/// opinion on *which* DIDs count as managers. A current-managers-only
+/// predicate is unsound on its own: a former manager's legitimate
+/// deletion stays in the chain forever, so once they're demoted it would
+/// trip this check. The manager-side caller
+/// (`FileManager::verify_directory_chain_additivity`) therefore runs this
+/// twice — fast pass over current managers, then, only on a violation, a
+/// pass over the union of everyone who was *ever* a manager across the
+/// keyring chain. Keep that two-pass contract in mind before assuming a
+/// single current-snapshot predicate is enough.
 ///
 /// Returns `Ok(())` on success or `Error::ChainAdditivityViolation`
 /// pointing at the first non-additive supersede found.

@@ -90,7 +90,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // dropped entries — the indexer enforces additivity at write
         // time, but we don't trust it alone. Skipped for cabinets
         // (single-author, no need).
-        self.verify_directory_chain_additivity(&records)?;
+        self.verify_directory_chain_additivity(&records).await?;
 
         let mut tree = DirectoryTree::from_cached_records(&records);
         self.decrypt_tree(&mut tree)?;
@@ -107,11 +107,40 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Run the directory-additivity check on cached records.
     ///
-    /// Parses each `CachedRecord` as a `Directory`, drops the sync
-    /// sentinel, and calls `verify_directory_additivity` with the
-    /// workspace's current manager list. Cabinet contexts skip the
-    /// check (single-author, no concurrent writers).
-    fn verify_directory_chain_additivity(
+    /// Editors may only append directory entries; managers may also drop
+    /// them. The check exempts managers from the additivity rule, so the
+    /// question is *who counted as a manager when a given supersede was
+    /// authored*. A naive "is this author a current manager?" test
+    /// regresses: a manager's legitimate deletion stays in the chain
+    /// forever, but if that manager is later demoted or removed, their old
+    /// deletion would suddenly trip the check and brick the tree load for
+    /// everyone.
+    ///
+    /// We resolve that with a lazy two-pass strategy:
+    ///
+    /// 1. **Fast path** — exempt the *current* managers. Zero network, and
+    ///    it passes on every normal load (no former-manager deletions in
+    ///    the chain).
+    /// 2. **Slow path** — only if the fast path reports a violation, walk
+    ///    the keyring supersede chain once and union the managers across
+    ///    *every* keyring version. Re-run the check exempting anyone who
+    ///    was *ever* a manager. This clears legitimate historical manager
+    ///    deletions while still rejecting a genuine editor non-additive
+    ///    supersede (an editor was never in the manager set).
+    ///
+    /// We deliberately use an "ever-was-a-manager" union rather than
+    /// point-in-time authority keyed on the supersede's `createdAt`:
+    /// `createdAt` lives inside the author-signed record, so it's
+    /// author-controlled, not a trusted clock. A malicious editor could
+    /// backdate. The union is coarser but sound — it never *grants*
+    /// authority to someone who never held it.
+    ///
+    /// On chain-walk failure (offline, indexer down) we fail **open**:
+    /// this check is defense-in-depth — the indexer enforces additivity at
+    /// write time — and bricking an offline tree load over a recheck we
+    /// can't complete is the worse outcome. Cabinet contexts skip the
+    /// check entirely (single-author, no concurrent writers).
+    async fn verify_directory_chain_additivity(
         &self,
         records: &[CachedRecord],
     ) -> Result<(), Error> {
@@ -130,9 +159,62 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             })
             .collect();
 
-        crate::directories::verify_directory_additivity(&directories, |did| {
+        // Pass 1: fast path, current managers only.
+        match crate::directories::verify_directory_additivity(&directories, |did| {
             workspace.is_manager(did)
+        }) {
+            Ok(()) => return Ok(()),
+            Err(Error::ChainAdditivityViolation { .. }) => {
+                // Could be a legitimate former-manager deletion. Fall
+                // through to the historical-authority recheck.
+            }
+            Err(other) => return Err(other),
+        }
+
+        // Pass 2: slow path, union of every manager across the keyring
+        // chain. Fail open if we can't reach the chain.
+        let ever_managers = match self.collect_ever_manager_dids(workspace).await {
+            Ok(set) => set,
+            Err(e) => {
+                log::warn!(
+                    "additivity: keyring chain walk failed ({e}); \
+                     skipping historical-authority recheck (fail-open)"
+                );
+                return Ok(());
+            }
+        };
+
+        crate::directories::verify_directory_additivity(&directories, |did| {
+            workspace.is_manager(did) || ever_managers.contains(did)
         })
+    }
+
+    /// Walk the workspace's keyring supersede chain and collect the union
+    /// of every DID that held [`Role::Manager`] in *any* keyring version,
+    /// genesis through head. Used by the additivity slow path to exempt
+    /// former managers whose legitimate deletions are still in the chain.
+    ///
+    /// Walks from the workspace's current keyring head (`workspace.uri`)
+    /// back to genesis via the `supersedes` back-edge. The walk is
+    /// structurally validated by `walk_back_to_genesis` (cycle detection,
+    /// no missing intermediates); we don't re-verify authority here — that
+    /// already happened when the keyring chain was fetched.
+    async fn collect_ever_manager_dids(
+        &self,
+        workspace: &crate::workspace::Workspace,
+    ) -> Result<std::collections::HashSet<String>, Error> {
+        let chain = crate::directories::walk_back_to_genesis::<crate::records::Keyring>(
+            self.opake.client.transport(),
+            &workspace.uri,
+        )
+        .await?;
+
+        Ok(chain
+            .iter()
+            .flat_map(|node| node.record.members.iter())
+            .filter(|m| matches!(m.role, crate::records::Role::Manager))
+            .map(|m| m.did().to_string())
+            .collect())
     }
 
     /// Try to sync deltas from the Indexer. If Indexer is unavailable,
@@ -354,6 +436,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             })
             .collect();
         let with_cursor = Self::with_sync_cursor(dir_records.clone(), snapshot.sync_cursor());
+
+        // Bootstrap ingests a full indexer snapshot — the most exposed
+        // read, and the one a fresh device or post-eviction client hits.
+        // Run the additivity check here too, before persisting or building,
+        // so this path gets the same guarantee as the cached path in
+        // `load_tree` rather than a free pass. Verifying before caching also
+        // means we never persist a tree that fails the check. Cabinets are
+        // skipped inside.
+        self.verify_directory_chain_additivity(&dir_records).await?;
 
         // Cache directories
         let dir_scope = dir_scope_key(self.context);
@@ -794,3 +885,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         )))
     }
 }
+
+#[cfg(test)]
+#[path = "tree_tests.rs"]
+mod tests;

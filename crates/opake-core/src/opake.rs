@@ -740,8 +740,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok((head_node.uri, head_node.record))
     }
 
-    /// Client-side manager-authority check. The indexer is authoritative,
-    /// but a local check produces a clear error before any write attempt.
+    /// Fast local pre-write manager check. Not a security boundary: the
+    /// authoritative authorization trail is verified on read by
+    /// `verify_keyring_chain_authority`, which walks the keyring chain and
+    /// confirms every supersede was authored by a manager of the prior
+    /// keyring. This check just produces a clear error before attempting a
+    /// write the chain verification would later reject anyway.
     fn require_manager(&self, keyring: &crate::records::Keyring) -> Result<(), Error> {
         let is_manager = keyring
             .members
