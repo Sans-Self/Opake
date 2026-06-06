@@ -854,6 +854,32 @@ impl DirectoryTree {
         None
     }
 
+    /// True if `uri` is the root directory or chains up to it via parent
+    /// links. After a delete orphans a subtree — the deleted directory's
+    /// record is gone, so its children no longer have a parent in the
+    /// tree — those descendants return `false`. Used to auto-close
+    /// watchers stranded on a directory that can no longer be reached
+    /// from the root.
+    pub fn is_reachable_from_root(&self, uri: &str) -> bool {
+        let Some(root) = self.root_uri.as_deref() else {
+            return false;
+        };
+        if uri == root {
+            return true;
+        }
+        let mut current = uri.to_string();
+        // Bounded by the directory count: a detached chain or cycle can't
+        // visit more distinct nodes than exist, so this always terminates.
+        for _ in 0..=self.directories.len() {
+            match self.find_parent(&current) {
+                Some(parent) if parent == root => return true,
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
     // -----------------------------------------------------------------------
     // Cache integration
     // -----------------------------------------------------------------------

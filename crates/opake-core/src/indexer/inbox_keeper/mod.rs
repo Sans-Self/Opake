@@ -120,6 +120,13 @@ impl InboxKeeper {
 
     /// Replace the entire entry set. Called after a full-list fetch
     /// from the indexer.
+    ///
+    /// Blind wholesale replace — the keeper does no snapshot-vs-stream
+    /// reconciliation. A caller consuming a concurrent SSE stream owns the
+    /// sequencing: serialize this against `upsert`/`delete` (buffer events
+    /// that land during the fetch, replay after) or a delta arriving
+    /// mid-fetch is lost to the stale snapshot. See the `opake-wasm`
+    /// consumer for that policy.
     pub fn bootstrap(&mut self, entries: Vec<InboxEntry>) {
         self.entries = entries.into_iter().map(|e| (e.uri.clone(), e)).collect();
         self.loaded = true;

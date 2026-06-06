@@ -290,6 +290,33 @@ impl TreeKeeper {
         self.workspaces.get(keyring_uri).map(|h| h.tree())
     }
 
+    /// Keyring URIs of every currently-installed workspace tree. Lets a
+    /// caller (e.g. the reconnect resync) discover which trees to re-load
+    /// without reaching into the keeper's internals.
+    pub fn installed_workspace_keyring_uris(&self) -> Vec<String> {
+        self.workspaces.keys().cloned().collect()
+    }
+
+    /// Last-seen rotation for an installed workspace tree, or `None` if no
+    /// tree is installed for that keyring. A caller compares this against
+    /// an incoming keyring record's rotation to detect a bump it must
+    /// react to — the keeper can bump the counter in place but can't
+    /// re-derive the new group key (it holds no identity material), so a
+    /// rotation needs a driver-side tree reload.
+    pub fn workspace_rotation(&self, keyring_uri: &str) -> Option<u64> {
+        match self.workspaces.get(keyring_uri) {
+            Some(HeldTree::Workspace { rotation, .. }) => Some(*rotation),
+            _ => None,
+        }
+    }
+
+    /// Fire watchers for a workspace scope with its current tree. Used
+    /// after an out-of-band reinstall (e.g. a rotation-triggered reload)
+    /// so consumers re-render against the freshly-decrypted tree.
+    pub fn notify_workspace_watchers(&mut self, keyring_uri: &str) {
+        self.notify_scope(&TreeScope::Workspace(keyring_uri.to_string()));
+    }
+
     fn tree_for_scope(&self, scope: &TreeScope) -> Option<&DirectoryTree> {
         match scope {
             TreeScope::Cabinet => self.cabinet_tree(),
@@ -493,9 +520,12 @@ impl TreeKeeper {
 
     // -- Watcher notification --
 
-    /// Fire all watchers in the given scope. If the change was a deletion
-    /// AND the deleted URI matches a watcher's directory_uri, that watcher
-    /// gets a None notification and is auto-closed.
+    /// Fire all watchers in the given scope. On a deletion, any watcher
+    /// whose directory can no longer be reached from the tree root gets a
+    /// `None` notification and is auto-closed — that covers both the
+    /// directly-deleted directory and every descendant orphaned by it
+    /// (deleting a parent strands children whose parent record is now
+    /// gone). All other watchers receive the updated tree.
     fn notify_watchers_for_change(&mut self, scope: &TreeScope, change: &TreeChange) {
         // Destructure self to split borrows: we need `&self.cabinet` /
         // `&self.workspaces` alongside `&mut self.watchers`.
@@ -514,6 +544,8 @@ impl TreeKeeper {
             return;
         };
 
+        // The deleted URI's parent may still list it, so an exact match is
+        // checked explicitly; descendants are caught by reachability.
         let deleted_uri = match change {
             TreeChange::Removed { uri } => Some(uri.as_str()),
             _ => None,
@@ -525,7 +557,19 @@ impl TreeKeeper {
             if &watcher.scope != scope {
                 continue;
             }
-            if deleted_uri == Some(watcher.directory_uri.as_str()) {
+            // Exact-deleted always closes. Descendants are closed only
+            // when the tree has a root to measure reachability against —
+            // without one, every watcher would look unreachable, so we
+            // fall back to exact-match-only rather than close them all.
+            let gone = match deleted_uri {
+                Some(deleted) => {
+                    deleted == watcher.directory_uri.as_str()
+                        || (tree.root_uri().is_some()
+                            && !tree.is_reachable_from_root(&watcher.directory_uri))
+                }
+                None => false,
+            };
+            if gone {
                 (watcher.callback)(None);
                 auto_close.push(*handle);
             } else {
@@ -567,8 +611,10 @@ impl TreeKeeper {
     }
 
     /// Fire all watchers with the current state of their respective
-    /// trees. Used on Reconnect.
-    fn notify_all_watchers(&mut self) {
+    /// trees. Used on Reconnect, and after an out-of-band resync of every
+    /// installed tree (e.g. a chain fork) so consumers re-render against
+    /// the refreshed content.
+    pub fn notify_all_watchers(&mut self) {
         let Self {
             cabinet,
             workspaces,

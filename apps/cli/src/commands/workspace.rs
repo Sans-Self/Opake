@@ -100,12 +100,12 @@ impl Execute for WorkspaceCommand {
 
 async fn create(ctx: &CommandContext, args: CreateArgs) -> Result<Option<Session>> {
     let mut opake = ctx.opake().await?;
-    let (uri, group_key) = opake.create_workspace(&args.name, None).await?;
+    let created = opake.create_workspace(&args.name, None).await?;
 
-    let at_uri = atproto::parse_at_uri(&uri)?;
-    keyring_store::save_group_key(&ctx.storage, &ctx.did, &at_uri.rkey, 0, &group_key)?;
+    let at_uri = atproto::parse_at_uri(&created.keyring_uri)?;
+    keyring_store::save_group_key(&ctx.storage, &ctx.did, &at_uri.rkey, 0, &created.key)?;
 
-    println!("{} → {}", args.name, uri);
+    println!("{} → {}", args.name, created.keyring_uri);
     Ok(None)
 }
 

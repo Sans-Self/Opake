@@ -93,6 +93,24 @@ pub async fn authenticated_client<T: Transport, S: Storage>(
     ))
 }
 
+/// Outcome of [`Opake::create_workspace`]. Carries the fields the caller
+/// needs to build an optimistic view entry that matches the eventual SSE
+/// echo exactly — `created_at` and `rotation` are the values actually
+/// written into the genesis keyring record, not values the caller would
+/// otherwise have to guess (a second `now()` call or a hardcoded rotation
+/// would never dedup against the echo).
+pub struct CreatedWorkspace {
+    /// The genesis keyring URI (also the workspace's stable identity).
+    pub keyring_uri: String,
+    /// The unwrapped group key for the new workspace.
+    pub key: ContentKey,
+    /// The `createdAt` timestamp written into the keyring record.
+    pub created_at: String,
+    /// The rotation written into the genesis keyring record (always the
+    /// genesis rotation).
+    pub rotation: u64,
+}
+
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub fn new(
         client: XrpcClient<T>,
@@ -504,18 +522,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Workspace management (keyring operations) --
 
-    /// Create a new workspace. Returns `(keyring_uri, key)`.
+    /// Create a new workspace. Returns the created keyring URI + group key
+    /// plus the `created_at` / `rotation` actually written, so a caller can
+    /// build an optimistic view entry that dedups against the SSE echo.
     pub async fn create_workspace(
         &mut self,
         name: &str,
         description: Option<&str>,
-    ) -> Result<(String, ContentKey), Error> {
+    ) -> Result<CreatedWorkspace, Error> {
         let identity = &self.identity;
         let pubkey = identity.x25519_public_key_bytes()?;
         let mlkem_pubkey = identity.ml_kem_public_key_bytes()?;
         let now = self.now();
         let rkey = self.generate_tid();
-        let result = keyrings::create_keyring(
+        let (keyring_uri, key) = keyrings::create_keyring(
             &mut self.client,
             &CreateKeyringParams {
                 name,
@@ -530,7 +550,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         )
         .await?;
         self.auto_persist_session().await?;
-        Ok(result)
+        Ok(CreatedWorkspace {
+            keyring_uri,
+            key,
+            created_at: now,
+            // Genesis keyrings start at rotation 0 (see keyrings::create_keyring).
+            rotation: 0,
+        })
     }
 
     /// Sync all workspaces: load the chain head tree for each.

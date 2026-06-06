@@ -140,6 +140,12 @@ export function useDirectory(
         // Watcher fires with null when the watched directory is
         // deleted; the WASM side auto-closes the watcher after
         // that call, so no need to call .close() from here.
+        //
+        // Feed the fresh base to the overlay first: this is the SSE
+        // echo arriving, so any optimistic patch whose change the echo
+        // now reflects releases here — before we re-render — so the
+        // entry never flashes out between patch-release and echo.
+        if (snap) overlay.setBase(scope, snap);
         setCommit({
           fileManager: fm,
           directoryUri,
@@ -188,7 +194,7 @@ export function useDirectory(
       state.cancelled = true;
       state.watcher?.close();
     };
-  }, [fileManager, fmReady, directoryUri, retryGeneration]);
+  }, [fileManager, fmReady, directoryUri, retryGeneration, overlay, scope]);
 
   // Only honor a commit whose keys match the current render's props.
   const current =

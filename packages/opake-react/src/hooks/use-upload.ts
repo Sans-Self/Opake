@@ -78,5 +78,12 @@ export function useUpload(keyringUri: string | null) {
         },
       };
     },
+    // Release once the echo lists the real document URI in the target
+    // directory — that's when the placeholder can drop without the file
+    // blinking out. No directory means nothing was patched.
+    buildSettlePredicate: (input, result) => (base) => {
+      if (!input.directoryUri) return true;
+      return base.directories[input.directoryUri]?.entries.some((e) => e.uri === result.uri) ?? false;
+    },
   });
 }

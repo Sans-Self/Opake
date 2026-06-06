@@ -7,19 +7,27 @@ import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/r
 import type { ChainForkedEvent, DirectoryTreeSnapshot, FileManager } from "@opake/sdk";
 import { useChainForkBus, useFileManagerCache, useOptimisticOverlay } from "../provider";
 import type { FileManagerCache } from "../file-manager-cache";
-import { scopeKey } from "../optimistic-overlay";
+import { scopeKey, type PatchHandle } from "../optimistic-overlay";
 import { opakeKeys } from "../keys";
 import { useWorkspaces } from "./use-workspaces";
 
 // Federation: writes commit on the caller's PDS in a single applyWrites
-// before the SDK call resolves. The optimistic patch only bridges the
-// `onMutate → onSettled` window; we release it on settle and let the
-// SSE echo refresh the underlying snapshot. If a concurrent supersede
-// wins the race against the chain head, the indexer emits
-// `chain:forked` and we replay the mutation with exponential backoff.
+// before the SDK call resolves. But the writer sees its own change in
+// the tree only once the indexer echoes it back over SSE (~1s) — the
+// write resolving is *not* the moment the base snapshot updates. So the
+// optimistic patch is held past settle and released by its settle-
+// predicate when the echo lands (see optimistic-overlay.ts); releasing
+// on settle would flash the pre-echo state. If a concurrent supersede
+// wins the race against the chain head, the indexer emits `chain:forked`
+// and we replay the mutation with exponential backoff.
 const MAX_FORK_RETRIES = 4;
 const FORK_RETRY_BASE_MS = 200; // 200ms → 400ms → 800ms → 1600ms (≈3s total)
 const FORK_RETRY_MAX_JITTER_MS = 100;
+
+// Safety net: if the SSE echo for a mutation never arrives (dropped
+// event, indexer down), force-release the patch so a stale optimistic
+// entry can't linger on screen. Generous — a healthy echo lands in ~1s.
+const OVERLAY_FALLBACK_MS = 15_000;
 
 /**
  * Chain-fork retry lifecycle, exposed alongside the standard mutation
@@ -94,11 +102,27 @@ interface TreeMutationOptions<TInput, TResult> {
     snapshot: DirectoryTreeSnapshot,
     input: TInput,
   ) => DirectoryTreeSnapshot;
+  /**
+   * Build the settle-predicate for this mutation's optimistic patch.
+   * Receives the input and the resolved result (the result matters for
+   * uploads/directory-creates, where the real record URI is only known
+   * after the write). The returned predicate reports whether a base
+   * snapshot already reflects the mutation — when it does, the patch
+   * releases without a flicker.
+   *
+   * Omit it to fall back to release-on-settle (correct only for
+   * mutations with no optimistic patch, or where a brief flash is
+   * acceptable).
+   */
+  readonly buildSettlePredicate?: (
+    input: TInput,
+    result: TResult,
+  ) => (base: DirectoryTreeSnapshot) => boolean;
 }
 
 interface MutationContext {
   readonly previous?: DirectoryTreeSnapshot;
-  readonly releaseOverlay?: () => void;
+  readonly handle?: PatchHandle;
 }
 
 /**
@@ -286,9 +310,11 @@ export function useTreeMutation<TInput, TResult>(
       // UI actually renders from) read from the optimistic overlay.
       // Push the same transform there so the change appears within
       // the current render instead of waiting ~1s for the SSE echo.
-      const releaseOverlay = overlay.apply(scope, (snap) => apply(snap, input));
+      // The patch is held until its settle-predicate (armed in
+      // onSuccess) sees the echo reflected in the base snapshot.
+      const handle = overlay.apply(scope, (snap) => apply(snap, input));
 
-      return { previous, releaseOverlay };
+      return { previous, handle };
     },
 
     onError: (_err, _input, context) => {
@@ -298,13 +324,13 @@ export function useTreeMutation<TInput, TResult>(
       // Release the overlay immediately on error: there's no server-side
       // state to wait for, and leaving the patch on screen would show the
       // user a mutation that never happened.
-      context?.releaseOverlay?.();
+      context?.handle?.release();
       // Drop any prior replay slot — this failed mutation isn't a
       // candidate for fork-driven retry.
       replayRef.current = null;
     },
 
-    onSuccess: (_data, input) => {
+    onSuccess: (data, input, context) => {
       // Register replay state so a subsequent chain-fork event can
       // re-run the same mutation. `attempt` starts at 0; the event
       // handler increments it on each retry. Workspace-only — cabinets
@@ -315,6 +341,14 @@ export function useTreeMutation<TInput, TResult>(
           input,
           attempt: 0,
         };
+      }
+
+      // Arm the settle-predicate now that the result (and thus any
+      // freshly-minted record URI) is known. The overlay releases the
+      // patch when the SSE echo folds the change into the base snapshot
+      // — or immediately, if the echo already beat us here.
+      if (options.buildSettlePredicate && context.handle) {
+        context.handle.settleWhen(options.buildSettlePredicate(input, data));
       }
     },
 
@@ -327,13 +361,25 @@ export function useTreeMutation<TInput, TResult>(
       // and keepPreviousData suppresses loading flicker on the active one.
       void queryClient.invalidateQueries({ queryKey: ["opake", "metadata"] });
 
-      // Release the optimistic patch on settle. Federation cascades
-      // commit synchronously inside the mutation — the SDK's await
-      // resolution already implies the PDS has the write, so there's
-      // no need to bridge a 2s window the way pre-federation proposals
-      // did. The SSE echo arrives shortly after; useDirectory's
-      // watcher updates the snapshot transparently.
-      context?.releaseOverlay?.();
+      const handle = context?.handle;
+      if (!handle) return;
+
+      if (options.buildSettlePredicate) {
+        // Predicate-armed: the patch self-releases when the echo lands.
+        // Schedule a fallback only — a dropped echo must not pin the
+        // patch on screen forever.
+        setTimeout(() => {
+          if (handle.release()) {
+            console.warn(
+              "[opake-react] optimistic patch force-released after fallback timeout — SSE echo never arrived",
+            );
+          }
+        }, OVERLAY_FALLBACK_MS);
+      } else {
+        // No predicate (mutation opted out / has no optimistic patch):
+        // legacy release-on-settle.
+        handle.release();
+      }
     },
   });
 

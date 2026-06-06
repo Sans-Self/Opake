@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use futures_util::lock::Mutex;
 use opake_core::indexer::chain_fork_keeper::ChainForkKeeper;
-use opake_core::indexer::inbox_keeper::{self as ik, InboxKeeper};
+use opake_core::indexer::inbox_keeper::InboxKeeper;
 use opake_core::indexer::tree_keeper::TreeKeeper;
 use opake_core::indexer::workspace_keeper::WorkspaceKeeper;
 use serde::Serialize;
@@ -62,12 +62,26 @@ pub struct WasmOpakeHandle {
     /// dispatch out to subscribers (typically the React mutation-retry
     /// layer). JS subscribes via `watchChainForks`.
     pub(crate) chain_fork_keeper: Rc<Mutex<ChainForkKeeper>>,
-    /// `true` while an SSE consumer task is alive. Doubles as both the
-    /// idempotency gate on `startSseConsumer` and the cancellation
-    /// signal read by the consumer loop — `stopSseConsumer` clears it,
-    /// the loop checks it after each `next_event().await` and breaks
-    /// on `false`. Single-threaded WASM — `Cell<bool>` is enough.
-    pub(crate) sse_started: Rc<std::cell::Cell<bool>>,
+    /// `true` while an SSE consumer task is alive — the idempotency gate
+    /// on `startSseConsumer` (a second start while one runs is a no-op).
+    pub(crate) sse_running: Rc<std::cell::Cell<bool>>,
+    /// Monotonic consumer-generation token. Each spawned consumer task
+    /// captures the generation at spawn; it stays the live consumer only
+    /// while `sse_generation == its captured value`. `stopSseConsumer`
+    /// bumps the generation, so a task still blocked in
+    /// `next_event().await` learns it was superseded the moment it
+    /// resumes — even if a *new* consumer has since started and flipped
+    /// `sse_running` back to `true`. A plain bool can't tell "stop me"
+    /// apart from "a newer consumer is now running"; the generation can.
+    /// Single-threaded WASM — `Cell` is enough, no atomics.
+    pub(crate) sse_generation: Rc<std::cell::Cell<u64>>,
+    /// Buffers keyring events that land while a `listWorkspaces` snapshot
+    /// fetch is in flight, so the snapshot's wholesale replace can't drop
+    /// a concurrent delta. Client-sync policy — the keeper is a dumb
+    /// projection and leaves sequencing to us. See [`crate::bootstrap_gate::BootstrapGate`].
+    pub(crate) ws_gate: Rc<std::cell::RefCell<crate::bootstrap_gate::BootstrapGate>>,
+    /// Same, for grant events during a `listInbox` snapshot fetch.
+    pub(crate) inbox_gate: Rc<std::cell::RefCell<crate::bootstrap_gate::BootstrapGate>>,
 }
 
 #[wasm_bindgen(js_class = OpakeContext)]
@@ -88,7 +102,10 @@ impl WasmOpakeHandle {
             workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
             inbox_keeper: Rc::new(Mutex::new(InboxKeeper::new())),
             chain_fork_keeper: Rc::new(Mutex::new(ChainForkKeeper::new())),
-            sse_started: Rc::new(std::cell::Cell::new(false)),
+            sse_running: Rc::new(std::cell::Cell::new(false)),
+            sse_generation: Rc::new(std::cell::Cell::new(0)),
+            ws_gate: Rc::new(std::cell::RefCell::new(crate::bootstrap_gate::BootstrapGate::new())),
+            inbox_gate: Rc::new(std::cell::RefCell::new(crate::bootstrap_gate::BootstrapGate::new())),
         })
     }
 
@@ -157,30 +174,31 @@ impl WasmOpakeHandle {
         description: Option<String>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
-        let (keyring_uri, key) = opake
+        let created = opake
             .create_workspace(name, description.as_deref())
             .await
             .map_err(wasm_err)?;
+        drop(opake);
 
         // Optimistic insert — the sidebar shows the new workspace immediately
-        // rather than waiting 1–4s for the SSE echo to arrive. The echo
-        // produces an equal entry and the keeper's dedup short-circuits.
-        //
-        // At creation time, head_uri == workspace_id (genesis). Membership
-        // is single-self-as-manager; rotation 1 reflects the first
-        // emitted record.
+        // rather than waiting 1–4s for the SSE echo to arrive. Every field
+        // is built from what was actually written (created_at + rotation
+        // come back from create_workspace, not a fresh now() / hardcoded
+        // guess) so this entry is byte-equal to the entry the echo will
+        // produce via `try_build_entry` — the keeper's dedup short-circuits
+        // and there's no spurious re-render or clobber. At creation time
+        // head_uri == workspace_id (genesis), membership is self-as-manager.
         let optimistic = opake_core::indexer::workspace_keeper::WorkspaceEntry {
-            workspace_id: keyring_uri.clone(),
-            head_uri: keyring_uri.clone(),
-            rotation: 1,
+            workspace_id: created.keyring_uri.clone(),
+            head_uri: created.keyring_uri.clone(),
+            rotation: created.rotation,
             member_count: 1,
-            created_at: Some(opake.now()),
+            created_at: Some(created.created_at.clone()),
             name: Some(name.to_string()),
             description: description.clone(),
             icon: None,
             my_role: Some("manager".to_string()),
         };
-        drop(opake);
 
         {
             let mut keeper = self.workspace_keeper.lock().await;
@@ -188,8 +206,8 @@ impl WasmOpakeHandle {
         }
 
         to_js(&crate::bindings::CreateWorkspaceResultDto {
-            keyring_uri,
-            key: key.0.to_vec(),
+            keyring_uri: created.keyring_uri,
+            key: created.key.0.to_vec(),
         })
     }
 
@@ -202,35 +220,16 @@ impl WasmOpakeHandle {
     /// without further `listWorkspaces` round-trips.
     #[wasm_bindgen(js_name = listWorkspaces)]
     pub async fn list_workspaces(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
-        let did = opake.did().to_string();
-
-        let workspaces = opake
-            .discover_member_workspaces()
-            .await
-            .map_err(wasm_err)?;
-        drop(opake);
-
-        // Build entries via the shared `workspace_keeper::try_build_entry`
-        // helper so this path and the SSE event path produce identical
-        // WorkspaceEntry values — any shape divergence between them
-        // would cause spurious watcher re-fires after SSE echoes.
-        let bundle = private_keys.bundle();
-        let entries: Vec<opake_core::indexer::workspace_keeper::WorkspaceEntry> = workspaces
-            .iter()
-            .filter_map(|envelope| {
-                opake_core::indexer::workspace_keeper::try_build_entry(envelope, &did, &bundle)
-            })
-            .collect();
-
-        // Bootstrap the keeper before returning — subscribers see the
-        // loaded state before any caller that awaits this method's
-        // return value resumes.
-        {
-            let mut keeper = self.workspace_keeper.lock().await;
-            keeper.bootstrap(entries.clone());
-        }
+        // Gate-protected bootstrap: the gate buffers keyring events that
+        // arrive during the fetch so the snapshot's wholesale replace
+        // can't clobber them. Shared with the reconnect resync path.
+        let entries = crate::sse_wasm::bootstrap_workspace_keeper(
+            &self.inner,
+            &self.workspace_keeper,
+            &self.ws_gate,
+            &self.sse_generation,
+        )
+        .await?;
 
         // JS-side wire format — `ListWorkspacesResultDto` is the named
         // shape; the SDK consumes the generated TS type.
@@ -624,20 +623,15 @@ impl WasmOpakeHandle {
     /// round-trips.
     #[wasm_bindgen(js_name = listInbox)]
     pub async fn list_inbox(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let my_did = opake.did().to_string();
-        let grants = opake.list_inbox().await.map_err(wasm_err)?;
-        drop(opake);
-
-        let entries: Vec<opake_core::indexer::inbox_keeper::InboxEntry> = grants
-            .iter()
-            .filter_map(|envelope| ik::try_build_entry_from_envelope(envelope, &my_did))
-            .collect();
-
-        {
-            let mut keeper = self.inbox_keeper.lock().await;
-            keeper.bootstrap(entries);
-        }
+        // Gate-protected bootstrap (see `list_workspaces`). Returns the raw
+        // grant envelopes for the JS wire format.
+        let grants = crate::sse_wasm::bootstrap_inbox_keeper(
+            &self.inner,
+            &self.inbox_keeper,
+            &self.inbox_gate,
+            &self.sse_generation,
+        )
+        .await?;
 
         to_js(&grants)
     }

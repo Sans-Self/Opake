@@ -42,6 +42,12 @@ export function useCreateDirectory(keyringUri: string | null) {
         },
       };
     },
+    // Release once the echo lists the real directory URI in the parent —
+    // the placeholder drops only when its replacement is actually there.
+    buildSettlePredicate: (input, result) => (base) => {
+      if (!input.parentUri) return true;
+      return base.directories[input.parentUri]?.entries.some((e) => e.uri === result.uri) ?? false;
+    },
   });
 }
 
@@ -66,6 +72,9 @@ export function useRenameDirectory(keyringUri: string | null) {
         },
       };
     },
+    // Release once the echo's decrypted name matches the new name.
+    buildSettlePredicate: (input) => (base) =>
+      base.directories[input.directoryUri]?.name === input.newName,
   });
 }
 

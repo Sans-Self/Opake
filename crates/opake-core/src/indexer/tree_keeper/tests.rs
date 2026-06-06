@@ -10,6 +10,8 @@ use crate::indexer::types::IndexerEnvelope;
 const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
 const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
 const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
+const DIR_PARENT_URI: &str = "at://did:plc:test/app.opake.directory/parent";
+const DIR_CHILD_URI: &str = "at://did:plc:test/app.opake.directory/child";
 
 // -- Test helpers --
 
@@ -192,6 +194,47 @@ fn deletion_of_watched_directory_fires_gone_and_auto_closes() {
         .apply_event(&sse_dir_upsert(DIR_PHOTOS_URI, "Photos", vec![]))
         .unwrap();
     assert_eq!(sink.count(), start + 1);
+}
+
+#[test]
+fn deletion_of_ancestor_closes_descendant_watcher() {
+    // root(self) → parent → child. Watching the child, we delete the
+    // parent. The child's parent record is now gone, so the child is
+    // unreachable from the root — its watcher must receive Gone and
+    // auto-close rather than linger as a zombie subscribed to an orphan.
+    let mut keeper = TreeKeeper::new(TEST_DID);
+    let kp = test_keypair();
+    let tree = DirectoryTree::from_records(vec![
+        (
+            ROOT_URI.to_string(),
+            dummy_directory_with_entries("/", vec![DIR_PARENT_URI.into()]),
+        ),
+        (
+            DIR_PARENT_URI.to_string(),
+            dummy_directory_with_entries("Parent", vec![DIR_CHILD_URI.into()]),
+        ),
+        (
+            DIR_CHILD_URI.to_string(),
+            dummy_directory_with_entries("Child", vec![]),
+        ),
+    ]);
+    // The "self"-rkey record is detected as the root, so reachability is
+    // measurable.
+    assert_eq!(tree.root_uri(), Some(ROOT_URI));
+    keeper.install_cabinet_tree(tree, kp.x25519_private, kp.ml_kem_private);
+
+    let child_sink = RecordingSink::new();
+    keeper.watch_cabinet(DIR_CHILD_URI.into(), child_sink.callback());
+    let root_sink = RecordingSink::new();
+    keeper.watch_cabinet(ROOT_URI.into(), root_sink.callback());
+
+    keeper.apply_event(&sse_dir_delete(DIR_PARENT_URI)).unwrap();
+
+    // Child watcher: orphaned by the ancestor delete → Gone + removed.
+    assert!(child_sink.was_closed());
+    // Root watcher: still reachable → not closed, still registered.
+    assert!(!root_sink.was_closed());
+    assert_eq!(keeper.watcher_count(), 1);
 }
 
 #[test]

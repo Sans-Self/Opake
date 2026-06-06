@@ -32,5 +32,10 @@ export function useDelete(keyringUri: string | null) {
         },
       };
     },
+    // Release once the echo no longer lists the deleted document in its
+    // parent — until then the patch hides it, so it can't reappear for
+    // the ~1s the echo takes to arrive.
+    buildSettlePredicate: (input) => (base) =>
+      !(base.directories[input.parentDirectoryUri]?.entries.some((e) => e.uri === input.documentUri) ?? false),
   });
 }

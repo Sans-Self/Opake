@@ -12,6 +12,13 @@ use wasm_bindgen::prelude::*;
 // wrappers via `From<&CoreType>` at the marshaling boundary.
 pub mod bindings;
 
+// Pure snapshot/stream sequencing logic with no wasm deps. Compiled on
+// wasm32 (where the SSE consumer uses it) and under `test` (so its unit
+// tests run in the native `cargo test --workspace` suite, since the
+// wasm-binding modules below are excluded there).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod bootstrap_gate;
+
 #[cfg(target_arch = "wasm32")]
 mod auth_wasm;
 #[cfg(target_arch = "wasm32")]

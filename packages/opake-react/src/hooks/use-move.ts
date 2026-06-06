@@ -41,5 +41,13 @@ export function useMove(keyringUri: string | null) {
         },
       };
     },
+    // Release once the echo shows the entry settled at its destination:
+    // present in the target directory and gone from the source. Holding
+    // for both halves avoids the entry snapping back mid-flight.
+    buildSettlePredicate: (input) => (base) => {
+      const inTarget = base.directories[input.targetDirUri]?.entries.some((e) => e.uri === input.entryUri) ?? false;
+      const goneFromSource = !(base.directories[input.sourceDirUri]?.entries.some((e) => e.uri === input.entryUri) ?? false);
+      return inTarget && goneFromSource;
+    },
   });
 }

@@ -14,6 +14,7 @@
 // events are dispatched to both the TreeKeeper (directory tree state)
 // and the WorkspaceKeeper (workspace-list state).
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -38,6 +39,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::bootstrap_gate::BootstrapGate;
 use crate::file_manager_wasm::WasmFileManagerHandle;
 use crate::opake_wasm::WasmOpakeHandle;
 use crate::wasm_util::{build_snapshot, wasm_err, WasmOpake};
@@ -378,7 +380,7 @@ impl WasmOpakeHandle {
         // (priority 1) before resolving — so passing a URL here wins over
         // PDS accountConfig and is consistent with every subsequent
         // indexer call made through this Opake instance. Resolve BEFORE
-        // flipping `sse_started` so a URL-less call on a fresh Opake
+        // touching `sse_running` so a URL-less call on a fresh Opake
         // without a default still surfaces the error cleanly.
         let resolved_url = {
             let mut guard = self.inner.lock().await;
@@ -388,18 +390,27 @@ impl WasmOpakeHandle {
             guard.resolve_indexer_url()
         };
 
-        if self.sse_started.get() {
+        if self.sse_running.get() {
             log::debug!("[sse] consumer already running, ignoring startSseConsumer");
             return Ok(());
         }
-        self.sse_started.set(true);
+        self.sse_running.set(true);
+        // Capture the generation this task runs under. If a stop (or a
+        // stop+restart) bumps it, every liveness check below sees the
+        // mismatch and the task exits — even when a newer consumer has
+        // already flipped `sse_running` back to true. A plain bool can't
+        // distinguish "stop me" from "a newer consumer is now live."
+        let my_generation = self.sse_generation.get();
 
         let opake_rc = Rc::clone(&self.inner);
         let tree_keeper_rc = Rc::clone(&self.tree_keeper);
         let workspace_keeper_rc = Rc::clone(&self.workspace_keeper);
         let inbox_keeper_rc = Rc::clone(&self.inbox_keeper);
         let chain_fork_keeper_rc = Rc::clone(&self.chain_fork_keeper);
-        let started_flag = Rc::clone(&self.sse_started);
+        let running_flag = Rc::clone(&self.sse_running);
+        let generation = Rc::clone(&self.sse_generation);
+        let ws_gate = Rc::clone(&self.ws_gate);
+        let inbox_gate = Rc::clone(&self.inbox_gate);
 
         let token_fetcher = make_token_fetcher(Rc::clone(&opake_rc), resolved_url.clone());
         let sleep_fn: SleepFn = Box::new(|d| Box::pin(wasm_sleep(d)));
@@ -414,6 +425,10 @@ impl WasmOpakeHandle {
         );
 
         wasm_bindgen_futures::spawn_local(async move {
+            // True once this task is no longer the live consumer: a stop
+            // (or a stop+restart) has bumped the generation past ours.
+            let superseded = || generation.get() != my_generation;
+
             loop {
                 let event = match consumer.next_event().await {
                     Ok(e) => e,
@@ -423,27 +438,94 @@ impl WasmOpakeHandle {
                     }
                 };
 
-                // `stop_sse_consumer` signals termination by clearing
-                // the started flag. Check after every await so we
-                // don't apply one last event after the owning
-                // component unmounted.
-                if !started_flag.get() {
-                    log::debug!("[sse] consumer stopped, exiting");
+                // Check after every await so we don't apply one last
+                // event after our generation was stopped — or after a
+                // newer consumer has taken over.
+                if superseded() {
+                    log::debug!("[sse] consumer superseded, exiting");
                     break;
                 }
 
-                {
+                // A reconnect means we may have missed events during the
+                // gap — Phoenix PubSub doesn't buffer for offline
+                // subscribers, so the stream resumes at "now" with no
+                // replay. Re-fetch the full state: workspace list + inbox
+                // (gate-protected, so live events arriving during the
+                // re-fetch aren't clobbered) and re-load installed trees.
+                // The `tree_keeper.apply_event(Reconnect)` below then
+                // notifies tree watchers with the refreshed content.
+                if matches!(event, SseEvent::Reconnect) {
+                    if bootstrap_workspace_keeper(
+                        &opake_rc,
+                        &workspace_keeper_rc,
+                        &ws_gate,
+                        &generation,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        log::warn!("[sse] reconnect: workspace list resync failed");
+                    }
+                    if bootstrap_inbox_keeper(&opake_rc, &inbox_keeper_rc, &inbox_gate, &generation)
+                        .await
+                        .is_err()
+                    {
+                        log::warn!("[sse] reconnect: inbox resync failed");
+                    }
+                    resync_installed_trees(&opake_rc, &tree_keeper_rc, &generation, my_generation)
+                        .await;
+                }
+
+                // Detect a keyring rotation against an installed workspace
+                // tree before applying. The tree_keeper bumps the rotation
+                // counter and invalidates names in place, but it holds no
+                // identity material so it can't unwrap the *new* group key
+                // — names would stay "?" until a reload. We resync the
+                // tree below to pick up the fresh key.
+                let rotation_resync_uri: Option<String> = {
                     let mut keeper = tree_keeper_rc.lock().await;
-                    // Re-check the flag after acquiring the lock: if the
-                    // consumer was stopped while we were waiting for it,
-                    // bail instead of re-inhabiting the tree the wipe
-                    // task is about to drain (or just drained).
-                    if !started_flag.get() {
-                        log::debug!("[sse] consumer stopped while awaiting tree_keeper lock");
+                    // Re-check after acquiring the lock: if we were
+                    // superseded while waiting for it, bail instead of
+                    // re-inhabiting the tree the wipe task is about to
+                    // drain (or just drained).
+                    if superseded() {
+                        log::debug!("[sse] consumer superseded while awaiting tree_keeper lock");
                         break;
                     }
+                    let resync_uri = match &event {
+                        SseEvent::KeyringUpsert(envelope) => {
+                            let uri = envelope
+                                .record
+                                .workspace_id
+                                .as_deref()
+                                .unwrap_or(envelope.uri.as_str());
+                            match keeper.workspace_rotation(uri) {
+                                Some(held) if envelope.record.rotation > held => {
+                                    Some(uri.to_string())
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
                     if let Err(e) = keeper.apply_event(&event) {
                         log::warn!("[sse] tree_keeper apply failed: {e}");
+                    }
+                    resync_uri
+                };
+
+                // A rotation landed on an installed tree: reload it so the
+                // new group key is unwrapped and names decrypt cleanly,
+                // then notify watchers to re-render with the fresh content.
+                if let Some(uri) = rotation_resync_uri {
+                    if resync_workspace_tree(&opake_rc, &tree_keeper_rc, &uri)
+                        .await
+                        .is_ok()
+                    {
+                        let mut keeper = tree_keeper_rc.lock().await;
+                        keeper.notify_workspace_watchers(&uri);
+                    } else {
+                        log::warn!("[sse] rotation tree resync failed for {uri}");
                     }
                 }
 
@@ -452,54 +534,94 @@ impl WasmOpakeHandle {
                 // trip. Idempotent upserts (same rotation + same data)
                 // don't re-fire watchers — see `WorkspaceKeeper::upsert`.
                 //
-                // Same post-lock flag recheck as the tree apply above:
-                // the helper bails internally if a stop landed while it
-                // was waiting for the workspace_keeper / inbox_keeper
-                // mutex.
+                // Same post-lock liveness recheck as the tree apply
+                // above: the helper bails internally if our generation
+                // was superseded while it waited for the keeper mutex.
                 apply_keyring_to_workspace_keeper(
                     &opake_rc,
                     &workspace_keeper_rc,
-                    &started_flag,
+                    &ws_gate,
+                    &generation,
+                    my_generation,
                     &event,
                 )
                 .await;
 
                 // Grant events: apply to the inbox keeper so the
                 // "Shared with me" view updates live.
-                apply_grant_to_inbox_keeper(&opake_rc, &inbox_keeper_rc, &started_flag, &event)
-                    .await;
+                apply_grant_to_inbox_keeper(
+                    &opake_rc,
+                    &inbox_keeper_rc,
+                    &inbox_gate,
+                    &generation,
+                    my_generation,
+                    &event,
+                )
+                .await;
 
                 // Chain-fork dispatch: fan out to any registered
                 // mutation-retry subscribers. The keeper holds no state,
                 // so each event is purely transient.
                 if let SseEvent::ChainForked(ref fork) = event {
-                    let mut keeper = chain_fork_keeper_rc.lock().await;
-                    if !started_flag.get() {
-                        break;
+                    {
+                        let mut keeper = chain_fork_keeper_rc.lock().await;
+                        if superseded() {
+                            break;
+                        }
+                        keeper.dispatch(fork);
                     }
-                    keeper.dispatch(fork);
+
+                    // The fork means our local chain lost a race: the tree
+                    // may hold a now-orphaned record the indexer dropped.
+                    // The mutation-retry layer re-runs the *write*, but
+                    // nothing resets the tree state. Resync installed trees
+                    // (forks are rare, so a full resync is cheap insurance
+                    // against fragile head-vs-genesis URI mapping) and
+                    // notify watchers to re-render against the winner.
+                    resync_installed_trees(&opake_rc, &tree_keeper_rc, &generation, my_generation)
+                        .await;
+                    {
+                        let mut keeper = tree_keeper_rc.lock().await;
+                        if superseded() {
+                            break;
+                        }
+                        keeper.notify_all_watchers();
+                    }
                 }
             }
-            // Task exited — clear the flag in case we broke on a
-            // transport error rather than an explicit stop, so a
-            // future start spawns a fresh consumer.
-            started_flag.set(false);
+            // Task exiting. Only clear `sse_running` if we're still the
+            // current generation — i.e. we broke on a transport error or
+            // a stop of our own generation. If a newer consumer has
+            // superseded us it owns `sse_running`; clearing it here would
+            // wrongly re-open the idempotency gate while that consumer
+            // is live. There is no await between the loop break and this
+            // check, so the generation can't change underneath us.
+            if !superseded() {
+                running_flag.set(false);
+            }
             drop(opake_rc);
         });
 
         Ok(())
     }
 
-    /// Stop the SSE consumer. Only flips the `sse_started` flag and
-    /// clears the proposal-sync debounce state — the consumer loop
-    /// terminates on its next `next_event().await`. Tree + workspace
-    /// caches are intentionally preserved: stopping the stream doesn't
-    /// mean the user is signing out, only that no new events will be
-    /// applied. Call `wipeState()` separately when crypto material
-    /// should be zeroed (logout, account switch).
+    /// Stop the SSE consumer. Clears the running gate and bumps the
+    /// generation; the consumer loop sees the generation mismatch and
+    /// terminates on its next liveness check (after `next_event().await`
+    /// or after acquiring a keeper lock). Bumping the generation — not
+    /// just clearing a bool — is what lets a subsequent `startSseConsumer`
+    /// spawn a fresh consumer without the old one re-inhabiting the
+    /// stream: the old task's captured generation no longer matches.
+    ///
+    /// Tree + workspace caches are intentionally preserved: stopping the
+    /// stream doesn't mean the user is signing out, only that no new
+    /// events will be applied. Call `wipeState()` separately when crypto
+    /// material should be zeroed (logout, account switch).
     #[wasm_bindgen(js_name = stopSseConsumer)]
     pub fn stop_sse_consumer(&self) {
-        self.sse_started.set(false);
+        self.sse_running.set(false);
+        self.sse_generation
+            .set(self.sse_generation.get().wrapping_add(1));
     }
 
     /// Drain every in-memory keeper: directory trees, the workspace
@@ -535,7 +657,233 @@ impl WasmOpakeHandle {
                 "[sse] tree_keeper + workspace_keeper + inbox_keeper + chain_fork_keeper drained on wipeState"
             );
         });
+        // Reset the bootstrap gates so a buffer captured before the wipe
+        // can't replay stale entries into the next session.
+        self.ws_gate.borrow_mut().finish();
+        self.inbox_gate.borrow_mut().finish();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap drivers (shared by the `list*` JS methods and reconnect resync)
+// ---------------------------------------------------------------------------
+//
+// Free functions over the shared `Rc`s so both the `WasmOpakeHandle`
+// driver methods (which have `&self`) and the SSE consumer task (which
+// only captures the `Rc`s) can run the same gate-protected bootstrap.
+
+/// Gate-protected workspace-list bootstrap: open the gate, fetch +
+/// decrypt the member-workspace snapshot, install it via
+/// `keeper.bootstrap`, then replay any keyring events that arrived during
+/// the fetch. Returns the entries so the `listWorkspaces` driver can build
+/// its JS DTO; the reconnect path ignores them. On fetch failure the gate
+/// is still closed (buffered events replay onto existing state) before the
+/// error propagates.
+pub(crate) async fn bootstrap_workspace_keeper(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+) -> Result<Vec<wk::WorkspaceEntry>, JsError> {
+    gate.borrow_mut().begin();
+
+    let entries = match fetch_workspace_entries(opake_rc).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            replay_workspace_gate(opake_rc, keeper_rc, gate, generation).await;
+            return Err(e);
+        }
+    };
+
+    {
+        let mut keeper = keeper_rc.lock().await;
+        keeper.bootstrap(entries.clone());
+    }
+    replay_workspace_gate(opake_rc, keeper_rc, gate, generation).await;
+    Ok(entries)
+}
+
+/// Fetch + decrypt the member-workspace list. Entries are built via the
+/// shared `workspace_keeper::try_build_entry` so this path and the SSE
+/// event path produce identical `WorkspaceEntry` values — any shape
+/// divergence would cause spurious watcher re-fires after SSE echoes.
+async fn fetch_workspace_entries(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+) -> Result<Vec<wk::WorkspaceEntry>, JsError> {
+    let mut opake = opake_rc.lock().await;
+    let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
+    let did = opake.did().to_string();
+    let workspaces = opake.discover_member_workspaces().await.map_err(wasm_err)?;
+    drop(opake);
+
+    let bundle = private_keys.bundle();
+    Ok(workspaces
+        .iter()
+        .filter_map(|envelope| wk::try_build_entry(envelope, &did, &bundle))
+        .collect())
+}
+
+/// Close the workspace gate and replay buffered keyring events onto the
+/// freshly-installed entry set. Idempotent against the snapshot, so events
+/// it already reflects no-op.
+async fn replay_workspace_gate(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+) {
+    let buffered = gate.borrow_mut().finish();
+    let current_gen = generation.get();
+    for event in &buffered {
+        apply_keyring_to_workspace_keeper(opake_rc, keeper_rc, gate, generation, current_gen, event)
+            .await;
+    }
+}
+
+/// Gate-protected inbox bootstrap (inbox analogue of
+/// [`bootstrap_workspace_keeper`]). Returns the raw grant envelopes for
+/// the `listInbox` JS DTO.
+pub(crate) async fn bootstrap_inbox_keeper(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    keeper_rc: &Rc<Mutex<InboxKeeper>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+) -> Result<Vec<opake_core::indexer::types::IndexerEnvelope<opake_core::records::Grant>>, JsError> {
+    gate.borrow_mut().begin();
+
+    let mut opake = opake_rc.lock().await;
+    let my_did = opake.did().to_string();
+    let grants = match opake.list_inbox().await {
+        Ok(grants) => grants,
+        Err(e) => {
+            drop(opake);
+            replay_inbox_gate(opake_rc, keeper_rc, gate, generation).await;
+            return Err(wasm_err(e));
+        }
+    };
+    drop(opake);
+
+    let entries: Vec<ik::InboxEntry> = grants
+        .iter()
+        .filter_map(|envelope| ik::try_build_entry_from_envelope(envelope, &my_did))
+        .collect();
+    {
+        let mut keeper = keeper_rc.lock().await;
+        keeper.bootstrap(entries);
+    }
+    replay_inbox_gate(opake_rc, keeper_rc, gate, generation).await;
+    Ok(grants)
+}
+
+/// Close the inbox gate and replay buffered grant events
+/// (see [`replay_workspace_gate`]).
+async fn replay_inbox_gate(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    keeper_rc: &Rc<Mutex<InboxKeeper>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+) {
+    let buffered = gate.borrow_mut().finish();
+    let current_gen = generation.get();
+    for event in &buffered {
+        apply_grant_to_inbox_keeper(opake_rc, keeper_rc, gate, generation, current_gen, event).await;
+    }
+}
+
+/// Re-load every installed directory tree after a reconnect. Trees are
+/// driven by directory events, which the indexer doesn't replay across a
+/// disconnect, so the only recovery is a fresh `load_tree`. Reinstalling
+/// replaces the held tree in place; the caller fires the watchers
+/// afterward (via the `Reconnect` arm of `TreeKeeper::apply_event`) so
+/// consumers re-render with the refreshed content.
+async fn resync_installed_trees(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    tree_keeper_rc: &Rc<Mutex<TreeKeeper>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+    my_generation: u64,
+) {
+    // Snapshot which contexts are installed, without holding the lock
+    // across the per-tree load awaits below.
+    let (cabinet_installed, workspace_uris) = {
+        let keeper = tree_keeper_rc.lock().await;
+        (
+            keeper.cabinet_tree().is_some(),
+            keeper.installed_workspace_keyring_uris(),
+        )
+    };
+
+    if cabinet_installed && resync_cabinet_tree(opake_rc, tree_keeper_rc).await.is_err() {
+        log::warn!("[sse] reconnect: cabinet tree resync failed");
+    }
+
+    for uri in workspace_uris {
+        // A stop/restart during the resync supersedes us — bail before
+        // touching shared state for the next workspace.
+        if generation.get() != my_generation {
+            return;
+        }
+        if resync_workspace_tree(opake_rc, tree_keeper_rc, &uri)
+            .await
+            .is_err()
+        {
+            log::warn!("[sse] reconnect: workspace tree resync failed for {uri}");
+        }
+    }
+}
+
+/// Reload + reinstall the cabinet tree. Mirrors the slow path of
+/// `ensure_tree_installed`, but forces a replace rather than skipping when
+/// already present.
+async fn resync_cabinet_tree(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    tree_keeper_rc: &Rc<Mutex<TreeKeeper>>,
+) -> Result<(), JsError> {
+    let (tree, x25519_private_key, ml_kem_private_key) = {
+        let mut guard = opake_rc.lock().await;
+        let context = crate::wasm_util::cabinet_context(&guard)?;
+        let tree = {
+            let mut mgr = guard.file_manager(&context);
+            mgr.load_tree().await.map_err(wasm_err)?
+        };
+        let identity = guard.identity();
+        let x25519 = *identity.x25519_private_key_bytes().map_err(wasm_err)?;
+        let ml_kem = *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
+        (tree, x25519, ml_kem)
+    };
+    let mut keeper = tree_keeper_rc.lock().await;
+    keeper.install_cabinet_tree(tree, x25519_private_key, ml_kem_private_key);
+    Ok(())
+}
+
+/// Reload + reinstall a single workspace tree by keyring URI.
+async fn resync_workspace_tree(
+    opake_rc: &Rc<Mutex<WasmOpake>>,
+    tree_keeper_rc: &Rc<Mutex<TreeKeeper>>,
+    keyring_uri: &str,
+) -> Result<(), JsError> {
+    let (tree, key, rotation, historical) = {
+        let mut guard = opake_rc.lock().await;
+        let ws = guard
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        let context = opake_core::manager::FileContext::Workspace(ws);
+        let tree = {
+            let mut mgr = guard.file_manager(&context);
+            mgr.load_tree().await.map_err(wasm_err)?
+        };
+        let (key, rotation, historical) = match &context {
+            opake_core::manager::FileContext::Workspace(ws) => {
+                (ws.key.clone(), ws.rotation, ws.historical_keys.clone())
+            }
+            // Unreachable — we just built a Workspace context above.
+            opake_core::manager::FileContext::Cabinet(_) => unreachable!(),
+        };
+        (tree, key, rotation, historical)
+    };
+    let mut keeper = tree_keeper_rc.lock().await;
+    keeper.install_workspace_tree(keyring_uri.to_string(), tree, key, rotation, historical);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -602,11 +950,19 @@ async fn wasm_sleep(duration: Duration) {
 async fn apply_keyring_to_workspace_keeper(
     opake_rc: &Rc<Mutex<WasmOpake>>,
     workspace_keeper_rc: &Rc<Mutex<WorkspaceKeeper>>,
-    started_flag: &Rc<std::cell::Cell<bool>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+    my_generation: u64,
     event: &SseEvent,
 ) {
     match event {
         SseEvent::KeyringUpsert(envelope) => {
+            // A `listWorkspaces` snapshot is in flight — buffer this and
+            // bail, else the snapshot replace would clobber it. Replayed
+            // by `replay_workspace_gate` after bootstrap.
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
             let maybe_entry = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
@@ -620,14 +976,17 @@ async fn apply_keyring_to_workspace_keeper(
                 wk::try_build_entry(envelope, &did, &private_keys.bundle())
             };
             let mut keeper = workspace_keeper_rc.lock().await;
-            if !started_flag.get() {
+            if generation.get() != my_generation {
                 return;
             }
             keeper.apply_keyring_record(&envelope.uri, maybe_entry);
         }
         SseEvent::KeyringDelete(payload) => {
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
             let mut keeper = workspace_keeper_rc.lock().await;
-            if !started_flag.get() {
+            if generation.get() != my_generation {
                 return;
             }
             keeper.delete(&payload.uri);
@@ -643,24 +1002,33 @@ async fn apply_keyring_to_workspace_keeper(
 async fn apply_grant_to_inbox_keeper(
     opake_rc: &Rc<Mutex<WasmOpake>>,
     inbox_keeper_rc: &Rc<Mutex<InboxKeeper>>,
-    started_flag: &Rc<std::cell::Cell<bool>>,
+    gate: &Rc<RefCell<BootstrapGate>>,
+    generation: &Rc<std::cell::Cell<u64>>,
+    my_generation: u64,
     event: &SseEvent,
 ) {
     match event {
         SseEvent::GrantUpsert(envelope) => {
+            // A `listInbox` snapshot is in flight — buffer and bail.
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
             let my_did = opake_rc.lock().await.did().to_string();
             let Some(entry) = ik::try_build_entry_from_envelope(envelope, &my_did) else {
                 return;
             };
             let mut keeper = inbox_keeper_rc.lock().await;
-            if !started_flag.get() {
+            if generation.get() != my_generation {
                 return;
             }
             keeper.upsert(entry);
         }
         SseEvent::GrantDelete(payload) => {
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
             let mut keeper = inbox_keeper_rc.lock().await;
-            if !started_flag.get() {
+            if generation.get() != my_generation {
                 return;
             }
             keeper.delete(&payload.uri);

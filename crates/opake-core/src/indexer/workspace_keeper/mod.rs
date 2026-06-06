@@ -153,6 +153,14 @@ impl WorkspaceKeeper {
 
     /// Replace the entire entry set. Called after a full-list fetch
     /// from the indexer.
+    ///
+    /// This is a blind wholesale replace: the keeper is a dumb in-memory
+    /// projection and does no snapshot-vs-stream reconciliation. A caller
+    /// that consumes a concurrent SSE stream owns the sequencing — it must
+    /// serialize this against `upsert`/`delete` (e.g. buffer events that
+    /// land during the fetch and replay them after) or a delta arriving
+    /// mid-fetch will be clobbered by the stale snapshot. See the
+    /// `opake-wasm` consumer for that policy.
     pub fn bootstrap(&mut self, entries: Vec<WorkspaceEntry>) {
         self.entries = entries
             .into_iter()
