@@ -375,6 +375,81 @@ mod workspace_upload_cascade {
         }
     }
 
+    /// Create-directory genesis: a brand-new workspace with no indexed root.
+    /// The first folder bootstraps the root — the cascade writes the folder
+    /// record, then a genesis root (isWorkspaceRoot, no supersedes) listing
+    /// that folder as its sole entry. Regression for the "Tree not loaded
+    /// yet" / `ensure_root is cabinet-only` failure on creating the first
+    /// folder in a fresh workspace.
+    #[tokio::test]
+    async fn create_directory_genesis_root_when_no_indexed_root() {
+        let mock = MockTransport::new();
+
+        // 1. chain-head: keyring genesis exists, no root_directory yet.
+        mock.enqueue(chain_head_response(Some((KEYRING_URI, "bafygenesis")), None));
+        // 2. createRecord for the new folder directory.
+        let folder_uri = format!("at://{ALICE_DID}/app.opake.directory/folder1");
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": folder_uri,
+                "cid": "bafyfolder1",
+            }))
+            .unwrap(),
+        });
+        // 3. createRecord for the genesis root.
+        let root_uri = format!("at://{ALICE_DID}/app.opake.directory/genesisroot");
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": root_uri,
+                "cid": "bafyrootgenesis",
+            }))
+            .unwrap(),
+        });
+
+        let mut opake = opake_for_alice(mock.clone());
+        let ctx = FileContext::Workspace(workspace_for_alice());
+        let mut mgr = opake.file_manager(&ctx);
+
+        // `None` parent = create at root; the workspace has no root yet.
+        let result = mgr.create_directory("Docs", None).await.unwrap();
+        assert!(result.outcome.is_applied());
+        assert_eq!(result.uri, folder_uri, "returns the new folder's URI");
+
+        // A genesis root must have been written: a directory createRecord
+        // flagged isWorkspaceRoot, with no supersedes, listing the folder.
+        let reqs = mock.requests();
+        let genesis_root = reqs
+            .iter()
+            .filter_map(|r| {
+                if !r.url.contains("createRecord") {
+                    return None;
+                }
+                let RequestBody::Json(v) = r.body.as_ref()? else {
+                    return None;
+                };
+                if v["collection"] != "app.opake.directory" {
+                    return None;
+                }
+                let dir: Directory = serde_json::from_value(v["record"].clone()).ok()?;
+                if dir.is_workspace_root {
+                    Some(dir)
+                } else {
+                    None
+                }
+            })
+            .next()
+            .expect("a genesis root directory must be written");
+
+        assert!(genesis_root.supersedes.is_none(), "genesis has no supersedes");
+        assert_eq!(genesis_root.workspace_id.as_deref(), Some(KEYRING_URI));
+        assert_eq!(genesis_root.entries.len(), 1);
+        assert_eq!(genesis_root.entries[0].target, folder_uri);
+    }
+
     /// Supersede path: indexer reports an existing root. Cascade fetches
     /// the prior root record (across DIDs), copies its key wrapping +
     /// encrypted metadata forward, appends the new doc as a listing entry,

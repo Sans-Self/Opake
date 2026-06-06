@@ -59,10 +59,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Create a new directory.
     ///
     /// If `parent_uri` is `None`, the directory is created under the root.
-    /// Cabinet: in-place applyWrites pairing the new directory record with
-    /// the parent's entry addition. Workspace: federation cascade — write the
-    /// new directory record, then cascade-supersede the parent and every
-    /// ancestor up to root on the caller's PDS.
+    /// Cabinet: ensures the root exists, then an in-place applyWrites pairing
+    /// the new directory record with the parent's entry addition. Workspace:
+    /// federation cascade — write the new directory record, then either
+    /// cascade-supersede the parent up to root, or, if the workspace has no
+    /// indexed root yet, write a genesis root with this directory as its
+    /// first entry (mirrors the first-upload bootstrap).
     #[::opake_derive::signoff]
     pub async fn create_directory(
         &mut self,
@@ -70,13 +72,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         parent_uri: Option<&str>,
     ) -> Result<UploadResult, Error> {
         let now = self.opake.now();
-        let parent = match parent_uri {
-            Some(uri) => uri.to_string(),
-            None => self.ensure_root().await?,
-        };
 
-        match &self.context {
+        match self.context {
             FileContext::Cabinet(cabinet) => {
+                // Cabinet root is rkey-"self" and created in place; resolve
+                // it here (workspaces can't use this path — see ensure_root).
+                let parent = match parent_uri {
+                    Some(uri) => uri.to_string(),
+                    None => self.ensure_root().await?,
+                };
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     name,
                     &cabinet.did,
@@ -103,7 +107,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 })
             }
             FileContext::Workspace(ws) => {
-                self.workspace_create_directory_cascade(ws, name, &parent, &now)
+                // `parent_uri == None` means "at root" — the cascade resolves
+                // the indexed root, or genesis-creates one if none exists yet.
+                self.workspace_create_directory_cascade(ws, name, parent_uri, &now)
                     .await
             }
         }
@@ -126,7 +132,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         &mut self,
         ws: &Workspace,
         name: &str,
-        parent_uri: &str,
+        parent_uri: Option<&str>,
         now: &str,
     ) -> Result<UploadResult, Error> {
         let workspace_uri = ws.uri.clone();
@@ -141,12 +147,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             };
             provider.workspace_chain_heads(&workspace_uri).await?
         };
-
-        let root_head = chain_heads.root_directory.as_ref().ok_or_else(|| {
-            Error::NotFound(
-                "workspace root not indexed yet — create the workspace first".into(),
-            )
-        })?;
 
         // 1. Write the new directory record.
         let (kw, meta) = directories::encrypt_keyring_directory_envelope(
@@ -172,62 +172,81 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             },
         };
 
-        // 2. Cascade — root single-level or deep depending on whether
-        //    the parent is the indexed root.
-        if root_head.uri == parent_uri {
-            // Parent is the root — single-level supersede with the new
-            // child appended.
-            let prior = directories::fetch_chain_node::<Directory>(
-                self.opake.client.transport(),
-                &root_head.uri,
-            )
-            .await?;
-            let mut entries = prior.record.entries;
-            entries.push(new_entry);
-            let new_root = Directory {
-                opake_version: SCHEMA_VERSION,
-                key_wrapping: prior.record.key_wrapping,
-                encrypted_metadata: prior.record.encrypted_metadata,
-                entries,
-                supersedes: Some(prior.uri),
-                workspace_id: Some(workspace_uri.clone()),
-                // Root-targeted supersede stays in the root chain.
-                is_workspace_root: true,
-                created_at: now.to_owned(),
-                modified_at: Some(now.to_owned()),
-            };
-            self.opake
-                .client
-                .create_record(DIRECTORY_COLLECTION, None, &new_root)
+        // 2. Cascade, keyed on (indexed root, parent):
+        //    * no indexed root        → genesis root with this dir as its
+        //                                first entry (first-folder bootstrap,
+        //                                mirrors the first-upload path)
+        //    * parent is/defaults root → single-level root supersede
+        //    * parent is a subdir      → deep cascade root → parent
+        match chain_heads.root_directory.as_ref() {
+            None => {
+                let leaf = self.build_root_genesis_leaf(ws, vec![new_entry]).await?;
+                directories::execute_cascade(
+                    &mut self.opake.client,
+                    &workspace_uri,
+                    Vec::new(),
+                    leaf,
+                    now,
+                )
                 .await?;
-        } else {
-            // Deep cascade — fetch the path root → parent, build cascade
-            // levels with the new child appended to the parent's listing,
-            // execute.
-            let chain = self.resolve_workspace_path(&root_head.uri, parent_uri).await?;
-            let parent_record = directories::fetch_chain_node::<Directory>(
-                self.opake.client.transport(),
-                chain.last().expect("non-empty chain"),
-            )
-            .await?;
-            let mut new_parent_entries = parent_record.record.entries;
-            new_parent_entries.push(new_entry);
+            }
+            Some(root_head) => {
+                // `None` parent means "at root".
+                let parent = parent_uri.unwrap_or(root_head.uri.as_str());
+                if root_head.uri == parent {
+                    let prior = directories::fetch_chain_node::<Directory>(
+                        self.opake.client.transport(),
+                        &root_head.uri,
+                    )
+                    .await?;
+                    let mut entries = prior.record.entries;
+                    entries.push(new_entry);
+                    let new_root = Directory {
+                        opake_version: SCHEMA_VERSION,
+                        key_wrapping: prior.record.key_wrapping,
+                        encrypted_metadata: prior.record.encrypted_metadata,
+                        entries,
+                        supersedes: Some(prior.uri),
+                        workspace_id: Some(workspace_uri.clone()),
+                        // Root-targeted supersede stays in the root chain.
+                        is_workspace_root: true,
+                        created_at: now.to_owned(),
+                        modified_at: Some(now.to_owned()),
+                    };
+                    self.opake
+                        .client
+                        .create_record(DIRECTORY_COLLECTION, None, &new_root)
+                        .await?;
+                } else {
+                    // Deep cascade — fetch the path root → parent, build
+                    // cascade levels with the new child appended to the
+                    // parent's listing, execute.
+                    let chain = self.resolve_workspace_path(&root_head.uri, parent).await?;
+                    let parent_record = directories::fetch_chain_node::<Directory>(
+                        self.opake.client.transport(),
+                        chain.last().expect("non-empty chain"),
+                    )
+                    .await?;
+                    let mut new_parent_entries = parent_record.record.entries;
+                    new_parent_entries.push(new_entry);
 
-            let (ancestors, leaf) = build_deep_cascade_levels(
-                self.opake.client.transport(),
-                &chain,
-                new_parent_entries,
-            )
-            .await?;
+                    let (ancestors, leaf) = build_deep_cascade_levels(
+                        self.opake.client.transport(),
+                        &chain,
+                        new_parent_entries,
+                    )
+                    .await?;
 
-            directories::execute_cascade(
-                &mut self.opake.client,
-                &workspace_uri,
-                ancestors,
-                leaf,
-                now,
-            )
-            .await?;
+                    directories::execute_cascade(
+                        &mut self.opake.client,
+                        &workspace_uri,
+                        ancestors,
+                        leaf,
+                        now,
+                    )
+                    .await?;
+                }
+            }
         }
 
         self.invalidate_directory_cache().await;
@@ -250,25 +269,26 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     ) -> Result<UploadResult, Error> {
         let tree = self.load_tree().await?;
 
-        let parent_uri = match parent_path {
-            Some(path) => {
-                let resolved = tree.resolve_directory(path)?;
-                resolved.uri
-            }
-            None => match tree.root_uri() {
-                Some(uri) => uri.to_owned(),
-                None => self.ensure_root().await?,
-            },
+        // `None` parent_path resolves to the root; if the workspace has no
+        // root yet, leave it `None` and let `create_directory` genesis-create
+        // one (cabinet's `create_directory` still resolves its own root).
+        let parent_uri: Option<String> = match parent_path {
+            Some(path) => Some(tree.resolve_directory(path)?.uri),
+            None => tree.root_uri().map(str::to_owned),
         };
 
-        if tree.has_child_directory(&parent_uri, name) {
-            return Err(Error::AlreadyExists(format!(
-                "directory {name:?} already exists in {}",
-                parent_path.unwrap_or("/"),
-            )));
+        // Duplicate-name check only applies when a parent exists — a
+        // not-yet-created root has no children to clash with.
+        if let Some(parent) = parent_uri.as_deref() {
+            if tree.has_child_directory(parent, name) {
+                return Err(Error::AlreadyExists(format!(
+                    "directory {name:?} already exists in {}",
+                    parent_path.unwrap_or("/"),
+                )));
+            }
         }
 
-        self.create_directory(name, Some(&parent_uri)).await
+        self.create_directory(name, parent_uri.as_deref()).await
     }
 
     /// Delete a directory and remove it from its parent.

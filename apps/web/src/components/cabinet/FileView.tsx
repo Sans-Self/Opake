@@ -710,8 +710,13 @@ export function FileView({
   // surfacing a toast after the click.
   const validateNewFolderName = useCallback(
     (name: string): { readonly ok: true } | { readonly ok: false; readonly message: string } => {
-      const parent = currentDirectoryUri ?? snapshot?.rootUri;
-      if (!parent) return { ok: false, message: "Tree not loaded yet" };
+      // Gate on the tree being loaded, not on a parent existing: a fresh
+      // workspace has no root directory yet, and creating the first folder
+      // bootstraps one (the SDK genesis-cascades it). Conflict-check against
+      // the current dir / root, falling back to "" (no parent) for an empty
+      // workspace — which has no children to clash with.
+      if (!snapshot) return { ok: false, message: "Tree not loaded yet" };
+      const parent = currentDirectoryUri ?? snapshot.rootUri ?? "";
       const check = checkAvailability(name, parent);
       return check.ok ? { ok: true } : { ok: false, message: check.message };
     },
@@ -720,16 +725,19 @@ export function FileView({
 
   const handleNewFolderConfirm = useCallback(
     (name: string) => {
-      const parent = currentDirectoryUri ?? snapshot?.rootUri;
-      if (!parent) {
+      if (!snapshot) {
         toastError("Tree not loaded yet");
         return;
       }
+      const parent = currentDirectoryUri ?? snapshot.rootUri ?? "";
       const check = checkAvailability(name, parent);
       if (!check.ok) {
         toastError(check.message);
         return;
       }
+      // `parentUri: undefined` for a workspace with no root → the SDK
+      // creates the root as a genesis cascade with this folder as its
+      // first entry.
       createDirMut.mutate(
         { name: check.normalized, parentUri: currentDirectoryUri ?? undefined },
         {

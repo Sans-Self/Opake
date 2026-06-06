@@ -283,7 +283,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// `isWorkspaceRoot: true`; the indexer's `chain_heads` table
     /// compare-and-set picks one winner via `WorkspaceRootQueries.create`,
     /// the others become orphan chain heads and self-heal on retry.
-    async fn build_root_genesis_leaf(
+    pub(crate) async fn build_root_genesis_leaf(
         &mut self,
         ws: &Workspace,
         entries: Vec<ListingEntry>,
