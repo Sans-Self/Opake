@@ -129,9 +129,16 @@ pub struct MutationResultDto {
 pub fn build_snapshot(
     tree: &opake_core::directories::DirectoryTree,
 ) -> crate::DirectoryTreeSnapshot {
+    // Canonical (chain-head) directories only. The indexer snapshot carries
+    // whole supersede chains, so `all_directory_uris` would leak superseded
+    // predecessors into the snapshot — ghost directories in the tree view and
+    // an ambiguous parent index (a child predating its parent's latest
+    // supersede is listed by every prior version of that parent).
+    let canonical = tree.canonical_directory_uris();
+
     let mut parent_index: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for uri in tree.all_directory_uris() {
+    for &uri in &canonical {
         if let Some(entries) = tree.entries_for(uri) {
             for entry_uri in entries {
                 parent_index.insert(entry_uri.clone(), uri.to_owned());
@@ -140,7 +147,7 @@ pub fn build_snapshot(
     }
 
     let mut directories = std::collections::HashMap::new();
-    for uri in tree.all_directory_uris() {
+    for &uri in &canonical {
         let name = tree.directory_name(uri).unwrap_or("?").to_owned();
         let entries: Vec<crate::TypedEntry> = tree
             .entries_for(uri)

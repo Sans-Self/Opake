@@ -18,7 +18,9 @@ pub(crate) use download::fetch_content_key_with_group_key;
 pub(crate) use download::{download, download_with_group_key};
 pub use download_grant::download_from_grant;
 pub(crate) use download_grant::resolve_grant_metadata;
-pub use download_keyring::{download_keyring_document, fetch_document_keyring_ref};
+pub use download_keyring::{
+    download_keyring_document, fetch_document_keyring_ref, fetch_keyring_document_metadata,
+};
 pub use update::update_content;
 pub(crate) use upload::{prepare_upload, prepare_upload_keyring};
 pub use upload::{KeyringUploadParams, UploadParams};

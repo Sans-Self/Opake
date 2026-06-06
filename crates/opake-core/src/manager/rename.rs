@@ -1,7 +1,7 @@
 use crate::atproto;
 use crate::client::Transport;
 use crate::crypto::{self, CryptoRng, DirectoryMetadata, RngCore};
-use crate::directories::DIRECTORY_COLLECTION;
+use crate::directories::{self, DIRECTORY_COLLECTION};
 use crate::error::Error;
 use crate::records::{self, Directory, KeyWrapping, SCHEMA_VERSION};
 use crate::storage::Storage;
@@ -15,11 +15,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Cabinet: in-place `putRecord` — the directory lives on the caller's
     /// PDS, no chain follows.
     ///
-    /// Workspace: single-level supersede on caller's PDS. The directory's
-    /// chain head advances; parent listings still reference the old URI
-    /// (they aren't cascaded up — the indexer's chain-follower resolves
-    /// reads to the current head). Works at any depth because no parent
-    /// entries change.
+    /// Workspace, self-authored: `putRecord` in place. The directory lives on
+    /// the caller's own PDS, so the at-uri is preserved — parent listings keep
+    /// pointing at it, no cascade needed (matches the cabinet path).
+    ///
+    /// Workspace, another member's directory: the caller can't `putRecord` a
+    /// repo they don't own, so they write a superseding record on their own
+    /// PDS (same entries, new name). For a nested directory the at-uri changes,
+    /// so the parent listing must be substituted to point at the new record and
+    /// cascaded to root — the tree projection resolves nested entries by exact
+    /// URI, not by chasing supersede chains. The workspace **root** is the lone
+    /// exception: it has no parent entry, and the tree builder forward-walks the
+    /// root chain to its head, so a single-level supersede suffices.
     #[::opake_derive::signoff]
     pub async fn rename_directory(
         &mut self,
@@ -27,13 +34,23 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         new_name: &str,
     ) -> Result<MutationOutcome, Error> {
         let at_uri = atproto::parse_at_uri(directory_uri)?;
-        let entry = self
-            .opake
-            .client
-            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-            .await?;
 
-        let directory: records::Directory = serde_json::from_value(entry.value)?;
+        // Read the current record. Cabinet directories are direct-encrypted on
+        // the caller's own PDS (authenticated read). Workspace directories may
+        // live on another member's PDS, so resolve the host and read from its
+        // public endpoint — the same cross-PDS fetch the cascade uses.
+        let directory: records::Directory = if self.context.is_cabinet() {
+            let entry = self
+                .opake
+                .client
+                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+                .await?;
+            serde_json::from_value(entry.value)?
+        } else {
+            directories::fetch_chain_node::<Directory>(self.opake.client.transport(), directory_uri)
+                .await?
+                .record
+        };
         records::check_version(directory.opake_version)?;
 
         let content_key = match &directory.key_wrapping {
@@ -81,45 +98,60 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let now = self.opake.now();
 
-        match &self.context {
-            FileContext::Cabinet(_) => {
-                let mut updated = directory;
-                updated.encrypted_metadata = new_encrypted_metadata;
-                updated.modified_at = Some(now);
+        if self.context.is_cabinet() || at_uri.authority == self.opake.did {
+            // Self-authored (cabinet, or a workspace record on the caller's own
+            // PDS): update in place. Same at-uri, new CID — parents unaffected.
+            let mut updated = directory;
+            updated.encrypted_metadata = new_encrypted_metadata;
+            updated.modified_at = Some(now);
 
-                self.opake
-                    .client
-                    .put_record(DIRECTORY_COLLECTION, &at_uri.rkey, &updated)
-                    .await?;
-            }
-            FileContext::Workspace(ws) => {
-                // Cross-PDS-safe supersede: write a new directory record
-                // on the caller's PDS with `supersedes` pointing at the
-                // observed URI. Carry the workspace_id so the indexer
-                // routes the supersede onto the right chain.
-                let new_record = Directory {
-                    opake_version: SCHEMA_VERSION,
-                    key_wrapping: directory.key_wrapping,
-                    encrypted_metadata: new_encrypted_metadata,
-                    entries: directory.entries,
-                    supersedes: Some(directory_uri.to_owned()),
-                    workspace_id: Some(ws.uri.clone()),
-                    // Inherit from the prior record so the "never flip"
-                    // invariant holds. Renaming the workspace-root keeps
-                    // it in the root chain; renaming any subdirectory
-                    // stays false.
-                    is_workspace_root: directory.is_workspace_root,
-                    created_at: now.clone(),
-                    modified_at: Some(now),
-                };
-                self.opake
-                    .client
-                    .create_record(DIRECTORY_COLLECTION, None, &new_record)
-                    .await?;
-            }
+            self.opake
+                .client
+                .put_record(DIRECTORY_COLLECTION, &at_uri.rkey, &updated)
+                .await?;
+
+            self.invalidate_directory_cache().await;
+            return Ok(MutationOutcome::Applied);
         }
 
-        self.invalidate_directory_cache().await;
+        // Another member's directory: supersede on the caller's PDS, carrying
+        // the workspace_id so the indexer routes onto the right chain. Entries
+        // are preserved (rename touches only metadata), so the supersede itself
+        // is trivially additive for an editor.
+        let workspace_id = match &self.context {
+            FileContext::Workspace(ws) => ws.uri.clone(),
+            FileContext::Cabinet(_) => unreachable!("handled above"),
+        };
+        let is_root = directory.is_workspace_root;
+        let new_record = Directory {
+            opake_version: SCHEMA_VERSION,
+            key_wrapping: directory.key_wrapping,
+            encrypted_metadata: new_encrypted_metadata,
+            entries: directory.entries,
+            supersedes: Some(directory_uri.to_owned()),
+            workspace_id: Some(workspace_id),
+            // Inherit from the prior record so the "never flip" invariant holds.
+            is_workspace_root: is_root,
+            created_at: now.clone(),
+            modified_at: Some(now.clone()),
+        };
+        let dir_ref = self
+            .opake
+            .client
+            .create_record(DIRECTORY_COLLECTION, None, &new_record)
+            .await?;
+
+        if !is_root {
+            // Nested directory at-uri changed; repoint the parent listing at
+            // the new record and cascade to root. The root needs no such
+            // repoint — it has no parent entry and the builder forward-walks
+            // its chain.
+            self.substitute_entry_and_cascade(directory_uri, &dir_ref.uri, &dir_ref.cid, &now)
+                .await?;
+        } else {
+            self.invalidate_directory_cache().await;
+        }
+
         Ok(MutationOutcome::Applied)
     }
 }

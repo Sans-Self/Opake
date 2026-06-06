@@ -169,6 +169,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 description: req.description,
                 tags: req.tags,
                 created_at: now,
+                supersedes: None,
             },
             &mut self.opake.rng,
             &tid,
@@ -257,7 +258,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Constructs an [`IndexerChainHeadProvider`] inline. The borrowed
     /// indexer URL + signing key live on the stack here so the provider
     /// can hold references for the duration of the lookup.
-    async fn fetch_workspace_chain_heads(
+    pub(crate) async fn fetch_workspace_chain_heads(
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceChainHeads, Error> {

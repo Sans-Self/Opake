@@ -158,7 +158,7 @@ impl WasmFileManagerHandle {
         let metadata = if let Some(ref dir_uri) = metadata_for_dir {
             if dir_uri == "*" {
                 let mut all = std::collections::HashMap::new();
-                for uri in tree.all_directory_uris() {
+                for uri in tree.canonical_directory_uris() {
                     match mgr.resolve_document_metadata_in(&tree, uri).await {
                         Ok(m) => all.extend(m),
                         Err(e) => log::warn!("metadata resolution failed for {uri}: {e}"),
@@ -202,7 +202,7 @@ impl WasmFileManagerHandle {
         let metadata = if let Some(ref dir_uri) = metadata_for_dir {
             if dir_uri == "*" {
                 let mut all = std::collections::HashMap::new();
-                for uri in tree.all_directory_uris() {
+                for uri in tree.canonical_directory_uris() {
                     match mgr.resolve_document_metadata_in(&tree, uri).await {
                         Ok(m) => all.extend(m),
                         Err(e) => log::warn!("metadata resolution failed for {uri}: {e}"),

@@ -14,6 +14,7 @@ mod editor;
 mod move_entry;
 mod rename;
 mod sharing;
+mod substitute;
 mod tree;
 mod types;
 mod upload;

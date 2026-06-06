@@ -520,9 +520,36 @@ impl DirectoryTree {
         entry_kind_from_uri(uri) == Some(EntryKind::Document)
     }
 
-    /// Iterate over all directory URIs in the tree.
+    /// Iterate over **every** directory record's URI, including superseded
+    /// predecessors. The indexer snapshot returns whole supersede chains, so
+    /// this yields stale records too — correct only for whole-chain
+    /// operations. For anything that treats the result as the *live* tree
+    /// (snapshot building, parent/child indexing), use
+    /// [`Self::canonical_directory_uris`] instead.
     pub fn all_directory_uris(&self) -> impl Iterator<Item = &str> {
         self.directories.keys().map(String::as_str)
+    }
+
+    /// Directory URIs in the current canonical tree — chain heads only.
+    /// Superseded predecessors are excluded. This is the set the live tree
+    /// view should be built from.
+    pub fn canonical_directory_uris(&self) -> Vec<&str> {
+        let superseded = self.superseded_uris();
+        self.directories
+            .keys()
+            .filter(|uri| !superseded.contains(uri.as_str()))
+            .map(String::as_str)
+            .collect()
+    }
+
+    /// URIs that some other directory record supersedes — i.e. the stale
+    /// predecessors. Computed from the `supersedes` back-edges present in the
+    /// record set.
+    fn superseded_uris(&self) -> std::collections::HashSet<&str> {
+        self.directories
+            .values()
+            .filter_map(|info| info.supersedes_uri.as_deref())
+            .collect()
     }
 
     /// Count descendant documents and directories under a directory URI.
@@ -844,9 +871,23 @@ impl DirectoryTree {
         })
     }
 
-    /// Scan all directories to find which one contains the given URI as an entry.
+    /// Find the canonical directory that currently lists `child_uri`.
+    ///
+    /// Only chain-head directories are considered. The indexer snapshot
+    /// returns the entire directory chain — every superseded predecessor as
+    /// well as the current head — and a child that predates its parent's
+    /// latest supersede is listed by *every* prior version of that parent.
+    /// Scanning all records would therefore return an arbitrary (possibly
+    /// superseded) parent, and walking up from it lands on a superseded root
+    /// that no longer matches the indexer's chain head. Skipping any record
+    /// that something else supersedes leaves exactly the canonical parent.
     pub fn find_parent(&self, child_uri: &str) -> Option<String> {
+        let superseded = self.superseded_uris();
+
         for (dir_uri, info) in &self.directories {
+            if superseded.contains(dir_uri.as_str()) {
+                continue; // Superseded predecessor — not part of the live tree.
+            }
             if info.entries.iter().any(|e| e == child_uri) {
                 return Some(dir_uri.clone());
             }

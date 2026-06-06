@@ -145,7 +145,7 @@ pub async fn prepare_upload_keyring(
         rng,
     )?;
 
-    let document = Document::new(
+    let mut document = Document::new(
         blob_ref,
         Encryption::Keyring(KeyringEncryption {
             keyring_ref: KeyringRef {
@@ -164,6 +164,8 @@ pub async fn prepare_upload_keyring(
         params.created_at.into(),
     )
     .with_workspace_id(params.workspace_id);
+
+    document.supersedes = params.supersedes.map(Into::into);
 
     Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
@@ -184,6 +186,12 @@ pub struct KeyringUploadParams<'a> {
     pub description: Option<&'a str>,
     pub tags: &'a [String],
     pub created_at: &'a str,
+    /// AT-URI of an earlier document this upload supersedes, if any. Set by
+    /// the cross-author editor edit path: the new document advances the one
+    /// it replaces, and the directory substitution that points the parent
+    /// listing at this record relies on the indexer reading this field to
+    /// authorize the editor's otherwise non-additive entry swap.
+    pub supersedes: Option<&'a str>,
 }
 
 /// Non-atomic upload for tests — creates the record directly via createRecord.
@@ -495,5 +503,77 @@ mod tests {
         .unwrap();
 
         assert_eq!(decrypted, plaintext);
+    }
+
+    /// The editor's cross-author edit writes a new document carrying
+    /// `supersedes: <original>` so the indexer authorizes the directory
+    /// substitution that repoints the listing at it.
+    #[tokio::test]
+    async fn keyring_upload_carries_supersedes_onto_record() {
+        let mock = MockTransport::new();
+        mock.enqueue(upload_blob_response());
+        mock.enqueue(create_record_response());
+
+        let mut client = mock_client(mock.clone());
+        let group_key = crypto::generate_content_key(&mut OsRng);
+        let prior = "at://did:plc:alice/app.opake.document/f1";
+
+        let (record_value, _tid) = prepare_upload_keyring(
+            &mut client,
+            &KeyringUploadParams {
+                plaintext: b"edited content",
+                filename: "note.txt",
+                mime_type: "text/plain",
+                keyring_uri: "at://did:plc:alice/app.opake.keyring/ws1",
+                workspace_id: "at://did:plc:alice/app.opake.keyring/ws1",
+                group_key: &group_key,
+                rotation: 1,
+                description: None,
+                tags: &[],
+                created_at: "2026-06-06T00:00:00Z",
+                supersedes: Some(prior),
+            },
+            &mut OsRng,
+            "test-tid",
+        )
+        .await
+        .unwrap();
+
+        let doc: Document = serde_json::from_value(record_value).unwrap();
+        assert_eq!(doc.supersedes.as_deref(), Some(prior));
+    }
+
+    /// A plain upload (no edit) leaves `supersedes` unset.
+    #[tokio::test]
+    async fn keyring_upload_without_supersedes_leaves_field_empty() {
+        let mock = MockTransport::new();
+        mock.enqueue(upload_blob_response());
+
+        let mut client = mock_client(mock.clone());
+        let group_key = crypto::generate_content_key(&mut OsRng);
+
+        let (record_value, _tid) = prepare_upload_keyring(
+            &mut client,
+            &KeyringUploadParams {
+                plaintext: b"fresh content",
+                filename: "note.txt",
+                mime_type: "text/plain",
+                keyring_uri: "at://did:plc:alice/app.opake.keyring/ws1",
+                workspace_id: "at://did:plc:alice/app.opake.keyring/ws1",
+                group_key: &group_key,
+                rotation: 1,
+                description: None,
+                tags: &[],
+                created_at: "2026-06-06T00:00:00Z",
+                supersedes: None,
+            },
+            &mut OsRng,
+            "test-tid",
+        )
+        .await
+        .unwrap();
+
+        let doc: Document = serde_json::from_value(record_value).unwrap();
+        assert!(doc.supersedes.is_none());
     }
 }

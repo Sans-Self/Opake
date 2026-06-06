@@ -5,6 +5,7 @@
 
 use zeroize::Zeroizing;
 
+use crate::atproto;
 use crate::client::Transport;
 use crate::crypto::{
     ContentKey, CryptoRng, DocumentMetadata, MlKemPrivateKey, PrivateKeyBundle, RngCore,
@@ -14,6 +15,7 @@ use crate::documents;
 use crate::error::Error;
 use crate::metadata;
 use crate::storage::Storage;
+use crate::workspace::GroupKeys;
 
 use super::types::FileContext;
 use super::FileManager;
@@ -112,10 +114,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         .await
     }
 
-    /// Replace a document's encrypted blob content.
+    /// Replace a document's blob content.
     ///
-    /// Re-encrypts with the same content key (no key rotation), uploads the
-    /// new ciphertext, updates metadata size, and writes the record back.
+    /// Two paths, keyed on who authored the document:
+    ///
+    ///   * **Self-authored** (the document lives on the caller's own repo):
+    ///     re-encrypts with the same content key (no rotation), uploads the
+    ///     new ciphertext, and `putRecord`s the same record in place — same
+    ///     at-uri, new CID.
+    ///   * **Another member's document** (workspace editing): the caller
+    ///     can't `putRecord` a repo they don't own, so they write a *new*
+    ///     document on their own PDS that supersedes the original, then
+    ///     substitute it into the parent directory listing and cascade to
+    ///     root. The original at-uri is retired; the new one takes its place.
+    ///     See [`Self::edit_foreign_document`].
     #[::opake_derive::signoff]
     pub async fn update_content(
         &mut self,
@@ -123,18 +135,106 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         new_plaintext: &[u8],
     ) -> Result<String, Error> {
         let now = self.opake.now();
-        let keys = self.decryption_keys()?;
-        documents::update_content(
+        let at_uri = atproto::parse_at_uri(document_uri)?;
+
+        if at_uri.authority == self.opake.did {
+            let keys = self.decryption_keys()?;
+            return documents::update_content(
+                &mut self.opake.client,
+                document_uri,
+                &keys.did,
+                &keys.private_keys(),
+                keys.group_keys(),
+                new_plaintext,
+                &now,
+                &mut self.opake.rng,
+            )
+            .await;
+        }
+
+        self.edit_foreign_document(document_uri, new_plaintext, &now)
+            .await
+    }
+
+    /// Edit a document authored by another workspace member.
+    ///
+    /// Writes a superseding document on the caller's PDS (same metadata as the
+    /// original — name, MIME, tags, description — but new content under a fresh
+    /// per-document content key, wrapped to the current group key), then points
+    /// the parent directory listing at it via a curatorial substitute cascade.
+    ///
+    /// The new document carries `supersedes: <original>` so the indexer
+    /// authorizes the otherwise non-additive listing swap for an editor.
+    /// Returns the `modified_at` timestamp stamped on the cascade.
+    async fn edit_foreign_document(
+        &mut self,
+        document_uri: &str,
+        new_plaintext: &[u8],
+        now: &str,
+    ) -> Result<String, Error> {
+        let (workspace_uri, group_key, rotation, historical) = match &self.context {
+            FileContext::Workspace(ws) => (
+                ws.uri.clone(),
+                ws.key.clone(),
+                ws.rotation,
+                ws.historical_keys.clone(),
+            ),
+            FileContext::Cabinet(_) => {
+                return Err(Error::InvalidRecord(
+                    "cannot edit a document authored by another account outside a workspace".into(),
+                ))
+            }
+        };
+
+        // Carry the original's metadata onto the superseding record. The
+        // original lives on its author's PDS, so this reads cross-PDS.
+        let metadata = {
+            let group_keys = GroupKeys {
+                current_rotation: rotation,
+                current: &group_key,
+                historical: &historical,
+            };
+            documents::fetch_keyring_document_metadata(
+                self.opake.client.transport(),
+                group_keys,
+                document_uri,
+            )
+            .await?
+        };
+
+        let tid = self.opake.generate_tid();
+        let (doc_record, tid) = documents::prepare_upload_keyring(
             &mut self.opake.client,
-            document_uri,
-            &keys.did,
-            &keys.private_keys(),
-            keys.group_keys(),
-            new_plaintext,
-            &now,
+            &documents::KeyringUploadParams {
+                plaintext: new_plaintext,
+                filename: &metadata.name,
+                mime_type: metadata
+                    .mime_type
+                    .as_deref()
+                    .unwrap_or("application/octet-stream"),
+                keyring_uri: &workspace_uri,
+                workspace_id: &workspace_uri,
+                group_key: &group_key,
+                rotation,
+                description: metadata.description.as_deref(),
+                tags: &metadata.tags,
+                created_at: now,
+                supersedes: Some(document_uri),
+            },
             &mut self.opake.rng,
+            &tid,
         )
-        .await
+        .await?;
+        let doc_ref = self
+            .opake
+            .client
+            .create_record(documents::DOCUMENT_COLLECTION, Some(&tid), &doc_record)
+            .await?;
+
+        self.substitute_entry_and_cascade(document_uri, &doc_ref.uri, &doc_ref.cid, now)
+            .await?;
+
+        Ok(now.to_string())
     }
 
     /// Fetch a document's content key without downloading the blob.

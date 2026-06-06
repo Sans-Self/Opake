@@ -2,13 +2,99 @@ use log::trace;
 
 use crate::atproto;
 use crate::client::{get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport};
-use crate::crypto;
+use crate::crypto::{self, ContentKey, DocumentMetadata};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption};
 use crate::workspace::GroupKeys;
 
 use super::download::{decrypt_with_nonce, resolve_document_name};
 use super::DOCUMENT_COLLECTION;
+
+/// Fetch a keyring-encrypted document from its host PDS and unwrap its content
+/// key using already-resolved group keys.
+///
+/// The cross-PDS read primitive shared by the blob download and metadata-only
+/// paths: resolves the document host's PDS from the authority DID, fetches the
+/// record over the public XRPC endpoint (the document may live on any member's
+/// PDS, not the caller's), and symmetrically unwraps the per-document content
+/// key from the group key for the rotation the document was encrypted under.
+///
+/// Does **not** fetch the keyring or re-check membership — the group key is the
+/// caller's already-settled proof of access (see module rationale below).
+async fn fetch_keyring_document(
+    transport: &impl Transport,
+    group_keys: GroupKeys<'_>,
+    document_uri: &str,
+) -> Result<(Document, ContentKey, String), Error> {
+    let doc_at = atproto::parse_at_uri(document_uri)?;
+    if doc_at.collection != DOCUMENT_COLLECTION {
+        return Err(Error::InvalidRecord(format!(
+            "expected a document URI ({}), got collection {}",
+            DOCUMENT_COLLECTION, doc_at.collection,
+        )));
+    }
+
+    let doc_authority_did = &doc_at.authority;
+    trace!("resolving PDS for document host {}", doc_authority_did);
+    let doc_did_doc = resolve_did_document(transport, doc_authority_did).await?;
+    let doc_pds = pds_from_did_document(&doc_did_doc)?;
+
+    trace!("fetching document from {}", doc_pds);
+    let doc_entry = get_record_public(
+        transport,
+        &doc_pds,
+        doc_authority_did,
+        DOCUMENT_COLLECTION,
+        &doc_at.rkey,
+    )
+    .await?;
+
+    let doc: Document = serde_json::from_value(doc_entry.value)?;
+    records::check_version(doc.opake_version)?;
+
+    let kr_enc = match &doc.encryption {
+        Encryption::Keyring(kr) => kr,
+        Encryption::Direct(_) => {
+            return Err(Error::InvalidRecord(
+                "document uses direct encryption, not keyring".into(),
+            ));
+        }
+    };
+
+    let doc_rotation = kr_enc.keyring_ref.rotation;
+    let group_key = group_keys.for_rotation(doc_rotation).ok_or_else(|| {
+        Error::Auth(format!(
+            "no group key for rotation {doc_rotation} — not a member of this workspace at that rotation"
+        ))
+    })?;
+
+    let wrapped_ck_bytes = kr_enc
+        .keyring_ref
+        .wrapped_content_key
+        .decode()
+        .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
+    let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, group_key)?;
+
+    Ok((doc, content_key, doc_pds))
+}
+
+/// Read and decrypt a keyring-encrypted document's metadata without fetching
+/// the blob.
+///
+/// The cross-PDS counterpart to [`crate::metadata::fetch_document_metadata`],
+/// which reads from the caller's authenticated PDS and so cannot see a
+/// document hosted on another member's repo. Used by the editor's cross-author
+/// edit path to carry the original document's name, MIME type, tags, and
+/// description onto the superseding record.
+pub async fn fetch_keyring_document_metadata(
+    transport: &impl Transport,
+    group_keys: GroupKeys<'_>,
+    document_uri: &str,
+) -> Result<DocumentMetadata, Error> {
+    let (doc, content_key, _pds) =
+        fetch_keyring_document(transport, group_keys, document_uri).await?;
+    Ok(crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?)
+}
 
 /// Download and decrypt a keyring-encrypted document using already-resolved
 /// group keys.
@@ -77,66 +163,18 @@ pub async fn download_keyring_document(
     document_uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
     let doc_at = atproto::parse_at_uri(document_uri)?;
-    if doc_at.collection != DOCUMENT_COLLECTION {
-        return Err(Error::InvalidRecord(format!(
-            "expected a document URI ({}), got collection {}",
-            DOCUMENT_COLLECTION, doc_at.collection,
-        )));
-    }
+    let (doc, content_key, doc_pds) =
+        fetch_keyring_document(transport, group_keys, document_uri).await?;
 
-    // Resolve the document host's PDS — that's the authority of the doc URI,
-    // which may be the workspace owner (owner-uploaded doc) or any member
-    // (contributor-uploaded doc).
-    let doc_authority_did = &doc_at.authority;
-    trace!("resolving PDS for document host {}", doc_authority_did);
-    let doc_did_doc = resolve_did_document(transport, doc_authority_did).await?;
-    let doc_pds = pds_from_did_document(&doc_did_doc)?;
-
-    // Fetch the document record
-    trace!("fetching document from {}", doc_pds);
-    let doc_entry = get_record_public(
-        transport,
-        &doc_pds,
-        doc_authority_did,
-        DOCUMENT_COLLECTION,
-        &doc_at.rkey,
-    )
-    .await?;
-
-    let doc: Document = serde_json::from_value(doc_entry.value)?;
-    records::check_version(doc.opake_version)?;
-
-    // Must be keyring-encrypted
-    let kr_enc = match &doc.encryption {
-        Encryption::Keyring(kr) => kr,
-        Encryption::Direct(_) => {
-            return Err(Error::InvalidRecord(
-                "document uses direct encryption, not keyring — \
-                 use `opake download` without --keyring-member"
-                    .into(),
-            ));
-        }
+    let Encryption::Keyring(kr_enc) = &doc.encryption else {
+        // fetch_keyring_document already rejected non-keyring encryption.
+        unreachable!("fetch_keyring_document guarantees keyring encryption");
     };
 
-    // Pick the group key for the rotation the document was encrypted under.
-    // Absent → the caller wasn't a member at that rotation.
-    let doc_rotation = kr_enc.keyring_ref.rotation;
-    let group_key = group_keys.for_rotation(doc_rotation).ok_or_else(|| {
-        Error::Auth(format!(
-            "no group key for rotation {doc_rotation} — not a member of this workspace at that rotation"
-        ))
-    })?;
+    // The blob is co-hosted with the document record on its authority's PDS
+    // (atproto convention; CIDs are repo-scoped).
+    let doc_authority_did = &doc_at.authority;
 
-    // Symmetric unwrap: group key → content key
-    let wrapped_ck_bytes = kr_enc
-        .keyring_ref
-        .wrapped_content_key
-        .decode()
-        .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
-    let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, group_key)?;
-
-    // Fetch and decrypt the blob — co-hosted with the document record on
-    // its authority's PDS (atproto convention; CIDs are repo-scoped).
     trace!(
         "fetching blob did={} cid={}",
         doc_authority_did,

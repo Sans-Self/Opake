@@ -206,7 +206,7 @@ async fn additivity_allows_former_manager_deletion() {
         cached(DIR_DEL_BY_ALICE, &dir(vec![DOC1], Some(DIR_GENESIS))),
     ];
 
-    mgr.verify_directory_chain_additivity(&records)
+    mgr.verify_directory_chain_additivity(&records, &[])
         .await
         .expect("former manager's deletion must pass after the keyring-chain recheck");
 
@@ -236,7 +236,7 @@ async fn additivity_rejects_never_manager_deletion() {
     ];
 
     let err = mgr
-        .verify_directory_chain_additivity(&records)
+        .verify_directory_chain_additivity(&records, &[])
         .await
         .expect_err("a never-manager's deletion must still be rejected");
 
@@ -274,7 +274,77 @@ async fn additivity_fails_open_when_keyring_chain_unreachable() {
         cached(DIR_DEL_BY_ALICE, &dir(vec![DOC1], Some(DIR_GENESIS))),
     ];
 
-    mgr.verify_directory_chain_additivity(&records)
+    mgr.verify_directory_chain_additivity(&records, &[])
         .await
         .expect("fail-open: an unreachable keyring chain must not brick the load");
+}
+
+/// Regression: an editor's cross-author doc edit drops the original doc
+/// entry and adds one that *supersedes* it. The supersede-aware rule must
+/// clear it — but the coverage link lives on the new *document*, which is
+/// cached under a different scope than the directory records, so it has to
+/// be supplied separately. Without the document records the edit reads as a
+/// bare delete and trips a false `ChainAdditivityViolation` (the symptom: a
+/// successfully-saved edit shows up as a violation in the file list).
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__additivity_allows_editor_doc_edit_via_document_supersede() {
+    const F1: &str = "at://did:plc:alice/app.opake.document/f1";
+    const F2: &str = "at://did:plc:charlie/app.opake.document/f2";
+    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/app.opake.directory/dedit";
+
+    // Fast path: F1 is dropped but covered by F2's supersede, so the check
+    // passes without walking the keyring chain — no mocked responses needed.
+    let mock = MockTransport::new();
+    let mut opake = opake_for_bob(mock.clone());
+    let ctx = FileContext::Workspace(workspace_bob_only_manager());
+    let mgr = opake.file_manager(&ctx);
+
+    let records = vec![
+        cached(DIR_GENESIS, &dir(vec![DOC1, F1], None)),
+        cached(DIR_EDIT_BY_CHARLIE, &dir(vec![DOC1, F2], Some(DIR_GENESIS))),
+    ];
+    let docs = vec![CachedRecord {
+        uri: F2.into(),
+        cid: String::new(),
+        value: serde_json::json!({ "supersedes": F1 }),
+    }];
+
+    mgr.verify_directory_chain_additivity(&records, &docs)
+        .await
+        .expect("editor doc edit via document supersede must pass additivity");
+}
+
+/// The negative: same shape, but the added document supersedes nothing — a
+/// genuine drop. Even with documents supplied, this must still be rejected
+/// (charlie was never a manager, so the keyring-chain recheck doesn't
+/// exempt him either).
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__additivity_rejects_editor_drop_without_document_supersede() {
+    const F1: &str = "at://did:plc:alice/app.opake.document/f1";
+    const F2: &str = "at://did:plc:charlie/app.opake.document/f2";
+    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/app.opake.directory/dedit";
+
+    let mock = MockTransport::new();
+    enqueue_keyring_chain(&mock);
+    let mut opake = opake_for_bob(mock.clone());
+    let ctx = FileContext::Workspace(workspace_bob_only_manager());
+    let mgr = opake.file_manager(&ctx);
+
+    let records = vec![
+        cached(DIR_GENESIS, &dir(vec![DOC1, F1], None)),
+        cached(DIR_EDIT_BY_CHARLIE, &dir(vec![DOC1, F2], Some(DIR_GENESIS))),
+    ];
+    let docs = vec![CachedRecord {
+        uri: F2.into(),
+        cid: String::new(),
+        value: serde_json::json!({}),
+    }];
+
+    let err = mgr
+        .verify_directory_chain_additivity(&records, &docs)
+        .await
+        .expect_err("a drop with no superseding document must be rejected");
+    assert!(matches!(err, Error::ChainAdditivityViolation { .. }));
 }

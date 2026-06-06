@@ -419,6 +419,45 @@ fn from_records_empty() {
     assert!(tree.root_uri().is_none());
 }
 
+/// Regression: the indexer snapshot returns the whole directory chain, so a
+/// superseded predecessor of a child's parent is present alongside the head.
+/// `find_parent` must return the *canonical* (chain-head) parent, never a
+/// superseded one — otherwise walking up to the root lands on a stale root
+/// that no longer matches the indexer's chain head (the symptom: editing a
+/// document in a workspace with rename/supersede history fails with "not
+/// reachable from indexer's root").
+#[test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__find_parent_skips_superseded_parent() {
+    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+    const PARENT_OLD: &str = "at://did:plc:test/app.opake.directory/parent_old";
+    const PARENT_NEW: &str = "at://did:plc:test/app.opake.directory/parent_new";
+
+    // Both versions of the parent list the doc; PARENT_NEW supersedes
+    // PARENT_OLD.
+    let parent_new = {
+        let mut d = dummy_directory_with_entries("Folder", vec![DOC_URI.into()]);
+        d.supersedes = Some(PARENT_OLD.into());
+        d
+    };
+
+    let records = vec![
+        (
+            PARENT_OLD.to_owned(),
+            dummy_directory_with_entries("Folder", vec![DOC_URI.into()]),
+        ),
+        (PARENT_NEW.to_owned(), parent_new),
+    ];
+
+    let tree = DirectoryTree::from_records(records);
+
+    assert_eq!(
+        tree.find_parent(DOC_URI).as_deref(),
+        Some(PARENT_NEW),
+        "find_parent must return the chain-head parent, not the superseded one"
+    );
+}
+
 // -- public getters --
 
 #[tokio::test]

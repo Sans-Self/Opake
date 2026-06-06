@@ -89,8 +89,19 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // workspaces, this catches editor-authored supersedes that
         // dropped entries — the indexer enforces additivity at write
         // time, but we don't trust it alone. Skipped for cabinets
-        // (single-author, no need).
-        self.verify_directory_chain_additivity(&records).await?;
+        // (single-author, no need). Documents are loaded from their own
+        // cache scope so the supersede-aware rule can see a doc edit's
+        // `supersedes` link (an edit's new doc lives in the doc cache,
+        // populated by the delta sync above, not in the directory records).
+        let doc_records = self
+            .opake
+            .storage
+            .cache_get_collection(&self.opake.did, &doc_scope_key(self.context))
+            .await?
+            .map(|c| c.records)
+            .unwrap_or_default();
+        self.verify_directory_chain_additivity(&records, &doc_records)
+            .await?;
 
         let mut tree = DirectoryTree::from_cached_records(&records);
         self.decrypt_tree(&mut tree)?;
@@ -143,6 +154,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     async fn verify_directory_chain_additivity(
         &self,
         records: &[CachedRecord],
+        doc_records: &[CachedRecord],
     ) -> Result<(), Error> {
         let workspace = match self.context {
             FileContext::Cabinet(_) => return Ok(()),
@@ -159,10 +171,31 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             })
             .collect();
 
+        // Supersede index over directories *and* documents, keyed target-URI →
+        // the URI it supersedes. Required by the supersede-aware additivity
+        // rule: a dropped entry is legitimate when its replacement advances
+        // it. The coverage link for a replaced *document* lives on the
+        // document record, which is cached under a separate scope from the
+        // directory `records` — so the caller passes documents in explicitly.
+        // Without them, an editor's legitimate doc edit (new doc supersedes
+        // the old) reads as a bare delete and trips a false violation.
+        let supersedes_index: std::collections::HashMap<String, String> = records
+            .iter()
+            .chain(doc_records.iter())
+            .filter(|r| r.uri != "__sync__")
+            .filter_map(|r| {
+                let prior = r.value.get("supersedes")?.as_str()?;
+                Some((r.uri.clone(), prior.to_owned()))
+            })
+            .collect();
+        let supersedes_of = |uri: &str| supersedes_index.get(uri).cloned();
+
         // Pass 1: fast path, current managers only.
-        match crate::directories::verify_directory_additivity(&directories, |did| {
-            workspace.is_manager(did)
-        }) {
+        match crate::directories::verify_directory_additivity(
+            &directories,
+            |did| workspace.is_manager(did),
+            supersedes_of,
+        ) {
             Ok(()) => return Ok(()),
             Err(Error::ChainAdditivityViolation { .. }) => {
                 // Could be a legitimate former-manager deletion. Fall
@@ -184,9 +217,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
-        crate::directories::verify_directory_additivity(&directories, |did| {
-            workspace.is_manager(did) || ever_managers.contains(did)
-        })
+        crate::directories::verify_directory_additivity(
+            &directories,
+            |did| workspace.is_manager(did) || ever_managers.contains(did),
+            supersedes_of,
+        )
     }
 
     /// Walk the workspace's keyring supersede chain and collect the union
@@ -444,7 +479,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // `load_tree` rather than a free pass. Verifying before caching also
         // means we never persist a tree that fails the check. Cabinets are
         // skipped inside.
-        self.verify_directory_chain_additivity(&dir_records).await?;
+        self.verify_directory_chain_additivity(&dir_records, &doc_records)
+            .await?;
 
         // Cache directories
         let dir_scope = dir_scope_key(self.context);
@@ -460,14 +496,25 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             )
             .await?;
 
-        // Cache documents
+        // Cache documents as a collection (not loose records) so the doc
+        // scope gets a `cacheMeta` sentinel — `cache_get_collection` returns
+        // `None` without one, which would leave the cached-path additivity
+        // check blind to document supersede links (it reads them from the doc
+        // cache). A full snapshot is a complete replace, so collection
+        // semantics are correct here; incremental delta syncs keep using
+        // `cache_put_records`, and the sentinel persists across them.
         let doc_scope = doc_scope_key(self.context);
-        if !doc_records.is_empty() {
-            self.opake
-                .storage
-                .cache_put_records(&self.opake.did, &doc_scope, &doc_records)
-                .await?;
-        }
+        self.opake
+            .storage
+            .cache_put_collection(
+                &self.opake.did,
+                &doc_scope,
+                &CachedCollection {
+                    records: doc_records,
+                    fetched_at: snapshot.fetched_at_millis(),
+                },
+            )
+            .await?;
 
         Ok(DirectoryTree::from_cached_records(&dir_records))
     }

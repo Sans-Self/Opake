@@ -306,15 +306,26 @@ pub fn verify_keyring_chain_authority(
     Ok(())
 }
 
-/// Verify that every editor-authored directory supersede in `records`
-/// added to (or preserved) the prior canonical's entry set. Managers
-/// are exempt — they may add or delete freely.
+/// Verify that every editor-authored directory supersede in `records` is
+/// *additive*: every entry in the prior canonical is either still present
+/// or replaced by an entry whose target supersedes it. Managers are exempt
+/// — they may add, delete, substitute, or reorder freely.
 ///
 /// `records` is the unfiltered set of directory records for a workspace
 /// (as the indexer's `/workspace/snapshot` endpoint returns it). The
 /// function groups records into chains by following `supersedes`
 /// pointers in-memory — no network calls — and runs the additivity
 /// check on each chain pair.
+///
+/// Additivity is **supersede-aware**, mirroring the indexer
+/// (`OpakeIndexer.Authority.additive?/3`): a dropped prior entry is allowed
+/// when some entry in the superseding record points at a target that
+/// supersedes the dropped one — that's an editor *advancing* an entry (a doc
+/// edit or a directory rename) rather than deleting it. `supersedes_of`
+/// resolves any target URI (document or directory) to the URI it supersedes,
+/// if any; the caller builds it from the full snapshot because the coverage
+/// link for a dropped *document* lives on the replacing document's record,
+/// which isn't among the directory `records` here.
 ///
 /// `is_manager` decides whether a given author DID is exempt from the
 /// additivity rule for a particular supersede. The exemption is purely a
@@ -334,11 +345,10 @@ pub fn verify_keyring_chain_authority(
 pub fn verify_directory_additivity(
     records: &[(String, crate::records::Directory)],
     is_manager: impl Fn(&str) -> bool,
+    supersedes_of: impl Fn(&str) -> Option<String>,
 ) -> Result<(), Error> {
     // Build a URI → record index so we can look up priors without an
-    // O(N²) scan per chain. The Directory clone here is intentional —
-    // we don't borrow from `records` because we need to walk pointers
-    // across the whole set freely.
+    // O(N²) scan per chain.
     let by_uri: HashMap<&str, &crate::records::Directory> = records
         .iter()
         .map(|(uri, dir)| (uri.as_str(), dir))
@@ -374,8 +384,17 @@ pub fn verify_directory_additivity(
             .map(|e| e.target.as_str())
             .collect();
 
+        // Targets the superseding record's entries claim to advance: the
+        // prior entry each new target supersedes (if any). A dropped prior
+        // entry covered here is an edit/rename, not a delete.
+        let claimed: HashSet<String> = new_targets
+            .iter()
+            .filter_map(|t| supersedes_of(t))
+            .collect();
+
         let missing: Vec<String> = prior_targets
             .difference(&new_targets)
+            .filter(|dropped| !claimed.contains(**dropped))
             .map(|s| (*s).to_owned())
             .collect();
 

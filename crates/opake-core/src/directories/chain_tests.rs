@@ -561,10 +561,15 @@ mod directory_additivity {
         did == ALICE_DID
     }
 
+    /// No supersede links — the legacy "strict superset" behavior.
+    fn none_supersedes(_: &str) -> Option<String> {
+        None
+    }
+
     #[test]
     fn passes_genesis_only() {
         let records = vec![(DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None))];
-        verify_directory_additivity(&records, no_managers).unwrap();
+        verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
     #[test]
@@ -577,7 +582,7 @@ mod directory_additivity {
                 dir(vec!["doc1", "doc2", "doc3"], Some(DIR_GENESIS)),
             ),
         ];
-        verify_directory_additivity(&records, no_managers).unwrap();
+        verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
     #[test]
@@ -590,7 +595,7 @@ mod directory_additivity {
                 dir(vec!["doc1", "doc3"], Some(DIR_GENESIS)),
             ),
         ];
-        let err = verify_directory_additivity(&records, no_managers).unwrap_err();
+        let err = verify_directory_additivity(&records, no_managers, none_supersedes).unwrap_err();
         match err {
             Error::ChainAdditivityViolation {
                 uri,
@@ -616,7 +621,7 @@ mod directory_additivity {
                 dir(vec!["doc1"], Some(DIR_GENESIS)),
             ),
         ];
-        verify_directory_additivity(&records, alice_is_manager).unwrap();
+        verify_directory_additivity(&records, alice_is_manager, none_supersedes).unwrap();
     }
 
     #[test]
@@ -627,7 +632,7 @@ mod directory_additivity {
             DIR_HEAD_BY_BOB.into(),
             dir(vec!["doc1"], Some("at://did:plc:other/app.opake.directory/gone")),
         )];
-        verify_directory_additivity(&records, no_managers).unwrap();
+        verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
     #[test]
@@ -646,7 +651,7 @@ mod directory_additivity {
                 dir(vec!["doc1", "doc2"], Some(middle_uri)),
             ),
         ];
-        let err = verify_directory_additivity(&records, no_managers).unwrap_err();
+        let err = verify_directory_additivity(&records, no_managers, none_supersedes).unwrap_err();
         match err {
             Error::ChainAdditivityViolation { uri, missing, .. } => {
                 assert_eq!(uri, middle_uri);
@@ -654,6 +659,56 @@ mod directory_additivity {
             }
             other => panic!("expected ChainAdditivityViolation, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn passes_editor_advance_when_dropped_entry_is_superseded() {
+        // Bob (editor) edits doc2 → doc2b, where doc2b supersedes doc2. The
+        // entry set drops doc2 and adds doc2b — non-additive on its face, but
+        // the supersede link makes it a legitimate advance.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (
+                DIR_HEAD_BY_BOB.into(),
+                dir(vec!["doc1", "doc2b"], Some(DIR_GENESIS)),
+            ),
+        ];
+        let supersedes_of = |uri: &str| {
+            (uri == "doc2b").then(|| "doc2".to_string())
+        };
+        verify_directory_additivity(&records, no_managers, supersedes_of).unwrap();
+    }
+
+    #[test]
+    fn rejects_editor_substitute_that_supersedes_wrong_entry() {
+        // doc2 dropped, doc9 added, but doc9 supersedes some unrelated docX —
+        // doc2 is uncovered, so this is a delete dressed as an edit.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (
+                DIR_HEAD_BY_BOB.into(),
+                dir(vec!["doc1", "doc9"], Some(DIR_GENESIS)),
+            ),
+        ];
+        let supersedes_of = |uri: &str| (uri == "doc9").then(|| "docX".to_string());
+        let err = verify_directory_additivity(&records, no_managers, supersedes_of).unwrap_err();
+        match err {
+            Error::ChainAdditivityViolation { missing, .. } => {
+                assert_eq!(missing, vec!["doc2".to_string()]);
+            }
+            other => panic!("expected ChainAdditivityViolation, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_editor_bare_delete_even_with_unrelated_supersedes() {
+        // doc2 simply removed; nothing added supersedes it. Still a delete.
+        let records = vec![
+            (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
+            (DIR_HEAD_BY_BOB.into(), dir(vec!["doc1"], Some(DIR_GENESIS))),
+        ];
+        let err = verify_directory_additivity(&records, no_managers, none_supersedes).unwrap_err();
+        assert!(matches!(err, Error::ChainAdditivityViolation { .. }));
     }
 }
 
