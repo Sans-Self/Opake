@@ -90,6 +90,28 @@ class OpakeDatabase extends Dexie {
   }
 }
 
+/**
+ * Clear the local projection cache (directory/document snapshots and sync
+ * cursors) without touching auth or identity.
+ *
+ * Only the `cacheRecords` and `cacheMeta` tables are cleared — `configs`,
+ * `identities`, `sessions`, and `pairStates` are left intact, so the user
+ * stays signed in. The next tree load re-bootstraps from the indexer. Used by
+ * the "clear cache & reload" recovery action when a stale or inconsistent
+ * local projection wedges the UI.
+ */
+export async function clearLocalCache(dbName = "opake"): Promise<void> {
+  const db = new OpakeDatabase(dbName);
+  try {
+    await db.transaction("rw", db.cacheRecords, db.cacheMeta, async () => {
+      await db.cacheRecords.clear();
+      await db.cacheMeta.clear();
+    });
+  } finally {
+    db.close();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // IndexedDbStorage
 // ---------------------------------------------------------------------------

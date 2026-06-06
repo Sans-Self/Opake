@@ -28,6 +28,8 @@ import {
 } from "@opake/react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { DocumentMetadata } from "@opake/sdk";
+import { wasmBuildInfo } from "@opake/sdk";
+import { clearLocalCache } from "@opake/sdk/storage/indexeddb";
 import { PanelShell } from "./PanelShell";
 import { PanelContent } from "./PanelContent";
 import { Breadcrumbs, BreadcrumbActive } from "./Breadcrumbs";
@@ -102,14 +104,59 @@ function FileViewSkeleton() {
 // ---------------------------------------------------------------------------
 
 function ErrorBanner({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }) {
+  const [build, setBuild] = useState<string>("loading build info…");
+  const [clearing, setClearing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    wasmBuildInfo()
+      .then((info) => {
+        if (!alive) return;
+        setBuild(
+          info
+            ? `wasm built ${info.builtAt} · ${info.gitHash}`
+            : "wasm buildInfo() missing — STALE binary (browser is serving a cached build)",
+        );
+      })
+      .catch((e: unknown) => {
+        if (alive) setBuild(`buildInfo error: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const clearCacheAndReload = async () => {
+    setClearing(true);
+    try {
+      await clearLocalCache();
+    } catch (e) {
+      console.error("[opake] clearLocalCache failed", e);
+    } finally {
+      window.location.reload();
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-16">
       <div className="bg-error/10 text-error rounded-lg px-4 py-3 text-sm font-medium">
         {message}
       </div>
-      <button onClick={onRetry} className="btn btn-ghost btn-sm">
-        Try again
-      </button>
+      <div className="flex gap-2">
+        <button onClick={onRetry} className="btn btn-ghost btn-sm">
+          Try again
+        </button>
+        <button
+          onClick={clearCacheAndReload}
+          disabled={clearing}
+          className="btn btn-ghost btn-sm"
+        >
+          {clearing ? "Clearing…" : "Clear cache & reload"}
+        </button>
+      </div>
+      <pre className="text-base-content/40 mt-2 max-w-full overflow-x-auto text-xs select-all">
+        {build}
+      </pre>
     </div>
   );
 }

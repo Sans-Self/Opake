@@ -64,6 +64,15 @@ pub fn schema_version() -> u32 {
     opake_core::records::SCHEMA_VERSION
 }
 
+/// Build stamp baked in at compile time: `"<unix-epoch-seconds> <git-hash>"`.
+/// Diagnostic for detecting a stale, browser-cached WASM binary — if the
+/// page reports an old timestamp (or this export is missing entirely), the
+/// browser is serving a cached build, not the latest one.
+#[wasm_bindgen(js_name = buildInfo)]
+pub fn build_info() -> String {
+    format!("{} {}", env!("OPAKE_BUILD_EPOCH"), env!("OPAKE_GIT_HASH"))
+}
+
 #[wasm_bindgen(js_name = generateContentKey)]
 pub fn generate_content_key() -> Vec<u8> {
     let key = opake_core::crypto::generate_content_key(&mut OsRng);

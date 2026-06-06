@@ -35,7 +35,11 @@ export { type LoginOptions, type StartLoginOptions, type PendingLogin } from "./
 
 // Storage implementations
 export { MemoryStorage } from "./storage/memory";
-// IndexedDbStorage is at "@opake/sdk/storage/indexeddb" (separate entrypoint)
+// IndexedDbStorage + clearLocalCache are at "@opake/sdk/storage/indexeddb"
+// (separate entrypoint, requires the dexie peer dep)
+
+// Diagnostics
+export { wasmBuildInfo } from "./wasm";
 
 // Domain types
 export {
