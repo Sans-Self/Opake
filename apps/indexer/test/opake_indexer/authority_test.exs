@@ -89,6 +89,65 @@ defmodule OpakeIndexer.AuthorityTest do
     end
   end
 
+  describe "additive?/3 — supersede-aware editor additivity" do
+    # Pure decision, no DB. The DB-resolution wrapper (additivity_check/2)
+    # is exercised by the firehose pipeline tests.
+
+    defp targets(uris), do: MapSet.new(uris)
+
+    test "pure add passes — nothing dropped" do
+      prior = targets(["at://a/doc/1"])
+      new = targets(["at://a/doc/1", "at://b/doc/2"])
+      assert Authority.additive?(prior, new, targets([])) == :ok
+    end
+
+    test "reorder passes — same target set" do
+      prior = targets(["at://a/doc/1", "at://a/doc/2"])
+      new = targets(["at://a/doc/2", "at://a/doc/1"])
+      assert Authority.additive?(prior, new, targets([])) == :ok
+    end
+
+    test "advance passes — dropped entry is superseded by an added one" do
+      # f1 replaced by f2, where f2.supersedes == f1.
+      prior = targets(["at://a/doc/f1", "at://a/doc/keep"])
+      new = targets(["at://b/doc/f2", "at://a/doc/keep"])
+      claimed = targets(["at://a/doc/f1"])
+      assert Authority.additive?(prior, new, claimed) == :ok
+    end
+
+    test "bare delete rejected — dropped entry with no superseding replacement" do
+      prior = targets(["at://a/doc/f1", "at://a/doc/keep"])
+      new = targets(["at://a/doc/keep"])
+      assert Authority.additive?(prior, new, targets([])) ==
+               {:rejected, :additivity_violation}
+    end
+
+    test "disguised delete rejected — substitute that supersedes the wrong entry" do
+      # f1 dropped, g2 added, but g2 supersedes some unrelated h — f1 is
+      # uncovered, so this is a delete wearing an edit's clothes.
+      prior = targets(["at://a/doc/f1"])
+      new = targets(["at://b/doc/g2"])
+      claimed = targets(["at://x/doc/h"])
+      assert Authority.additive?(prior, new, claimed) ==
+               {:rejected, :additivity_violation}
+    end
+
+    test "partial cover rejected — one of two drops is superseded" do
+      prior = targets(["at://a/doc/f1", "at://a/doc/f3"])
+      new = targets(["at://b/doc/f2"])
+      claimed = targets(["at://a/doc/f1"])
+      assert Authority.additive?(prior, new, claimed) ==
+               {:rejected, :additivity_violation}
+    end
+
+    test "advance plus add passes — edit one entry and contribute another" do
+      prior = targets(["at://a/doc/f1"])
+      new = targets(["at://b/doc/f2", "at://b/doc/own"])
+      claimed = targets(["at://a/doc/f1"])
+      assert Authority.additive?(prior, new, claimed) == :ok
+    end
+  end
+
   describe "check_workspace_root_flag/2" do
     # Pure function, no DB — safe to exercise here.
 
