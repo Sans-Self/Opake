@@ -177,6 +177,11 @@ pub(crate) fn derive_historical_keys(
     keyring_uri: &str,
     private_keys: &PrivateKeyBundle<'_>,
 ) -> Vec<HistoricalKey> {
+    // History entries carry the prior rotations' member wraps, all anchored
+    // to the workspace's stable (genesis) URI just like the live members.
+    // `keyring_uri` is whatever URI the caller fetched the record at; the
+    // record resolves its own anchor.
+    let anchor = keyring.wrap_anchor(keyring_uri);
     keyring
         .key_history
         .iter()
@@ -185,7 +190,7 @@ pub(crate) fn derive_historical_keys(
             let key = crypto::unwrap_key(
                 &member.wrapped_key,
                 private_keys,
-                &crypto::WrapContext::Keyring { uri: keyring_uri },
+                &crypto::WrapContext::Keyring { uri: anchor },
             )
             .ok()?;
             Some(HistoricalKey {

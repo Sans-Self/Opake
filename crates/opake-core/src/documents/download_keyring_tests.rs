@@ -1,16 +1,14 @@
 use super::*;
 use crate::client::HttpResponse;
-use crate::crypto::OsRng;
-use crate::records::{
-    AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringMember, KeyringRef, Role, WrappedKey,
-};
-use crate::test_utils::{dummy_encrypted_metadata, MockTransport, TestKeys};
+use crate::crypto::{ContentKey, OsRng};
+use crate::records::{AtBytes, BlobRef, CidLink, KeyringEncryption, KeyringRef};
+use crate::test_utils::{MockTransport, TestKeys};
+use crate::workspace::{GroupKeys, HistoricalKey};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 const OWNER_DID: &str = "did:plc:owner";
 const OWNER_PDS: &str = "https://pds.owner.example.com";
 const MEMBER_DID: &str = "did:plc:member";
-const KR_RKEY: &str = "kr1";
 const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
 const KR_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
 
@@ -52,45 +50,20 @@ fn blob_response(data: &[u8]) -> HttpResponse {
     }
 }
 
-/// Encrypt plaintext under a keyring group key and wrap the group key
-/// to a member. Returns everything needed to build test fixtures.
+/// Encrypt plaintext under a group key and wrap the content key to it. No
+/// member wrapping — the download primitive is now key-driven and never
+/// touches the keyring record.
 struct KeyringFixture {
     ciphertext: Vec<u8>,
     nonce: [u8; 12],
     content_key: ContentKey,
     group_key: ContentKey,
-    owner_wrapped_gk: WrappedKey,
-    member_wrapped_gk: WrappedKey,
     wrapped_content_key_bytes: Vec<u8>,
 }
 
-fn create_keyring_fixture(
-    plaintext: &[u8],
-    owner_keys: &TestKeys,
-    member_keys: &TestKeys,
-) -> KeyringFixture {
+fn create_keyring_fixture(plaintext: &[u8]) -> KeyringFixture {
     let rng = &mut OsRng;
-
-    // Generate group key and wrap to owner + member
     let group_key = crypto::generate_content_key(rng);
-    let owner_wrapped_gk = crypto::wrap_key(
-        &group_key,
-        &owner_keys.public_keys(),
-        OWNER_DID,
-        &crypto::WrapContext::Keyring { uri: KR_URI },
-        rng,
-    )
-    .unwrap();
-    let member_wrapped_gk = crypto::wrap_key(
-        &group_key,
-        &member_keys.public_keys(),
-        MEMBER_DID,
-        &crypto::WrapContext::Keyring { uri: KR_URI },
-        rng,
-    )
-    .unwrap();
-
-    // Generate content key, encrypt blob, wrap CK under group key
     let content_key = crypto::generate_content_key(rng);
     let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
     let wrapped_content_key_bytes =
@@ -101,8 +74,6 @@ fn create_keyring_fixture(
         nonce: payload.nonce,
         content_key,
         group_key,
-        owner_wrapped_gk,
-        member_wrapped_gk,
         wrapped_content_key_bytes,
     }
 }
@@ -149,65 +120,54 @@ fn keyring_document(fixture: &KeyringFixture) -> Document {
     keyring_document_at_rotation(fixture, 0)
 }
 
-fn keyring_record(fixture: &KeyringFixture) -> Keyring {
-    Keyring::new(
-        vec![
-            KeyringMember {
-                wrapped_key: fixture.owner_wrapped_gk.clone(),
-                role: Role::Manager,
-            },
-            KeyringMember {
-                wrapped_key: fixture.member_wrapped_gk.clone(),
-                role: Role::Manager,
-            },
-        ],
-        dummy_encrypted_metadata(),
-        "2026-03-01T00:00:00Z".into(),
-    )
+/// Borrowed `GroupKeys` over a single current-rotation key.
+fn current_keys(current_rotation: u64, key: &ContentKey) -> GroupKeys<'_> {
+    GroupKeys {
+        current_rotation,
+        current: key,
+        historical: &[],
+    }
 }
 
 #[tokio::test]
 async fn roundtrip() {
-    let owner = TestKeys::generate(OWNER_DID);
-    let member = TestKeys::generate(MEMBER_DID);
-
     let plaintext = b"shared keyring content";
-    let fixture = create_keyring_fixture(plaintext, &owner, &member);
+    let fixture = create_keyring_fixture(plaintext);
     let doc = keyring_document(&fixture);
-    let keyring = keyring_record(&fixture);
 
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
-    mock.enqueue(record_response(KR_URI, &keyring));
     mock.enqueue(blob_response(&fixture.ciphertext));
 
-    let result =
-        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
+    let (filename, bytes) =
+        download_keyring_document(&mock, current_keys(0, &fixture.group_key), DOC_URI)
             .await
             .unwrap();
 
-    assert_eq!(result.filename, "keyring-file.txt");
-    assert_eq!(result.plaintext, plaintext);
-    assert_eq!(result.keyring_rkey, KR_RKEY);
+    assert_eq!(filename, "keyring-file.txt");
+    assert_eq!(bytes, plaintext);
 
+    // No keyring fetch: DID resolution, document record, blob. Three requests.
     let reqs = mock.requests();
-    assert_eq!(reqs.len(), 4);
+    assert_eq!(reqs.len(), 3, "must not fetch the keyring record");
     assert!(reqs[0].url.contains("plc.directory"), "DID resolution");
     assert!(reqs[1].url.contains("getRecord"), "document fetch");
     assert!(reqs[1].url.contains(OWNER_PDS), "from owner PDS");
-    assert!(reqs[2].url.contains("getRecord"), "keyring fetch");
-    assert!(reqs[3].url.contains("getBlob"), "blob fetch");
+    assert!(reqs[2].url.contains("getBlob"), "blob fetch");
+    assert!(
+        !reqs.iter().any(|r| r.url.contains("app.opake.keyring")),
+        "key-driven download must never fetch the keyring"
+    );
 }
 
 #[tokio::test]
 async fn rejects_non_document_uri() {
+    let key = crypto::generate_content_key(&mut OsRng);
     let mock = MockTransport::new();
-    let outsider = TestKeys::generate(MEMBER_DID);
-    let err = download_from_keyring_member(
+    let err = download_keyring_document(
         &mock,
-        MEMBER_DID,
-        &outsider.private_keys(),
+        current_keys(0, &key),
         "at://did:plc:x/app.opake.grant/abc",
     )
     .await
@@ -222,7 +182,6 @@ async fn rejects_non_document_uri() {
 async fn rejects_direct_encrypted_document() {
     let member = TestKeys::generate(MEMBER_DID);
 
-    // Build a direct-encrypted document (not keyring)
     let content_key = crypto::generate_content_key(&mut OsRng);
     let payload = crypto::encrypt_blob(&content_key, b"data", &mut OsRng).unwrap();
     let wrapped = crypto::wrap_key(
@@ -265,190 +224,118 @@ async fn rejects_direct_encrypted_document() {
         "2026-03-01T00:00:00Z".into(),
     );
 
+    let key = crypto::generate_content_key(&mut OsRng);
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
 
-    let err =
-        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
-            .await
-            .unwrap_err();
+    let err = download_keyring_document(&mock, current_keys(0, &key), DOC_URI)
+        .await
+        .unwrap_err();
     assert!(
         err.to_string().contains("direct encryption"),
         "expected direct encryption error, got: {err}"
     );
 }
 
+/// The caller holds no key for the rotation the document was encrypted under —
+/// they weren't a member at that rotation. (Replaces the old "not a member of
+/// keyring" check, which now lives in workspace resolution, not here.)
 #[tokio::test]
-async fn rejects_non_member() {
-    let owner = TestKeys::generate(OWNER_DID);
-    let member = TestKeys::generate(MEMBER_DID);
-    let outsider = TestKeys::generate("did:plc:outsider");
+async fn rejects_missing_rotation_key() {
+    let fixture = create_keyring_fixture(b"data");
+    let doc = keyring_document_at_rotation(&fixture, 0);
 
-    let fixture = create_keyring_fixture(b"secret", &owner, &member);
-    let doc = keyring_document(&fixture);
-    let keyring = keyring_record(&fixture);
-
+    // Group keys only cover rotation 1 — nothing for the document's rotation 0.
+    let other = crypto::generate_content_key(&mut OsRng);
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
-    mock.enqueue(record_response(KR_URI, &keyring));
 
-    let err = download_from_keyring_member(
-        &mock,
-        "did:plc:outsider",
-        &outsider.private_keys(),
-        DOC_URI,
-    )
-    .await
-    .unwrap_err();
+    let err = download_keyring_document(&mock, current_keys(1, &other), DOC_URI)
+        .await
+        .unwrap_err();
     assert!(
-        err.to_string().contains("not a member"),
-        "expected member error, got: {err}"
+        err.to_string().contains("rotation 0"),
+        "expected missing-rotation error, got: {err}"
     );
 }
 
-#[tokio::test]
-async fn returns_group_key_for_caching() {
-    let owner = TestKeys::generate(OWNER_DID);
-    let member = TestKeys::generate(MEMBER_DID);
-
-    let plaintext = b"cache test content";
-    let fixture = create_keyring_fixture(plaintext, &owner, &member);
-
-    // Save the original group key bytes for comparison
-    let original_gk_bytes = fixture.group_key.0;
-
-    let doc = keyring_document(&fixture);
-    let keyring = keyring_record(&fixture);
-
-    let mock = MockTransport::new();
-    mock.enqueue(did_document_response());
-    mock.enqueue(record_response(DOC_URI, &doc));
-    mock.enqueue(record_response(KR_URI, &keyring));
-    mock.enqueue(blob_response(&fixture.ciphertext));
-
-    let result =
-        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
-            .await
-            .unwrap();
-
-    // The returned group key should match what was used to wrap content keys
-    assert_eq!(result.group_key.0, original_gk_bytes);
-
-    // Verify the group key can unwrap the content key independently
-    let ck = crypto::unwrap_content_key_from_keyring(
-        &fixture.wrapped_content_key_bytes,
-        &result.group_key,
-    )
-    .expect("cached group key should unwrap content key");
-
-    // Re-decrypt using the independently unwrapped content key
-    let re_decrypted = crypto::decrypt_blob(
-        &ck,
-        &crypto::EncryptedPayload {
-            ciphertext: fixture.ciphertext.clone(),
-            nonce: fixture.nonce,
-        },
-    )
-    .unwrap();
-    assert_eq!(re_decrypted, plaintext);
-}
-
+/// A document encrypted under an earlier rotation decrypts via the historical
+/// key the caller carries from `keyHistory`.
 #[tokio::test]
 async fn download_from_previous_rotation_via_history() {
-    let owner = TestKeys::generate(OWNER_DID);
-    let member = TestKeys::generate(MEMBER_DID);
-
     let plaintext = b"pre-rotation content";
-    let fixture = create_keyring_fixture(plaintext, &owner, &member);
-
-    // Document was uploaded at rotation 0
+    let fixture = create_keyring_fixture(plaintext);
     let doc = keyring_document_at_rotation(&fixture, 0);
 
-    // Keyring has since rotated to 1 — rotation 0 members are in key_history
-    let mut keyring = Keyring {
-        rotation: 1,
-        members: vec![KeyringMember {
-            wrapped_key: fixture.owner_wrapped_gk.clone(),
-            role: Role::Manager,
-        }],
-        key_history: vec![records::KeyHistoryEntry {
-            rotation: 0,
-            members: vec![
-                KeyringMember {
-                    wrapped_key: fixture.owner_wrapped_gk.clone(),
-                    role: Role::Manager,
-                },
-                KeyringMember {
-                    wrapped_key: fixture.member_wrapped_gk.clone(),
-                    role: Role::Manager,
-                },
-            ],
-        }],
-        ..keyring_record(&fixture)
+    // Current rotation is 1; the rotation-0 key lives in history.
+    let current = crypto::generate_content_key(&mut OsRng);
+    let historical = vec![HistoricalKey {
+        rotation: 0,
+        key: fixture.group_key.clone(),
+    }];
+    let group_keys = GroupKeys {
+        current_rotation: 1,
+        current: &current,
+        historical: &historical,
     };
-    // Suppress the members from new() since we overwrote them
-    let _ = &mut keyring;
 
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
-    mock.enqueue(record_response(KR_URI, &keyring));
     mock.enqueue(blob_response(&fixture.ciphertext));
 
-    let result =
-        download_from_keyring_member(&mock, MEMBER_DID, &member.private_keys(), DOC_URI)
-            .await
-            .unwrap();
+    let (_filename, bytes) = download_keyring_document(&mock, group_keys, DOC_URI)
+        .await
+        .unwrap();
+    assert_eq!(bytes, plaintext);
+}
 
-    assert_eq!(result.plaintext, plaintext);
-    assert_eq!(result.rotation, 1); // returns current keyring rotation for caching
+/// Regression: a member added by a keyring supersede (after the document was
+/// uploaded at rotation 0) can open that document. The old self-fetching
+/// download looked the member up in the *genesis* keyring record, which never
+/// lists supersede-added members → "not a member". The key-driven path uses
+/// the group key the head walk already resolved and never consults the keyring
+/// — so the post-genesis member reads the pre-membership document.
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__post_genesis_member_opens_pre_membership_document() {
+    let plaintext = b"uploaded before they joined";
+    let fixture = create_keyring_fixture(plaintext);
+    let doc = keyring_document_at_rotation(&fixture, 0);
+
+    // The editor resolved the workspace at its head and unwrapped the
+    // rotation-0 group key — exactly what `ws.group_keys()` carries.
+    let editor_keys = current_keys(0, &fixture.group_key);
+
+    let mock = MockTransport::new();
+    mock.enqueue(did_document_response());
+    mock.enqueue(record_response(DOC_URI, &doc));
+    mock.enqueue(blob_response(&fixture.ciphertext));
+
+    let (_filename, bytes) = download_keyring_document(&mock, editor_keys, DOC_URI)
+        .await
+        .unwrap();
+    assert_eq!(bytes, plaintext);
+
+    let reqs = mock.requests();
+    assert!(
+        !reqs.iter().any(|r| r.url.contains("app.opake.keyring")),
+        "must not consult the keyring — membership was settled at resolution time"
+    );
 }
 
 #[tokio::test]
-async fn rejects_member_not_present_at_historical_rotation() {
-    let owner = TestKeys::generate(OWNER_DID);
-    let member = TestKeys::generate(MEMBER_DID);
-    let outsider = TestKeys::generate("did:plc:outsider");
-
-    let fixture = create_keyring_fixture(b"data", &owner, &member);
-
-    // Document encrypted at rotation 0
-    let doc = keyring_document_at_rotation(&fixture, 0);
-
-    // Keyring is at rotation 1, history has rotation 0 with only owner
-    let keyring = Keyring {
-        rotation: 1,
-        members: vec![KeyringMember {
-            wrapped_key: fixture.owner_wrapped_gk.clone(),
-            role: Role::Manager,
-        }],
-        key_history: vec![records::KeyHistoryEntry {
-            rotation: 0,
-            members: vec![KeyringMember {
-                wrapped_key: fixture.owner_wrapped_gk.clone(),
-                role: Role::Manager,
-            }],
-        }],
-        ..keyring_record(&fixture)
-    };
+async fn fetch_document_keyring_ref_returns_stable_id_and_rotation() {
+    let fixture = create_keyring_fixture(b"x");
+    let doc = keyring_document_at_rotation(&fixture, 3);
 
     let mock = MockTransport::new();
     mock.enqueue(did_document_response());
     mock.enqueue(record_response(DOC_URI, &doc));
-    mock.enqueue(record_response(KR_URI, &keyring));
 
-    let err = download_from_keyring_member(
-        &mock,
-        "did:plc:outsider",
-        &outsider.private_keys(),
-        DOC_URI,
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("not a member"),
-        "expected member error, got: {err}"
-    );
+    let (keyring_uri, rotation) = fetch_document_keyring_ref(&mock, DOC_URI).await.unwrap();
+    assert_eq!(keyring_uri, KR_URI);
+    assert_eq!(rotation, 3);
 }

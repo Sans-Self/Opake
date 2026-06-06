@@ -1,49 +1,81 @@
 use log::trace;
 
 use crate::atproto;
-use crate::client::{
-    get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport,
-};
-use crate::crypto::{self, ContentKey, PrivateKeyBundle};
+use crate::client::{get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport};
+use crate::crypto;
 use crate::error::Error;
-use crate::keyrings::KEYRING_COLLECTION;
-use crate::records::{self, Document, Encryption, Keyring};
+use crate::records::{self, Document, Encryption};
+use crate::workspace::GroupKeys;
 
 use super::download::{decrypt_with_nonce, resolve_document_name};
 use super::DOCUMENT_COLLECTION;
 
-/// Result of downloading a keyring-encrypted document as a member.
+/// Download and decrypt a keyring-encrypted document using already-resolved
+/// group keys.
 ///
-/// Includes the unwrapped group key, its rotation number, and keyring rkey so
-/// the caller can cache them for subsequent downloads under the same keyring.
-#[derive(Debug)]
-pub struct KeyringDownloadResult {
-    pub filename: String,
-    pub plaintext: Vec<u8>,
-    pub group_key: ContentKey,
-    pub keyring_rkey: String,
-    pub rotation: u64,
+/// This is the cross-PDS path for workspace members. A member-uploaded
+/// document lives on the contributor's PDS while the owner-uploaded one lives
+/// on the owner's — either way the document is fetched from its own authority's
+/// public XRPC endpoint.
+///
+/// Crucially, this does **not** fetch the keyring or re-check membership. The
+/// group key is supplied by the caller, which resolved it once at
+/// workspace-resolution time — walking the keyring chain to its head (via the
+/// indexer) to find the caller's current member entry and unwrap the group key
+/// for every rotation they can read. That orchestration is a client concern
+/// and lives in the `Opake`/`FileManager` layer; this primitive stays pure
+/// crypto + transport.
+///
+/// The earlier self-fetching version looked the member up in the keyring
+/// record named by `keyringRef.keyring` — the *stable genesis* URI — which
+/// does not list members added by a later supersede. A member added after a
+/// document was uploaded could therefore not open it. Keying off the resolved
+/// `GroupKeys` sidesteps that entirely: the head walk already established
+/// membership.
+///
+/// `group_keys` must carry a key for the document's `keyringRef.rotation`
+/// (current or historical); otherwise the caller wasn't a member at the
+/// rotation the document was encrypted under.
+/// Fetch a keyring-encrypted document's keyring reference without downloading
+/// the blob: the stable workspace id (genesis keyring URI) it belongs to and
+/// the rotation it was encrypted under.
+///
+/// Used to resolve the workspace — walk its keyring chain to the current head
+/// and unwrap the group key — before a cross-PDS member download, when the
+/// caller starts from only a document URI.
+pub async fn fetch_document_keyring_ref(
+    transport: &impl Transport,
+    document_uri: &str,
+) -> Result<(String, u64), Error> {
+    let doc_at = atproto::parse_at_uri(document_uri)?;
+    if doc_at.collection != DOCUMENT_COLLECTION {
+        return Err(Error::InvalidRecord(format!(
+            "expected a document URI ({}), got collection {}",
+            DOCUMENT_COLLECTION, doc_at.collection,
+        )));
+    }
+    let did_doc = resolve_did_document(transport, &doc_at.authority).await?;
+    let pds = pds_from_did_document(&did_doc)?;
+    let entry =
+        get_record_public(transport, &pds, &doc_at.authority, DOCUMENT_COLLECTION, &doc_at.rkey)
+            .await?;
+    let doc: Document = serde_json::from_value(entry.value)?;
+    records::check_version(doc.opake_version)?;
+    match &doc.encryption {
+        Encryption::Keyring(kr) => {
+            Ok((kr.keyring_ref.keyring.clone(), kr.keyring_ref.rotation))
+        }
+        Encryption::Direct(_) => Err(Error::InvalidRecord(
+            "document uses direct encryption, not keyring".into(),
+        )),
+    }
 }
 
-/// Download and decrypt a keyring-encrypted document as a member.
-///
-/// This is the cross-PDS path for keyring members. In the federated workspace
-/// model the document and keyring may live on different PDSes — a member-
-/// uploaded document lives on the contributor's PDS, while the keyring
-/// always lives on the workspace owner's. Each lookup resolves the
-/// authority's PDS via DID document and uses the public XRPC endpoint.
-///
-/// The caller provides the document URI. The function:
-/// 1. Resolves the document authority's PDS and fetches the document record.
-/// 2. Resolves the keyring authority's PDS (separately, since it may differ
-///    from the document host) and fetches the keyring.
-/// 3. Unwraps group key → unwraps content key → decrypts blob.
-pub async fn download_from_keyring_member(
+pub async fn download_keyring_document(
     transport: &impl Transport,
-    member_did: &str,
-    private_keys: &PrivateKeyBundle<'_>,
+    group_keys: GroupKeys<'_>,
     document_uri: &str,
-) -> Result<KeyringDownloadResult, Error> {
+) -> Result<(String, Vec<u8>), Error> {
     let doc_at = atproto::parse_at_uri(document_uri)?;
     if doc_at.collection != DOCUMENT_COLLECTION {
         return Err(Error::InvalidRecord(format!(
@@ -86,59 +118,14 @@ pub async fn download_from_keyring_member(
         }
     };
 
-    // Parse the keyring URI and resolve its authority's PDS. The keyring
-    // lives on the workspace owner's PDS, which may not match the document's
-    // host — federated uploads land docs on contributors' PDSes while the
-    // shared keyring stays with the workspace owner.
-    let kr_at = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-    let kr_pds = if kr_at.authority == *doc_authority_did {
-        doc_pds.clone()
-    } else {
-        let kr_did_doc = resolve_did_document(transport, &kr_at.authority).await?;
-        pds_from_did_document(&kr_did_doc)?
-    };
-    trace!("fetching keyring {} from {}", kr_at.rkey, kr_pds);
-    let kr_entry = get_record_public(
-        transport,
-        &kr_pds,
-        &kr_at.authority,
-        KEYRING_COLLECTION,
-        &kr_at.rkey,
-    )
-    .await?;
-
-    let keyring: Keyring = serde_json::from_value(kr_entry.value)?;
-    records::check_version(keyring.opake_version)?;
-
-    // Find the member's wrapped group key — check the current rotation first,
-    // then fall back to key_history if the document was encrypted under an
-    // older rotation.
+    // Pick the group key for the rotation the document was encrypted under.
+    // Absent → the caller wasn't a member at that rotation.
     let doc_rotation = kr_enc.keyring_ref.rotation;
-    let member_wrapped = if doc_rotation == keyring.rotation {
-        keyring.members.iter().find(|m| m.did() == member_did)
-    } else {
-        keyring
-            .key_history
-            .iter()
-            .find(|h| h.rotation == doc_rotation)
-            .and_then(|h| h.members.iter().find(|m| m.did() == member_did))
-    }
-    .ok_or_else(|| {
-        Error::InvalidRecord(format!(
-            "DID ({member_did}) is not a member of keyring {} at rotation {doc_rotation}",
-            kr_enc.keyring_ref.keyring,
+    let group_key = group_keys.for_rotation(doc_rotation).ok_or_else(|| {
+        Error::Auth(format!(
+            "no group key for rotation {doc_rotation} — not a member of this workspace at that rotation"
         ))
     })?;
-
-    // Asymmetric unwrap: member's private key → group key
-    trace!("unwrapping group key for {}", member_did);
-    let group_key = crypto::unwrap_key(
-        &member_wrapped.wrapped_key,
-        private_keys,
-        &crypto::WrapContext::Keyring {
-            uri: &kr_enc.keyring_ref.keyring,
-        },
-    )?;
 
     // Symmetric unwrap: group key → content key
     let wrapped_ck_bytes = kr_enc
@@ -146,7 +133,7 @@ pub async fn download_from_keyring_member(
         .wrapped_content_key
         .decode()
         .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
-    let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, &group_key)?;
+    let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, group_key)?;
 
     // Fetch and decrypt the blob — co-hosted with the document record on
     // its authority's PDS (atproto convention; CIDs are repo-scoped).
@@ -166,13 +153,7 @@ pub async fn download_from_keyring_member(
     let plaintext = decrypt_with_nonce(&content_key, &kr_enc.nonce, ciphertext)?;
     let filename = resolve_document_name(&doc, &content_key)?;
 
-    Ok(KeyringDownloadResult {
-        filename,
-        plaintext,
-        group_key,
-        keyring_rkey: kr_at.rkey,
-        rotation: keyring.rotation,
-    })
+    Ok((filename, plaintext))
 }
 
 #[cfg(test)]

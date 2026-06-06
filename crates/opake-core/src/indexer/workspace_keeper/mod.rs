@@ -285,12 +285,16 @@ pub fn try_build_entry(
     let my_role = my_member.role;
     let member_count = keyring.members.len();
 
-    // Wrap context is bound to the URI used at wrap time — that's the
-    // head URI (the keyring record actually carrying these members).
+    // Member wraps are anchored to the workspace's stable (genesis) URI, not
+    // the head — unwrapping with `head_uri` breaks the moment the workspace
+    // supersedes (add/remove member). `wrap_anchor` resolves the right URI
+    // from the record itself.
     let group_key = match crypto::unwrap_key(
         &my_member.wrapped_key,
         private_keys,
-        &crypto::WrapContext::Keyring { uri: head_uri },
+        &crypto::WrapContext::Keyring {
+            uri: keyring.wrap_anchor(head_uri),
+        },
     ) {
         Ok(k) => k,
         Err(_) => {

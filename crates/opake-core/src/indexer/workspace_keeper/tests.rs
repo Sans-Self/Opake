@@ -308,6 +308,99 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     );
 }
 
+/// Build a *superseded* keyring envelope with real, decryptable metadata.
+/// The member wrap and the metadata are both anchored to `genesis_uri`
+/// (the stable workspace identity), while the envelope's own URI is
+/// `head_uri` — exactly the post-add-member shape where head ≠ genesis.
+fn make_superseded_envelope_with_name(
+    head_uri: &str,
+    genesis_uri: &str,
+    member_did: &str,
+    name: &str,
+    keys: &crate::test_utils::TestKeys,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> crate::indexer::types::IndexerEnvelope<crate::records::Keyring> {
+    use crate::crypto::{encrypt_metadata, generate_content_key, wrap_key, WrapContext};
+    use crate::records::{Keyring, KeyringMember, SCHEMA_VERSION};
+
+    let gk = generate_content_key(rng);
+    // Wrap anchored to genesis — the way add_member carries members forward.
+    let wrapped = wrap_key(
+        &gk,
+        &keys.public_keys(),
+        member_did,
+        &WrapContext::Keyring { uri: genesis_uri },
+        rng,
+    )
+    .unwrap();
+    let metadata = KeyringMetadata {
+        name: name.to_string(),
+        description: None,
+        icon: None,
+        enforce_revocation: None,
+    };
+    let encrypted_metadata = encrypt_metadata(&gk, &metadata, rng).unwrap();
+
+    crate::indexer::types::IndexerEnvelope {
+        uri: head_uri.to_string(),
+        record: Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: vec![KeyringMember {
+                wrapped_key: wrapped,
+                role: crate::records::Role::Manager,
+            }],
+            rotation: 0,
+            key_history: Vec::new(),
+            encrypted_metadata,
+            supersedes: Some(genesis_uri.to_string()),
+            workspace_id: Some(genesis_uri.to_string()),
+            created_at: "2026-04-17T00:00:00Z".into(),
+            modified_at: Some("2026-04-17T00:01:00Z".into()),
+        },
+        indexed_at: "2026-04-17T00:00:01Z".into(),
+        deleted_at: None,
+    }
+}
+
+/// Regression: adding a member supersedes the keyring, so the head URI no
+/// longer equals the genesis URI the member wraps are anchored to. Unwrapping
+/// against the head (the old bug) fails the AEAD check → name decodes to None
+/// → the workspace renders "unnamed". `wrap_anchor` must resolve the genesis
+/// URI from the record so the name still decrypts.
+#[test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
+    use crate::crypto::OsRng;
+    use crate::test_utils::TestKeys;
+
+    let mut rng: OsRng = OsRng;
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let head = "at://did:plc:alice/app.opake.keyring/head2";
+    let keys = TestKeys::generate("did:plc:alice");
+
+    let envelope = make_superseded_envelope_with_name(
+        head,
+        genesis,
+        "did:plc:alice",
+        "Shared Space",
+        &keys,
+        &mut rng,
+    );
+
+    let entry = try_build_entry(&envelope, "did:plc:alice", &keys.private_keys())
+        .expect("member entry must resolve");
+
+    // Identity is the stable genesis, head tracks the current record.
+    assert_eq!(entry.workspace_id, genesis);
+    assert_eq!(entry.head_uri, head);
+    assert_eq!(
+        entry.name.as_deref(),
+        Some("Shared Space"),
+        "name must decrypt via the genesis anchor, not the head URI"
+    );
+}
+
 /// DID absent from member list → None → keeper deletes the workspace.
 #[test]
 fn try_build_entry_non_member_returns_none() {

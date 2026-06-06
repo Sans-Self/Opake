@@ -69,4 +69,24 @@ impl Keyring {
         self.workspace_id = Some(workspace_id.into());
         self
     }
+
+    /// The URI that member and `keyHistory` wraps are bound to as AEAD
+    /// associated data.
+    ///
+    /// Member group-key wraps are anchored to the workspace's *stable*
+    /// identity — the genesis keyring URI — so they survive supersedes
+    /// without re-wrapping (a manager appends a new member's wrap and
+    /// carries the rest forward verbatim). That stable URI is this record's
+    /// `workspace_id` once it has superseded, or the record's own URI on the
+    /// genesis keyring (where `workspace_id` is absent because the genesis
+    /// URI *is* the workspace ID).
+    ///
+    /// Every site that unwraps a member key must use this as the wrap
+    /// context, regardless of which URI it fetched the record at. Passing the
+    /// head URI — the natural mistake, since that's what callers hold —
+    /// produces an AEAD context mismatch the moment a workspace supersedes.
+    /// This is the single place that resolution lives.
+    pub fn wrap_anchor<'a>(&'a self, self_uri: &'a str) -> &'a str {
+        self.workspace_id.as_deref().unwrap_or(self_uri)
+    }
 }

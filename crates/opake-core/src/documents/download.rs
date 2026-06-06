@@ -185,7 +185,7 @@ async fn fetch_document_and_key(
                     &member.wrapped_key,
                     private_keys,
                     &crypto::WrapContext::Keyring {
-                        uri: &kr_enc.keyring_ref.keyring,
+                        uri: keyring.wrap_anchor(&kr_enc.keyring_ref.keyring),
                     },
                 )?;
                 let historical = crate::workspace::derive_historical_keys(

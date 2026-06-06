@@ -75,17 +75,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         plaintext,
                     })
                 } else {
-                    let result = documents::download_from_keyring_member(
+                    // Cross-PDS member download. The group key was already
+                    // resolved when this workspace was opened — the chain was
+                    // walked to its head, establishing membership and unwrapping
+                    // the key for every readable rotation. So we hand the keys
+                    // straight to the download primitive; no keyring re-fetch,
+                    // and a member added after the document was uploaded can
+                    // still open it (the head walk, not the genesis record,
+                    // proved membership).
+                    let (filename, plaintext) = documents::download_keyring_document(
                         self.opake.client.transport(),
-                        &self.opake.did,
-                        &private_keys,
+                        ws.group_keys(),
                         document_uri,
                     )
                     .await?;
-                    Ok(DownloadResult {
-                        filename: result.filename,
-                        plaintext: result.plaintext,
-                    })
+                    Ok(DownloadResult { filename, plaintext })
                 }
             }
         }

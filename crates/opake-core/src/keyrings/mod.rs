@@ -71,11 +71,10 @@ pub fn decrypt_indexer_workspace_name(
     let group_key = crypto::unwrap_key(
         &member.wrapped_key,
         private_keys,
-        // Wrap context is bound to the URI used at wrap time. For an
-        // un-superseded workspace head_uri == workspace_id; after a
-        // supersede the manager re-wraps under the new head URI.
+        // Member wraps are anchored to the workspace's stable (genesis) URI,
+        // which survives supersedes — not the head URI in `envelope.uri`.
         &crypto::WrapContext::Keyring {
-            uri: &envelope.uri,
+            uri: keyring.wrap_anchor(&envelope.uri),
         },
     )
     .ok()?;

@@ -111,6 +111,20 @@ pub struct CreatedWorkspace {
     pub rotation: u64,
 }
 
+/// Result of a first-time cross-PDS member download.
+///
+/// Carries the decrypted bytes plus the keyring rkey and rotation so the
+/// caller can cache the group key for subsequent downloads under the same
+/// workspace.
+#[derive(Debug)]
+pub struct KeyringDownloadResult {
+    pub filename: String,
+    pub plaintext: Vec<u8>,
+    pub group_key: ContentKey,
+    pub keyring_rkey: String,
+    pub rotation: u64,
+}
+
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub fn new(
         client: XrpcClient<T>,
@@ -333,10 +347,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 .get_record(&self.did, &at_uri.collection, &at_uri.rkey)
                 .await?;
             let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
+            // `keyring_uri` is the head the caller fetched; the stable
+            // workspace identity (genesis URI) is what wraps anchor to and
+            // what every downstream consumer — chain lookups, doc refs,
+            // cache keys — must key on.
+            let workspace_id = keyring.wrap_anchor(keyring_uri).to_string();
             let group_key = Self::unwrap_workspace_key(
                 &keyring.members,
                 &self.did,
-                keyring_uri,
+                &workspace_id,
                 &private_keys.bundle(),
             )?;
             let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
@@ -344,12 +363,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             let historical_keys = crate::workspace::derive_historical_keys(
                 &keyring,
                 &self.did,
-                keyring_uri,
+                &workspace_id,
                 &private_keys.bundle(),
             );
             let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
             Ok(Workspace::from_keyring(
-                keyring_uri.to_string(),
+                workspace_id,
                 name,
                 None,
                 self.did.clone(),
@@ -390,10 +409,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         .await?;
 
         let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
+        // Stable (genesis) identity — the wrap anchor and the id every
+        // downstream consumer keys on. See resolve_workspace_by_uri.
+        let workspace_id = keyring.wrap_anchor(keyring_uri).to_string();
         let group_key = Self::unwrap_workspace_key(
             &keyring.members,
             &self.did,
-            keyring_uri,
+            &workspace_id,
             &private_keys.bundle(),
         )?;
 
@@ -404,13 +426,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let historical_keys = crate::workspace::derive_historical_keys(
             &keyring,
             &self.did,
-            keyring_uri,
+            &workspace_id,
             &private_keys.bundle(),
         );
 
         let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
         Ok(Workspace::from_keyring(
-            keyring_uri.to_string(),
+            workspace_id,
             name,
             None,
             owner_did.to_string(),
@@ -650,10 +672,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let is_owner = head_pds_did == self.did;
         log::trace!("sync: processing {head_uri} (owner={is_owner})");
 
+        // Member wraps anchor to the stable (genesis) workspace_id, not the
+        // head — the same context resolve_workspace_by_uri uses.
         let group_key = match Self::unwrap_workspace_key(
             &envelope.record.members,
             &self.did,
-            &head_uri,
+            &workspace_id,
             private_keys,
         ) {
             Ok(k) => k,
@@ -1162,10 +1186,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     }
 
     /// Unwrap a workspace key from keyring member data (pure crypto, no network).
+    ///
+    /// `wrap_anchor` is the URI the member wraps were bound to — the
+    /// workspace's stable genesis URI, resolved via [`Keyring::wrap_anchor`].
+    /// Passing the head URI of a superseded keyring fails the AEAD check.
     pub fn unwrap_workspace_key(
         members: &[crate::records::KeyringMember],
         did: &str,
-        keyring_uri: &str,
+        wrap_anchor: &str,
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
     ) -> Result<ContentKey, Error> {
         let member = members
@@ -1175,7 +1203,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(crate::crypto::unwrap_key(
             &member.wrapped_key,
             private_keys,
-            &crate::crypto::WrapContext::Keyring { uri: keyring_uri },
+            &crate::crypto::WrapContext::Keyring { uri: wrap_anchor },
         )?)
     }
 
@@ -1380,21 +1408,40 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Download a workspace document as a member (cross-PDS, first-time).
     ///
-    /// Uses the transport for unauthenticated public endpoint calls to the
-    /// document owner's PDS. Returns the download result plus the keyring
-    /// rkey and rotation for local caching.
+    /// The caller starts from only a document URI. We peek the document's
+    /// keyring reference to learn the workspace it belongs to, resolve that
+    /// workspace by walking its keyring chain to the current head (which is
+    /// where membership for anyone added by a supersede actually lives), then
+    /// download using the resolved group keys. Returns the plaintext plus the
+    /// keyring rkey and rotation so the caller can cache the group key for
+    /// subsequent downloads.
     pub async fn download_as_workspace_member(
         &mut self,
         document_uri: &str,
-    ) -> Result<crate::documents::KeyringDownloadResult, Error> {
-        let private_keys = self.private_keys_from_cache();
-        crate::documents::download_from_keyring_member(
+    ) -> Result<KeyringDownloadResult, Error> {
+        // Peek the keyring reference (stable workspace id) the document was
+        // encrypted against, then resolve that workspace at its current head.
+        let (workspace_id, _doc_rotation) =
+            crate::documents::fetch_document_keyring_ref(self.client.transport(), document_uri)
+                .await?;
+        let (head_uri, _head) = self.fetch_keyring_chain_head(&workspace_id).await?;
+        let ws = self.resolve_workspace_by_uri(&head_uri).await?;
+
+        let (filename, plaintext) = crate::documents::download_keyring_document(
             self.client.transport(),
-            &self.did,
-            &private_keys.bundle(),
+            ws.group_keys(),
             document_uri,
         )
-        .await
+        .await?;
+
+        let keyring_rkey = atproto::parse_at_uri(&workspace_id)?.rkey;
+        Ok(KeyringDownloadResult {
+            filename,
+            plaintext,
+            group_key: ws.key.clone(),
+            keyring_rkey,
+            rotation: ws.rotation,
+        })
     }
 
     // -- Identity resolution --
