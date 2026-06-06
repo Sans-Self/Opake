@@ -8,6 +8,10 @@ wasm_out := "packages/opake-sdk/wasm"
 registry := env("REGISTRY", "zot.sans-self.org")
 tag := `git rev-parse --short HEAD`
 
+# Indexer Postgres (docker compose). Override via env for other setups.
+db_container := env("OPAKE_DB_CONTAINER", "opake-db-1")
+db_name := env("OPAKE_DB_NAME", "opake_indexer_dev")
+
 # ---------------------------------------------------------------------------
 # Rust
 # ---------------------------------------------------------------------------
@@ -121,6 +125,11 @@ indexer-test:
 # Build indexer release
 indexer-release:
     cd apps/indexer && MIX_ENV=prod mix release
+
+# Set the indexer cursor to "now" so the next start skips replaying Jetstream from its earliest retained frame. Stop the running indexer first — it holds an in-memory cursor that overwrites manual writes on the next persist.
+indexer-cursor-now:
+    @echo "Stop the indexer first — a running process overwrites manual cursor writes on its next persist."
+    docker exec {{ db_container }} psql -U postgres -d {{ db_name }} -c "INSERT INTO cursor (id, time_us, updated_at) VALUES (1, (EXTRACT(EPOCH FROM NOW()) * 1000000)::bigint, NOW()) ON CONFLICT (id) DO UPDATE SET time_us = EXCLUDED.time_us, updated_at = EXCLUDED.updated_at;"
 
 # ---------------------------------------------------------------------------
 # E2E tests
