@@ -6,9 +6,16 @@ import type { DirectoryTreeSnapshot, DocumentMetadata } from "@opake/sdk";
 import type { FileItem } from "@/components/cabinet/types";
 import { mimeTypeToFileType, formatFileSize, formatRelativeDate } from "@/lib/format";
 
+// `keyringUri` is the current chain *head* — what SDK calls resolve against to
+// see the live keyring (members, metadata). `workspaceId` is the *stable*
+// genesis URI: it never changes across supersedes, so it's the canonical key
+// for routing (the `$rkey` route param) and for any persistent reference.
+// Deriving a route rkey from `keyringUri` breaks the moment the workspace
+// supersedes (add/remove member) — the head rkey diverges from the genesis the
+// routes match on.
 export type FileContext =
   | { readonly kind: "cabinet" }
-  | { readonly kind: "workspace"; readonly keyringUri: string };
+  | { readonly kind: "workspace"; readonly keyringUri: string; readonly workspaceId: string };
 
 /** Translate a FileContext into the keyringUri expected by @opake/react hooks. */
 export function keyringUriFor(context: FileContext): string | null {

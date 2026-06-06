@@ -68,7 +68,7 @@ function WorkspaceEditor() {
     <EditorView
       mode="edit"
       documentUri={uri}
-      context={{ kind: "workspace", keyringUri: workspace.headUri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri, workspaceId: workspace.workspaceId }}
       returnPath={returnPath}
       parentDirectoryUri={parentUri}
     />

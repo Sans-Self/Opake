@@ -27,7 +27,7 @@ function WorkspaceNewEditor() {
   return (
     <EditorView
       mode="new"
-      context={{ kind: "workspace", keyringUri: workspace.headUri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri, workspaceId: workspace.workspaceId }}
       returnPath={returnPath}
       directoryUri={directoryUri}
     />

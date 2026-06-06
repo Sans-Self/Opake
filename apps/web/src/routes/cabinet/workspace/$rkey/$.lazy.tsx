@@ -24,7 +24,7 @@ function WorkspaceFiles() {
       rootLabel={workspace.name || "Workspace"}
       pathSegments={dirSegments}
       fileSegment={fileSegment}
-      context={{ kind: "workspace", keyringUri: workspace.headUri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri, workspaceId: workspace.workspaceId }}
       basePath={`/cabinet/workspace/${rkey}`}
     />
   );

@@ -21,7 +21,7 @@ function WorkspaceIndex() {
       rootLabel={workspace.name || "Workspace"}
       pathSegments={[]}
       fileSegment={null}
-      context={{ kind: "workspace", keyringUri: workspace.headUri }}
+      context={{ kind: "workspace", keyringUri: workspace.headUri, workspaceId: workspace.workspaceId }}
       basePath={`/cabinet/workspace/${rkey}`}
     />
   );

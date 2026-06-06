@@ -420,7 +420,7 @@ export function FileView({
     (item: FileItem) => {
       const rkey = rkeyFromUri(item.uri);
       if (context.kind === "workspace") {
-        const wsRkey = rkeyFromUri(context.keyringUri);
+        const wsRkey = rkeyFromUri(context.workspaceId);
         void navigate({
           to: "/cabinet/workspace-editor/$rkey/$docRkey",
           params: { rkey: wsRkey, docRkey: rkey },
@@ -435,7 +435,7 @@ export function FileView({
   const handleNewNote = useCallback(() => {
     const search = currentDirectoryUri ? { directoryUri: currentDirectoryUri } : {};
     if (context.kind === "workspace") {
-      const wsRkey = rkeyFromUri(context.keyringUri);
+      const wsRkey = rkeyFromUri(context.workspaceId);
       void navigate({
         to: "/cabinet/workspace-editor/$rkey/new",
         params: { rkey: wsRkey },
@@ -916,7 +916,7 @@ export function FileView({
       {context.kind === "workspace" && (
         <Link
           to="/cabinet/workspace-settings/$rkey"
-          params={{ rkey: rkeyFromUri(context.keyringUri) }}
+          params={{ rkey: rkeyFromUri(context.workspaceId) }}
           className="btn btn-ghost btn-xs btn-square rounded-md"
           aria-label="Workspace settings"
         >
