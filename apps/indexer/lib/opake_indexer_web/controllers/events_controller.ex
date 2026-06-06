@@ -138,7 +138,7 @@ defmodule OpakeIndexerWeb.EventsController do
             sse_loop(conn, %{state | keepalive_timer: timer})
 
           {:error, _} ->
-            :ok
+            conn
         end
     end
   end
