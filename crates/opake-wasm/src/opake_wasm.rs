@@ -256,7 +256,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         let role = parse_role(role)?;
         let _outcome = opake
-            .add_workspace_member(keyring_uri, &ws.key, member_did, role)
+            .add_workspace_member(&ws.uri, &ws.key, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
@@ -288,7 +288,7 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
         let (_new_key, rotation) = opake
-            .remove_workspace_member(keyring_uri, &ws.key, member_did)
+            .remove_workspace_member(&ws.uri, &ws.key, member_did)
             .await
             .map_err(wasm_err)?;
 
@@ -318,7 +318,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         let _outcome = opake
             .update_workspace_metadata(
-                keyring_uri,
+                &ws.uri,
                 &ws.key,
                 name.as_deref(),
                 description.as_deref(),
@@ -340,8 +340,16 @@ impl WasmOpakeHandle {
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let role = parse_role(role)?;
+        // The web hands us the chain-head URI; the core role-change op keys
+        // the indexer chain-head lookup and the keyring wrap anchor on the
+        // stable genesis URI. `resolve_workspace_by_uri` walks head→genesis
+        // via `wrap_anchor`, so `ws.uri` is the genesis URI the op expects.
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let _outcome = opake
-            .update_member_role(keyring_uri, member_did, role)
+            .update_member_role(&ws.uri, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
