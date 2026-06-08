@@ -326,7 +326,7 @@ export function EditorView(props: EditorViewProps) {
 
   return (
     <>
-      <PanelShell depth={1} breadcrumbs={breadcrumbs} footer="End-to-end encrypted">
+      <PanelShell depth={2} breadcrumbs={breadcrumbs} footer="End-to-end encrypted">
         {error ? (
           <div className="flex flex-1 items-center justify-center p-8">
             <div className="bg-error/10 text-error rounded-lg px-4 py-3 text-sm font-medium">
