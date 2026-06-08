@@ -1010,10 +1010,15 @@ export function FileView({
         ? pathSegments
         : [];
 
+  // Filing-cabinet depth cue: the root directory is panel 1, each nested
+  // folder stacks one ghost panel behind it. The file leaf (fileSegment)
+  // opens as a side panel, not a deeper level, so it doesn't count.
+  const panelDepth = pathSegments.length + 1;
+
   return (
     <TreeSnapshotProvider value={snapshot}>
       <PanelShell
-        depth={1}
+        depth={panelDepth}
         breadcrumbs={breadcrumbs}
         toolbar={isNotFound ? undefined : toolbar}
         footer={footerText}
