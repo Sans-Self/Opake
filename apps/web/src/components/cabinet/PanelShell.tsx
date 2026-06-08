@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ShieldCheckIcon } from "@phosphor-icons/react";
+import { BuildStamp } from "./BuildStamp";
 
 interface PanelShellProps {
   readonly depth: number;
@@ -42,11 +43,16 @@ export function PanelShell({
 
       {/* Panel footer */}
       <div className="border-base-300/50 bg-base-100/60 flex shrink-0 items-center gap-2 border-t px-4 py-2.25">
-        <ShieldCheckIcon size={11} className="text-primary" />
-        <span className="text-caption text-text-faint">{footer}</span>
-        <div className="flex-1" />
+        <ShieldCheckIcon size={11} className="text-primary shrink-0" />
+        <span className="text-caption text-text-faint shrink-0">{footer}</span>
+        <span className="text-text-faint/30 shrink-0" aria-hidden>
+          ·
+        </span>
+        <BuildStamp className="min-w-0 flex-1 truncate" />
         {depth > 1 && (
-          <span className="font-display text-ui text-text-faint italic">{depth} panels deep</span>
+          <span className="font-display text-ui text-text-faint shrink-0 italic">
+            {depth} panels deep
+          </span>
         )}
       </div>
     </div>
