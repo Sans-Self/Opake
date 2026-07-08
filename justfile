@@ -110,6 +110,10 @@ web-lint:
 web-typecheck:
     cd apps/web && bun run tsc --noEmit
 
+# Check that spec citations (paths, bug__ tests, commit hashes) still resolve
+spec-lint:
+    python3 scripts/spec_lint.py
+
 # ---------------------------------------------------------------------------
 # Elixir indexer
 # ---------------------------------------------------------------------------
@@ -147,7 +151,7 @@ e2e: e2e-cli
 # ---------------------------------------------------------------------------
 
 # Run all checks (CI equivalent)
-validate: fmt clippy rust-test sdk web-lint web-typecheck web-build indexer-test
+validate: fmt clippy rust-test sdk web-lint web-typecheck web-build indexer-test spec-lint
 
 # Run all tests (Rust + SDK + web + indexer)
 test: rust-test sdk-test web-test indexer-test
