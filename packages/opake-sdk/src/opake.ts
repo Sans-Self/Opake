@@ -665,8 +665,8 @@ export class Opake {
   /** Leave a workspace you're a member of. */
   @wrapWasmErrors
   @withTokenGuard
-  leaveWorkspace(keyringUri: string): Promise<string> {
-    return this.requireContext().leaveWorkspace(keyringUri);
+  leaveWorkspace(keyringUri: string): Promise<MutationResult> {
+    return this.requireContext().leaveWorkspace(keyringUri) as Promise<MutationResult>;
   }
 
   /**

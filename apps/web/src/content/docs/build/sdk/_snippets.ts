@@ -527,10 +527,10 @@ const { rotation } = await opake.removeWorkspaceMember(keyringUri, memberDid);
 // removed member doesn't have.
 console.log("Rotated to", rotation);`;
 
-export const leaveWorkspace = `// Opt out of a workspace you're a member of (not the owner of).
-// Self-removal currently requires manager authority — design call
-// pending on whether viewers/editors can self-remove (would violate
-// the editor-additivity invariant).
+export const leaveWorkspace = `// Opt out of a workspace you're a member of. Any role can leave —
+// the supersede is valid iff the only change is dropping yourself.
+// Guards: the last member can't leave (that would orphan the
+// workspace), and the only manager must promote someone first.
 await opake.leaveWorkspace(keyringUri);`;
 
 export const mutationResultHandling = `// Every write returns MutationResult:

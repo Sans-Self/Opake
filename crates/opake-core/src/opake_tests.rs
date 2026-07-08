@@ -474,4 +474,148 @@ mod keyring_supersede {
         }
     }
 
+    const CAROL_DID: &str = "did:plc:carol";
+
+    /// Happy path for `leave_workspace`: an editor authors a self-removal
+    /// supersede. No rotation — the leaver would have to mint the new
+    /// group key, which buys nothing — so the remaining members' wraps,
+    /// the rotation counter, and the key history all carry verbatim.
+    #[tokio::test]
+    async fn leave_workspace_writes_self_removal_supersede() {
+        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+
+        let prior = as_supersede(keyring_with_members(vec![
+            (ALICE_DID, Role::Manager),
+            (BOB_DID, Role::Editor),
+            (CAROL_DID, Role::Viewer),
+        ]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
+
+        let mock = MockTransport::new();
+        mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+        let new_uri = format!("at://{BOB_DID}/app.opake.keyring/3leave");
+        mock.enqueue(create_record_response(&new_uri, "bafyleave"));
+
+        let mut opake = opake_for(BOB_DID, mock.clone());
+        let outcome = opake
+            .leave_workspace(&WorkspaceId::from_resolved(WORKSPACE_ID))
+            .await
+            .unwrap();
+        assert!(outcome.is_applied());
+
+        let reqs = mock.requests();
+        let create = reqs
+            .iter()
+            .find(|r| r.url.contains("createRecord"))
+            .expect("createRecord");
+        match &create.body {
+            Some(RequestBody::Json(v)) => {
+                assert_eq!(v["collection"], "app.opake.keyring");
+                let written: Keyring =
+                    serde_json::from_value(v["record"].clone()).expect("record body");
+                assert_eq!(written.supersedes.as_deref(), Some(prior_head_uri.as_str()));
+                assert_eq!(written.workspace_id.as_deref(), Some(WORKSPACE_ID));
+                // Bob gone, alice + carol carried verbatim with roles intact.
+                assert_eq!(written.members.len(), 2);
+                assert!(written.members.iter().all(|m| m.did() != BOB_DID));
+                let alice = written
+                    .members
+                    .iter()
+                    .find(|m| m.did() == ALICE_DID)
+                    .unwrap();
+                assert!(matches!(alice.role, Role::Manager));
+                let carol = written
+                    .members
+                    .iter()
+                    .find(|m| m.did() == CAROL_DID)
+                    .unwrap();
+                assert!(matches!(carol.role, Role::Viewer));
+                // No rotation on leave.
+                assert_eq!(written.rotation, prior.rotation);
+                assert_eq!(written.key_history.len(), prior.key_history.len());
+            }
+            _ => panic!("expected JSON body"),
+        }
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_rejects_non_member() {
+        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+
+        let prior = as_supersede(keyring_with_members(vec![
+            (ALICE_DID, Role::Manager),
+            (BOB_DID, Role::Editor),
+        ]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
+
+        let mock = MockTransport::new();
+        mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+
+        let mut opake = opake_for(CAROL_DID, mock);
+        let err = opake
+            .leave_workspace(&WorkspaceId::from_resolved(WORKSPACE_ID))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not a member"),
+            "expected not-a-member error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_rejects_last_member() {
+        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+
+        let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
+
+        let mock = MockTransport::new();
+        mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+
+        let mut opake = opake_for(ALICE_DID, mock);
+        let err = opake
+            .leave_workspace(&WorkspaceId::from_resolved(WORKSPACE_ID))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("last member"),
+            "expected last-member error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn leave_workspace_rejects_only_manager() {
+        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+
+        let prior = as_supersede(keyring_with_members(vec![
+            (ALICE_DID, Role::Manager),
+            (BOB_DID, Role::Editor),
+        ]));
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
+
+        let mock = MockTransport::new();
+        mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+
+        let mut opake = opake_for(ALICE_DID, mock);
+        let err = opake
+            .leave_workspace(&WorkspaceId::from_resolved(WORKSPACE_ID))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("only manager"),
+            "expected only-manager error, got: {err}"
+        );
+    }
 }

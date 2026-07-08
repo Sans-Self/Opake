@@ -4,9 +4,15 @@ defmodule OpakeIndexer.Authority do
 
   Two authority models, one per chain type:
 
-    * **Keyrings** — manager-only. A keyring supersede is valid iff the
-      author is a manager of the workspace per the current head keyring's
-      member list. For first-fault simplicity we use the current view;
+    * **Keyrings** — manager-only, with one exception: self-removal. A
+      keyring supersede is valid iff the author is a manager of the
+      workspace per the current head keyring's member list, OR the author
+      is a non-manager member and the supersede is a pure *leave*: the
+      new member list is exactly the prior list minus the author, with
+      every remaining member's role unchanged. Anything else a
+      non-manager writes — adding members, dropping someone else,
+      re-roling, smuggling changes alongside the self-removal — is
+      rejected. For first-fault simplicity we use the current view;
       cross-chain time-travel verification is deferred.
 
     * **Directories** — manager-or-better OR editor-with-additivity. A
@@ -66,20 +72,57 @@ defmodule OpakeIndexer.Authority do
 
   @doc """
   Validate a keyring supersede. The author must currently be a manager
-  of the workspace. Genesis records (no prior head) skip the check.
-  """
-  @spec check_keyring_supersede(String.t(), String.t() | nil, String.t()) :: result()
-  def check_keyring_supersede(_workspace_id, nil, _author_did), do: :ok
+  of the workspace, or a non-manager member authoring a pure self-removal
+  (see the moduledoc). Genesis records (no prior head) skip the check.
 
-  def check_keyring_supersede(workspace_id, _prior_uri, author_did) do
+  `new_members` is the list parsed straight from `record_jsonb["members"]`
+  — each entry has `"wrappedKey" => %{"did" => did}` and `"role"`.
+  """
+  @spec check_keyring_supersede(String.t(), String.t() | nil, String.t(), [map()]) :: result()
+  def check_keyring_supersede(_workspace_id, nil, _author_did, _new_members), do: :ok
+
+  def check_keyring_supersede(workspace_id, _prior_uri, author_did, new_members) do
     case classify_role(RecordQueries.member_role(workspace_id, author_did),
            workspace_id: workspace_id
          ) do
-      :manager -> :ok
-      :missing -> {:rejected, :not_a_member}
-      _ -> {:rejected, :insufficient_role}
+      :manager ->
+        :ok
+
+      :missing ->
+        {:rejected, :not_a_member}
+
+      _ ->
+        if pure_self_removal?(workspace_id, author_did, new_members) do
+          :ok
+        else
+          {:rejected, :insufficient_role}
+        end
     end
   end
+
+  # A non-manager supersede is a valid leave iff the new member list is
+  # exactly the head's list minus the author: author absent, nobody else
+  # added or dropped, every remaining role unchanged. Compared on
+  # {did, role} pairs — wrapped-key bytes may legitimately differ.
+  defp pure_self_removal?(workspace_id, author_did, new_members) do
+    case RecordQueries.head_member_roles(workspace_id) do
+      nil ->
+        false
+
+      prior_roles ->
+        expected = Map.delete(prior_roles, author_did)
+        member_roles(new_members) == expected
+    end
+  end
+
+  defp member_roles(members) when is_list(members) do
+    Map.new(members, fn
+      %{"wrappedKey" => %{"did" => did}, "role" => role} -> {did, role}
+      _ -> {nil, nil}
+    end)
+  end
+
+  defp member_roles(_), do: %{}
 
   # -- Directory authority --
 

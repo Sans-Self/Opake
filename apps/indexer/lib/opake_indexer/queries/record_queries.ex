@@ -154,6 +154,27 @@ defmodule OpakeIndexer.Queries.RecordQueries do
     not is_nil(member_role(workspace_id, did))
   end
 
+  @doc """
+  The `did => role` map of the current head keyring's members, or `nil`
+  if no keyring has been indexed for the workspace.
+  """
+  @spec head_member_roles(String.t()) :: %{String.t() => String.t()} | nil
+  def head_member_roles(workspace_id) do
+    case workspace_keyring_head(workspace_id) do
+      nil ->
+        nil
+
+      %RecordSchema{record_jsonb: %{"members" => members}} when is_list(members) ->
+        Map.new(members, fn
+          %{"wrappedKey" => %{"did" => did}, "role" => role} -> {did, role}
+          _ -> {nil, nil}
+        end)
+
+      %RecordSchema{} ->
+        %{}
+    end
+  end
+
   defp extract_member_role(%{"members" => members}, did) when is_list(members) do
     Enum.find_value(members, fn
       %{"wrappedKey" => %{"did" => ^did}, "role" => role} -> role

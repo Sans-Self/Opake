@@ -267,13 +267,14 @@ impl WasmOpakeHandle {
     /// JS-supplied URI is always the head (see workspace-identity spec,
     /// "the WASM boundary resolves to genesis before core operations").
     #[wasm_bindgen(js_name = leaveWorkspace)]
-    pub async fn leave_workspace(&self, keyring_uri: &str) -> Result<String, JsError> {
+    pub async fn leave_workspace(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let ws = opake
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        opake.leave_workspace(&ws.id()).await.map_err(wasm_err)
+        let _outcome = opake.leave_workspace(&ws.id()).await.map_err(wasm_err)?;
+        to_js(&MutationResultDto { uri: None })
     }
 
     /// Remove a member from a workspace. Resolves the keyring + group key

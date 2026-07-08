@@ -158,4 +158,68 @@ defmodule OpakeIndexer.AuthorityDbTest do
              ]) == {:rejected, :not_a_member}
     end
   end
+
+  # Head members are alice (manager), bob (editor), carol (viewer) — see setup.
+  defp member(did, role), do: %{"wrappedKey" => %{"did" => did}, "role" => role}
+
+  describe "check_keyring_supersede/4 — self-removal (leave)" do
+    test "genesis (no prior) skips the check" do
+      assert Authority.check_keyring_supersede(@workspace_id, nil, "did:plc:anyone", []) == :ok
+    end
+
+    test "manager supersede passes regardless of member changes" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, "did:plc:alice", [
+               member("did:plc:alice", "manager")
+             ]) == :ok
+    end
+
+    test "editor leaving passes: prior list minus exactly themselves" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               member("did:plc:alice", "manager"),
+               member(@viewer_did, "viewer")
+             ]) == :ok
+    end
+
+    test "viewer leaving passes" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @viewer_did, [
+               member("did:plc:alice", "manager"),
+               member(@editor_did, "editor")
+             ]) == :ok
+    end
+
+    test "editor dropping someone else alongside themselves is rejected" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               member("did:plc:alice", "manager")
+             ]) == {:rejected, :insufficient_role}
+    end
+
+    test "editor re-roling a remaining member while leaving is rejected" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               member("did:plc:alice", "manager"),
+               member(@viewer_did, "editor")
+             ]) == {:rejected, :insufficient_role}
+    end
+
+    test "editor adding a member while leaving is rejected" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               member("did:plc:alice", "manager"),
+               member(@viewer_did, "viewer"),
+               member("did:plc:mallory", "editor")
+             ]) == {:rejected, :insufficient_role}
+    end
+
+    test "editor supersede that keeps themselves is rejected" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               member("did:plc:alice", "manager"),
+               member(@editor_did, "editor"),
+               member(@viewer_did, "viewer")
+             ]) == {:rejected, :insufficient_role}
+    end
+
+    test "non-member is rejected" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, "did:plc:stranger", [
+               member("did:plc:alice", "manager")
+             ]) == {:rejected, :not_a_member}
+    end
+  end
 end

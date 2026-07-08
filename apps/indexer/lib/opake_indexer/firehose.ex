@@ -161,7 +161,13 @@ defmodule OpakeIndexer.Firehose do
         "[Indexer] keyring upsert: #{attrs.uri} workspace=#{workspace_id} supersedes=#{inspect(prior_uri)}"
       )
 
-      with :ok <- Authority.check_keyring_supersede(workspace_id, prior_uri, attrs.author_did),
+      with :ok <-
+             Authority.check_keyring_supersede(
+               workspace_id,
+               prior_uri,
+               attrs.author_did,
+               attrs.record_jsonb["members"] || []
+             ),
            {:ok, _} <- upsert_record(attrs, now) do
         chain_outcome = advance_or_create_chain(
           "keyring",

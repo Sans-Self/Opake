@@ -888,17 +888,75 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .await
     }
 
-    /// Leave a workspace.
+    /// Leave a workspace via self-removal keyring supersede.
     ///
-    /// Pre-federation this wrote a `keyringUpdate.leave` record that the
-    /// owner's daemon processed. The federation rewrite replaces this with
-    /// a manager-authority supersede that drops the leaving member; pending
-    /// that wiring, this path errors out.
-    pub async fn leave_workspace(&mut self, workspace_id: &WorkspaceId) -> Result<String, Error> {
-        let _ = workspace_id;
-        Err(Error::Unimplemented(
-            "workspace leave (keyring supersede)".into(),
-        ))
+    /// Any member can author, not just managers — the indexer's keyring
+    /// authority admits a non-manager supersede iff the only membership
+    /// change is the author dropping themselves, with the remaining
+    /// members' roles and wraps carried verbatim.
+    ///
+    /// Deliberately no key rotation. The leaver would have to mint the
+    /// new group key themselves, so rotating here buys no forward
+    /// secrecy — the leaver knows whatever key they wrap. Leave is
+    /// cooperative departure; forward secrecy against the departed
+    /// arrives with the next manager-authored rotation
+    /// (`remove_workspace_member` covers the uncooperative case).
+    pub async fn leave_workspace(
+        &mut self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<MutationOutcome, Error> {
+        use crate::records::KeyringMember;
+
+        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+
+        if !prior.members.iter().any(|m| m.did() == self.did) {
+            return Err(Error::InvalidRecord(format!(
+                "{} is not a member of this workspace",
+                self.did
+            )));
+        }
+        if prior.members.len() == 1 {
+            return Err(Error::InvalidRecord(
+                "cannot leave as the last member — workspace destruction is not supported".into(),
+            ));
+        }
+        let self_is_manager = prior
+            .members
+            .iter()
+            .any(|m| m.did() == self.did && matches!(m.role, Role::Manager));
+        let manager_count = prior
+            .members
+            .iter()
+            .filter(|m| matches!(m.role, Role::Manager))
+            .count();
+        if self_is_manager && manager_count == 1 {
+            return Err(Error::InvalidRecord(
+                "cannot leave as the only manager — promote another member first".into(),
+            ));
+        }
+
+        let remaining: Vec<KeyringMember> = prior
+            .members
+            .iter()
+            .filter(|m| m.did() != self.did)
+            .cloned()
+            .collect();
+
+        let new_record = crate::records::Keyring {
+            opake_version: prior.opake_version,
+            algo: prior.algo.clone(),
+            members: remaining,
+            rotation: prior.rotation,
+            key_history: prior.key_history.clone(),
+            encrypted_metadata: prior.encrypted_metadata.clone(),
+            supersedes: None,   // filled by write_keyring_supersede
+            workspace_id: None, // filled by write_keyring_supersede
+            created_at: String::new(),
+            modified_at: None,
+        };
+
+        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+            .await
     }
 
     /// Remove a member from a workspace via curatorial keyring supersede.
