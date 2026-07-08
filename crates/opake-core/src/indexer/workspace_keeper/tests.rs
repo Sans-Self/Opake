@@ -401,6 +401,54 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
     );
 }
 
+/// Regression: a member-removal supersede delivers an envelope whose URI is
+/// the *new head*, while keeper entries are keyed by the genesis workspace
+/// id. The wasm dispatch used to key the resulting delete on the envelope
+/// URI, so it no-op'd — the removed member's sidebar kept a workspace they
+/// could no longer decrypt until the next full bootstrap. The apply must be
+/// keyed on `envelope.workspace_id()` (genesis) for the entry to drop.
+#[test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
+    use crate::crypto::OsRng;
+    use crate::test_utils::TestKeys;
+
+    let mut rng: OsRng = OsRng;
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let head = "at://did:plc:alice/app.opake.keyring/head2";
+    let alice = TestKeys::generate("did:plc:alice");
+
+    // Bob's keeper tracks the workspace under its genesis id.
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(genesis, 0)]);
+
+    // Removal supersede: fresh head record whose member list holds only
+    // alice — exactly what bob receives before the server unsubscribes him.
+    let envelope = make_superseded_envelope_with_name(
+        head,
+        genesis,
+        "did:plc:alice",
+        "Shared Space",
+        &alice,
+        &mut rng,
+    );
+
+    let bob = TestKeys::generate("did:plc:bob");
+    let entry = try_build_entry(&envelope, "did:plc:bob", &bob.private_keys());
+    assert!(entry.is_none(), "removed member must not build an entry");
+
+    // The dispatch contract: the apply is keyed on the derived genesis
+    // identity, never the envelope (head) URI.
+    assert_eq!(envelope.workspace_id(), genesis);
+    keeper.apply_keyring_record(envelope.workspace_id(), entry);
+
+    assert_eq!(
+        keeper.entry_count(),
+        0,
+        "workspace must drop from the removed member's sidebar"
+    );
+}
+
 /// DID absent from member list → None → keeper deletes the workspace.
 #[test]
 fn try_build_entry_non_member_returns_none() {

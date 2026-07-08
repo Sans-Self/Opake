@@ -278,7 +278,7 @@ pub fn try_build_entry(
 ) -> Option<WorkspaceEntry> {
     let keyring = &envelope.record;
     let head_uri = envelope.uri.as_str();
-    let workspace_id = keyring.workspace_id.as_deref().unwrap_or(head_uri);
+    let workspace_id = envelope.workspace_id();
 
     // Locate our member entry. If not found, we're not a member.
     let my_member = keyring.members.iter().find(|m| m.did() == my_did)?;
