@@ -136,6 +136,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         now: &str,
     ) -> Result<UploadResult, Error> {
         let workspace_uri = ws.uri.clone();
+        let workspace_id = ws.id();
         let chain_heads = {
             let url = self.opake.resolve_indexer_url();
             let signing_key = self.opake.require_signing_key()?;
@@ -145,7 +146,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 did: &self.opake.did,
                 signing_key: &signing_key,
             };
-            provider.workspace_chain_heads(&workspace_uri).await?
+            provider.workspace_chain_heads(&workspace_id).await?
         };
 
         // 1. Write the new directory record.
@@ -367,8 +368,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         parent_uri: &str,
         now: &str,
     ) -> Result<MutationOutcome, Error> {
-        let workspace_uri = match &self.context {
-            FileContext::Workspace(ws) => ws.uri.clone(),
+        let (workspace_uri, workspace_id) = match &self.context {
+            FileContext::Workspace(ws) => (ws.uri.clone(), ws.id()),
             _ => unreachable!(),
         };
 
@@ -381,7 +382,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 did: &self.opake.did,
                 signing_key: &signing_key,
             };
-            provider.workspace_chain_heads(&workspace_uri).await?
+            provider.workspace_chain_heads(&workspace_id).await?
         };
 
         let root_head = chain_heads.root_directory.as_ref().ok_or_else(|| {

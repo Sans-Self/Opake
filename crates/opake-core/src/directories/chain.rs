@@ -100,7 +100,7 @@ pub trait ChainHeadProvider {
     /// runs.
     async fn workspace_chain_heads(
         &self,
-        workspace_id: &str,
+        workspace_id: &crate::workspace::WorkspaceId,
     ) -> Result<WorkspaceChainHeads, Error>;
 }
 

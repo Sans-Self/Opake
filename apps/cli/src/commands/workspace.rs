@@ -176,7 +176,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
     let resolved = resolve::resolve_identity(&transport, &ctx.pds_url, &args.member).await?;
 
     opake
-        .add_workspace_member(&workspace.uri, &workspace.key, &resolved.did, args.role)
+        .add_workspace_member(&workspace.id(), &workspace.key, &resolved.did, args.role)
         .await?;
 
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
@@ -193,7 +193,7 @@ async fn leave(ctx: &CommandContext, args: LeaveArgs) -> Result<Option<Session>>
         return Ok(None);
     }
 
-    opake.leave_workspace(&workspace.uri).await?;
+    opake.leave_workspace(&workspace.id()).await?;
     println!("left {}", args.workspace);
     Ok(None)
 }

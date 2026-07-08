@@ -125,9 +125,7 @@ fn workspace_admin_preserves_workspace() {
 mod keyring_supersede {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
-    use crate::records::{
-        AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION,
-    };
+    use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::dummy_encrypted_metadata;
 
     const ALICE_DID: &str = "did:plc:alice";
@@ -288,7 +286,11 @@ mod keyring_supersede {
 
         let mut opake = opake_for(ALICE_DID, mock.clone());
         let outcome = opake
-            .update_member_role(WORKSPACE_ID, BOB_DID, Role::Manager)
+            .update_member_role(
+                &WorkspaceId::from_resolved(WORKSPACE_ID),
+                BOB_DID,
+                Role::Manager,
+            )
             .await
             .unwrap();
         assert!(outcome.is_applied());
@@ -307,11 +309,7 @@ mod keyring_supersede {
                 assert_eq!(written.workspace_id.as_deref(), Some(WORKSPACE_ID));
                 assert_eq!(written.members.len(), 2);
                 // Bob promoted from Editor to Manager.
-                let bob = written
-                    .members
-                    .iter()
-                    .find(|m| m.did() == BOB_DID)
-                    .unwrap();
+                let bob = written.members.iter().find(|m| m.did() == BOB_DID).unwrap();
                 assert!(matches!(bob.role, Role::Manager));
                 // Alice's role unchanged.
                 let alice = written
@@ -347,7 +345,11 @@ mod keyring_supersede {
         // Bob (editor, not manager) attempts to promote himself.
         let mut opake = opake_for(BOB_DID, mock);
         let err = opake
-            .update_member_role(WORKSPACE_ID, BOB_DID, Role::Manager)
+            .update_member_role(
+                &WorkspaceId::from_resolved(WORKSPACE_ID),
+                BOB_DID,
+                Role::Manager,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -373,7 +375,11 @@ mod keyring_supersede {
 
         let mut opake = opake_for(ALICE_DID, mock);
         let err = opake
-            .update_member_role(WORKSPACE_ID, "did:plc:ghost", Role::Editor)
+            .update_member_role(
+                &WorkspaceId::from_resolved(WORKSPACE_ID),
+                "did:plc:ghost",
+                Role::Editor,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -381,4 +387,91 @@ mod keyring_supersede {
             "expected InvalidRecord, got {err:?}"
         );
     }
+
+    /// Regression: `sync_workspace_by_uri` used to take a bare `&str` and
+    /// compare it directly against each envelope's derived genesis. A
+    /// caller holding a head URI post-supersede (what the WASM binding
+    /// gets from JS) could pass it straight through and silently get
+    /// `None` back — the workspace was never "not found," just queried
+    /// under the wrong URI kind. Typing the parameter as `WorkspaceId`
+    /// forces resolution first; this proves the lookup still matches an
+    /// envelope whose own indexed URI (the head) differs from the
+    /// genesis id being queried.
+    ///
+    /// See workspace-identity spec, "sync-by-URI accepts what its caller
+    /// holds" (audit finding 4).
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__sync_workspace_by_uri_matches_envelope_by_derived_genesis() {
+        let head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3head");
+        let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
+
+        let workspaces_response = serde_json::json!({
+            "workspaces": [{
+                "uri": head_uri,
+                "record": prior,
+                "indexedAt": "2026-03-01T00:00:00Z",
+            }]
+        });
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&workspaces_response).unwrap(),
+        });
+
+        // Bob isn't a member of `prior` — the group-key unwrap fails, but
+        // that's a *found-but-undecryptable* result (`Some` with an
+        // `error` field), never `None`. `None` only happens when no
+        // envelope's derived genesis matches the query, which is exactly
+        // the bug this guards against.
+        let mut opake = opake_for(BOB_DID, mock);
+        let result = opake
+            .sync_workspace_by_uri(&WorkspaceId::from_resolved(WORKSPACE_ID))
+            .await
+            .unwrap();
+
+        let result = result.expect("head-keyed envelope must match a genesis-keyed query");
+        assert_eq!(result.keyring_uri, head_uri);
+    }
+
+    /// Regression: `create_invitation` used to store the caller-supplied
+    /// URI verbatim as the invitation target. The WASM binding receives a
+    /// head URI from JS, so an invitation created right before a
+    /// supersede would point at a keyring record that's no longer the
+    /// chain head. Typing the parameter as `WorkspaceId` forces the
+    /// caller to resolve first, so the stored target is always the
+    /// stable genesis id.
+    ///
+    /// See workspace-identity spec, "invitation target survives
+    /// membership churn" (audit finding 3).
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__create_invitation_stores_genesis_target() {
+        let mock = MockTransport::new();
+        let invitation_uri = format!("at://{ALICE_DID}/app.opake.invitation/inv1");
+        mock.enqueue(create_record_response(&invitation_uri, "bafyinv"));
+
+        let mut opake = opake_for(ALICE_DID, mock.clone());
+        let (uri, _token) = opake
+            .create_invitation(&WorkspaceId::from_resolved(WORKSPACE_ID), "editor")
+            .await
+            .unwrap();
+        assert_eq!(uri, invitation_uri);
+
+        let reqs = mock.requests();
+        let create = reqs
+            .iter()
+            .find(|r| r.url.contains("createRecord"))
+            .expect("createRecord");
+        match &create.body {
+            Some(RequestBody::Json(v)) => {
+                let written: crate::records::Invitation =
+                    serde_json::from_value(v["record"].clone()).expect("record body");
+                assert_eq!(written.target, WORKSPACE_ID);
+            }
+            _ => panic!("expected JSON body"),
+        }
+    }
+
 }

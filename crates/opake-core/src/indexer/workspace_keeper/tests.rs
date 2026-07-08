@@ -439,8 +439,8 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
 
     // The dispatch contract: the apply is keyed on the derived genesis
     // identity, never the envelope (head) URI.
-    assert_eq!(envelope.workspace_id(), genesis);
-    keeper.apply_keyring_record(envelope.workspace_id(), entry);
+    assert_eq!(envelope.workspace_id().as_str(), genesis);
+    keeper.apply_keyring_record(envelope.workspace_id().as_str(), entry);
 
     assert_eq!(
         keeper.entry_count(),

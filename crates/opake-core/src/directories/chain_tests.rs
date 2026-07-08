@@ -725,16 +725,23 @@ struct MapChainHeadProvider {
 impl ChainHeadProvider for MapChainHeadProvider {
     async fn workspace_chain_heads(
         &self,
-        workspace_id: &str,
+        workspace_id: &crate::workspace::WorkspaceId,
     ) -> Result<WorkspaceChainHeads, Error> {
-        Ok(self.heads.get(workspace_id).cloned().unwrap_or_default())
+        Ok(self
+            .heads
+            .get(workspace_id.as_str())
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
 #[tokio::test]
 async fn chain_head_provider_returns_empty_for_unknown_workspace() {
     let provider = MapChainHeadProvider::default();
-    let heads = provider.workspace_chain_heads("ws-missing").await.unwrap();
+    let heads = provider
+        .workspace_chain_heads(&crate::workspace::WorkspaceId::from_resolved("ws-missing"))
+        .await
+        .unwrap();
     assert!(heads.keyring.is_none());
     assert!(heads.root_directory.is_none());
 }
@@ -757,7 +764,10 @@ async fn chain_head_provider_returns_known_heads() {
     );
     let provider = MapChainHeadProvider { heads };
 
-    let result = provider.workspace_chain_heads("ws-1").await.unwrap();
+    let result = provider
+        .workspace_chain_heads(&crate::workspace::WorkspaceId::from_resolved("ws-1"))
+        .await
+        .unwrap();
     assert_eq!(result.keyring.as_ref().unwrap().uri, URI_HEAD);
     assert_eq!(result.root_directory.as_ref().unwrap().cid, "bafyroot");
 }
@@ -778,7 +788,10 @@ async fn chain_head_provider_handles_partial_population() {
     );
     let provider = MapChainHeadProvider { heads };
 
-    let result = provider.workspace_chain_heads("ws-fresh").await.unwrap();
+    let result = provider
+        .workspace_chain_heads(&crate::workspace::WorkspaceId::from_resolved("ws-fresh"))
+        .await
+        .unwrap();
     assert!(result.keyring.is_some());
     assert!(result.root_directory.is_none());
 }

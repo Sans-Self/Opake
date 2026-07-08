@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::records::{Directory, Document, Grant, Keyring};
+use crate::workspace::WorkspaceId;
 
 /// Indexer envelope. Carries the verbatim on-PDS record JSON plus
 /// indexer-managed metadata as siblings. `T` is the record type
@@ -52,8 +53,8 @@ impl IndexerEnvelope<Keyring> {
     /// head — never use it to key workspace-scoped state, or every event
     /// on a superseded chain silently misses (see `Keyring::wrap_anchor`,
     /// the crypto-side twin of this resolution).
-    pub fn workspace_id(&self) -> &str {
-        self.record.wrap_anchor(&self.uri)
+    pub fn workspace_id(&self) -> WorkspaceId {
+        WorkspaceId::from_resolved(self.record.wrap_anchor(&self.uri))
     }
 }
 

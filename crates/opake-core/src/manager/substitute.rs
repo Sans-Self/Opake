@@ -48,8 +48,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         new_cid: &str,
         now: &str,
     ) -> Result<(), Error> {
-        let workspace_uri = match &self.context {
-            FileContext::Workspace(ws) => ws.uri.clone(),
+        let (workspace_uri, workspace_id) = match &self.context {
+            FileContext::Workspace(ws) => (ws.uri.clone(), ws.id()),
             FileContext::Cabinet(_) => {
                 return Err(Error::InvalidRecord(
                     "substitute cascade is a workspace operation; cabinet records edit in place"
@@ -58,7 +58,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
-        let chain_heads = self.fetch_workspace_chain_heads(&workspace_uri).await?;
+        let chain_heads = self.fetch_workspace_chain_heads(&workspace_id).await?;
         let root_head = chain_heads
             .root_directory
             .ok_or_else(|| Error::NotFound("workspace root not indexed yet".into()))?;

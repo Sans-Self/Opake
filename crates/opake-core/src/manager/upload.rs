@@ -140,7 +140,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             unreachable!()
         };
         let workspace_uri = ws.uri.clone();
-        let chain_heads = self.fetch_workspace_chain_heads(&workspace_uri).await?;
+        let workspace_id = ws.id();
+        let chain_heads = self.fetch_workspace_chain_heads(&workspace_id).await?;
 
         // Three cases keyed on (target, indexed-root):
         //   1. No target + no root           → genesis cascade at ws-{rkey}
@@ -260,7 +261,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// can hold references for the duration of the lookup.
     pub(crate) async fn fetch_workspace_chain_heads(
         &self,
-        workspace_id: &str,
+        workspace_id: &crate::workspace::WorkspaceId,
     ) -> Result<WorkspaceChainHeads, Error> {
         let url = self.opake.resolve_indexer_url();
         let signing_key = self.opake.require_signing_key()?;

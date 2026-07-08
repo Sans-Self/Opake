@@ -495,7 +495,7 @@ impl WasmOpakeHandle {
                     let resync_uri = match &event {
                         SseEvent::KeyringUpsert(envelope) => {
                             let uri = envelope.workspace_id();
-                            match keeper.workspace_rotation(uri) {
+                            match keeper.workspace_rotation(uri.as_str()) {
                                 Some(held) if envelope.record.rotation > held => {
                                     Some(uri.to_string())
                                 }
@@ -980,7 +980,7 @@ async fn apply_keyring_to_workspace_keeper(
             // and a delete keyed by it would no-op against the genesis-keyed
             // entry — the removed member's sidebar keeps a workspace they
             // can no longer decrypt.
-            keeper.apply_keyring_record(envelope.workspace_id(), maybe_entry);
+            keeper.apply_keyring_record(envelope.workspace_id().as_str(), maybe_entry);
         }
         SseEvent::KeyringDelete(payload) => {
             if gate.borrow_mut().capture_if_active(event) {

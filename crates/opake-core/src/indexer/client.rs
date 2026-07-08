@@ -13,6 +13,7 @@ use crate::indexer::types::{
     IndexerEnvelope, InboxResponse, TreeDelta, WorkspaceChainHeadResponse, WorkspacesResponse,
 };
 use crate::records::{Grant, Keyring};
+use crate::workspace::WorkspaceId;
 
 /// Check an indexer JSON response for errors.
 fn check_indexer_response(status: u16, body: &[u8]) -> Result<(), Error> {
@@ -224,9 +225,9 @@ pub async fn fetch_workspace_snapshot(
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    workspace_id: &str,
+    workspace_id: &WorkspaceId,
 ) -> Result<TreeDelta, Error> {
-    let query = format!("workspace_id={workspace_id}");
+    let query = format!("workspace_id={}", workspace_id.as_str());
     let body = indexer_get(
         transport,
         indexer_url,
@@ -247,10 +248,10 @@ pub async fn fetch_workspace_sync(
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    workspace_id: &str,
+    workspace_id: &WorkspaceId,
     since: &str,
 ) -> Result<TreeDelta, Error> {
-    let query = format!("workspace_id={workspace_id}&since={since}");
+    let query = format!("workspace_id={}&since={since}", workspace_id.as_str());
     let body = indexer_get(
         transport,
         indexer_url,
@@ -310,9 +311,9 @@ pub async fn fetch_workspace_chain_heads(
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-    workspace_id: &str,
+    workspace_id: &WorkspaceId,
 ) -> Result<WorkspaceChainHeadResponse, Error> {
-    let query = format!("workspace_id={workspace_id}");
+    let query = format!("workspace_id={}", workspace_id.as_str());
     let body = indexer_get(
         transport,
         indexer_url,
@@ -339,7 +340,7 @@ pub struct IndexerChainHeadProvider<'a, T: Transport> {
 impl<T: Transport> ChainHeadProvider for IndexerChainHeadProvider<'_, T> {
     async fn workspace_chain_heads(
         &self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
     ) -> Result<WorkspaceChainHeads, Error> {
         let response = fetch_workspace_chain_heads(
             self.transport,

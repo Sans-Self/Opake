@@ -256,16 +256,24 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         let role = parse_role(role)?;
         let _outcome = opake
-            .add_workspace_member(&ws.uri, &ws.key, member_did, role)
+            .add_workspace_member(&ws.id(), &ws.key, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
     }
 
+    /// Leave a workspace. Resolves the head URI to the stable genesis id
+    /// first — `leave_workspace` is a genesis-keyed core operation, and a
+    /// JS-supplied URI is always the head (see workspace-identity spec,
+    /// "the WASM boundary resolves to genesis before core operations").
     #[wasm_bindgen(js_name = leaveWorkspace)]
     pub async fn leave_workspace(&self, keyring_uri: &str) -> Result<String, JsError> {
         let mut opake = self.opake().await?;
-        opake.leave_workspace(keyring_uri).await.map_err(wasm_err)
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        opake.leave_workspace(&ws.id()).await.map_err(wasm_err)
     }
 
     /// Remove a member from a workspace. Resolves the keyring + group key
@@ -288,7 +296,7 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
         let (_new_key, rotation) = opake
-            .remove_workspace_member(&ws.uri, &ws.key, member_did)
+            .remove_workspace_member(&ws.id(), &ws.key, member_did)
             .await
             .map_err(wasm_err)?;
 
@@ -318,7 +326,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         let _outcome = opake
             .update_workspace_metadata(
-                &ws.uri,
+                &ws.id(),
                 &ws.key,
                 name.as_deref(),
                 description.as_deref(),
@@ -349,7 +357,7 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
         let _outcome = opake
-            .update_member_role(&ws.uri, member_did, role)
+            .update_member_role(&ws.id(), member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
@@ -359,6 +367,10 @@ impl WasmOpakeHandle {
     // -- Invitations --
 
     /// Create a workspace invitation. Returns `{ uri, token }`.
+    ///
+    /// Resolves to the genesis id first so the invitation target survives
+    /// a supersede between creation and redemption (workspace-identity
+    /// spec, "invitation target survives membership churn").
     #[wasm_bindgen(js_name = createInvitation)]
     pub async fn create_invitation(
         &self,
@@ -366,8 +378,12 @@ impl WasmOpakeHandle {
         role: &str,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let (uri, token) = opake
-            .create_invitation(keyring_uri, role)
+            .create_invitation(&ws.id(), role)
             .await
             .map_err(wasm_err)?;
 
@@ -470,13 +486,22 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)
     }
 
-    /// Sync a single workspace by keyring URI. Returns null if the URI is not
-    /// in the member list, or the sync result otherwise.
+    /// Sync a single workspace by keyring URI. Errors if the URI doesn't
+    /// resolve to a workspace the caller is a member of.
+    ///
+    /// Resolves first: core `sync_workspace_by_uri` matches against the
+    /// derived genesis id, so a head URI (what JS holds after a supersede)
+    /// would silently miss without this (workspace-identity spec,
+    /// "sync-by-URI accepts what its caller holds").
     #[wasm_bindgen(js_name = syncWorkspaceByUri)]
     pub async fn sync_workspace_by_uri(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         let result = opake
-            .sync_workspace_by_uri(keyring_uri)
+            .sync_workspace_by_uri(&ws.id())
             .await
             .map_err(wasm_err)?;
         to_js(&result)

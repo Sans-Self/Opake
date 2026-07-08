@@ -33,7 +33,7 @@ use crate::records::{
     INVITATION_COLLECTION,
 };
 use crate::storage::{Identity, Storage};
-use crate::workspace::Workspace;
+use crate::workspace::{Workspace, WorkspaceId};
 
 pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) client: XrpcClient<T>,
@@ -621,16 +621,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// `None` if the workspace wasn't found in the member list.
     pub async fn sync_workspace_by_uri(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
     ) -> Result<Option<crate::indexer::daemon::WorkspaceSyncResult>, Error> {
         let workspaces = self.discover_member_workspaces().await?;
-        let target = workspaces.iter().find(|env| {
-            env.record
-                .workspace_id
-                .as_deref()
-                .unwrap_or(env.uri.as_str())
-                == workspace_id
-        });
+        let target = workspaces
+            .iter()
+            .find(|env| env.workspace_id() == *workspace_id);
         let Some(ws) = target else { return Ok(None) };
 
         let private_keys = self.private_keys_from_cache();
@@ -749,7 +745,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// posture, not a security failure.
     async fn fetch_keyring_chain_head(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
     ) -> Result<(String, crate::records::Keyring), Error> {
         let url = self.resolve_indexer_url();
         let signing_key = self.require_signing_key()?;
@@ -771,7 +767,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let chain = crate::directories::verify_and_walk_chain::<crate::records::Keyring>(
             self.client.transport(),
             &head.uri,
-            workspace_id,
+            workspace_id.as_str(),
         )
         .await?;
 
@@ -819,13 +815,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// avoids relying on the prior record having it populated.
     async fn write_keyring_supersede(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
         prior_uri: String,
         mut record: crate::records::Keyring,
     ) -> Result<MutationOutcome, Error> {
         let now = self.now();
         record.supersedes = Some(prior_uri);
-        record.workspace_id = Some(workspace_id.to_owned());
+        record.workspace_id = Some(workspace_id.as_str().to_owned());
         record.created_at = now.clone();
         record.modified_at = Some(now);
 
@@ -852,7 +848,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// the current head URI) so wraps survive future supersedes.
     pub async fn add_workspace_member(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
         key: &ContentKey,
         member_did: &str,
         role: Role,
@@ -876,7 +872,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             key,
             &member_public_keys,
             member_did,
-            &crate::crypto::WrapContext::Keyring { uri: workspace_id },
+            &crate::crypto::WrapContext::Keyring {
+                uri: workspace_id.as_str(),
+            },
             &mut self.rng,
         )?;
 
@@ -896,8 +894,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// owner's daemon processed. The federation rewrite replaces this with
     /// a manager-authority supersede that drops the leaving member; pending
     /// that wiring, this path errors out.
-    pub async fn leave_workspace(&mut self, keyring_uri: &str) -> Result<String, Error> {
-        let _ = keyring_uri;
+    pub async fn leave_workspace(&mut self, workspace_id: &WorkspaceId) -> Result<String, Error> {
+        let _ = workspace_id;
         Err(Error::Unimplemented(
             "workspace leave (keyring supersede)".into(),
         ))
@@ -916,7 +914,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// prior rotation's members in `keyHistory` for backward decryption.
     pub async fn remove_workspace_member(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
         group_key: &ContentKey,
         member_did: &str,
     ) -> Result<(ContentKey, u64), Error> {
@@ -962,7 +960,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 &new_group_key,
                 &public_keys,
                 did,
-                &WrapContext::Keyring { uri: workspace_id },
+                &WrapContext::Keyring {
+                    uri: workspace_id.as_str(),
+                },
                 &mut self.rng,
             )?;
             // Roles carry forward unchanged for remaining members.
@@ -1018,7 +1018,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// untouched — only `encrypted_metadata` changes.
     pub async fn update_workspace_metadata(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
         group_key: &ContentKey,
         name: Option<&str>,
         description: Option<&str>,
@@ -1064,7 +1064,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// untouched.
     pub async fn update_member_role(
         &mut self,
-        workspace_id: &str,
+        workspace_id: &WorkspaceId,
         member_did: &str,
         new_role: Role,
     ) -> Result<MutationOutcome, Error> {
@@ -1089,15 +1089,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     // -- Invitations --
 
     /// Create a workspace invitation with a random token.
+    ///
+    /// `workspace_id` is the genesis URI — the invitation target must
+    /// survive membership churn, so it's stamped with the stable
+    /// identity rather than whatever head URI the caller happened to
+    /// hold when the invitation was created.
     /// Returns `(invitation_uri, token)`.
     pub async fn create_invitation(
         &mut self,
-        keyring_uri: &str,
+        workspace_id: &WorkspaceId,
         role: &str,
     ) -> Result<(String, String), Error> {
         let token = self.generate_token();
         let now = self.now();
-        let record = Invitation::workspace(keyring_uri.to_string(), role, token.clone(), now);
+        let record =
+            Invitation::workspace(workspace_id.as_str().to_string(), role, token.clone(), now);
         let record_ref = self
             .client
             .create_record(INVITATION_COLLECTION, None, &record)
@@ -1424,6 +1430,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let (workspace_id, _doc_rotation) =
             crate::documents::fetch_document_keyring_ref(self.client.transport(), document_uri)
                 .await?;
+        let workspace_id = WorkspaceId::from_resolved(workspace_id);
         let (head_uri, _head) = self.fetch_keyring_chain_head(&workspace_id).await?;
         let ws = self.resolve_workspace_by_uri(&head_uri).await?;
 
@@ -1434,7 +1441,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         )
         .await?;
 
-        let keyring_rkey = atproto::parse_at_uri(&workspace_id)?.rkey;
+        let keyring_rkey = atproto::parse_at_uri(workspace_id.as_str())?.rkey;
         Ok(KeyringDownloadResult {
             filename,
             plaintext,

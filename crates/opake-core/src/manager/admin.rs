@@ -24,7 +24,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> WorkspaceAdmin<'_, T, R, 
     /// authoritatively at the indexer.
     pub async fn add_member(&mut self, member_did: &str, role: Role) -> Result<(), Error> {
         self.opake
-            .add_workspace_member(&self.workspace.uri, &self.workspace.key, member_did, role)
+            .add_workspace_member(&self.workspace.id(), &self.workspace.key, member_did, role)
             .await?;
         Ok(())
     }
@@ -36,7 +36,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> WorkspaceAdmin<'_, T, R, 
     /// is now stale and should be refreshed.
     pub async fn remove_member(&mut self, member_did: &str) -> Result<(ContentKey, u64), Error> {
         self.opake
-            .remove_workspace_member(&self.workspace.uri, &self.workspace.key, member_did)
+            .remove_workspace_member(&self.workspace.id(), &self.workspace.key, member_did)
             .await
     }
 

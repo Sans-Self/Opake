@@ -7,8 +7,53 @@
 //
 // Keyring is crypto plumbing. Workspace is the domain concept.
 
+use std::fmt;
+
 use crate::crypto::{self, ContentKey, PrivateKeyBundle};
 use crate::records::{Keyring, Role};
+
+/// The stable identity of a workspace — its genesis keyring AT-URI.
+///
+/// Two URI kinds exist for a workspace's keyring chain: the genesis URI
+/// (this type) and the head URI (a plain `String`, churns on every
+/// supersede). Three shipped bugs came from a call site handing the head
+/// URI to something keyed on genesis; this type makes that a compile
+/// error instead of a production incident.
+///
+/// No public constructor and no `From<String>`/`Deserialize` impl —
+/// minting a `WorkspaceId` requires going through workspace resolution
+/// (`Workspace::id`, `IndexerEnvelope<Keyring>::workspace_id`) or a
+/// `pub(crate)` derivation site inside opake-core. JS-supplied strings at
+/// the WASM boundary can never become one directly.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WorkspaceId(String);
+
+impl WorkspaceId {
+    /// Mint a `WorkspaceId` from an already-resolved genesis URI.
+    ///
+    /// `pub(crate)` — every call site inside opake-core has derived the
+    /// value via `wrap_anchor` or an equivalent chain-genesis resolution,
+    /// never a raw caller-supplied string.
+    pub(crate) fn from_resolved(uri: impl Into<String>) -> Self {
+        Self(uri.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for WorkspaceId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for WorkspaceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// Extract the DIDs of every member with `Role::Manager` from a keyring
 /// record. Used at workspace-resolution time to populate the
@@ -114,6 +159,17 @@ impl Workspace {
     /// The underlying keyring AT-URI.
     pub fn keyring_uri(&self) -> &str {
         &self.uri
+    }
+
+    /// The workspace's stable identity, typed.
+    ///
+    /// `uri` is already the genesis URI post-resolution (see
+    /// `Opake::resolve_workspace_by_uri` / `resolve_foreign_workspace`) —
+    /// this just wraps it as a `WorkspaceId` so genesis-keyed call sites
+    /// can require the type instead of trusting every caller to pass the
+    /// right string.
+    pub fn id(&self) -> WorkspaceId {
+        WorkspaceId::from_resolved(self.uri.clone())
     }
 
     /// Resolve the group key for a given rotation. Returns `None` when the

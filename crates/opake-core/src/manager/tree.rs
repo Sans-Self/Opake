@@ -300,7 +300,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         &indexer_url,
                         &self.opake.did,
                         &signing_key,
-                        &ws.uri,
+                        &ws.id(),
                         s,
                     )
                     .await
@@ -311,7 +311,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         &indexer_url,
                         &self.opake.did,
                         &signing_key,
-                        &ws.uri,
+                        &ws.id(),
                     )
                     .await
                 }
@@ -440,7 +440,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     &indexer_url,
                     &self.opake.did,
                     &signing_key,
-                    &ws.uri,
+                    &ws.id(),
                 )
                 .await?
             }

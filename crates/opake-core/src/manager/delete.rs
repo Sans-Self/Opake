@@ -69,8 +69,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         document_uri: &str,
         now: &str,
     ) -> Result<MutationOutcome, Error> {
-        let workspace_uri = match &self.context {
-            FileContext::Workspace(ws) => ws.uri.clone(),
+        let (workspace_uri, workspace_id) = match &self.context {
+            FileContext::Workspace(ws) => (ws.uri.clone(), ws.id()),
             _ => unreachable!(),
         };
 
@@ -82,7 +82,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             did: &self.opake.did,
             signing_key: &signing_key,
         };
-        let chain_heads = provider.workspace_chain_heads(&workspace_uri).await?;
+        let chain_heads = provider.workspace_chain_heads(&workspace_id).await?;
 
         let root_head = chain_heads.root_directory.as_ref().ok_or_else(|| {
             Error::NotFound("workspace root not indexed yet — nothing to delete".into())
