@@ -68,3 +68,4 @@ e2e-tests/playwright-report/
 .direnv/
 /result
 /result-*
+.claude/skills/openspec-*
