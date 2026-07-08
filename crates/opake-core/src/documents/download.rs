@@ -80,7 +80,9 @@ fn unwrap_document_key(
         Encryption::Keyring(kr_enc) => {
             let keys = keys.ok_or_else(|| {
                 Error::InvalidRecord(
-                    "document uses keyring encryption but no group key provided".into(),
+                    "document uses keyring encryption but no group keys were provided — \
+                     resolve the workspace and pass ws.group_keys()"
+                        .into(),
                 )
             })?;
             let doc_rotation = kr_enc.keyring_ref.rotation;
@@ -109,8 +111,9 @@ fn encryption_nonce(doc: &Document) -> Result<&AtBytes, Error> {
 
 /// Fetch a document record and extract the content key without downloading the blob.
 ///
-/// For direct-encrypted documents only. Use `fetch_content_key_keyring` for
-/// keyring-encrypted documents.
+/// For direct-encrypted documents only. Keyring-encrypted documents need
+/// resolved group keys — go through `fetch_content_key_with_group_key`
+/// with the workspace's `group_keys()`.
 pub async fn fetch_content_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
@@ -134,11 +137,14 @@ pub async fn fetch_content_key_with_group_key(
 
 /// Internal: fetch a document record, validate it, and unwrap the content key.
 ///
-/// When `keys` is `None` and the document uses keyring encryption, auto-
-/// resolves group keys by fetching the keyring and unwrapping the caller's
-/// member entry — including any historical entries — so the cabinet download
-/// path can read workspace documents at any rotation. The doc's
-/// `keyringRef.rotation` selects the right key.
+/// Keyring-encrypted documents require the caller to pass resolved group
+/// keys. This layer is PDS-only and cannot resolve them itself: the
+/// document's `keyringRef.keyring` is the genesis URI, and the genesis
+/// record is a historical artifact — its member list, wrapped keys, and
+/// `keyHistory` are all frozen at creation time. Reaching the live chain
+/// head takes the indexer, which callers have and this layer doesn't
+/// (see the workspace-identity spec, "membership authority is the live
+/// chain head").
 async fn fetch_document_and_key(
     client: &mut XrpcClient<impl Transport>,
     did: &str,
@@ -157,58 +163,7 @@ async fn fetch_document_and_key(
     records::check_version(doc.opake_version)?;
 
     trace!("unwrapping content key");
-
-    // Auto-resolve group keys from the keyring when the caller didn't
-    // provide them — typical for the cabinet path reaching into a
-    // workspace doc. Owned outside the match so the borrowed `GroupKeys`
-    // view below outlives the unwrap.
-    let auto: Option<(ContentKey, u64, Vec<crate::workspace::HistoricalKey>)> =
-        match (&doc.encryption, &keys) {
-            (Encryption::Keyring(kr_enc), None) => {
-                trace!(
-                    "auto-resolving group keys from keyring {}",
-                    kr_enc.keyring_ref.keyring
-                );
-                let kr_uri = atproto::parse_at_uri(&kr_enc.keyring_ref.keyring)?;
-                let kr_entry = client
-                    .get_record(&kr_uri.authority, &kr_uri.collection, &kr_uri.rkey)
-                    .await?;
-                let keyring: records::Keyring = serde_json::from_value(kr_entry.value)?;
-                let member = keyring
-                    .members
-                    .iter()
-                    .find(|m| m.did() == did)
-                    .ok_or_else(|| {
-                        Error::NotFound(format!("no member entry for DID {did} in keyring"))
-                    })?;
-                let current = crypto::unwrap_key(
-                    &member.wrapped_key,
-                    private_keys,
-                    &crypto::WrapContext::Keyring {
-                        uri: keyring.wrap_anchor(&kr_enc.keyring_ref.keyring),
-                    },
-                )?;
-                let historical = crate::workspace::derive_historical_keys(
-                    &keyring,
-                    did,
-                    &kr_enc.keyring_ref.keyring,
-                    private_keys,
-                );
-                Some((current, keyring.rotation, historical))
-            }
-            _ => None,
-        };
-
-    let effective_keys = match &auto {
-        Some((current, rotation, historical)) => Some(crate::workspace::GroupKeys {
-            current_rotation: *rotation,
-            current,
-            historical,
-        }),
-        None => keys,
-    };
-
-    let content_key = unwrap_document_key(&doc, did, uri, private_keys, effective_keys)?;
+    let content_key = unwrap_document_key(&doc, did, uri, private_keys, keys)?;
 
     Ok((content_key, doc))
 }
@@ -412,66 +367,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_resolves_keyring_encryption() {
-        // When a document uses keyring encryption and no group key is provided,
-        // fetch_document_and_key auto-resolves by fetching the keyring record
-        // and unwrapping the group key from the caller's member entry.
-        // This test verifies the auto-resolve is attempted (the mock will fail
-        // with "response queue exhausted" because we don't mock the keyring,
-        // but the important thing is it TRIES rather than rejecting outright).
-        let doc_value = serde_json::json!({
-            "uri": TEST_URI,
-            "cid": "bafyrecord",
-            "value": {
-                "opakeVersion": 1,
-                "name": "keyring-doc.txt",
-                "blob": {
-                    "$type": "blob",
-                    "ref": { "$link": "bafytest" },
-                    "mimeType": "application/octet-stream",
-                    "size": 100,
-                },
-                "encryption": {
-                    "$type": "app.opake.document#keyringEncryption",
-                    "keyringRef": {
-                        "keyring": "at://did:plc:test/app.opake.keyring/kr1",
-                        "wrappedContentKey": { "$bytes": "AAAA" },
-                        "rotation": 1,
-                    },
-                    "algo": "aes-256-gcm",
-                    "nonce": { "$bytes": "AAAAAAAAAAAAAAAA" },
-                },
-                "encryptedMetadata": {
-                    "ciphertext": { "$bytes": "AAAA" },
-                    "nonce": { "$bytes": "AAAAAAAAAAAAAAAA" },
-                },
-                "createdAt": "2026-03-01T00:00:00Z",
-            },
-        });
-
-        let mock = MockTransport::new();
-        mock.enqueue(HttpResponse {
-            status: 200,
-            headers: vec![],
-            body: serde_json::to_vec(&doc_value).unwrap(),
-        });
-
-        let keys = TestKeys::generate(TEST_DID);
-        let mut client = mock_client(mock);
-        // Auto-resolve attempts to fetch the keyring — fails because mock
-        // has no more responses, but the error is from the keyring fetch,
-        // not from a "keyring encryption not supported" rejection.
-        let err = download(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
-            .await
-            .unwrap_err();
-        assert!(
-            !err.to_string()
-                .contains("keyring encryption but no group key"),
-            "should auto-resolve, not reject: {err}",
-        );
-    }
-
-    #[tokio::test]
     async fn pds_404_on_record() {
         let mock = MockTransport::new();
         mock.enqueue(HttpResponse {
@@ -561,6 +456,59 @@ mod tests {
         assert!(
             matches!(err, Error::KeyWrap(_) | Error::Decryption(_)),
             "expected key/decryption error, got: {err}"
+        );
+    }
+
+    /// Regression: the download layer used to "auto-resolve" group keys for
+    /// keyring-encrypted documents by fetching the record at the document's
+    /// `keyringRef.keyring` — the genesis URI — and gating on that record's
+    /// member list. The genesis record is frozen at creation: members added
+    /// later are absent, its wrapped keys are rotation 0, and its keyHistory
+    /// is empty, so the gate rejected legitimate post-genesis members and
+    /// handed stale keys to everyone else. The layer is PDS-only and cannot
+    /// reach the live chain head; it must refuse instead of resolving from
+    /// the past. Callers resolve the workspace and pass `ws.group_keys()`.
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__keyring_doc_without_keys_errors_instead_of_stale_genesis_gate() {
+        use crate::records::{KeyringEncryption, KeyringRef};
+
+        let keys = TestKeys::generate(TEST_DID);
+        let fixture = encrypt_for_download(b"workspace bytes", &keys);
+        let mut doc = document_from_fixture(&fixture);
+        doc.encryption = Encryption::Keyring(KeyringEncryption {
+            keyring_ref: KeyringRef {
+                keyring: "at://did:plc:owner/app.opake.keyring/genesis".into(),
+                wrapped_content_key: AtBytes {
+                    encoded: BASE64.encode([0u8; 40]),
+                },
+                rotation: 0,
+            },
+            algo: "aes-256-gcm".into(),
+            nonce: AtBytes {
+                encoded: BASE64.encode(fixture.nonce),
+            },
+        });
+
+        let mock = MockTransport::new();
+        mock.enqueue(record_response(&doc));
+
+        let mut client = mock_client(mock.clone());
+        let err = fetch_content_key(&mut client, TEST_DID, &keys.private_keys(), TEST_URI)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(&err, Error::InvalidRecord(msg) if msg.contains("group keys")),
+            "expected explicit missing-group-keys error, got: {err}"
+        );
+        // The old path fetched the genesis keyring record before failing;
+        // the fix must fail without a second fetch.
+        let requests = mock.requests();
+        assert_eq!(
+            requests.len(),
+            1,
+            "only the document getRecord — no keyring fetch"
         );
     }
 }
