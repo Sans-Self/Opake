@@ -65,13 +65,15 @@ Long-lived references — invitation targets, cache keys, routes, stored record 
 - **GIVEN** an invitation created for a workspace
 - **WHEN** the workspace keyring is superseded before the invitation is redeemed
 - **THEN** the invitation's `target` still identifies the workspace
-- Currently violated: `create_invitation` stores the caller-supplied `keyring_uri` verbatim, and the binding receives `headUri` (audit finding 3; latent, no mounted redemption path)
+- Conformant since the WorkspaceId pass: the binding resolves first and core stores the genesis id as `target` (audit finding 3; regression `bug__create_invitation_stores_genesis_target`)
 
 ### Requirement: The WASM boundary resolves to genesis before core operations
 
 Keyring URIs supplied by JS are head URIs. Every WASM binding that invokes a workspace-scoped core operation or indexer call SHALL resolve the workspace first and pass `ws.uri`. Bindings SHALL NOT forward a JS-supplied keyring URI directly into a genesis-keyed operation.
 
 The two URI kinds SHALL be distinct types on the Rust side of the boundary: a `WorkspaceId` newtype for the genesis URI and a separate type for head URIs, so that handing one where the other is expected fails to compile. Genesis-keyed core and indexer signatures SHALL accept `WorkspaceId`, not a raw string. `Workspace::uri` and resolution are the only constructors of `WorkspaceId`; bindings obtain one by resolving, never by wrapping a JS argument.
+
+The typed boundary ends where `WorkspaceId` would have to cross into opake-crypto or into a serialized record field. `WorkspaceId` is a domain concept: opake-crypto sits below opake-core in the dependency graph and takes wrap contexts as plain URIs (`WrapContext::Keyring`), and record fields (`Invitation.target`, `KeyringUploadParams.workspace_id`) are wire format, which the newtype deliberately doesn't deserialize into. Chain-generic helpers that walk directory and keyring chains alike (`verify_and_walk_chain`) also take the genesis as a plain URI — a directory chain's genesis is not a workspace identity. Below that line call sites convert via `as_str()`, and the guarantee is carried by the typed signature above them — the last typed function before the conversion is responsible for having received a genuine `WorkspaceId`, so every `as_str()` sits directly under one.
 
 #### Scenario: a new binding cannot skip resolution
 
@@ -90,13 +92,13 @@ The two URI kinds SHALL be distinct types on the Rust side of the boundary: a `W
 
 - **WHEN** the web client calls leaveWorkspace with a head URI
 - **THEN** the binding resolves before invoking the core operation
-- Currently violated: the binding forwards the JS URI unresolved (audit finding 5; benign only because core `leave` is an unimplemented stub)
+- Conformant since the WorkspaceId pass: the binding resolves and passes `ws.id()`; core `leave_workspace` takes `&WorkspaceId` so its future implementation can't regress (audit finding 5; core is still an unimplemented stub)
 
 #### Scenario: sync-by-URI accepts what its caller holds
 
 - **WHEN** the SDK calls syncWorkspaceByUri with a head URI after a supersede
 - **THEN** the workspace is found and synced, not silently skipped
-- Currently violated: core matches the argument against derived genesis URIs, so a head URI misses and returns null (audit finding 4; no production caller today)
+- Conformant since the WorkspaceId pass: the binding resolves first and core takes `&WorkspaceId` (audit finding 4; regression `bug__sync_workspace_by_uri_matches_envelope_by_derived_genesis`). Behavior note: an unresolvable URI now errors instead of returning null; no production caller depended on the null.
 
 ### Requirement: SSE keyring dispatch keys on derived genesis
 
@@ -127,16 +129,20 @@ Membership checks SHALL evaluate the member list of the resolved chain head, nev
 - **THEN** access is granted via their unwrapped group key
 - Regression: `bug__post_genesis_member_opens_pre_membership_document` (shipped fix `2c9b32d`)
 
-#### Scenario: auto-resolve download path
+#### Scenario: a layer that cannot reach the head makes no membership decision
 
-- **GIVEN** a post-genesis member downloading without pre-resolved keys
-- **WHEN** the download auto-resolves the keyring from the document's `keyring_ref` (which holds genesis)
-- **THEN** the member is not rejected on the genesis record's member list
-- Currently violated: crates/opake-core/src/documents/download.rs:172 gates on the genesis record's members (audit finding 2; latent — FileManager::download always passes keys, reachable via the cabinet-sharing path)
+- **GIVEN** a keyring-encrypted document and a caller without pre-resolved group keys
+- **WHEN** the PDS-only download layer is asked for the content key
+- **THEN** it refuses with an explicit error, without fetching the genesis record or gating on its frozen member list — callers resolve the workspace at the head and pass `ws.group_keys()`
+- Conformant since the finding-2 fix: the auto-resolve branch was removed rather than repaired — the genesis record's member list, wrapped keys, and `keyHistory` are all frozen at creation, and the layer has no indexer access to walk to the head (audit finding 2; regression `bug__keyring_doc_without_keys_errors_instead_of_stale_genesis_gate`)
 
 ## Open questions
 
-- Keyring delete tombstones: a `KeyringDelete` event carries only the deleted record's URI. Deleting a superseded old head should not remove the workspace; deleting the entire workspace should. Whether workspace destruction emits a delete on genesis, on the head, or on every chain record is undefined — the indexer acknowledges the same ambiguity (events_controller.ex:118). Dispatch semantics can't be specified until destruction semantics are (audit finding 6).
+- Workspace destruction: deliberately unspecified for now (decided 2026-07-08). There is no destruction operation, and none can be built on record deletion: the keyring chain is distributed — genesis on the creator's PDS, each supersede on the authoring manager's PDS — so no single party can delete it, and FEDERATION.md explicitly allows the genesis record to be deleted while the workspace lives on (the genesis URI identifies the workspace, not a live record). Two constraints bind future work meanwhile:
+  - A keyring delete tombstone SHALL NOT drop a workspace from tracked state. Tombstones are record cleanup, never destruction. The current keeper behavior violates this by accident — `delete(payload.uri)` matches when the deleted record is genesis — and needs correcting whenever the dispatch is next touched (audit finding 6).
+  - When destruction is designed, the leading candidate is a terminal supersede (a keyring record marking the chain ended), not deletion: it rides the existing chain mechanics — single-manager authority, fork detection, upsert dispatch with full context — and should land with the supersede/fork custody design pass. Record litter after destruction is garbage collection: best-effort, client-initiated, out of scope here.
+  - UX until then: members exit via leave/removal (leave shipped 2026-07-08 as a self-removal keyring supersede — any role, no rotation, indexer-enforced pure-leave check), and hiding dead workspaces is client-local state.
+- Departure does not re-home documents: entries referencing a departed member's PDS stay valid but unguaranteed — the ex-member may delete records or the account outright, dangling the entries. Account deletion is the forcing function: it's unobservable in advance, so recovery-after is impossible and the answer is replication-before (mirroring encrypted blobs across member PDSes needs no key material). Custody transfer (re-home on leave, mechanically the cross-author substitute cascade) and a replication policy are queued as their own design pass (decided 2026-07-08).
 - Dead pre-federation code: `keyrings/add_member.rs` and `remove_member.rs` export raw functions that wrap under a caller-supplied keyring URI with no genesis derivation. Test-only callers today. Delete, or bring under this spec before any new caller appears.
 
 ## Non-requirements
