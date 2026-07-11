@@ -19,10 +19,10 @@ use ts_rs::TS;
 use opake_wasm::bindings::{
     ChainForkedEventDto, CreateWorkspaceResultDto, DeleteRecursiveResultDto,
     DirectorySnapshotEntry, DirectoryTreeSnapshot, DocumentMetadataDto, DownloadResult,
-    EncryptedPayloadDto, GrantEntryDto, InboxGrantDto, InboxSnapshotDto,
-    ListWorkspacesResultDto, MutationResultDto, PairRequestResultDto, PendingShareEntryDto,
-    PkceChallengeDto, ResolvedGrantMetadataDto, ResolvedIdentityDto, TreeWithMetadataDto,
-    TypedEntry, WorkspaceEntryDto, WorkspaceSnapshotDto, WorkspaceSyncResultDto,
+    EncryptedPayloadDto, GrantEntryDto, InboxGrantDto, InboxSnapshotDto, ListWorkspacesResultDto,
+    MutationResultDto, PairRequestResultDto, PendingShareEntryDto, PkceChallengeDto,
+    ResolvedGrantMetadataDto, ResolvedIdentityDto, TreeWithMetadataDto, TypedEntry,
+    WorkspaceEntryDto, WorkspaceSnapshotDto, WorkspaceSyncResultDto,
 };
 
 // ---------------------------------------------------------------------------

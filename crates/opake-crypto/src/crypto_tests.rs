@@ -295,7 +295,12 @@ fn cross_recipient_splice_rejected() {
         &mut OsRng,
     )
     .unwrap();
-    assert!(unwrap_key(&wrapped_for_alice, &bob.private_keys(), &WrapContext::Cabinet).is_err());
+    assert!(unwrap_key(
+        &wrapped_for_alice,
+        &bob.private_keys(),
+        &WrapContext::Cabinet
+    )
+    .is_err());
 }
 
 #[test]

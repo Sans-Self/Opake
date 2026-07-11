@@ -25,7 +25,10 @@ impl Execute for ResolveCommand {
         }
         println!("  DID:        {}", identity.did);
         println!("  PDS:        {}", identity.pds_url);
-        println!("  X25519:     {}", BASE64.encode(identity.x25519_public_key));
+        println!(
+            "  X25519:     {}",
+            BASE64.encode(identity.x25519_public_key)
+        );
         println!("  X25519 algo: {}", identity.x25519_algo);
         println!(
             "  ML-KEM-768: {}…  ({} bytes)",

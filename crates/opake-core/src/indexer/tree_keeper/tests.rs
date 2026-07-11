@@ -361,20 +361,28 @@ fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
         opake_version: SCHEMA_VERSION,
         blob: BlobRef {
             blob_type: "blob".into(),
-            reference: CidLink { cid: "bafyfake".into() },
+            reference: CidLink {
+                cid: "bafyfake".into(),
+            },
             mime_type: "application/octet-stream".into(),
             size: 0,
         },
         encryption: Encryption::Direct(DirectEncryption {
             envelope: EncryptionEnvelope {
                 algo: "aes-256-gcm".into(),
-                nonce: AtBytes { encoded: String::new() },
+                nonce: AtBytes {
+                    encoded: String::new(),
+                },
                 keys: Vec::new(),
             },
         }),
         encrypted_metadata: EncryptedMetadata {
-            ciphertext: AtBytes { encoded: String::new() },
-            nonce: AtBytes { encoded: String::new() },
+            ciphertext: AtBytes {
+                encoded: String::new(),
+            },
+            nonce: AtBytes {
+                encoded: String::new(),
+            },
         },
         supersedes: None,
         workspace_id: keyring_uri.map(str::to_owned),
@@ -535,8 +543,12 @@ fn keyring_upsert_event(uri: &str, rotation: u64) -> SseEvent {
             rotation,
             key_history: Vec::new(),
             encrypted_metadata: EncryptedMetadata {
-                ciphertext: AtBytes { encoded: String::new() },
-                nonce: AtBytes { encoded: String::new() },
+                ciphertext: AtBytes {
+                    encoded: String::new(),
+                },
+                nonce: AtBytes {
+                    encoded: String::new(),
+                },
             },
             supersedes: None,
             workspace_id: Some(uri.into()),
@@ -628,8 +640,8 @@ fn workspace_variant_does_not_pay_for_cabinet_keys() {
     // max(variant size) layout doesn't bloat every Workspace tree. The
     // enum is now sized by the Workspace variant; Cabinet's key payload
     // only allocates for the (typically one) cabinet tree per identity.
-    use std::mem::size_of;
     use crate::crypto::{MlKemPrivateKey, X25519PrivateKey};
+    use std::mem::size_of;
 
     // The raw key bytes still cost what they cost — they just live on
     // the heap inside CabinetKeys now.

@@ -47,7 +47,7 @@ fn file_context_owner_did_workspace() {
 /// directory record (and therefore in any consumer that mirrored it).
 #[tokio::test]
 async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
-    use crate::client::{Session, LegacySession, XrpcClient};
+    use crate::client::{LegacySession, Session, XrpcClient};
     use crate::crypto::OsRng;
     use crate::directories::tests::{
         dummy_directory_with_entries, get_record_response, put_record_response,
@@ -78,14 +78,9 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     });
     let client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
     let identity = Identity::generate(DID, &mut OsRng);
-    let mut opake = Opake::new(
-        client,
-        DID.into(),
-        identity,
-        OsRng,
-        NoopStorage,
-        || 1_700_000_000_000_000,
-    )
+    let mut opake = Opake::new(client, DID.into(), identity, OsRng, NoopStorage, || {
+        1_700_000_000_000_000
+    })
     .unwrap();
 
     let ctx = opake.cabinet_context().unwrap();
@@ -97,7 +92,10 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "expected getRecord + applyWrites");
     assert!(reqs[0].url.contains("getRecord"), "first call is fetch");
-    assert!(reqs[1].url.contains("applyWrites"), "second call is atomic write");
+    assert!(
+        reqs[1].url.contains("applyWrites"),
+        "second call is atomic write"
+    );
 
     // Assert the applyWrites body carries BOTH ops in one batch, and the
     // directory update actually prunes the deleted doc (but keeps siblings).
@@ -117,7 +115,11 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     assert_eq!(update_op["collection"], "app.opake.directory");
     let updated: Directory = serde_json::from_value(update_op["value"].clone()).unwrap();
     assert_eq!(
-        updated.entries.iter().map(|e| e.target.as_str()).collect::<Vec<_>>(),
+        updated
+            .entries
+            .iter()
+            .map(|e| e.target.as_str())
+            .collect::<Vec<_>>(),
         vec![OTHER_DOC_URI],
         "deleted doc URI must be pruned from parent.entries; siblings preserved",
     );
@@ -386,7 +388,10 @@ mod workspace_upload_cascade {
         let mock = MockTransport::new();
 
         // 1. chain-head: keyring genesis exists, no root_directory yet.
-        mock.enqueue(chain_head_response(Some((KEYRING_URI, "bafygenesis")), None));
+        mock.enqueue(chain_head_response(
+            Some((KEYRING_URI, "bafygenesis")),
+            None,
+        ));
         // 2. createRecord for the new folder directory.
         let folder_uri = format!("at://{ALICE_DID}/app.opake.directory/folder1");
         mock.enqueue(HttpResponse {
@@ -444,7 +449,10 @@ mod workspace_upload_cascade {
             .next()
             .expect("a genesis root directory must be written");
 
-        assert!(genesis_root.supersedes.is_none(), "genesis has no supersedes");
+        assert!(
+            genesis_root.supersedes.is_none(),
+            "genesis has no supersedes"
+        );
         assert_eq!(genesis_root.workspace_id.as_deref(), Some(KEYRING_URI));
         assert_eq!(genesis_root.entries.len(), 1);
         assert_eq!(genesis_root.entries[0].target, folder_uri);
@@ -524,8 +532,7 @@ mod workspace_upload_cascade {
         // The cascade leaf write is the LAST createRecord that's not the doc.
         let cascade_write = reqs
             .iter()
-            .filter(|r| r.url.contains("createRecord"))
-            .last()
+            .rfind(|r| r.url.contains("createRecord"))
             .expect("must have at least one createRecord");
 
         match &cascade_write.body {
@@ -607,14 +614,9 @@ mod workspace_upload_cascade {
         });
         let client = XrpcClient::with_session(mock.clone(), "https://pds.bob".into(), session);
         let identity = Identity::generate(BOB_DID, &mut OsRng);
-        let mut opake = Opake::new(
-            client,
-            BOB_DID.into(),
-            identity,
-            OsRng,
-            NoopStorage,
-            || 1_700_000_000_000_000,
-        )
+        let mut opake = Opake::new(client, BOB_DID.into(), identity, OsRng, NoopStorage, || {
+            1_700_000_000_000_000
+        })
         .unwrap();
         opake.set_indexer_url(INDEXER_URL.into());
 
@@ -645,8 +647,7 @@ mod workspace_upload_cascade {
         let reqs = mock.requests();
         let cascade_write = reqs
             .iter()
-            .filter(|r| r.url.contains("createRecord"))
-            .last()
+            .rfind(|r| r.url.contains("createRecord"))
             .expect("cascade createRecord");
         match &cascade_write.body {
             Some(RequestBody::Json(v)) => {
@@ -827,7 +828,10 @@ mod workspace_delete_cascade {
 
                 let new_root: Directory =
                     serde_json::from_value(writes[1]["value"].clone()).unwrap();
-                assert_eq!(new_root.supersedes.as_deref(), Some(prior_root_uri.as_str()));
+                assert_eq!(
+                    new_root.supersedes.as_deref(),
+                    Some(prior_root_uri.as_str())
+                );
                 assert_eq!(new_root.workspace_id.as_deref(), Some(KEYRING_URI));
                 // Deleted doc pruned, sibling preserved.
                 let targets: Vec<&str> =

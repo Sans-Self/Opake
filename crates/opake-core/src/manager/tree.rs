@@ -254,10 +254,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
     /// Try to sync deltas from the Indexer. If Indexer is unavailable,
     /// return the cached records as-is (offline-capable).
-    async fn try_sync_deltas(
-        &self,
-        cached: CachedCollection,
-    ) -> Result<Vec<CachedRecord>, Error> {
+    async fn try_sync_deltas(&self, cached: CachedCollection) -> Result<Vec<CachedRecord>, Error> {
         let indexer_url = self.opake.resolve_indexer_url();
         let signing_key = match self.opake.identity().signing_key_bytes() {
             Ok(Some(k)) => k,
@@ -355,11 +352,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .iter()
             .filter(|e| e.deleted_at.is_none())
             .filter_map(|e| {
-                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
-                    uri: e.uri.clone(),
-                    cid: String::new(),
-                    value,
-                })
+                serde_json::to_value(&e.record)
+                    .ok()
+                    .map(|value| CachedRecord {
+                        uri: e.uri.clone(),
+                        cid: String::new(),
+                        value,
+                    })
             })
             .collect();
         if !doc_records.is_empty() {
@@ -451,11 +450,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .iter()
             .filter(|e| e.deleted_at.is_none())
             .filter_map(|e| {
-                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
-                    uri: e.uri.clone(),
-                    cid: String::new(),
-                    value,
-                })
+                serde_json::to_value(&e.record)
+                    .ok()
+                    .map(|value| CachedRecord {
+                        uri: e.uri.clone(),
+                        cid: String::new(),
+                        value,
+                    })
             })
             .collect();
         let doc_records: Vec<CachedRecord> = snapshot
@@ -463,11 +464,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .iter()
             .filter(|e| e.deleted_at.is_none())
             .filter_map(|e| {
-                serde_json::to_value(&e.record).ok().map(|value| CachedRecord {
-                    uri: e.uri.clone(),
-                    cid: String::new(),
-                    value,
-                })
+                serde_json::to_value(&e.record)
+                    .ok()
+                    .map(|value| CachedRecord {
+                        uri: e.uri.clone(),
+                        cid: String::new(),
+                        value,
+                    })
             })
             .collect();
         let with_cursor = Self::with_sync_cursor(dir_records.clone(), snapshot.sync_cursor());
@@ -540,11 +543,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     x25519: &x25519_private,
                     ml_kem: &ml_kem_private,
                 };
-                tree.decrypt_names_with_group_keys(
-                    &self.opake.did,
-                    &private_keys,
-                    &group_keys,
-                );
+                tree.decrypt_names_with_group_keys(&self.opake.did, &private_keys, &group_keys);
             }
         }
         Ok(())
@@ -797,10 +796,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             if !tree.is_document_uri(uri) {
                 continue;
             }
-            match self
-                .resolve_single_document_metadata(uri, &keys)
-                .await
-            {
+            match self.resolve_single_document_metadata(uri, &keys).await {
                 Ok(Some(metadata)) => {
                     result.insert(uri.clone(), metadata);
                 }
@@ -825,10 +821,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let keys = self.decryption_keys()?;
         let mut result = HashMap::new();
         for uri in uris {
-            match self
-                .resolve_single_document_metadata(uri, &keys)
-                .await
-            {
+            match self.resolve_single_document_metadata(uri, &keys).await {
                 Ok(Some(metadata)) => {
                     result.insert((*uri).to_owned(), metadata);
                 }
@@ -897,11 +890,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             Encryption::Direct(direct) => {
                 let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
                 match wrapped {
-                    Some(w) => crypto::unwrap_key(
-                        w,
-                        private_keys,
-                        &crypto::WrapContext::Document { uri },
-                    )?,
+                    Some(w) => {
+                        crypto::unwrap_key(w, private_keys, &crypto::WrapContext::Document { uri })?
+                    }
                     None => return Ok(None),
                 }
             }

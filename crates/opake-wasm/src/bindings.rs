@@ -50,7 +50,7 @@ use opake_core::sharing::{GrantEntry, PendingShareEntry};
 pub mod serde_bytes {
     use serde::Serializer;
 
-    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(bytes)
     }
 }

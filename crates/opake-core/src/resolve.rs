@@ -258,12 +258,9 @@ pub async fn publish_public_key(
     created_at: &str,
 ) -> Result<String, Error> {
     let record = match signing_key {
-        Some(sk) => PublicKeyRecord::with_signing_key(
-            x25519_public_key,
-            ml_kem_public_key,
-            sk,
-            created_at,
-        ),
+        Some(sk) => {
+            PublicKeyRecord::with_signing_key(x25519_public_key, ml_kem_public_key, sk, created_at)
+        }
         None => PublicKeyRecord::new(x25519_public_key, ml_kem_public_key, created_at),
     };
     let result = client
@@ -697,11 +694,8 @@ mod tests {
         )));
 
         // Build a public-key record with a bogus algo string.
-        let mut record = PublicKeyRecord::new(
-            &pubkey,
-            &dummy_ml_kem_pubkey(0xAA),
-            "2026-03-01T00:00:00Z",
-        );
+        let mut record =
+            PublicKeyRecord::new(&pubkey, &dummy_ml_kem_pubkey(0xAA), "2026-03-01T00:00:00Z");
         record.ml_kem_algo = "ml-kem-512".to_string();
         let entry = serde_json::json!({
             "uri": "at://did:plc:target/app.opake.publicKey/self",
@@ -730,11 +724,8 @@ mod tests {
             "https://pds.alice.example.com",
         )));
 
-        let mut record = PublicKeyRecord::new(
-            &pubkey,
-            &dummy_ml_kem_pubkey(0xAA),
-            "2026-03-01T00:00:00Z",
-        );
+        let mut record =
+            PublicKeyRecord::new(&pubkey, &dummy_ml_kem_pubkey(0xAA), "2026-03-01T00:00:00Z");
         record.x25519_algo = "x448".to_string();
         let entry = serde_json::json!({
             "uri": "at://did:plc:target/app.opake.publicKey/self",

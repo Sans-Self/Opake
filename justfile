@@ -69,11 +69,13 @@ sdk-build: wasm
     cd packages/opake-daemon && bun run build
     cd packages/opake-react && bun run build
 
-# Run all package tests
+# Run all package tests. opake-daemon has no test files yet and bun
+# errors on an empty match — add it back with its first test.
+# opake-react runs under vitest (jsdom), so it needs its own script,
+# not bun's test runner.
 sdk-test:
     cd packages/opake-sdk && bun test
-    cd packages/opake-daemon && bun test
-    cd packages/opake-react && bun test
+    cd packages/opake-react && bun run test
 
 # Generate API docs
 sdk-docs:

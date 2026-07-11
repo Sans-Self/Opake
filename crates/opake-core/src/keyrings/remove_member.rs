@@ -82,8 +82,7 @@ pub async fn remove_member(
         "rotating group key, re-wrapping to {} remaining members",
         remaining_keys.len()
     );
-    let (new_group_key, new_wrapped) =
-        crypto::create_group_key(remaining_keys, keyring_uri, rng)?;
+    let (new_group_key, new_wrapped) = crypto::create_group_key(remaining_keys, keyring_uri, rng)?;
 
     // Pair new wrapped keys with roles from the original keyring.
     let new_members: Result<Vec<KeyringMember>, Error> = new_wrapped

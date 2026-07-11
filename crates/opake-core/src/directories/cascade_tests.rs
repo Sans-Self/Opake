@@ -59,9 +59,15 @@ async fn single_level_supersede_writes_leaf_and_returns_head() {
         is_workspace_root: true,
     };
 
-    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
-        .await
-        .unwrap();
+    let outcome = execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        vec![],
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(outcome.steps.len(), 1);
     assert_eq!(outcome.leaf().unwrap().uri, new_root_uri);
@@ -119,9 +125,15 @@ async fn two_level_supersede_threads_child_cid_into_parent() {
         is_workspace_root: false,
     };
 
-    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
-        .await
-        .unwrap();
+    let outcome = execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        ancestors,
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(outcome.steps.len(), 2);
     assert_eq!(outcome.leaf().unwrap().uri, new_leaf_uri);
@@ -182,9 +194,15 @@ async fn add_child_appends_new_listing_entry_at_parent() {
         is_workspace_root: false,
     };
 
-    let outcome = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
-        .await
-        .unwrap();
+    let outcome = execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        ancestors,
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(outcome.steps.len(), 2);
     assert!(outcome.steps[0].superseded.is_none());
@@ -221,9 +239,15 @@ async fn genesis_with_stable_rkey_uses_put_record() {
         is_workspace_root: true,
     };
 
-    execute_cascade(&mut client, TEST_WORKSPACE_ID, vec![], leaf, "2026-03-01T12:00:00Z")
-        .await
-        .unwrap();
+    execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        vec![],
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap();
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 1);
@@ -265,9 +289,15 @@ async fn replace_child_with_missing_prior_uri_errors() {
         is_workspace_root: false,
     };
 
-    let err = execute_cascade(&mut client, TEST_WORKSPACE_ID, ancestors, leaf, "2026-03-01T12:00:00Z")
-        .await
-        .unwrap_err();
+    let err = execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        ancestors,
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap_err();
     assert!(err.to_string().contains("missing expected child URI"));
 }
 
@@ -317,10 +347,7 @@ mod deep_cascade_levels {
         let err = build_deep_cascade_levels(&mock, &[], vec![])
             .await
             .unwrap_err();
-        assert!(
-            err.to_string().contains("empty uri_chain"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("empty uri_chain"), "got: {err}");
     }
 
     /// Single-element chain (target IS the root). Returns no ancestors;
@@ -336,15 +363,13 @@ mod deep_cascade_levels {
 
         let new_entries = vec![ListingEntry::new(DOC_URI, DOC_CID)];
         let (ancestors, leaf) =
-            build_deep_cascade_levels(&mock, &[root_uri.clone()], new_entries.clone())
+            build_deep_cascade_levels(&mock, std::slice::from_ref(&root_uri), new_entries.clone())
                 .await
                 .unwrap();
 
         assert!(ancestors.is_empty());
         match &leaf.mode {
-            LevelMode::Supersede {
-                prior_head_uri, ..
-            } => assert_eq!(prior_head_uri, &root_uri),
+            LevelMode::Supersede { prior_head_uri, .. } => assert_eq!(prior_head_uri, &root_uri),
             _ => panic!("expected Supersede mode"),
         }
         assert_eq!(leaf.entries.len(), 1);
@@ -368,13 +393,10 @@ mod deep_cascade_levels {
         mock.enqueue(get_dir_response(&subdir_uri, "bafysubdir", &subdir));
 
         let new_entries = vec![ListingEntry::new(DOC_URI, DOC_CID)];
-        let (ancestors, leaf) = build_deep_cascade_levels(
-            &mock,
-            &[root_uri.clone(), subdir_uri.clone()],
-            new_entries,
-        )
-        .await
-        .unwrap();
+        let (ancestors, leaf) =
+            build_deep_cascade_levels(&mock, &[root_uri.clone(), subdir_uri.clone()], new_entries)
+                .await
+                .unwrap();
 
         assert_eq!(ancestors.len(), 1);
 

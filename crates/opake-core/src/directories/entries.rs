@@ -140,9 +140,15 @@ mod tests {
         mock.enqueue(put_record_response(DIR_URI)); // applyWrites just needs 200
 
         let mut client = mock_client(mock.clone());
-        add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
-            .await
-            .unwrap();
+        add_entry(
+            &mut client,
+            DIR_URI,
+            DOC_URI,
+            DOC_CID,
+            "2026-03-01T12:00:00Z",
+        )
+        .await
+        .unwrap();
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 2);
@@ -172,9 +178,15 @@ mod tests {
         mock.enqueue(get_record_response(DIR_URI, &directory));
 
         let mut client = mock_client(mock);
-        let err = add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
-            .await
-            .unwrap_err();
+        let err = add_entry(
+            &mut client,
+            DIR_URI,
+            DOC_URI,
+            DOC_CID,
+            "2026-03-01T12:00:00Z",
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("already in this directory"));
     }
@@ -188,9 +200,15 @@ mod tests {
         mock.enqueue(get_record_response(DIR_URI, &directory));
 
         let mut client = mock_client(mock);
-        let err = add_entry(&mut client, DIR_URI, DOC_URI, DOC_CID, "2026-03-01T12:00:00Z")
-            .await
-            .unwrap_err();
+        let err = add_entry(
+            &mut client,
+            DIR_URI,
+            DOC_URI,
+            DOC_CID,
+            "2026-03-01T12:00:00Z",
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("schema version"));
     }

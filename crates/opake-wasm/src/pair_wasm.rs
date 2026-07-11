@@ -7,7 +7,7 @@
 // only ever sees `{ uri, rkey, ephemeralPublicKey }` going out and `true`
 // coming back on completion.
 
-use opake_core::client::{Transport, XrpcClient, WasmTransport};
+use opake_core::client::{Transport, WasmTransport, XrpcClient};
 use opake_core::crypto::OsRng;
 use opake_core::error::Error;
 use opake_core::opake::authenticated_client;
@@ -35,9 +35,10 @@ pub async fn create_pair_request_js(
 
     let now = opake_core::timestamp::rfc3339_from_micros(crate::now_micros());
     let mut rng = OsRng;
-    let info = opake_core::pairing::create_pair_request(&mut client, &storage, &did, &now, &mut rng)
-        .await
-        .map_err(wasm_err)?;
+    let info =
+        opake_core::pairing::create_pair_request(&mut client, &storage, &did, &now, &mut rng)
+            .await
+            .map_err(wasm_err)?;
 
     persist_if_refreshed(&storage, &did, &client).await?;
 
@@ -72,10 +73,9 @@ pub async fn try_complete_pair_js(
         .await
         .map_err(wasm_err)?;
 
-    let result =
-        opake_core::pairing::try_complete_pair(&mut client, &storage, &did, &request_rkey)
-            .await
-            .map_err(wasm_err)?;
+    let result = opake_core::pairing::try_complete_pair(&mut client, &storage, &did, &request_rkey)
+        .await
+        .map_err(wasm_err)?;
 
     persist_if_refreshed(&storage, &did, &client).await?;
     Ok(result)

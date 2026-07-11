@@ -1,7 +1,9 @@
 use log::trace;
 
 use crate::atproto;
-use crate::client::{get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport};
+use crate::client::{
+    get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport,
+};
 use crate::crypto::{self, ContentKey, DocumentMetadata};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption};
@@ -93,7 +95,10 @@ pub async fn fetch_keyring_document_metadata(
 ) -> Result<DocumentMetadata, Error> {
     let (doc, content_key, _pds) =
         fetch_keyring_document(transport, group_keys, document_uri).await?;
-    Ok(crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?)
+    Ok(crypto::decrypt_metadata(
+        &content_key,
+        &doc.encrypted_metadata,
+    )?)
 }
 
 /// Download and decrypt a keyring-encrypted document using already-resolved
@@ -142,15 +147,18 @@ pub async fn fetch_document_keyring_ref(
     }
     let did_doc = resolve_did_document(transport, &doc_at.authority).await?;
     let pds = pds_from_did_document(&did_doc)?;
-    let entry =
-        get_record_public(transport, &pds, &doc_at.authority, DOCUMENT_COLLECTION, &doc_at.rkey)
-            .await?;
+    let entry = get_record_public(
+        transport,
+        &pds,
+        &doc_at.authority,
+        DOCUMENT_COLLECTION,
+        &doc_at.rkey,
+    )
+    .await?;
     let doc: Document = serde_json::from_value(entry.value)?;
     records::check_version(doc.opake_version)?;
     match &doc.encryption {
-        Encryption::Keyring(kr) => {
-            Ok((kr.keyring_ref.keyring.clone(), kr.keyring_ref.rotation))
-        }
+        Encryption::Keyring(kr) => Ok((kr.keyring_ref.keyring.clone(), kr.keyring_ref.rotation)),
         Encryption::Direct(_) => Err(Error::InvalidRecord(
             "document uses direct encryption, not keyring".into(),
         )),

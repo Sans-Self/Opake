@@ -104,8 +104,12 @@ impl WasmOpakeHandle {
             chain_fork_keeper: Rc::new(Mutex::new(ChainForkKeeper::new())),
             sse_running: Rc::new(std::cell::Cell::new(false)),
             sse_generation: Rc::new(std::cell::Cell::new(0)),
-            ws_gate: Rc::new(std::cell::RefCell::new(crate::bootstrap_gate::BootstrapGate::new())),
-            inbox_gate: Rc::new(std::cell::RefCell::new(crate::bootstrap_gate::BootstrapGate::new())),
+            ws_gate: Rc::new(std::cell::RefCell::new(
+                crate::bootstrap_gate::BootstrapGate::new(),
+            )),
+            inbox_gate: Rc::new(std::cell::RefCell::new(
+                crate::bootstrap_gate::BootstrapGate::new(),
+            )),
         })
     }
 
@@ -234,7 +238,10 @@ impl WasmOpakeHandle {
         // JS-side wire format — `ListWorkspacesResultDto` is the named
         // shape; the SDK consumes the generated TS type.
         to_js(&crate::bindings::ListWorkspacesResultDto {
-            workspaces: entries.iter().map(crate::bindings::WorkspaceEntryDto::from).collect(),
+            workspaces: entries
+                .iter()
+                .map(crate::bindings::WorkspaceEntryDto::from)
+                .collect(),
         })
     }
 
@@ -305,8 +312,7 @@ impl WasmOpakeHandle {
         struct R {
             rotation: u64,
         }
-        serde_wasm_bindgen::to_value(&R { rotation })
-            .map_err(|e| JsError::new(&e.to_string()))
+        serde_wasm_bindgen::to_value(&R { rotation }).map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Update workspace metadata (name, description, icon). Resolves the
@@ -741,8 +747,11 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
 
-        let resolved =
-            opake_core::manager::ResolvedDocumentMetadata::from_parts(metadata, created_at, modified_at);
+        let resolved = opake_core::manager::ResolvedDocumentMetadata::from_parts(
+            metadata,
+            created_at,
+            modified_at,
+        );
 
         to_js(&crate::bindings::ResolvedGrantMetadataDto {
             name,

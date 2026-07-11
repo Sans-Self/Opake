@@ -332,14 +332,13 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
     // or the leaf's prior URI for the deepest ancestor.
     let mut child_uris: Vec<String> = records.iter().skip(1).map(|n| n.uri.clone()).collect();
     if let LevelMode::Supersede {
-        ref prior_head_uri,
-        ..
+        ref prior_head_uri, ..
     } = leaf.mode
     {
         child_uris.push(prior_head_uri.clone());
     }
 
-    for (ancestor_node, child_uri) in records.into_iter().zip(child_uris.into_iter()) {
+    for (ancestor_node, child_uri) in records.into_iter().zip(child_uris) {
         ancestors.push(AncestorLevel {
             mode: LevelMode::Supersede {
                 prior_head_uri: ancestor_node.uri,
@@ -362,7 +361,12 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
 
 fn unpack_mode(
     mode: LevelMode,
-) -> (KeyWrapping, EncryptedMetadata, Option<String>, Option<String>) {
+) -> (
+    KeyWrapping,
+    EncryptedMetadata,
+    Option<String>,
+    Option<String>,
+) {
     match mode {
         LevelMode::Supersede {
             prior_head_uri,

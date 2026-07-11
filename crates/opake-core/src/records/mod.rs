@@ -123,11 +123,8 @@ mod tests {
 
     #[test]
     fn public_key_record_new_sets_defaults() {
-        let record = PublicKeyRecord::new(
-            &[42u8; 32],
-            &dummy_ml_kem_pubkey(),
-            "2026-03-01T00:00:00Z",
-        );
+        let record =
+            PublicKeyRecord::new(&[42u8; 32], &dummy_ml_kem_pubkey(), "2026-03-01T00:00:00Z");
         assert_eq!(record.opake_version, SCHEMA_VERSION);
         assert_eq!(record.x25519_algo, "x25519");
         assert_eq!(record.ml_kem_algo, "ml-kem-768");
@@ -136,11 +133,8 @@ mod tests {
 
     #[test]
     fn public_key_record_roundtrips_through_json() {
-        let record = PublicKeyRecord::new(
-            &[7u8; 32],
-            &dummy_ml_kem_pubkey(),
-            "2026-03-01T12:00:00Z",
-        );
+        let record =
+            PublicKeyRecord::new(&[7u8; 32], &dummy_ml_kem_pubkey(), "2026-03-01T12:00:00Z");
         let json = serde_json::to_string(&record).unwrap();
         let parsed: PublicKeyRecord = serde_json::from_str(&json).unwrap();
 
@@ -160,11 +154,8 @@ mod tests {
 
     #[test]
     fn public_key_record_uses_atbytes_wire_format() {
-        let record = PublicKeyRecord::new(
-            &[1u8; 32],
-            &dummy_ml_kem_pubkey(),
-            "2026-03-01T00:00:00Z",
-        );
+        let record =
+            PublicKeyRecord::new(&[1u8; 32], &dummy_ml_kem_pubkey(), "2026-03-01T00:00:00Z");
         let json = serde_json::to_value(&record).unwrap();
         // atproto $bytes convention: { "$bytes": "<base64>" }
         assert!(json["x25519PublicKey"]["$bytes"].is_string());
@@ -220,14 +211,8 @@ mod tests {
     fn directory_with_entries_roundtrips() {
         let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         directory.entries = vec![
-            ListingEntry::new(
-                "at://did:plc:test/app.opake.document/abc",
-                "bafydoc",
-            ),
-            ListingEntry::new(
-                "at://did:plc:test/app.opake.directory/def",
-                "bafydir",
-            ),
+            ListingEntry::new("at://did:plc:test/app.opake.document/abc", "bafydoc"),
+            ListingEntry::new("at://did:plc:test/app.opake.directory/def", "bafydir"),
         ];
         directory.modified_at = Some("2026-03-01T12:00:00Z".into());
 
@@ -354,5 +339,4 @@ mod tests {
             Some("at://did:plc:test/app.opake.keyring/prior")
         );
     }
-
 }

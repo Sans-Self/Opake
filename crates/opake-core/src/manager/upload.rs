@@ -192,9 +192,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let (ancestors, leaf): (Vec<AncestorLevel>, LeafLevel) = match target_kind {
             UploadTarget::RootGenesis => {
-                let leaf = self
-                    .build_root_genesis_leaf(ws, vec![new_entry])
-                    .await?;
+                let leaf = self.build_root_genesis_leaf(ws, vec![new_entry]).await?;
                 (Vec::new(), leaf)
             }
             UploadTarget::RootSupersede(root_head_uri) => {
@@ -398,4 +396,3 @@ fn classify_upload_target(
         ))),
     }
 }
-

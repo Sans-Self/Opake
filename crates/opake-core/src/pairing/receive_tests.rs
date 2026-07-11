@@ -56,7 +56,10 @@ impl crate::storage::Storage for FixedStateStorage {
         Ok(())
     }
     async fn cache_get_record(
-        &self, _: &str, _: &str, _: &str,
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
     ) -> Result<Option<CachedRecord>, Error> {
         Ok(None)
     }
@@ -67,12 +70,17 @@ impl crate::storage::Storage for FixedStateStorage {
         Ok(())
     }
     async fn cache_get_collection(
-        &self, _: &str, _: &str,
+        &self,
+        _: &str,
+        _: &str,
     ) -> Result<Option<CachedCollection>, Error> {
         Ok(None)
     }
     async fn cache_put_collection(
-        &self, _: &str, _: &str, _: &CachedCollection,
+        &self,
+        _: &str,
+        _: &str,
+        _: &CachedCollection,
     ) -> Result<(), Error> {
         Ok(())
     }

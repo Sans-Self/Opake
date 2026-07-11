@@ -134,12 +134,21 @@ async fn create_pair_request_persists_ephemeral_privkey() {
     let mut client = mock_client(mock);
     let mut rng = OsRng;
 
-    let info = create_pair_request(&mut client, &storage, TEST_DID, "2026-04-01T00:00:00Z", &mut rng)
-        .await
-        .unwrap();
+    let info = create_pair_request(
+        &mut client,
+        &storage,
+        TEST_DID,
+        "2026-04-01T00:00:00Z",
+        &mut rng,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(info.rkey, "rk1");
-    assert_eq!(info.uri, format!("at://{TEST_DID}/{PAIR_REQUEST_COLLECTION}/rk1"));
+    assert_eq!(
+        info.uri,
+        format!("at://{TEST_DID}/{PAIR_REQUEST_COLLECTION}/rk1")
+    );
     assert_eq!(info.x25519_ephemeral_public_key.len(), 32);
     assert_eq!(info.ml_kem_ephemeral_public_key.len(), 1184);
 

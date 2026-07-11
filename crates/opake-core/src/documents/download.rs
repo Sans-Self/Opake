@@ -22,7 +22,10 @@ pub(super) fn decrypt_with_nonce(
     })?;
 
     trace!("decrypting {} bytes", ciphertext.len());
-    Ok(crypto::decrypt_blob(content_key, &crypto::EncryptedPayload { ciphertext, nonce })?)
+    Ok(crypto::decrypt_blob(
+        content_key,
+        &crypto::EncryptedPayload { ciphertext, nonce },
+    )?)
 }
 
 /// Resolve a document's name from encrypted metadata if present, falling
@@ -443,14 +446,9 @@ mod tests {
         mock.enqueue(record_response(&doc));
 
         let mut client = mock_client(mock);
-        let err = download(
-            &mut client,
-            TEST_DID,
-            &wrong_keys.private_keys(),
-            TEST_URI,
-        )
-        .await
-        .unwrap_err();
+        let err = download(&mut client, TEST_DID, &wrong_keys.private_keys(), TEST_URI)
+            .await
+            .unwrap_err();
         // Wrong key produces either a KeyWrap or Decryption error depending
         // on where AES-KW detects the integrity failure.
         assert!(

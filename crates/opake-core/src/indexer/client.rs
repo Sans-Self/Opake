@@ -10,7 +10,7 @@ use crate::directories::{ChainHead, ChainHeadProvider, WorkspaceChainHeads};
 use crate::error::Error;
 use crate::indexer::auth::sign_indexer_request;
 use crate::indexer::types::{
-    IndexerEnvelope, InboxResponse, TreeDelta, WorkspaceChainHeadResponse, WorkspacesResponse,
+    InboxResponse, IndexerEnvelope, TreeDelta, WorkspaceChainHeadResponse, WorkspacesResponse,
 };
 use crate::records::{Grant, Keyring};
 use crate::workspace::WorkspaceId;

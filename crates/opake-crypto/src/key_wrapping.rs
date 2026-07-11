@@ -1,8 +1,6 @@
 use aes_kw::KekAes256;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use libcrux_ml_kem::mlkem768::{
-    self, MlKem768Ciphertext, MlKem768PrivateKey, MlKem768PublicKey,
-};
+use libcrux_ml_kem::mlkem768::{self, MlKem768Ciphertext, MlKem768PrivateKey, MlKem768PublicKey};
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 

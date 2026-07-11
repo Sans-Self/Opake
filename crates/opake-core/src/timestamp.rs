@@ -26,9 +26,7 @@ pub fn rfc3339_from_micros(micros: u64) -> String {
 
     let (year, month, day) = civil_from_days(days);
 
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{sub_micros:06}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{sub_micros:06}Z")
 }
 
 /// Convert days since 1970-01-01 to a civil (year, month, day).

@@ -290,10 +290,11 @@ pub fn verify_keyring_chain_authority(
         let prior = &window[1];
         let author_did = crate::atproto::parse_at_uri(&supersede.uri)?.authority;
 
-        let is_manager = prior.record.members.iter().any(|m| {
-            m.did() == author_did
-                && matches!(m.role, crate::records::Role::Manager)
-        });
+        let is_manager = prior
+            .record
+            .members
+            .iter()
+            .any(|m| m.did() == author_did && matches!(m.role, crate::records::Role::Manager));
 
         if !is_manager {
             return Err(Error::ChainAuthorityViolation {
@@ -373,16 +374,9 @@ pub fn verify_directory_additivity(
             continue;
         };
 
-        let prior_targets: HashSet<&str> = prior
-            .entries
-            .iter()
-            .map(|e| e.target.as_str())
-            .collect();
-        let new_targets: HashSet<&str> = dir
-            .entries
-            .iter()
-            .map(|e| e.target.as_str())
-            .collect();
+        let prior_targets: HashSet<&str> =
+            prior.entries.iter().map(|e| e.target.as_str()).collect();
+        let new_targets: HashSet<&str> = dir.entries.iter().map(|e| e.target.as_str()).collect();
 
         // Targets the superseding record's entries claim to advance: the
         // prior entry each new target supersedes (if any). A dropped prior

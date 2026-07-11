@@ -652,9 +652,7 @@ fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
 // Incremental mutation via apply_directory_delta (SSE path)
 // ---------------------------------------------------------------------------
 
-fn cabinet_ctx<'a>(
-    private_keys: &'a crate::crypto::PrivateKeyBundle<'a>,
-) -> DecryptionCtx<'a> {
+fn cabinet_ctx<'a>(private_keys: &'a crate::crypto::PrivateKeyBundle<'a>) -> DecryptionCtx<'a> {
     DecryptionCtx::cabinet(TEST_DID, private_keys)
 }
 
@@ -666,7 +664,11 @@ fn apply_directory_delta_inserts_new_directory() {
     let photos_dir = dummy_directory_with_entries("Photos", vec![DOC_BEACH_URI.into()]);
 
     let change = tree
-        .apply_directory_delta(DIR_PHOTOS_URI, &photos_dir, &cabinet_ctx(&kp.private_keys()))
+        .apply_directory_delta(
+            DIR_PHOTOS_URI,
+            &photos_dir,
+            &cabinet_ctx(&kp.private_keys()),
+        )
         .unwrap();
 
     match change {

@@ -60,7 +60,8 @@ fn dir_superseding(name: &str, prior_uri: &str) -> Directory {
 #[tokio::test]
 async fn fetch_chain_node_resolves_pds_and_returns_record() {
     let mock = MockTransport::new();
-    let dir = dummy_directory_with_entries("/", vec!["at://did:plc:x/app.opake.document/d1".into()]);
+    let dir =
+        dummy_directory_with_entries("/", vec!["at://did:plc:x/app.opake.document/d1".into()]);
 
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &dir)));
@@ -73,7 +74,10 @@ async fn fetch_chain_node_resolves_pds_and_returns_record() {
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2);
-    assert!(reqs[0].url.contains(DID_A), "first request hits PLC for DID resolution");
+    assert!(
+        reqs[0].url.contains(DID_A),
+        "first request hits PLC for DID resolution"
+    );
     assert!(
         reqs[1].url.starts_with(PDS_A),
         "second request goes to the resolved PDS, got {}",
@@ -89,7 +93,10 @@ async fn fetch_chain_node_rejects_malformed_uri() {
         .await
         .unwrap_err();
     assert!(matches!(err, Error::InvalidRecord(_)));
-    assert!(mock.requests().is_empty(), "no network call on malformed URI");
+    assert!(
+        mock.requests().is_empty(),
+        "no network call on malformed URI"
+    );
 }
 
 #[tokio::test]
@@ -114,8 +121,7 @@ async fn walk_back_returns_genesis_only_when_no_supersedes() {
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
 
-    let chain: Vec<ChainNode<Directory>> =
-        walk_back_to_genesis(&mock, URI_GENESIS).await.unwrap();
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_GENESIS).await.unwrap();
 
     assert_eq!(chain.len(), 1);
     assert_eq!(chain[0].uri, URI_GENESIS);
@@ -138,8 +144,7 @@ async fn walk_back_traverses_chain_in_head_to_genesis_order() {
     mock.enqueue(ok(record_entry(URI_MIDDLE, "bafymiddle", &middle)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
 
-    let chain: Vec<ChainNode<Directory>> =
-        walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
 
     assert_eq!(chain.len(), 3);
     assert_eq!(chain[0].uri, URI_HEAD);
@@ -216,8 +221,9 @@ async fn verify_and_walk_chain_accepts_matching_genesis() {
     mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
 
-    let chain: Vec<ChainNode<Directory>> =
-        verify_and_walk_chain(&mock, URI_HEAD, URI_GENESIS).await.unwrap();
+    let chain: Vec<ChainNode<Directory>> = verify_and_walk_chain(&mock, URI_HEAD, URI_GENESIS)
+        .await
+        .unwrap();
 
     assert_eq!(chain.len(), 2);
     assert_eq!(chain[0].uri, URI_HEAD);
@@ -233,8 +239,9 @@ async fn verify_and_walk_chain_accepts_genesis_only_chain() {
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
 
-    let chain: Vec<ChainNode<Directory>> =
-        verify_and_walk_chain(&mock, URI_GENESIS, URI_GENESIS).await.unwrap();
+    let chain: Vec<ChainNode<Directory>> = verify_and_walk_chain(&mock, URI_GENESIS, URI_GENESIS)
+        .await
+        .unwrap();
 
     assert_eq!(chain.len(), 1);
     assert_eq!(chain[0].uri, URI_GENESIS);
@@ -452,10 +459,7 @@ mod keyring_authority {
         let chain = vec![
             node(
                 KEYRING_HEAD,
-                keyring(
-                    vec![member(DID_A, Role::Manager)],
-                    Some(middle_uri),
-                ),
+                keyring(vec![member(DID_A, Role::Manager)], Some(middle_uri)),
             ),
             node(
                 middle_uri,
@@ -540,9 +544,9 @@ mod directory_additivity {
     fn dir(entries: Vec<&str>, supersedes: Option<&str>) -> Directory {
         Directory {
             opake_version: crate::records::SCHEMA_VERSION,
-            key_wrapping: crate::records::KeyWrapping::Direct(
-                crate::records::DirectKeyWrapping { keys: vec![] },
-            ),
+            key_wrapping: crate::records::KeyWrapping::Direct(crate::records::DirectKeyWrapping {
+                keys: vec![],
+            }),
             encrypted_metadata: crate::test_utils::dummy_encrypted_metadata(),
             entries: entries.into_iter().map(entry).collect(),
             supersedes: supersedes.map(String::from),
@@ -630,7 +634,10 @@ mod directory_additivity {
         // rather than reject (the indexer would surface this elsewhere).
         let records = vec![(
             DIR_HEAD_BY_BOB.into(),
-            dir(vec!["doc1"], Some("at://did:plc:other/app.opake.directory/gone")),
+            dir(
+                vec!["doc1"],
+                Some("at://did:plc:other/app.opake.directory/gone"),
+            ),
         )];
         verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
@@ -673,9 +680,7 @@ mod directory_additivity {
                 dir(vec!["doc1", "doc2b"], Some(DIR_GENESIS)),
             ),
         ];
-        let supersedes_of = |uri: &str| {
-            (uri == "doc2b").then(|| "doc2".to_string())
-        };
+        let supersedes_of = |uri: &str| (uri == "doc2b").then(|| "doc2".to_string());
         verify_directory_additivity(&records, no_managers, supersedes_of).unwrap();
     }
 

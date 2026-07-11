@@ -29,8 +29,7 @@ use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::{
-    Invitation, InvitationAcceptance, Role, INVITATION_ACCEPTANCE_COLLECTION,
-    INVITATION_COLLECTION,
+    Invitation, InvitationAcceptance, Role, INVITATION_ACCEPTANCE_COLLECTION, INVITATION_COLLECTION,
 };
 use crate::storage::{Identity, Storage};
 use crate::workspace::{Workspace, WorkspaceId};
@@ -630,9 +629,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let Some(ws) = target else { return Ok(None) };
 
         let private_keys = self.private_keys_from_cache();
-        let result = self
-            .sync_single_workspace(ws, &private_keys.bundle())
-            .await;
+        let result = self.sync_single_workspace(ws, &private_keys.bundle()).await;
 
         self.auto_persist_session().await?;
         Ok(Some(result))
@@ -1043,8 +1040,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             rotation: new_rotation,
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
-            supersedes: None,    // filled by write_keyring_supersede
-            workspace_id: None,  // filled by write_keyring_supersede
+            supersedes: None,   // filled by write_keyring_supersede
+            workspace_id: None, // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1134,9 +1131,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .iter_mut()
             .find(|m| m.did() == member_did)
             .ok_or_else(|| {
-                Error::InvalidRecord(format!(
-                    "{member_did} is not a member of this workspace"
-                ))
+                Error::InvalidRecord(format!("{member_did} is not a member of this workspace"))
             })?;
         member.role = new_role;
 
@@ -1239,7 +1234,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub async fn resolve_grant_metadata(
         &self,
         grant_uri: &str,
-    ) -> Result<(String, crate::crypto::DocumentMetadata, String, Option<String>), Error> {
+    ) -> Result<
+        (
+            String,
+            crate::crypto::DocumentMetadata,
+            String,
+            Option<String>,
+        ),
+        Error,
+    > {
         let private_keys = self.private_keys_from_cache();
         crate::documents::resolve_grant_metadata(
             self.client.transport(),
@@ -1322,10 +1325,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Fetch all incoming grants from the Indexer.
     pub async fn list_inbox(
         &mut self,
-    ) -> Result<
-        Vec<crate::indexer::types::IndexerEnvelope<crate::records::Grant>>,
-        Error,
-    > {
+    ) -> Result<Vec<crate::indexer::types::IndexerEnvelope<crate::records::Grant>>, Error> {
         let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
         crate::indexer::fetch_inbox_all(self.client.transport(), &url, &self.did, &signing_key)
@@ -1337,10 +1337,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// member list.
     pub async fn discover_member_workspaces(
         &mut self,
-    ) -> Result<
-        Vec<crate::indexer::types::IndexerEnvelope<crate::records::Keyring>>,
-        Error,
-    > {
+    ) -> Result<Vec<crate::indexer::types::IndexerEnvelope<crate::records::Keyring>>, Error> {
         let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
         crate::indexer::fetch_member_workspaces(
@@ -1358,9 +1355,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// always has signing keys. The only way to hit this error is a custom
     /// `Opake::new` caller that supplied a legacy Identity without signing
     /// keys — surface the problem rather than quietly returning empty data.
-    pub(crate) fn require_signing_key(
-        &self,
-    ) -> Result<crate::storage::Ed25519SecretKey, Error> {
+    pub(crate) fn require_signing_key(&self) -> Result<crate::storage::Ed25519SecretKey, Error> {
         self.identity
             .signing_key_bytes()?
             .ok_or_else(|| Error::Auth("identity is missing Ed25519 signing key".into()))

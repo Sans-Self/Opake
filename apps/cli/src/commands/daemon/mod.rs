@@ -273,7 +273,10 @@ async fn run_sync_consumer_for_did(storage: &FileStorage, did: &str, cancel: Rc<
         match guard.sync_owned_workspaces_detailed().await {
             Ok(results) => {
                 if !results.is_empty() {
-                    info!("sync: initial catch-up loaded {} workspaces for {did}", results.len());
+                    info!(
+                        "sync: initial catch-up loaded {} workspaces for {did}",
+                        results.len()
+                    );
                 }
             }
             Err(e) => {
@@ -355,7 +358,6 @@ fn make_native_token_fetcher(opake: SharedOpake) -> TokenFetcher {
         })
     })
 }
-
 
 // ---------------------------------------------------------------------------
 // Shared helpers

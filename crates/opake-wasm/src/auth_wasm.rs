@@ -62,10 +62,7 @@ fn generate_csrf_state(rng: &mut OsRng) -> String {
 /// Returns `{ authUrl, pending }` where `pending` is serializable state
 /// the caller saves to sessionStorage for the redirect round-trip.
 #[wasm_bindgen(js_name = startOAuthLogin)]
-pub async fn start_oauth_login(
-    handle: &str,
-    redirect_uri: &str,
-) -> Result<JsValue, JsError> {
+pub async fn start_oauth_login(handle: &str, redirect_uri: &str) -> Result<JsValue, JsError> {
     let transport = WasmTransport::new();
     let mut rng = OsRng;
 

@@ -206,7 +206,10 @@ mod tests {
         let entries: Vec<ListingEntry> = serde_json::from_value(value).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries[0].has_legacy_empty_cid());
-        assert_eq!(entries[0].target, "at://did:plc:abc/app.opake.document/legacy1");
+        assert_eq!(
+            entries[0].target,
+            "at://did:plc:abc/app.opake.document/legacy1"
+        );
         assert!(!entries[1].has_legacy_empty_cid());
         assert_eq!(entries[1].target_cid.cid, "bafymodern");
     }

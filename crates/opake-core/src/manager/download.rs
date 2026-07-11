@@ -89,7 +89,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         document_uri,
                     )
                     .await?;
-                    Ok(DownloadResult { filename, plaintext })
+                    Ok(DownloadResult {
+                        filename,
+                        plaintext,
+                    })
                 }
             }
         }

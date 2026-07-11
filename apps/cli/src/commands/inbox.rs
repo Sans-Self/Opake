@@ -99,13 +99,19 @@ mod tests {
                 recipient: "did:plc:me".into(),
                 wrapped_key: WrappedKey {
                     did: "did:plc:me".into(),
-                    ciphertext: AtBytes { encoded: String::new() },
+                    ciphertext: AtBytes {
+                        encoded: String::new(),
+                    },
                     algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
                 expires_at: None,
                 encrypted_metadata: EncryptedMetadata {
-                    ciphertext: AtBytes { encoded: String::new() },
-                    nonce: AtBytes { encoded: String::new() },
+                    ciphertext: AtBytes {
+                        encoded: String::new(),
+                    },
+                    nonce: AtBytes {
+                        encoded: String::new(),
+                    },
                 },
                 created_at: "2026-03-01T12:00:00Z".into(),
             },

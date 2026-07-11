@@ -465,7 +465,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         directory_uri: &str,
         now: &str,
     ) -> Result<(), Error> {
-        let chain = self.resolve_workspace_path(root_head_uri, parent_uri).await?;
+        let chain = self
+            .resolve_workspace_path(root_head_uri, parent_uri)
+            .await?;
 
         let transport = self.opake.client.transport();
         let mut pds_cache: std::collections::HashMap<String, String> =
@@ -474,8 +476,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             Vec::with_capacity(chain.len());
         for uri in &chain {
             chain_records.push(
-                directories::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache)
-                    .await?,
+                directories::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache).await?,
             );
         }
 

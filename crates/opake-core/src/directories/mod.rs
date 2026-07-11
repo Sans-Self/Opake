@@ -18,12 +18,12 @@ pub use cascade::{
     build_deep_cascade_levels, execute_cascade, AncestorLevel, AncestorLinkage, CascadeOutcome,
     CascadeStep, LeafLevel, LevelMode,
 };
+pub(crate) use chain::fetch_with_cache;
 pub use chain::{
     fetch_chain_node, verify_and_walk_chain, verify_directory_additivity,
     verify_keyring_chain_authority, walk_back_to_genesis, ChainHead, ChainHeadProvider, ChainNode,
     Superseding, WorkspaceChainHeads,
 };
-pub(crate) use chain::fetch_with_cache;
 pub use create::create_directory;
 pub(crate) use delete::delete_directory;
 pub(crate) use entries::{add_entry, prepare_add_entry, prepare_remove_entry};

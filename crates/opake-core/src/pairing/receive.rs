@@ -9,8 +9,7 @@ use crate::crypto::{
 };
 use crate::error::Error;
 use crate::records::{
-    PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION,
-    PUBLIC_KEY_RKEY,
+    PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY,
 };
 use crate::storage::{Identity, Storage};
 
@@ -43,7 +42,10 @@ where
     T: Transport,
     S: Storage,
 {
-    let request_uri = format!("at://{did}/{}/{request_rkey}", crate::records::PAIR_REQUEST_COLLECTION);
+    let request_uri = format!(
+        "at://{did}/{}/{request_rkey}",
+        crate::records::PAIR_REQUEST_COLLECTION
+    );
 
     let page = client
         .list_records(PAIR_RESPONSE_COLLECTION, Some(100), None)
@@ -54,7 +56,15 @@ where
         return Ok(false);
     };
 
-    complete_pair_response(client, storage, did, request_rkey, &response, &response_rkey).await?;
+    complete_pair_response(
+        client,
+        storage,
+        did,
+        request_rkey,
+        &response,
+        &response_rkey,
+    )
+    .await?;
     Ok(true)
 }
 
@@ -97,8 +107,7 @@ where
     let mut mlkem_priv: Zeroizing<[u8; ML_KEM_SK_LEN]> = Zeroizing::new([0u8; ML_KEM_SK_LEN]);
     mlkem_priv.copy_from_slice(mlkem_bytes);
 
-    let identity =
-        decrypt_pair_response(client, did, response, &*x25519_priv, &*mlkem_priv).await?;
+    let identity = decrypt_pair_response(client, did, response, &x25519_priv, &mlkem_priv).await?;
     storage.save_identity(did, &identity).await?;
 
     // Tear-down is best-effort from the caller's perspective — the Identity
@@ -178,7 +187,9 @@ async fn decrypt_pair_response(
     let published_x25519 = BASE64
         .decode(&published.x25519_public_key.encoded)
         .map_err(|e| {
-            Error::InvalidRecord(format!("invalid base64 in published X25519 public key: {e}"))
+            Error::InvalidRecord(format!(
+                "invalid base64 in published X25519 public key: {e}"
+            ))
         })?;
     let received_x25519 = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
         Error::InvalidRecord(format!(

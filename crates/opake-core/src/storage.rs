@@ -235,12 +235,12 @@ impl Identity {
     fn from_secrets(secrets: &DerivedSecrets, did: &str) -> Self {
         Identity {
             did: did.to_string(),
-            x25519_public_key: BASE64.encode(&secrets.x25519_public),
-            x25519_private_key: BASE64.encode(&secrets.x25519_private),
+            x25519_public_key: BASE64.encode(secrets.x25519_public),
+            x25519_private_key: BASE64.encode(secrets.x25519_private),
             ml_kem_public_key: BASE64.encode(secrets.ml_kem_public.as_slice()),
             ml_kem_private_key: BASE64.encode(secrets.ml_kem_private.as_slice()),
-            signing_key: Some(BASE64.encode(&secrets.ed25519_signing)),
-            verify_key: Some(BASE64.encode(&secrets.ed25519_verifying)),
+            signing_key: Some(BASE64.encode(secrets.ed25519_signing)),
+            verify_key: Some(BASE64.encode(secrets.ed25519_verifying)),
         }
     }
 

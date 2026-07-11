@@ -14,7 +14,6 @@ pub enum Error {
     #[error("authentication failed: {0}")]
     Auth(String),
 
-
     #[error("XRPC error ({status}): {message}")]
     Xrpc { status: u16, message: String },
 
@@ -28,7 +27,9 @@ pub enum Error {
     /// identity is persisted locally. Callers should route the user to
     /// recovery (seed phrase) or pairing (another device) to bootstrap one.
     /// Distinct from `NotFound` so the SDK/CLI can prompt for the right flow.
-    #[error("no encryption identity for this device — recover from seed phrase or pair another device")]
+    #[error(
+        "no encryption identity for this device — recover from seed phrase or pair another device"
+    )]
     IdentityMissing,
 
     /// The target handle or DID is a valid identity but has not published an

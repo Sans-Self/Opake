@@ -180,11 +180,8 @@ mod indexer_workspace_tests {
         // A DID not present in the members list — we use unrelated keys
         // so that even if the DID matched, unwrap_key would fail.
         let stranger = TestKeys::generate("did:plc:stranger");
-        let name = decrypt_indexer_workspace_name(
-            &keyring,
-            "did:plc:stranger",
-            &stranger.private_keys(),
-        );
+        let name =
+            decrypt_indexer_workspace_name(&keyring, "did:plc:stranger", &stranger.private_keys());
         assert!(name.is_none());
     }
 

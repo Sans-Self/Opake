@@ -124,8 +124,8 @@ impl Workspace {
     /// the wrong key. The supported entry points are `Opake::resolve_workspace`,
     /// `Opake::file_context`, and the daemon's workspace-resolution helpers.
     #[allow(clippy::too_many_arguments)] // Constructor — every field is a
-    // workspace-identity-defining piece. Bundling into a struct would just
-    // move the arg list one call up.
+                                         // workspace-identity-defining piece. Bundling into a struct would just
+                                         // move the arg list one call up.
     pub(crate) fn from_keyring(
         uri: String,
         name: String,

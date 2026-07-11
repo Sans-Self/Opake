@@ -379,7 +379,10 @@ async fn pair_state_file_is_mode_0600() {
     let (_dir, storage) = test_storage();
     let did = "did:plc:perm";
     let rkey = "rk1";
-    storage.save_pair_state(did, rkey, &[0u8; 32]).await.unwrap();
+    storage
+        .save_pair_state(did, rkey, &[0u8; 32])
+        .await
+        .unwrap();
 
     let path = storage
         .account_dir(did)

@@ -192,7 +192,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         now: &str,
     ) -> Result<MutationOutcome, Error> {
         // 1. URI chain root → parent.
-        let chain = self.resolve_workspace_path(root_head_uri, parent_uri).await?;
+        let chain = self
+            .resolve_workspace_path(root_head_uri, parent_uri)
+            .await?;
 
         // 2. Fetch every level's current record. Share a PDS cache so a
         //    chain spanning a single DID is one resolve.
@@ -203,8 +205,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             Vec::with_capacity(chain.len());
         for uri in &chain {
             chain_records.push(
-                directories::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache)
-                    .await?,
+                directories::fetch_with_cache::<Directory>(transport, uri, &mut pds_cache).await?,
             );
         }
 
@@ -253,10 +254,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             .apply_writes_returning(&[delete_op, create_op])
             .await?;
         let (mut child_uri, mut child_cid) = match results.get(1) {
-            Some(r) if r.uri.is_some() && r.cid.is_some() => (
-                r.uri.clone().unwrap(),
-                r.cid.clone().unwrap(),
-            ),
+            Some(r) if r.uri.is_some() && r.cid.is_some() => {
+                (r.uri.clone().unwrap(), r.cid.clone().unwrap())
+            }
             _ => {
                 return Err(Error::InvalidRecord(
                     "applyWrites did not return URI/CID for the new directory record".into(),

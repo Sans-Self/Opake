@@ -88,7 +88,10 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
     // Fingerprint the X25519 half — short and stable, matches what the
     // approving device displays. The ML-KEM half is 1184 bytes; printing
     // its fingerprint adds nothing for human comparison.
-    println!("Fingerprint: {}", fingerprint(&info.x25519_ephemeral_public_key));
+    println!(
+        "Fingerprint: {}",
+        fingerprint(&info.x25519_ephemeral_public_key)
+    );
     println!();
     println!("Run `opake pair approve` on your existing device.");
     println!("Waiting for response...");

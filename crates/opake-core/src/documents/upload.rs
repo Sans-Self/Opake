@@ -74,8 +74,7 @@ pub async fn prepare_upload(
     // any grants wrapped to the same content key share one consistent
     // context tag (`Document { uri }`). The download / metadata-read
     // paths unwrap with the same context.
-    let document_uri =
-        crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
+    let document_uri = crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
     let wrapped_key = crypto::wrap_key(
         &content_key,
         &params.owner_public_keys,
@@ -360,7 +359,8 @@ mod tests {
         // Match the upload-side context: every document wraps to its own
         // URI so the same context unlocks both the owner's envelope and
         // any grants wrapped from it.
-        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let test_uri =
+            crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
         let content_key = crypto::unwrap_key(
             &envelope.keys[0],
             &keys.private_keys(),
@@ -485,7 +485,8 @@ mod tests {
         };
 
         let wrapped = &envelope.keys[0];
-        let test_uri = crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
+        let test_uri =
+            crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, "test-tid");
         let content_key = crypto::unwrap_key(
             wrapped,
             &keys.private_keys(),

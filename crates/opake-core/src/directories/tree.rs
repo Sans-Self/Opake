@@ -101,8 +101,9 @@ impl<'a> DecryptionCtx<'a> {
     }
 }
 
-static EMPTY_GROUP_KEYS: std::sync::OnceLock<HashMap<String, crate::workspace::GroupKeys<'static>>> =
-    std::sync::OnceLock::new();
+static EMPTY_GROUP_KEYS: std::sync::OnceLock<
+    HashMap<String, crate::workspace::GroupKeys<'static>>,
+> = std::sync::OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct ResolvedPath {
@@ -185,9 +186,7 @@ impl DirectoryTree {
 
         let root_uri = directories
             .iter()
-            .find(|(uri, info)| {
-                info.is_workspace_root && !superseded_uris.contains(uri.as_str())
-            })
+            .find(|(uri, info)| info.is_workspace_root && !superseded_uris.contains(uri.as_str()))
             .map(|(uri, _)| uri.clone())
             .or_else(|| {
                 directories
@@ -446,8 +445,8 @@ impl DirectoryTree {
             }
         }
 
-        dirs.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
-        docs.sort_by(|a, b| a.2.to_lowercase().cmp(&b.2.to_lowercase()));
+        dirs.sort_by_key(|a| a.2.to_lowercase());
+        docs.sort_by_key(|a| a.2.to_lowercase());
         dirs.extend(docs);
         dirs
     }
@@ -959,7 +958,9 @@ impl DirectoryTree {
         if self.root_uri.as_deref() == Some(uri) {
             self.root_uri = None;
         }
-        TreeChange::Removed { uri: uri.to_string() }
+        TreeChange::Removed {
+            uri: uri.to_string(),
+        }
     }
 
     /// Apply a single indexed directory record to the in-memory tree.
@@ -982,11 +983,7 @@ impl DirectoryTree {
         // Project the record into the tree's internal shape. Entries become
         // bare target URIs (the cascade-pinned CIDs live on the record but
         // aren't load-bearing for in-memory navigation).
-        let entries: Vec<String> = dir
-            .entries
-            .iter()
-            .map(|e| e.target.clone())
-            .collect();
+        let entries: Vec<String> = dir.entries.iter().map(|e| e.target.clone()).collect();
 
         let mut info = DirectoryInfo {
             name: String::new(),
@@ -1031,9 +1028,13 @@ impl DirectoryTree {
         }
 
         if existed {
-            Ok(TreeChange::Updated { uri: uri.to_string() })
+            Ok(TreeChange::Updated {
+                uri: uri.to_string(),
+            })
         } else {
-            Ok(TreeChange::Inserted { uri: uri.to_string() })
+            Ok(TreeChange::Inserted {
+                uri: uri.to_string(),
+            })
         }
     }
 

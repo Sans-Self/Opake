@@ -208,7 +208,10 @@ mod tests {
         let events = feed_string(&mut acc, data);
         assert_eq!(events.len(), 1);
         assert!(events[0].is_ok());
-        assert_eq!(events[0].as_ref().unwrap().event_name(), "app.opake.directory:delete");
+        assert_eq!(
+            events[0].as_ref().unwrap().event_name(),
+            "app.opake.directory:delete"
+        );
     }
 
     #[test]
@@ -223,7 +226,10 @@ mod tests {
         let mut acc = SseLineAccumulator::new();
         // Split an event across three feeds, including mid-data and
         // mid-terminator.
-        assert_eq!(feed_string(&mut acc, "event: app.opake.directory:").len(), 0);
+        assert_eq!(
+            feed_string(&mut acc, "event: app.opake.directory:").len(),
+            0
+        );
         assert_eq!(feed_string(&mut acc, "delete\ndata: {\"uri").len(), 0);
         let events = feed_string(&mut acc, "\":\"at://x\"}\n\n");
         assert_eq!(events.len(), 1);

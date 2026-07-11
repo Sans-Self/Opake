@@ -137,14 +137,9 @@ fn opake_for_bob(mock: MockTransport) -> Opake<MockTransport, OsRng, NoopStorage
     });
     let client = XrpcClient::with_session(mock, "https://pds.test".into(), session);
     let identity = Identity::generate(BOB, &mut OsRng);
-    Opake::new(
-        client,
-        BOB.into(),
-        identity,
-        OsRng,
-        NoopStorage,
-        || 1_700_000_000_000_000,
-    )
+    Opake::new(client, BOB.into(), identity, OsRng, NoopStorage, || {
+        1_700_000_000_000_000
+    })
     .unwrap()
 }
 

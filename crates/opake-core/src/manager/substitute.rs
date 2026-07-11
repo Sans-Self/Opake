@@ -48,15 +48,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         new_cid: &str,
         now: &str,
     ) -> Result<(), Error> {
-        let (workspace_uri, workspace_id) = match &self.context {
-            FileContext::Workspace(ws) => (ws.uri.clone(), ws.id()),
-            FileContext::Cabinet(_) => {
-                return Err(Error::InvalidRecord(
+        let (workspace_uri, workspace_id) =
+            match &self.context {
+                FileContext::Workspace(ws) => (ws.uri.clone(), ws.id()),
+                FileContext::Cabinet(_) => return Err(Error::InvalidRecord(
                     "substitute cascade is a workspace operation; cabinet records edit in place"
                         .into(),
-                ))
-            }
-        };
+                )),
+            };
 
         let chain_heads = self.fetch_workspace_chain_heads(&workspace_id).await?;
         let root_head = chain_heads
@@ -110,14 +109,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         let (ancestors, leaf) =
             build_deep_cascade_levels(self.opake.client.transport(), &chain, new_entries).await?;
-        directories::execute_cascade(
-            &mut self.opake.client,
-            &workspace_uri,
-            ancestors,
-            leaf,
-            now,
-        )
-        .await?;
+        directories::execute_cascade(&mut self.opake.client, &workspace_uri, ancestors, leaf, now)
+            .await?;
 
         self.invalidate_directory_cache().await;
         Ok(())

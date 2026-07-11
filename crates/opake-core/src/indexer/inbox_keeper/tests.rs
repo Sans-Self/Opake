@@ -164,13 +164,19 @@ fn fixture_envelope(
             recipient: recipient.to_string(),
             wrapped_key: WrappedKey {
                 did: recipient.to_string(),
-                ciphertext: AtBytes { encoded: String::new() },
+                ciphertext: AtBytes {
+                    encoded: String::new(),
+                },
                 algo: "x25519-mlkem768-hkdf-a256kw-v2".to_string(),
             },
             expires_at: None,
             encrypted_metadata: EncryptedMetadata {
-                ciphertext: AtBytes { encoded: String::new() },
-                nonce: AtBytes { encoded: String::new() },
+                ciphertext: AtBytes {
+                    encoded: String::new(),
+                },
+                nonce: AtBytes {
+                    encoded: String::new(),
+                },
             },
             created_at: created_at.to_string(),
         },
@@ -205,6 +211,9 @@ fn try_build_entry_pulls_author_did_from_uri() {
 
     let entry = try_build_entry_from_envelope(&envelope, "did:plc:bob").unwrap();
     assert_eq!(entry.author_did, "did:plc:alice");
-    assert_eq!(entry.document_uri, "at://did:plc:alice/app.opake.document/d1");
+    assert_eq!(
+        entry.document_uri,
+        "at://did:plc:alice/app.opake.document/d1"
+    );
     assert_eq!(entry.created_at, "2026-04-17T00:00:00Z");
 }

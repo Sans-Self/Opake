@@ -4,6 +4,10 @@ use crate::cabinet::Cabinet;
 use crate::workspace::Workspace;
 
 /// Discriminates the crypto context for file operations.
+// Cabinet's key material makes the variant ~3.7KB. FileContext values are
+// created once per operation and never collected, so the stack size is
+// irrelevant and boxing would only add indirection to every match.
+#[allow(clippy::large_enum_variant)]
 pub enum FileContext {
     /// Personal file space — direct (asymmetric) key wrapping.
     Cabinet(Cabinet),
