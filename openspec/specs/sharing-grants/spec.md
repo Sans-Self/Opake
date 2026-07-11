@@ -20,7 +20,7 @@ Terms:
 
 A share SHALL be expressed as an `app.opake.grant` record independent of the document it grants access to (design decision 2). The grant SHALL carry the document's content key wrapped to the recipient, plus encrypted grant metadata; it SHALL NOT be a field on the document record. Creating, listing, and deleting grants operate on grant records alone and never rewrite the document.
 
-The wrapped content key SHALL bind its AEAD context to the shared document's URI (`WrapContext::Document`), so a grant's wrapped key is meaningful only for that document. The grant metadata (permissions, note) SHALL be encrypted under the document's content key, so both sharer and recipient — the two parties who hold that key — can read it, and the PDS cannot.
+The wrapped content key SHALL bind its AEAD context to the shared document's URI (`WrapContext::Document`; the binding contract is `spec:document-crypto § Wraps are AEAD-bound to their record context`), so a grant's wrapped key is meaningful only for that document. The grant metadata (permissions, note) SHALL be encrypted under the document's content key, so both sharer and recipient — the two parties who hold that key — can read it, and the PDS cannot.
 
 #### Scenario: sharing writes exactly one grant record
 
@@ -114,7 +114,7 @@ Revoking a share SHALL delete the grant record (design decision 4). Deletion SHA
 
 ### Requirement: Sharing is cabinet-only
 
-Grant creation and the pending-share queue SHALL be available only from `FileContext::Cabinet`; a call from a workspace context SHALL be refused (crates/opake-core/src/manager/sharing.rs). Workspace documents are reached through group keys, not grants, and are not shareable person-to-person today. Correspondingly, the PDS-only download layer SHALL refuse a keyring-encrypted document when it has no pre-resolved group keys, rather than fetch a keyring record and guess — it cannot reach the live chain head and must make no membership decision (`1a797ab`; see workspace-identity, "a layer that cannot reach the head makes no membership decision").
+Grant creation and the pending-share queue SHALL be available only from `FileContext::Cabinet`; a call from a workspace context SHALL be refused (crates/opake-core/src/manager/sharing.rs). Workspace documents are reached through group keys, not grants, and are not shareable person-to-person today. Correspondingly, the PDS-only download layer SHALL refuse a keyring-encrypted document when it has no pre-resolved group keys, rather than fetch a keyring record and guess — it cannot reach the live chain head and must make no membership decision (`1a797ab`; `spec:workspace-identity § Membership authority is the live chain head`, with the document-side contract in `spec:document-crypto § The PDS-only download layer will not resolve group keys itself`).
 
 #### Scenario: sharing from a workspace context is refused
 
@@ -124,7 +124,7 @@ Grant creation and the pending-share queue SHALL be available only from `FileCon
 
 ### Requirement: Invitation targets hold the stable resource id
 
-An `app.opake.invitation` SHALL carry a random token, a `type` (`workspace` or `share`), and a `target` AT-URI of the resource being offered. For workspace invitations, `target` SHALL be the stable workspace identity (the genesis keyring URI), so the invitation survives keyring supersede; the identity requirement and its resolution are owned by the workspace-identity spec (finding 3) and are not restated here. `maxUses` / `uses` bound redemptions; `expiresAt` bounds lifetime.
+An `app.opake.invitation` SHALL carry a random token, a `type` (`workspace` or `share`), and a `target` AT-URI of the resource being offered. For workspace invitations, `target` SHALL be the stable workspace identity (the genesis keyring URI), so the invitation survives keyring supersede; the identity rule and the ban on head URIs in long-lived references are owned by `spec:workspace-identity § Head URI use is limited to head-record operations and resolution input` and are not restated here. `maxUses` / `uses` bound redemptions; `expiresAt` bounds lifetime.
 
 Acceptance SHALL be recorded as an `app.opake.invitationAcceptance` record on the acceptor's PDS pointing at the invitation; it records intent and does not itself grant membership or access.
 

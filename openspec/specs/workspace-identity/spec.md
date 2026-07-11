@@ -92,7 +92,7 @@ The typed boundary ends where `WorkspaceId` would have to cross into opake-crypt
 
 - **WHEN** the web client calls leaveWorkspace with a head URI
 - **THEN** the binding resolves before invoking the core operation
-- The binding resolves and passes `ws.id()`; core `leave_workspace` takes `&WorkspaceId`. Leave semantics are the workspace-membership spec's
+- The binding resolves and passes `ws.id()`; core `leave_workspace` takes `&WorkspaceId`. Leave semantics are owned by `spec:workspace-membership § Removal rotates the group key; leave does not`
 
 #### Scenario: sync-by-URI accepts what its caller holds
 
@@ -133,7 +133,7 @@ Membership checks SHALL evaluate the member list of the resolved chain head, nev
 
 - **GIVEN** a keyring-encrypted document and a caller without pre-resolved group keys
 - **WHEN** the PDS-only download layer is asked for the content key
-- **THEN** it refuses with an explicit error, without fetching the genesis record or gating on its frozen member list — callers resolve the workspace at the head and pass `ws.group_keys()`
+- **THEN** it refuses with an explicit error, without fetching the genesis record or gating on its frozen member list — callers resolve the workspace at the head and pass `ws.group_keys()` (the document-side contract is `spec:document-crypto § The PDS-only download layer will not resolve group keys itself`)
 - The genesis record's member list, wrapped keys, and `keyHistory` are frozen at creation, and this layer has no indexer access to walk to the head — so it refuses instead of resolving from the past. Regression: `bug__keyring_doc_without_keys_errors_instead_of_stale_genesis_gate`
 
 ## Open questions

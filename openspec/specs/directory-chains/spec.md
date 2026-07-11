@@ -48,7 +48,7 @@ A curatorial write is a full statement of the directory's entries. The writer SH
 
 ### Requirement: The workspace root is a flag-marked chain, forward-walked from genesis
 
-The workspace-root path SHALL have no anchor or deterministic URI. Every record in the root chain SHALL be an ordinary directory record with a PDS-assigned rkey, marked `isWorkspaceRoot: true` and carrying `workspaceId` set to the genesis keyring URI (the workspace identity — see the workspace-identity spec). A consumer SHALL find the current root by taking the flagged record that no other record supersedes, and SHALL advance to the head by walking `supersedes` back-edges forward, never by pinning the genesis record.
+The workspace-root path SHALL have no anchor or deterministic URI. Every record in the root chain SHALL be an ordinary directory record with a PDS-assigned rkey, marked `isWorkspaceRoot: true` and carrying `workspaceId` set to the genesis keyring URI (`spec:workspace-identity § Genesis URI is the workspace identity`). A consumer SHALL find the current root by taking the flagged record that no other record supersedes, and SHALL advance to the head by walking `supersedes` back-edges forward, never by pinning the genesis record.
 
 Creating the first directory in a fresh workspace SHALL genesis-cascade the root: when no indexed root head exists, the write builds a genesis root leaf carrying the new entry rather than superseding a root that was never created.
 
@@ -68,7 +68,7 @@ Creating the first directory in a fresh workspace SHALL genesis-cascade the root
 
 ### Requirement: Editor supersedes are additive; managers are unrestricted
 
-Directory authority SHALL follow the member's role in the current keyring (defined by the membership spec): a viewer authors nothing, a manager may add, drop, substitute, and reorder freely, and an editor may only ADD entries or ADVANCE an existing one. An editor's supersede SHALL be rejected unless every entry present in the prior canonical is either still present or covered by an advance — an entry the superseding record ADDs whose target record `supersedes` the dropped entry. A dropped entry with no such coverage is a disguised delete and SHALL be rejected.
+Directory authority SHALL follow the member's role in the current keyring (`spec:workspace-membership § Membership state is the keyring head's member list`): a viewer authors nothing, a manager may add, drop, substitute, and reorder freely, and an editor may only ADD entries or ADVANCE an existing one. An editor's supersede SHALL be rejected unless every entry present in the prior canonical is either still present or covered by an advance — an entry the superseding record ADDs whose target record `supersedes` the dropped entry. A dropped entry with no such coverage is a disguised delete and SHALL be rejected.
 
 The additivity check SHALL be evaluated over target URIs only; CIDs and ordering may differ across an additive supersede. Because an advance's coverage link lives on the *replacing target's* `supersedes` field — and for a document that record is not among the directory records — the check SHALL be fed both directory and document supersede links. The rule is enforced in two places that must agree: the indexer at write time (apps/indexer/lib/opake_indexer/authority.ex — `check_directory_supersede/4`, `additivity_check/2`, `additive?/3`) and the client as defense-in-depth over an indexer snapshot (crates/opake-core/src/directories/chain.rs::`verify_directory_additivity`).
 

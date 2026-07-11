@@ -85,8 +85,8 @@ Every wrap SHALL fold a `WrapContext` into the HKDF `info` string so that a `Wra
 
 The contexts and their bindings:
 
-- `Document { uri }` — a document's own content-key wrap binds the document's AT-URI. A grant that shares the same document to another recipient wraps the same content key under the *same* `Document { uri }` context, so the owner's envelope and every grant unwrap under one consistent tag (crates/opake-core/src/documents/{upload.rs,download_grant.rs}). Grants are otherwise the sharing spec's concern; this spec only fixes the context they bind.
-- `Keyring { uri }` — a member's group-key wrap binds the workspace's *genesis* keyring URI, resolved through `Keyring::wrap_anchor`. Binding the head URI instead is a context mismatch that breaks the moment a workspace supersedes; the rule and its regressions belong to the workspace-identity spec, and this spec defers to it.
+- `Document { uri }` — a document's own content-key wrap binds the document's AT-URI. A grant that shares the same document to another recipient wraps the same content key under the *same* `Document { uri }` context, so the owner's envelope and every grant unwrap under one consistent tag (crates/opake-core/src/documents/{upload.rs,download_grant.rs}). Grants are otherwise the concern of `spec:sharing-grants § A grant is a standalone record, not inline document state`; this spec only fixes the context they bind.
+- `Keyring { uri }` — a member's group-key wrap binds the workspace's *genesis* keyring URI, resolved through `Keyring::wrap_anchor`. Binding the head URI instead is a context mismatch that breaks the moment a workspace supersedes; the rule and its regressions belong to `spec:workspace-identity § Group-key wraps are AEAD-bound to genesis`, and this spec defers to it.
 - `PairResponse` — the device-pairing Identity-bundle wrap, single-recipient and single-context, needs no URI (crates/opake-core/src/pairing/).
 - `Cabinet` — the personal self-wrap of a content key under the user's own published keys, one cabinet per identity, needs no URI (crates/opake-core/src/directories/mod.rs).
 
@@ -126,7 +126,7 @@ A keyring-encrypted document SHALL be decrypted using the group key generation n
 
 If no key is available for the document's rotation, the read SHALL fail with an explicit error rather than attempting the wrong key — the reader was not a member at that rotation, or the rotation is unknown.
 
-Because a document keeps referencing the rotation it was sealed under, rotating the group key SHALL NOT require re-encrypting any blob or content key: new documents use the new group key, old documents stay readable through `keyHistory`, and the removed member cannot derive keys minted after their removal (docs/CRYPTO.md, "Key Rotation"; CLAUDE.md decisions #3 and #4). This is the git-crypt posture: forward secrecy holds for content created after removal, but a member who could already read a document may have cached its plaintext, so historical access is not revoked.
+Because a document keeps referencing the rotation it was sealed under, rotating the group key SHALL NOT require re-encrypting any blob or content key: new documents use the new group key, old documents stay readable through `keyHistory`, and the removed member cannot derive keys minted after their removal (rotation-on-removal mechanics are `spec:workspace-membership § Removal rotates the group key; leave does not`; docs/CRYPTO.md, "Key Rotation"; CLAUDE.md decisions #3 and #4). This is the git-crypt posture: forward secrecy holds for content created after removal, but a member who could already read a document may have cached its plaintext, so historical access is not revoked.
 
 #### Scenario: post-rotation reader opens a pre-rotation document
 
@@ -144,7 +144,7 @@ Because a document keeps referencing the rotation it was sealed under, rotating 
 
 A layer that has only PDS access and no indexer SHALL NOT resolve a keyring-encrypted document's group keys on its own. Given a keyring-encrypted document and no supplied group keys, it SHALL refuse with an explicit error directing the caller to resolve the workspace and pass `ws.group_keys()`.
 
-It SHALL NOT fall back to fetching the record at `keyringRef.keyring` and gating on that record's member list: `keyringRef.keyring` is the genesis URI, and the genesis record's members, wrapped keys, and `keyHistory` are frozen at creation — a member added by a later supersede is absent, and everyone else would be handed rotation-0 keys. Reaching the live chain head needs the indexer, which this layer does not have. Membership authority living at the chain head is the workspace-identity spec's rule; this requirement is the document-side consequence.
+It SHALL NOT fall back to fetching the record at `keyringRef.keyring` and gating on that record's member list: `keyringRef.keyring` is the genesis URI, and the genesis record's members, wrapped keys, and `keyHistory` are frozen at creation — a member added by a later supersede is absent, and everyone else would be handed rotation-0 keys. Reaching the live chain head needs the indexer, which this layer does not have. Membership authority living at the chain head is `spec:workspace-identity § Membership authority is the live chain head`; this requirement is the document-side consequence.
 
 #### Scenario: keyring document without keys errors instead of gating on genesis
 

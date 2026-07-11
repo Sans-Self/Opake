@@ -24,7 +24,7 @@ A role string outside the known set SHALL be treated as insufficient authority a
 
 ### Requirement: Membership state is the keyring head's member list
 
-The member list of the current keyring chain head is the sole source of membership truth. Every membership decision — authority checks, indexer 403s, entry building for the sidebar — SHALL evaluate the head's `members[]`, keyed by `wrappedKey.did`, carrying `role`. (Which record is "the head" and why the genesis record must never be consulted for membership is the workspace-identity spec's "membership authority is the live chain head".)
+The member list of the current keyring chain head is the sole source of membership truth. Every membership decision — authority checks, indexer 403s, entry building for the sidebar — SHALL evaluate the head's `members[]`, keyed by `wrappedKey.did`, carrying `role`. (Which record is "the head" and why the genesis record must never be consulted for membership is owned by `spec:workspace-identity § Membership authority is the live chain head`.)
 
 #### Scenario: indexer role lookup reads the head
 
@@ -53,7 +53,7 @@ The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_s
 
 ### Requirement: Adding a member is a manager-authored supersede
 
-A manager adds a member by wrapping the current group key to the recipient's published hybrid public keys and appending the wrap to a superseding keyring record. Adding a DID already in the member list SHALL be rejected. The wrap's AEAD anchor is the genesis URI (workspace-identity spec); the role is assigned at add time.
+A manager adds a member by wrapping the current group key to the recipient's published hybrid public keys and appending the wrap to a superseding keyring record. Adding a DID already in the member list SHALL be rejected. The wrap's AEAD anchor is the genesis URI (`spec:workspace-identity § Group-key wraps are AEAD-bound to genesis`); the role is assigned at add time.
 
 #### Scenario: duplicate add rejected
 
@@ -63,7 +63,7 @@ A manager adds a member by wrapping the current group key to the recipient's pub
 
 ### Requirement: Removal rotates the group key; leave does not
 
-Removing a member SHALL rotate: the authoring manager mints a new group key, re-wraps it for every remaining member, bumps `rotation`, and pushes the prior rotation's members into `keyHistory` so existing documents stay readable. The removed member never sees the new key — that is the forward-secrecy contract, bounded by the no-historical-revocation posture (removed members keep whatever they already had).
+Removing a member SHALL rotate: the authoring manager mints a new group key, re-wraps it for every remaining member, bumps `rotation`, and pushes the prior rotation's members into `keyHistory` so existing documents stay readable (`spec:document-crypto § Keyring reads select the group key by the document's rotation`). The removed member never sees the new key — that is the forward-secrecy contract, bounded by the no-historical-revocation posture (removed members keep whatever they already had).
 
 Leave SHALL NOT rotate. The leaver authors the supersede, so any key minted in it is a key the leaver knows — rotation there costs a rotation number and buys nothing. A leave carries the remaining members' wraps, the rotation counter, and the key history verbatim, dropping only the author's entry. Forward secrecy against a departed member arrives with the next manager-authored rotation; `remove_workspace_member` covers the uncooperative case.
 
@@ -119,5 +119,5 @@ A manager changes a member's role by writing a supersede carrying the prior memb
 - Genesis identity, AEAD wrap anchoring, head-vs-genesis resolution — workspace-identity spec.
 - What editors may do to directory contents (wiki-semantics additivity) — directory-chains spec.
 - The wrap algorithm, key hierarchy, and rotation-aware decryption mechanics — document-crypto spec.
-- Person-to-person sharing and invitations — sharing-grants spec (invitation targets are covered by workspace-identity finding 3).
+- Person-to-person sharing and invitations — sharing-grants spec (`spec:sharing-grants § Invitation targets hold the stable resource id`).
 - Workspace destruction — deliberately unspecified; see workspace-identity open questions.
