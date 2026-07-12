@@ -1,0 +1,114 @@
+# indexer-consistency (delta)
+
+## ADDED Requirements
+
+### Requirement: The cursor is strictly monotonic
+
+The indexer's firehose cursor SHALL only advance: the persisted cursor is written only when the incoming event's `time_us` exceeds the last persisted value, and a restart resumes from the persisted cursor. The indexer SHALL never re-emit previously indexed state as new — replays of already-consumed events are absorbed idempotently by upserts and never move the cursor backward.
+
+The cursor is the pipeline's single notion of progress. Every other guarantee in this capability is expressed against it.
+
+#### Scenario: restart does not rewind
+
+- **WHEN** the indexer restarts after consuming events through cursor T
+- **THEN** consumption resumes at T, and no event with `time_us` ≤ T produces an SSE broadcast or changes a record's `indexed_at`
+
+#### Scenario: out-of-order frame does not regress the cursor
+
+- **WHEN** a frame arrives carrying `time_us` older than the persisted cursor
+- **THEN** the persisted cursor is unchanged
+
+### Requirement: Snapshot and stream jointly lose nothing
+
+A snapshot response reflects every event the indexer has consumed at the moment it is served. An SSE subscription delivers every event consumed after the subscription is established. A client that takes a snapshot and then subscribes — or subscribes and then takes a snapshot — SHALL observe every event at least once; the overlap window may deliver an event both in the snapshot and on the stream, and every consumer SHALL treat re-delivery as idempotent.
+
+This seam is why sync-then-stream reconnect is sound: Phoenix PubSub does not buffer for offline subscribers, so the full re-sync on (re)connect is the mechanism that closes the gap, and the keepers' idempotent application is what makes the overlap harmless. Both halves are load-bearing; neither is a defensive nicety.
+
+#### Scenario: reconnect after missed events
+
+- **WHEN** a client's SSE connection drops, events E1..En are consumed by the indexer during the outage, and the client reconnects using sync-then-stream
+- **THEN** the client's post-sync projection reflects E1..En, and any of E1..En re-delivered on the new stream leave the projection unchanged
+
+#### Scenario: duplicate delivery in the overlap window
+
+- **WHEN** an event appears both in a client's snapshot and on its subsequently attached stream
+- **THEN** applying the streamed copy is a no-op
+
+### Requirement: indexed_at is first-seen
+
+`indexed_at` records when the indexer first consumed a record's URI and SHALL be immutable thereafter: upserts triggered by later events for the same URI (updates, supersedes, echoes, replays) SHALL NOT modify it. Pagination cursors and `changes_since` filters built on `indexed_at` therefore observe a stable total order — a record never moves position in the sequence after first insertion.
+
+#### Scenario: update does not reposition a record
+
+- **WHEN** a record indexed at time T1 is updated by a later event at time T2
+- **THEN** its `indexed_at` remains T1, a pagination pass ordered by `indexed_at` returns it in the same position as before the update, and `changes_since(T1)` does not re-deliver it
+
+### Requirement: Acceptance does not imply visibility
+
+A write accepted by a PDS is not thereby queryable at the indexer, and no bounded interval between acceptance and visibility exists. A client SHALL NOT assume that its own accepted write — or a write it learned of out-of-band — is reflected in indexer snapshots, chain heads, membership checks, or any other indexer-derived answer. Client code paths whose correctness depends on such an assumption are defective under this contract even when they pass in low-lag environments.
+
+The successor design that would let a client await visibility of a known write (cursor exposure and/or a record-visibility probe) is deliberately out of scope: its parameters are a function of the real lag distribution, which the observability requirement below exists to measure first.
+
+#### Scenario: fresh write is absent from a snapshot
+
+- **WHEN** a client writes a record to its PDS and immediately requests an indexer snapshot
+- **THEN** a snapshot that does not yet contain the record is a conforming response, not an error
+
+### Requirement: Dependent operations tolerate the visibility gap
+
+A client operation whose input depends on the indexer having consumed a prior write of the same actor — resolving a chain head just written, passing a membership check for a workspace just created, mutating a record whose genesis is in flight — SHALL tolerate not-found and authorization failures for the duration of a bounded retry window (retry with backoff) before surfacing an error. First-response failure of such an operation is a contract violation in the client, not the indexer.
+
+The canonical instance: a workspace creator's first mutation resolves the keyring chain head via the indexer; between genesis commit and indexer consumption that resolution 403s as "not a member". Under this requirement the client absorbs the window; the user sees at most latency, never an authorization error for a workspace they own.
+
+#### Scenario: creator mutates a fresh workspace
+
+- **WHEN** a client creates a workspace and issues a dependent mutation before the indexer has consumed the genesis keyring
+- **THEN** the mutation retries resolution within the bounded window and succeeds once the genesis is consumed, and only exhaustion of the window surfaces an error
+
+#### Scenario: retry window exhaustion is an error, not a hang
+
+- **WHEN** the indexer does not consume the awaited write within the retry window
+- **THEN** the operation fails with an error naming the visibility wait, distinct from an ordinary authorization denial
+
+### Requirement: Ordering is guaranteed per topic only
+
+Within a single SSE topic, events are delivered in cursor order. Across topics — including the `did:` and `keyring:` topics of one subscriber — no relative ordering is guaranteed, and a consumer SHALL NOT infer cross-topic ordering from arrival order. A keeper reconciling state fed by multiple topics derives correctness from record content (chain links, supersede references), never from event arrival order across topics.
+
+#### Scenario: cross-topic arrival order is uninformative
+
+- **WHEN** one underlying write fans out to both a subscriber's `did:` topic and a `keyring:` topic and the two events arrive in either order
+- **THEN** the subscriber's resulting projection is identical
+
+### Requirement: Client projections contain only indexer-confirmed state
+
+A client projection — a keeper's tree, workspace list, inbox, or any other locally maintained view of indexed state — SHALL be patched exclusively by indexer-derived inputs: snapshots and SSE events. A client SHALL NOT insert an anticipated write into a projection ahead of the indexer confirming it. Visibility in a projection and authorization for dependent operations thereby become the same event: anything a projection shows, the indexer can already answer for.
+
+Operation-in-flight state is exempt and remains permitted: a busy dialog, a disabled control, a progress affordance scoped to a running operation. Such state is ephemeral, tied to the operation's lifetime, and never takes the form of an entry in a projection. The line is representational — feedback about *an operation* is fine; a record that doesn't exist yet in the indexer's answer is not.
+
+Optimistic projection entries may return as a designed feature — a provisional entry that can confirm or retract itself against an explicit visibility signal — if the write-visibility successor lands. Until then they are forbidden, not discouraged.
+
+#### Scenario: workspace creation surfaces on the echo, not before
+
+- **WHEN** a client creates a workspace and the create operation completes against the PDS
+- **THEN** the workspace appears in the client's workspace projection only when the indexer's event or snapshot delivers it, and the create flow signals in-flight state until that happens
+
+#### Scenario: a projection entry is always actionable
+
+- **WHEN** any entry is visible in a client projection
+- **THEN** a dependent operation on that entry does not fail for lack of indexer visibility of the entry itself
+
+### Requirement: The indexer measures its own consume lag
+
+The indexer SHALL measure, per consumed event, the delta between the event's firehose `time_us` and the wall-clock processing time, and SHALL expose the distribution (at minimum p50/p95/p99 over a rolling interval) server-side. The measurement is derived entirely from data the indexer already holds; no client sends telemetry and no per-user data is recorded.
+
+This is the decision procedure for the write-visibility successor: whether the tail is hundreds of milliseconds or minutes determines whether awaiting a write is an invisible beat or a designed waiting state, and that question stays open until this data exists.
+
+#### Scenario: lag distribution is available server-side
+
+- **WHEN** an operator inspects the indexer after a period of consumption
+- **THEN** the consume-lag distribution over that period is available without instrumenting any client
+
+#### Scenario: idle is distinguishable from stalled
+
+- **WHEN** no events arrive for an interval
+- **THEN** the lag measurement does not grow against wall clock, and an operator can distinguish an idle pipeline from a stalled one
