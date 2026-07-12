@@ -29,7 +29,20 @@ through a cowboy on Opus.
 
 3. **Spawn ONE cowboy** — `Agent` with `subagent_type: "Opake Review"`,
    `model: "opus"`, foreground (`run_in_background: false`; do not use tmux
-   teams — broken on this machine, see memory). Prompt shape:
+   teams — broken on this machine, see memory).
+
+   **Harvesting the report:** the Opake Review agent type has NO
+   SendMessage tool — it cannot deliver its report itself, and an idle
+   notification is its only completion signal (verified 2026-07-12; two
+   idles and a futile nudge before this was diagnosed). If the spawn ran
+   async and only idles arrive, do not keep nudging: extract the final
+   assistant text from the agent's transcript JSONL under
+   `~/.claude/projects/<project-dir>/` (grep the .jsonl files for a
+   distinctive phrase from the brief to find the right one, then take the
+   last assistant text entry). Tell the cowboy in the brief that its final
+   plain-text output IS the deliverable.
+
+   Prompt shape:
 
    > You are reviewing an openspec change for semantic cross-spec impact.
    > The change's delta specs are at <paths>. Read them fully. Then read

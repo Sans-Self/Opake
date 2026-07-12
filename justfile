@@ -3,6 +3,12 @@
 # Replaces Makefile. Each language's toolchain handles its own caching;
 # just orchestrates the dependency order.
 
+# Recipes need the nix devshell (rustc, NIX_LDFLAGS for the linker, mix, bun).
+# Interactive shells get it via the direnv hook, but bare shells (CI, agents)
+# don't — route every recipe through direnv so the env is loaded either way.
+# No-ops cheaply when already inside; nix-direnv caches the evaluation.
+set shell := ["direnv", "exec", ".", "bash", "-cu"]
+
 wasm_crate := "crates/opake-wasm"
 wasm_out := "packages/opake-sdk/wasm"
 registry := env("REGISTRY", "zot.sans-self.org")
