@@ -22,6 +22,7 @@ fn generate_produces_24_words() {
     assert_eq!(mnemonic.words().len(), 24);
 }
 
+// spec:auth-identity § A mnemonic is rejected unless it is 24 valid checksummed words
 #[test]
 fn generate_roundtrips_through_parse() {
     let mnemonic = generate_mnemonic(&mut test_rng());
@@ -82,6 +83,7 @@ fn all_ones_entropy_test_vector() {
 // Validation
 // ---------------------------------------------------------------------------
 
+// spec:auth-identity § A mnemonic is rejected unless it is 24 valid checksummed words
 #[test]
 fn parse_rejects_wrong_word_count() {
     let err = parse_mnemonic("abandon ability able").unwrap_err();
@@ -95,6 +97,7 @@ fn parse_rejects_twelve_words() {
     assert!(err.to_string().contains("expected 24 words, got 12"));
 }
 
+// spec:auth-identity § A mnemonic is rejected unless it is 24 valid checksummed words
 #[test]
 fn parse_rejects_unknown_word() {
     let mut words = vec!["abandon"; 23];
@@ -103,6 +106,7 @@ fn parse_rejects_unknown_word() {
     assert!(err.to_string().contains("notaword"));
 }
 
+// spec:auth-identity § A mnemonic is rejected unless it is 24 valid checksummed words
 #[test]
 fn parse_rejects_bad_checksum() {
     // Valid words but wrong checksum: "abandon" x 23 + "about" (should be "art").
@@ -157,6 +161,7 @@ fn nonzero_entropy_roundtrips() {
 // Derivation
 // ---------------------------------------------------------------------------
 
+// spec:auth-identity § Identity keys derive deterministically from the mnemonic
 #[test]
 fn derivation_is_deterministic() {
     let mnemonic = generate_mnemonic(&mut test_rng());
@@ -170,6 +175,7 @@ fn derivation_is_deterministic() {
     assert_eq!(a.ml_kem_private, b.ml_kem_private);
 }
 
+// spec:auth-identity § Identity keys derive deterministically from the mnemonic
 #[test]
 fn derivation_produces_correct_key_lengths() {
     let mnemonic = generate_mnemonic(&mut test_rng());
@@ -196,6 +202,7 @@ fn different_mnemonics_produce_different_keys() {
 // Golden test vector
 // ---------------------------------------------------------------------------
 
+// spec:auth-identity § The derivation path is version-pinned and immutable
 #[test]
 fn golden_vector_all_zero_entropy() {
     // All-zero entropy → known mnemonic → deterministic keys.
@@ -236,6 +243,7 @@ fn golden_vector_all_zero_entropy() {
 // Debug redaction
 // ---------------------------------------------------------------------------
 
+// spec:auth-identity § The mnemonic zeroizes and never leaks through debug output
 #[test]
 fn debug_does_not_leak_words() {
     let mnemonic = generate_mnemonic(&mut test_rng());

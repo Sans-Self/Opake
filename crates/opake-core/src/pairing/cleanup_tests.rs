@@ -59,6 +59,7 @@ fn delete_ok() -> HttpResponse {
     }
 }
 
+// spec:auth-pairing § Stale pair requests are swept client-side
 #[tokio::test]
 async fn deletes_expired_request() {
     let mock = MockTransport::new();
@@ -89,6 +90,7 @@ async fn deletes_expired_request() {
     );
 }
 
+// spec:auth-pairing § Stale pair requests are swept client-side
 #[tokio::test]
 async fn keeps_fresh_request() {
     let mock = MockTransport::new();
@@ -119,6 +121,7 @@ async fn keeps_fresh_request() {
     assert_eq!(mock.requests().len(), 2);
 }
 
+// spec:auth-pairing § Stale pair requests are swept client-side
 #[tokio::test]
 async fn deletes_orphaned_response() {
     let mock = MockTransport::new();

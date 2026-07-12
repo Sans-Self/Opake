@@ -125,6 +125,7 @@ impl Storage for MemoryPairStore {
     }
 }
 
+// spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair
 #[tokio::test]
 async fn create_pair_request_persists_ephemeral_privkey() {
     let mock = MockTransport::new();

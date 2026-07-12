@@ -2,7 +2,6 @@ use opake_core::crypto::{
     ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
     KeyringMetadata, OsRng,
 };
-use opake_core::storage::Identity;
 use wasm_bindgen::prelude::*;
 
 // Bindings module — wrapper DTOs + ts-rs annotations. Not wasm32-gated
@@ -131,16 +130,6 @@ fn content_key_from_slice(bytes: &[u8]) -> Result<ContentKey, JsError> {
         .try_into()
         .map_err(|_| JsError::new("content key must be exactly 32 bytes"))?;
     Ok(ContentKey(arr))
-}
-
-// ---------------------------------------------------------------------------
-// Identity exports
-// ---------------------------------------------------------------------------
-
-#[wasm_bindgen(js_name = generateIdentity)]
-pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {
-    let identity = Identity::generate(did, &mut OsRng);
-    serde_wasm_bindgen::to_value(&identity).map_err(|e| JsError::new(&e.to_string()))
 }
 
 // ---------------------------------------------------------------------------

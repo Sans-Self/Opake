@@ -67,6 +67,7 @@ fn needs_refresh_oauth_within_threshold() {
     assert!(session.needs_refresh(300, 800));
 }
 
+// spec:auth-session § Token refresh is proactive, threshold-gated, and single-flight
 #[test]
 fn needs_refresh_oauth_outside_threshold() {
     let session = oauth_session(Some(5000));
@@ -80,6 +81,7 @@ fn needs_refresh_oauth_no_expiry() {
     assert!(session.needs_refresh(300, 1000));
 }
 
+// spec:auth-session § App-password login remains as the legacy path
 #[test]
 fn needs_refresh_legacy_always_true() {
     let session = legacy_session();
@@ -107,6 +109,7 @@ fn needs_refresh_exact_boundary() {
 
 // --- proactive_refresh tests ---
 
+// spec:auth-session § Token refresh is proactive, threshold-gated, and single-flight
 #[tokio::test]
 async fn proactive_refresh_not_needed() {
     let session = oauth_session(Some(5000));
@@ -155,6 +158,7 @@ async fn proactive_refresh_oauth_success() {
     assert!(reqs[0].url.contains("/token"));
 }
 
+// spec:auth-session § App-password login remains as the legacy path
 #[tokio::test]
 async fn proactive_refresh_legacy_success() {
     let session = legacy_session();
@@ -214,6 +218,7 @@ async fn proactive_refresh_legacy_failure() {
     assert!(matches!(result, RefreshOutcome::Failed(_)));
 }
 
+// spec:auth-session § Token refresh is proactive, threshold-gated, and single-flight
 #[tokio::test]
 async fn proactive_refresh_oauth_preserves_refresh_token_when_not_rotated() {
     let session = oauth_session(Some(1100));

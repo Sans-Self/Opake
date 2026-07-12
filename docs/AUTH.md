@@ -53,7 +53,7 @@ The `Config` type tracks all logged-in accounts with a `default_did` pointer. Ea
   config.toml               # { default_did, accounts: { did → { handle, pds_url } } }
   accounts/
     did:plc:alice/
-      identity.json          # X25519 + Ed25519 keypairs (0600)
+      identity.json          # X25519 + ML-KEM-768 + Ed25519 keypairs (0600)
       session.json           # OAuth or legacy tokens (0600)
       keyrings/              # Cached group keys per keyring
     did:plc:bob/

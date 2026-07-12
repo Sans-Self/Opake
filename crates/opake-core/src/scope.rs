@@ -44,6 +44,7 @@ mod tests {
     /// Ensures every *_COLLECTION const in the crate is listed in
     /// OPAKE_COLLECTIONS. If this fails, you added a new collection
     /// constant but forgot to register it for OAuth scopes.
+    // spec:auth-session § The OAuth scope derives from one collection registry
     #[test]
     fn all_collection_constants_are_registered() {
         let all_known: &[&str] = &[
@@ -76,6 +77,7 @@ mod tests {
         assert!(scope.ends_with(" blob:*/*"));
     }
 
+    // spec:auth-session § The OAuth scope derives from one collection registry
     #[test]
     fn oauth_scope_includes_all_collections() {
         let scope = oauth_scope();

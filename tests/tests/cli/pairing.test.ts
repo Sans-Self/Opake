@@ -57,6 +57,7 @@ afterAll(async () => {
 });
 
 describe("device pairing", () => {
+  // spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair
   it("pair request → approve → new device can decrypt", async () => {
     resetPds();
     const pds = getPds();
@@ -138,6 +139,7 @@ describe("device pairing", () => {
     expect(readFileSync(downloadPath, "utf-8")).toBe("pairing test content");
   });
 
+  // spec:auth-pairing § A device that already holds an identity refuses to request pairing
   it("pair request fails when identity already exists", async () => {
     resetPds();
 

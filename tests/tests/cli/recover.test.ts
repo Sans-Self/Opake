@@ -28,6 +28,7 @@ afterAll(async () => {
 });
 
 describe("recover failures", () => {
+  // spec:auth-identity § A mnemonic is rejected unless it is 24 valid checksummed words
   it("recover rejects invalid seed phrase", async () => {
     resetPds();
     const configDir = freshDir();
@@ -56,6 +57,7 @@ describe("recover failures", () => {
     expect(recover.code).not.toBe(0);
   });
 
+  // spec:auth-identity § Recovery re-derives and cross-checks the published key
   it("recover rejects when identity already exists", async () => {
     resetPds();
     const configDir = freshDir();
@@ -112,6 +114,7 @@ describe("recover", () => {
     expect(readFileSync(downloadPath, "utf-8")).toBe("recoverable via grid");
   });
 
+  // spec:auth-identity § Recovery re-derives and cross-checks the published key
   it("recover from plain text seed phrase → decrypt works", async () => {
     resetPds();
     const configDir = freshDir();

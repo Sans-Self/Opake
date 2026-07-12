@@ -113,6 +113,7 @@ fn proof_includes_nonce_when_provided() {
     assert_eq!(payload["nonce"], "server-nonce-42");
 }
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[test]
 fn proof_includes_ath_when_access_token_provided() {
     let kp = DpopKeyPair::generate(&mut OsRng);
@@ -157,6 +158,7 @@ fn proof_signature_is_64_bytes_raw() {
     );
 }
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[test]
 fn proof_signature_verifies() {
     let kp = DpopKeyPair::generate(&mut OsRng);
@@ -181,6 +183,7 @@ fn proof_signature_verifies() {
         .unwrap();
 }
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[test]
 fn jti_is_unique_per_proof() {
     let kp = DpopKeyPair::generate(&mut OsRng);

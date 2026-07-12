@@ -118,6 +118,7 @@ fn valid_pair_state() -> Vec<u8> {
     blob
 }
 
+// spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair
 #[tokio::test]
 async fn pair_state_wrong_length_is_rejected() {
     // Legacy 32-byte X25519-only blob should produce a clean length error.
@@ -138,6 +139,7 @@ async fn pair_state_wrong_length_is_rejected() {
     }
 }
 
+// spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair
 #[tokio::test]
 async fn pair_state_unknown_version_byte_is_rejected() {
     let mut blob = valid_pair_state();

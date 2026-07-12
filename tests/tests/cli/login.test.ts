@@ -28,6 +28,7 @@ afterAll(async () => {
 });
 
 describe("login", () => {
+  // spec:auth-identity § The seed phrase is the sole human-facing identity-creation path
   it("legacy login with seed phrase confirmation", async () => {
     const configDir = freshConfigDir();
     const result = await interactiveLogin("alice.test", configDir);
@@ -42,6 +43,7 @@ describe("login", () => {
     expect(accounts.stdout).toContain("alice.test");
   });
 
+  // spec:auth-session § Accounts are per-DID and switching is destroy-then-reinit
   it("second login adds account without overwriting first", async () => {
     const configDir = freshConfigDir();
     await interactiveLogin("alice.test", configDir);

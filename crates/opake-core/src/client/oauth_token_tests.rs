@@ -29,6 +29,7 @@ fn dpop_key() -> DpopKeyPair {
 
 // -- PAR --
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[tokio::test]
 async fn par_sends_form_with_dpop_header() {
     let mock = MockTransport::new();
@@ -120,6 +121,7 @@ async fn exchange_code_happy_path() {
     assert_eq!(token.sub.as_deref(), Some("did:plc:test"));
 }
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[tokio::test]
 async fn exchange_code_rejects_wrong_sub() {
     let mock = MockTransport::new();
@@ -151,6 +153,7 @@ async fn exchange_code_rejects_wrong_sub() {
     assert!(err.to_string().contains("does not match"));
 }
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[tokio::test]
 async fn exchange_code_rejects_bearer_token_type() {
     let mock = MockTransport::new();
@@ -190,6 +193,7 @@ async fn exchange_code_rejects_bearer_token_type() {
 
 // -- dpop nonce retry --
 
+// spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
 #[tokio::test]
 async fn exchange_code_retries_on_use_dpop_nonce() {
     let mock = MockTransport::new();

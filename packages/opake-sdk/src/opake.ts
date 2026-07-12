@@ -251,12 +251,6 @@ export class Opake {
     return wasm.deriveIdentityFromMnemonic(seedPhrase, did) as import("./storage").Identity;
   }
 
-  /** Generate a fresh random encryption identity. */
-  static async generateIdentity(did: string): Promise<import("./storage").Identity> {
-    const wasm = await initWasm();
-    return wasm.generateIdentity(did) as import("./storage").Identity;
-  }
-
   // ---------------------------------------------------------------------------
   // Authentication
   // ---------------------------------------------------------------------------
