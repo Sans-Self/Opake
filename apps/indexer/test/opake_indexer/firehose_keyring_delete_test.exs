@@ -71,6 +71,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
   end
 
   describe "keyring delete outcomes" do
+    # spec:keyring-tombstones § The indexer resolves every keyring delete to an outcome
     test "genesis delete on a superseded chain is unchanged" do
       head = "at://#{@alice}/app.opake.keyring/head"
       put_keyring(@genesis, indexed_at: t(100))
@@ -88,6 +89,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       assert %{deleted_at: %DateTime{}} = RecordQueries.lookup(@genesis)
     end
 
+    # spec:keyring-tombstones § The indexer resolves every keyring delete to an outcome
     test "superseded intermediate delete is unchanged" do
       mid = "at://#{@alice}/app.opake.keyring/mid"
       head = "at://#{@alice}/app.opake.keyring/head"
@@ -103,6 +105,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       assert %{head_uri: ^head} = ChainHeadQueries.get(@genesis, "keyring")
     end
 
+    # spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it
     test "head delete rolls back to the predecessor and re-broadcasts it" do
       head = "at://#{@alice}/app.opake.keyring/head"
       put_keyring(@genesis, indexed_at: t(100))
@@ -121,6 +124,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       assert %{head_uri: @genesis} = ChainHeadQueries.get(@genesis, "keyring")
     end
 
+    # spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it
     test "head delete with a purged intermediate rolls back to the newest live record" do
       # Chain genesis -> mid -> head, where mid's tombstone was purged:
       # its row no longer exists at all. head's supersedes link dangles.
@@ -137,6 +141,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       assert %{head_uri: @genesis} = ChainHeadQueries.get(@genesis, "keyring")
     end
 
+    # spec:keyring-tombstones § The indexer resolves every keyring delete to an outcome
     test "sole-record delete tears down the workspace's tracked chains" do
       put_keyring(@genesis, indexed_at: t(100))
       {:ok, _} = ChainHeadQueries.create(@genesis, "keyring", @genesis, "bafy-#{@genesis}")

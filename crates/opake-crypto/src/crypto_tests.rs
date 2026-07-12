@@ -144,6 +144,7 @@ fn wrap_unwrap_roundtrips() {
     assert_eq!(content_key.0, unwrapped.0);
 }
 
+// spec:document-crypto § Asymmetric wraps use the hybrid post-quantum construction
 #[test]
 fn wrap_produces_correct_algo() {
     let content_key = generate_content_key(&mut OsRng);
@@ -303,6 +304,7 @@ fn cross_recipient_splice_rejected() {
     .is_err());
 }
 
+// spec:document-crypto § Wraps are AEAD-bound to their record context
 #[test]
 fn cross_context_splice_rejected() {
     // A WrappedKey created in a keyring context must not unwrap when fed
@@ -361,6 +363,7 @@ fn cross_context_splice_rejected() {
 
 // -- Wrong-algo rejection --
 
+// spec:document-crypto § Asymmetric wraps use the hybrid post-quantum construction
 #[test]
 fn unwrap_rejects_unknown_algo() {
     // Build a `WrappedKey` with an unsupported `algo` string — `unwrap_key`

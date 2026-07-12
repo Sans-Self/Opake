@@ -129,6 +129,7 @@ fn current_keys(current_rotation: u64, key: &ContentKey) -> GroupKeys<'_> {
     }
 }
 
+// spec:document-crypto § The PDS-only download layer will not resolve group keys itself
 #[tokio::test]
 async fn roundtrip() {
     let plaintext = b"shared keyring content";
@@ -178,6 +179,7 @@ async fn rejects_non_document_uri() {
     );
 }
 
+// spec:document-crypto § A document is encrypted in exactly one of two modes
 #[tokio::test]
 async fn rejects_direct_encrypted_document() {
     let member = TestKeys::generate(MEMBER_DID);
@@ -241,6 +243,7 @@ async fn rejects_direct_encrypted_document() {
 /// The caller holds no key for the rotation the document was encrypted under —
 /// they weren't a member at that rotation. (Replaces the old "not a member of
 /// keyring" check, which now lives in workspace resolution, not here.)
+// spec:document-crypto § Keyring reads select the group key by the document's rotation
 #[tokio::test]
 async fn rejects_missing_rotation_key() {
     let fixture = create_keyring_fixture(b"data");
@@ -263,6 +266,7 @@ async fn rejects_missing_rotation_key() {
 
 /// A document encrypted under an earlier rotation decrypts via the historical
 /// key the caller carries from `keyHistory`.
+// spec:document-crypto § Keyring reads select the group key by the document's rotation
 #[tokio::test]
 async fn download_from_previous_rotation_via_history() {
     let plaintext = b"pre-rotation content";
@@ -298,6 +302,7 @@ async fn download_from_previous_rotation_via_history() {
 /// lists supersede-added members → "not a member". The key-driven path uses
 /// the group key the head walk already resolved and never consults the keyring
 /// — so the post-genesis member reads the pre-membership document.
+// spec:workspace-identity § Membership authority is the live chain head
 #[tokio::test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 async fn bug__post_genesis_member_opens_pre_membership_document() {

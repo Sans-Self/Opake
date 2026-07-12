@@ -426,6 +426,7 @@ fn from_records_empty() {
 /// that no longer matches the indexer's chain head (the symptom: editing a
 /// document in a workspace with rename/supersede history fails with "not
 /// reachable from indexer's root").
+// spec:directory-chains § Consumers build the live tree from chain heads only
 #[test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 fn bug__find_parent_skips_superseded_parent() {

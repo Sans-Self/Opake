@@ -96,6 +96,7 @@ fn newtype_transparent_shows_value() {
 
 // -- Real type tests --
 
+// spec:document-crypto § Key-carrying types zeroize on drop
 #[test]
 fn content_key_shows_length_not_bytes() {
     let key = generate_content_key(&mut OsRng);

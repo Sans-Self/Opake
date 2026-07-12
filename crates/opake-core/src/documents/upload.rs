@@ -449,6 +449,7 @@ mod tests {
         assert!(matches!(err, Error::Xrpc { .. }));
     }
 
+    // spec:document-crypto § Wraps are AEAD-bound to their record context
     #[tokio::test]
     async fn roundtrip_with_download() {
         let keys = TestKeys::generate(TEST_DID);

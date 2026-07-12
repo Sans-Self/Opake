@@ -7,11 +7,26 @@ checks document structure, so nothing else notices when a cited test is
 renamed, a file moves, or a hash is fabricated. This lint turns those
 citations from decoration into a checked contract.
 
-The reverse direction is checked too: e2e tests under tests/ may cite the
-spec scenario they exercise as `spec:<capability> § <requirement name>`.
-Each citation must resolve to a `### Requirement:` heading in
+The reverse direction is checked too: tests may cite the spec scenario
+they exercise as `spec:<capability> § <requirement name>`. Each citation
+must resolve to a `### Requirement:` heading in
 openspec/specs/<capability>/spec.md, so renaming a requirement without
 updating its tests (or citing a requirement that never existed) fails.
+Test citations live in three places, all scanned the same way:
+
+- TS/e2e tests under tests/ — literal `spec:` strings and `cite(...)` calls.
+- Rust tests under crates/ — comment lines `// spec:<cap> § <req>` (also
+  `//!`/`///`). All .rs is scanned, not only *_tests.rs; a citation
+  outside test code is harmless and still resolves.
+- Elixir tests under apps/indexer/test/ — comment lines `# spec:<cap> § <req>`.
+
+Dangling test citations report file:line so the offending comment is easy
+to find.
+
+Pass --coverage to print the requirement-coverage ledger: per capability,
+each requirement with the number of citing tests across all languages,
+flagging any requirement no test cites. The table is informational — it
+never changes the exit code.
 
 Specs may cite each other with the same syntax. Cross-spec citations are
 resolved in main specs and in non-archived change deltas; a delta's
@@ -30,6 +45,8 @@ that half lives in the spec-crossref-review skill.
 
 Exit code is non-zero if any citation dangles.
 """
+
+from __future__ import annotations
 
 import re
 import subprocess
@@ -128,7 +145,7 @@ def main() -> int:
     citers: dict[tuple[str, str], list[tuple[Path, str | None]]] = {}
 
     def check_citation(
-        rel: Path,
+        loc: str,
         capability: str,
         req: str,
         extra: set[tuple[str, str]] = frozenset(),
@@ -138,9 +155,9 @@ def main() -> int:
         if (capability, req) in extra:
             return
         if capability not in requirements:
-            errors.append(f"{rel}: cited capability does not exist: {capability}")
+            errors.append(f"{loc}: cited capability does not exist: {capability}")
         elif req not in requirements[capability]:
-            errors.append(f"{rel}: no requirement '{req}' in spec {capability}")
+            errors.append(f"{loc}: no requirement '{req}' in spec {capability}")
 
     for spec in specs:
         rel = spec.relative_to(ROOT)
@@ -162,7 +179,7 @@ def main() -> int:
                 errors.append(f"{rel}: cited commit not found: {rev}")
 
         for capability, req in CITE_RE.findall(text):
-            check_citation(rel, capability, req)
+            check_citation(str(rel), capability, req)
             citers.setdefault((capability, normalize(req)), []).append(
                 (rel, spec.parent.name)
             )
@@ -173,8 +190,24 @@ def main() -> int:
         rel = test_file.relative_to(ROOT)
         text = test_file.read_text()
         for capability, req in CITE_RE.findall(text) + CITE_CALL_RE.findall(text):
-            check_citation(rel, capability, req)
+            check_citation(str(rel), capability, req)
             citers.setdefault((capability, normalize(req)), []).append((rel, None))
+
+    # Rust and Elixir tests carry citations as comment lines. Scan line by
+    # line so a dangling citation reports file:line, and scan all .rs under
+    # crates/ (not just *_tests.rs) — a citation outside test code resolves
+    # the same way and is harmless.
+    source_files = sorted((ROOT / "crates").rglob("*.rs")) + sorted(
+        (ROOT / "apps" / "indexer" / "test").rglob("*.exs")
+    )
+    for source_file in source_files:
+        if "node_modules" in source_file.parts or "target" in source_file.parts:
+            continue
+        rel = source_file.relative_to(ROOT)
+        for lineno, line in enumerate(source_file.read_text().splitlines(), start=1):
+            for capability, req in CITE_RE.findall(line):
+                check_citation(f"{rel}:{lineno}", capability, req)
+                citers.setdefault((capability, normalize(req)), []).append((rel, None))
 
     changes_root = ROOT / "openspec" / "changes"
     changes = (
@@ -196,7 +229,7 @@ def main() -> int:
         for cap, delta in deltas.items():
             rel = delta.relative_to(ROOT)
             for capability, req in CITE_RE.findall(delta.read_text()):
-                check_citation(rel, capability, req, extra=added)
+                check_citation(str(rel), capability, req, extra=added)
 
         for cap, secs in sections.items():
             for req in sorted(secs.get("REMOVED", set())):
@@ -232,7 +265,40 @@ def main() -> int:
         f"{checked['hashes']} hashes, "
         f"{checked['citations']} citations checked, {len(errors)} dangling"
     )
+
+    if "--coverage" in sys.argv:
+        print_coverage(requirements, citers)
+
     return 1 if errors else 0
+
+
+def print_coverage(
+    requirements: dict[str, set[str]],
+    citers: dict[tuple[str, str], list[tuple[Path, str | None]]],
+) -> None:
+    """Requirement-coverage ledger: per capability, each requirement with
+    the count of citing tests (non-spec source citations) across all
+    languages. Informational — the caller keeps its own exit code."""
+    # Only test/source citations count toward coverage; spec-to-spec
+    # cross-references (citing_cap set) are cross-links, not test evidence.
+    def test_count(capability: str, req: str) -> int:
+        return sum(
+            1 for _, cap in citers.get((capability, req), []) if cap is None
+        )
+
+    total = 0
+    cited = 0
+    print("\nrequirement coverage (test citations across all languages)")
+    for capability in sorted(requirements):
+        print(f"\n{capability}")
+        for req in sorted(requirements[capability]):
+            count = test_count(capability, req)
+            total += 1
+            if count:
+                cited += 1
+            flag = "" if count else "  <- uncited"
+            print(f"  [{count}] {req}{flag}")
+    print(f"\ncoverage: {cited}/{total} requirements cited")
 
 
 if __name__ == "__main__":

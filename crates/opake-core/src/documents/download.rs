@@ -466,6 +466,7 @@ mod tests {
     /// handed stale keys to everyone else. The layer is PDS-only and cannot
     /// reach the live chain head; it must refuse instead of resolving from
     /// the past. Callers resolve the workspace and pass `ws.group_keys()`.
+    // spec:document-crypto § The PDS-only download layer will not resolve group keys itself
     #[tokio::test]
     #[allow(non_snake_case)] // bug__ regression-naming convention
     async fn bug__keyring_doc_without_keys_errors_instead_of_stale_genesis_gate() {

@@ -85,6 +85,7 @@ mod tests {
         }
     }
 
+    // spec:sharing-grants § A grant is a standalone record, not inline document state
     #[tokio::test]
     async fn create_grant_happy_path() {
         let mock = MockTransport::new();
@@ -132,6 +133,7 @@ mod tests {
         }
     }
 
+    // spec:sharing-grants § A grant is a standalone record, not inline document state
     #[tokio::test]
     async fn created_grant_key_is_unwrappable() {
         let mock = MockTransport::new();

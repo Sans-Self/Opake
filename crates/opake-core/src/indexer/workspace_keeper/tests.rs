@@ -471,6 +471,7 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
 /// head, keys, and members were all intact. The keeper must act on the
 /// indexer-resolved outcome: `unchanged` never touches tracked state,
 /// even when the deleted URI equals a tracked key.
+// spec:keyring-tombstones § Clients act on the outcome, never on URI matching
 #[test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 fn bug__genesis_delete_tombstone_drops_living_workspace() {
@@ -501,6 +502,7 @@ fn bug__genesis_delete_tombstone_drops_living_workspace() {
 
 /// `rolled_back` leaves the entry alone — the follow-up `keyring:upsert`
 /// of the restored head carries the rebuild.
+// spec:keyring-tombstones § Clients act on the outcome, never on URI matching
 #[test]
 fn rolled_back_delete_defers_to_the_follow_up_upsert() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
@@ -523,6 +525,7 @@ fn rolled_back_delete_defers_to_the_follow_up_upsert() {
 /// `torn_down` removes the entry keyed by the payload's workspace
 /// identity — matching what the next bootstrap would show, since the
 /// indexer has already dropped the workspace's tracked chains.
+// spec:keyring-tombstones § Clients act on the outcome, never on URI matching
 #[test]
 fn torn_down_delete_drops_the_entry_by_workspace_id() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};

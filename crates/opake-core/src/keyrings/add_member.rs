@@ -154,6 +154,7 @@ mod tests {
         }
     }
 
+    // spec:workspace-membership § Adding a member is a manager-authored supersede
     #[tokio::test]
     async fn happy_path() {
         let keyring = existing_keyring(TEST_DID);
@@ -202,6 +203,7 @@ mod tests {
         }
     }
 
+    // spec:workspace-membership § Adding a member is a manager-authored supersede
     #[tokio::test]
     async fn rejects_duplicate_member() {
         let keyring = existing_keyring(TEST_DID);

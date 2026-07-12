@@ -258,6 +258,7 @@ mod keyring_supersede {
     /// Happy path for `update_member_role`: manager promotes an existing
     /// editor. The supersede write carries the prior members list with
     /// just the targeted member's role bumped.
+    // spec:workspace-membership § Role changes are manager-authored supersedes
     #[tokio::test]
     async fn update_member_role_writes_supersede_with_updated_role() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
@@ -326,6 +327,7 @@ mod keyring_supersede {
     /// Non-manager attempting any keyring supersede gets a clear local
     /// rejection before the write attempt. The indexer would also reject,
     /// but failing fast saves a roundtrip + provides a usable error.
+    // spec:workspace-membership § Role changes are manager-authored supersedes
     #[tokio::test]
     async fn update_member_role_rejects_non_manager_caller() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
@@ -400,6 +402,7 @@ mod keyring_supersede {
     ///
     /// See workspace-identity spec, "sync-by-URI accepts what its caller
     /// holds" (audit finding 4).
+    // spec:workspace-identity § Head URI use is limited to head-record operations and resolution input
     #[tokio::test]
     #[allow(non_snake_case)] // bug__ regression-naming convention
     async fn bug__sync_workspace_by_uri_matches_envelope_by_derived_genesis() {
@@ -445,6 +448,7 @@ mod keyring_supersede {
     ///
     /// See workspace-identity spec, "invitation target survives
     /// membership churn" (audit finding 3).
+    // spec:workspace-identity § Head URI use is limited to head-record operations and resolution input
     #[tokio::test]
     #[allow(non_snake_case)] // bug__ regression-naming convention
     async fn bug__create_invitation_stores_genesis_target() {
@@ -480,6 +484,7 @@ mod keyring_supersede {
     /// supersede. No rotation — the leaver would have to mint the new
     /// group key, which buys nothing — so the remaining members' wraps,
     /// the rotation counter, and the key history all carry verbatim.
+    // spec:workspace-membership § Removal rotates the group key; leave does not
     #[tokio::test]
     async fn leave_workspace_writes_self_removal_supersede() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
@@ -568,6 +573,7 @@ mod keyring_supersede {
         );
     }
 
+    // spec:workspace-membership § Leave guards — no orphaned workspaces
     #[tokio::test]
     async fn leave_workspace_rejects_last_member() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
@@ -592,6 +598,7 @@ mod keyring_supersede {
         );
     }
 
+    // spec:workspace-membership § Leave guards — no orphaned workspaces
     #[tokio::test]
     async fn leave_workspace_rejects_only_manager() {
         let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");

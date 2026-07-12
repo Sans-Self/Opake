@@ -18,6 +18,7 @@ fn keypair_roundtrips_through_json() {
     assert_eq!(restored.public_jwk, kp.public_jwk);
 }
 
+// spec:wasm-security-boundary § Token-bearing types zeroize and redact on the WASM side
 #[test]
 fn keypair_debug_redacts_private_key() {
     let kp = DpopKeyPair::generate(&mut OsRng);

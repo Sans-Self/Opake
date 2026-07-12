@@ -131,6 +131,7 @@ fn base_retry_params(now: i64) -> RetryParams<'static> {
 // create_pending_share
 // ---------------------------------------------------------------------------
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn create_pending_share_creates_record_and_returns_uri() {
     let mock = MockTransport::new();
@@ -174,6 +175,7 @@ async fn create_pending_share_creates_record_and_returns_uri() {
 // retry_pending_shares — TTL expiry
 // ---------------------------------------------------------------------------
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn retry_expired_entry_deletes_record_and_counts_expired() {
     let mock = MockTransport::new();
@@ -204,6 +206,7 @@ async fn retry_expired_entry_deletes_record_and_counts_expired() {
     assert!(reqs[1].url.contains("deleteRecord"));
 }
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn retry_non_expired_entry_is_not_deleted_without_resolution() {
     let mock = MockTransport::new();
@@ -236,6 +239,7 @@ async fn retry_non_expired_entry_is_not_deleted_without_resolution() {
 // retry_pending_shares — still pending (RecipientNotReady)
 // ---------------------------------------------------------------------------
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn retry_recipient_not_ready_counts_as_still_pending() {
     // Before the RecipientNotReady fix, this was incorrectly counted as `failed`.
@@ -269,6 +273,7 @@ async fn retry_recipient_not_ready_counts_as_still_pending() {
 // retry_pending_shares — transient failure
 // ---------------------------------------------------------------------------
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn retry_transient_error_counts_as_failed_and_is_not_cached() {
     // When resolution fails with a transient error (5xx), the entry is counted
@@ -318,6 +323,7 @@ async fn retry_transient_error_counts_as_failed_and_is_not_cached() {
 // retry_pending_shares — empty queue
 // ---------------------------------------------------------------------------
 
+// spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
 #[tokio::test]
 async fn retry_empty_queue_returns_zeroed_result() {
     let mock = MockTransport::new();

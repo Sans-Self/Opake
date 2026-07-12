@@ -422,6 +422,7 @@ mod tests {
         assert_eq!(mock.requests().len(), 2);
     }
 
+    // spec:sharing-grants § The recipient's keys are discovered from their published public-key record
     #[tokio::test]
     async fn no_public_key_record_returns_recipient_not_ready() {
         // A valid DID with no publicKey/self record is a distinct case from a
@@ -682,6 +683,7 @@ mod tests {
     /// junk would slip past byte-length validation and fail later inside
     /// `wrap_key`'s `validate_public_key` call. Resolving should reject it
     /// upfront with a clear "wrong algorithm" error instead.
+    // spec:sharing-grants § The recipient's keys are discovered from their published public-key record
     #[tokio::test]
     async fn resolve_rejects_wrong_ml_kem_algo() {
         let mock = MockTransport::new();
@@ -713,6 +715,7 @@ mod tests {
         );
     }
 
+    // spec:sharing-grants § The recipient's keys are discovered from their published public-key record
     #[tokio::test]
     async fn resolve_rejects_wrong_x25519_algo() {
         let mock = MockTransport::new();

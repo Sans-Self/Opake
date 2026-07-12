@@ -80,6 +80,7 @@ fn put_record_response() -> HttpResponse {
     }
 }
 
+// spec:workspace-membership § Removal rotates the group key; leave does not
 #[tokio::test]
 async fn happy_path_removes_and_rotates() {
     let (keyring, old_group_key) = two_member_keyring();

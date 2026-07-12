@@ -95,18 +95,21 @@ defmodule OpakeIndexer.AuthorityTest do
 
     defp targets(uris), do: MapSet.new(uris)
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "pure add passes — nothing dropped" do
       prior = targets(["at://a/doc/1"])
       new = targets(["at://a/doc/1", "at://b/doc/2"])
       assert Authority.additive?(prior, new, targets([])) == :ok
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "reorder passes — same target set" do
       prior = targets(["at://a/doc/1", "at://a/doc/2"])
       new = targets(["at://a/doc/2", "at://a/doc/1"])
       assert Authority.additive?(prior, new, targets([])) == :ok
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "advance passes — dropped entry is superseded by an added one" do
       # f1 replaced by f2, where f2.supersedes == f1.
       prior = targets(["at://a/doc/f1", "at://a/doc/keep"])
@@ -115,6 +118,7 @@ defmodule OpakeIndexer.AuthorityTest do
       assert Authority.additive?(prior, new, claimed) == :ok
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "bare delete rejected — dropped entry with no superseding replacement" do
       prior = targets(["at://a/doc/f1", "at://a/doc/keep"])
       new = targets(["at://a/doc/keep"])
@@ -122,6 +126,7 @@ defmodule OpakeIndexer.AuthorityTest do
                {:rejected, :additivity_violation}
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "disguised delete rejected — substitute that supersedes the wrong entry" do
       # f1 dropped, g2 added, but g2 supersedes some unrelated h — f1 is
       # uncovered, so this is a delete wearing an edit's clothes.
@@ -132,6 +137,7 @@ defmodule OpakeIndexer.AuthorityTest do
                {:rejected, :additivity_violation}
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "partial cover rejected — one of two drops is superseded" do
       prior = targets(["at://a/doc/f1", "at://a/doc/f3"])
       new = targets(["at://b/doc/f2"])
@@ -140,6 +146,7 @@ defmodule OpakeIndexer.AuthorityTest do
                {:rejected, :additivity_violation}
     end
 
+    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
     test "advance plus add passes — edit one entry and contribute another" do
       prior = targets(["at://a/doc/f1"])
       new = targets(["at://b/doc/f2", "at://b/doc/own"])
@@ -151,21 +158,25 @@ defmodule OpakeIndexer.AuthorityTest do
   describe "check_workspace_root_flag/2" do
     # Pure function, no DB — safe to exercise here.
 
+    # spec:directory-chains § The workspace root is a flag-marked chain, forward-walked from genesis
     test "no prior record always passes" do
       assert Authority.check_workspace_root_flag(nil, true) == :ok
       assert Authority.check_workspace_root_flag(nil, false) == :ok
     end
 
+    # spec:directory-chains § The workspace root is a flag-marked chain, forward-walked from genesis
     test "flag unchanged passes" do
       prior = %{record_jsonb: %{"isWorkspaceRoot" => true}}
       assert Authority.check_workspace_root_flag(prior, true) == :ok
     end
 
+    # spec:directory-chains § The workspace root is a flag-marked chain, forward-walked from genesis
     test "absent prior flag matches new false" do
       prior = %{record_jsonb: %{"otherField" => 1}}
       assert Authority.check_workspace_root_flag(prior, false) == :ok
     end
 
+    # spec:directory-chains § The workspace root is a flag-marked chain, forward-walked from genesis
     test "flag flipping is rejected" do
       true_prior = %{record_jsonb: %{"isWorkspaceRoot" => true}}
       false_prior = %{record_jsonb: %{"isWorkspaceRoot" => false}}

@@ -407,6 +407,7 @@ mod tests {
         format!(r#"{{"grants":[{grants_str}]{cursor_str}}}"#).into_bytes()
     }
 
+    // spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes
     #[tokio::test]
     async fn fetch_inbox_single_page() {
         let mock = MockTransport::new();
@@ -444,6 +445,7 @@ mod tests {
             .any(|(k, v)| k == "Authorization" && v.starts_with("Opake-Ed25519 ")));
     }
 
+    // spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes
     #[tokio::test]
     async fn fetch_inbox_all_paginates() {
         let mock = MockTransport::new();
@@ -467,6 +469,7 @@ mod tests {
         assert!(mock.requests()[1].url.contains("cursor=cursor1"));
     }
 
+    // spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes
     #[tokio::test]
     async fn fetch_inbox_empty() {
         let mock = MockTransport::new();
