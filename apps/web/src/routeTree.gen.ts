@@ -19,11 +19,9 @@ import { Route as CabinetIndexRouteImport } from './routes/cabinet/index'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
 import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
-import { Route as CabinetTrashRouteImport } from './routes/cabinet/trash'
 import { Route as CabinetTasksRouteImport } from './routes/cabinet/tasks'
 import { Route as CabinetSharedRouteImport } from './routes/cabinet/shared'
 import { Route as CabinetSettingsRouteImport } from './routes/cabinet/settings'
-import { Route as CabinetEncryptedRouteImport } from './routes/cabinet/encrypted'
 import { Route as PublicTroubleshootingRouteImport } from './routes/_public/troubleshooting'
 import { Route as PublicFaqRouteImport } from './routes/_public/faq'
 import { Route as CabinetFilesRouteRouteImport } from './routes/cabinet/files/route'
@@ -99,11 +97,6 @@ const DevicesLoginRoute = DevicesLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => DevicesRouteRoute,
 } as any).lazy(() => import('./routes/devices/login.lazy').then((d) => d.Route))
-const CabinetTrashRoute = CabinetTrashRouteImport.update({
-  id: '/trash',
-  path: '/trash',
-  getParentRoute: () => CabinetRouteRoute,
-} as any).lazy(() => import('./routes/cabinet/trash.lazy').then((d) => d.Route))
 const CabinetTasksRoute = CabinetTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
@@ -122,13 +115,6 @@ const CabinetSettingsRoute = CabinetSettingsRouteImport.update({
   getParentRoute: () => CabinetRouteRoute,
 } as any).lazy(() =>
   import('./routes/cabinet/settings.lazy').then((d) => d.Route),
-)
-const CabinetEncryptedRoute = CabinetEncryptedRouteImport.update({
-  id: '/encrypted',
-  path: '/encrypted',
-  getParentRoute: () => CabinetRouteRoute,
-} as any).lazy(() =>
-  import('./routes/cabinet/encrypted.lazy').then((d) => d.Route),
 )
 const PublicTroubleshootingRoute = PublicTroubleshootingRouteImport.update({
   id: '/troubleshooting',
@@ -295,11 +281,9 @@ export interface FileRoutesByFullPath {
   '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
   '/faq': typeof PublicFaqRoute
   '/troubleshooting': typeof PublicTroubleshootingRoute
-  '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
-  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
@@ -327,11 +311,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/faq': typeof PublicFaqRoute
   '/troubleshooting': typeof PublicTroubleshootingRoute
-  '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
-  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
@@ -365,11 +347,9 @@ export interface FileRoutesById {
   '/cabinet/files': typeof CabinetFilesRouteRouteWithChildren
   '/_public/faq': typeof PublicFaqRoute
   '/_public/troubleshooting': typeof PublicTroubleshootingRoute
-  '/cabinet/encrypted': typeof CabinetEncryptedRoute
   '/cabinet/settings': typeof CabinetSettingsRoute
   '/cabinet/shared': typeof CabinetSharedRoute
   '/cabinet/tasks': typeof CabinetTasksRoute
-  '/cabinet/trash': typeof CabinetTrashRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
@@ -405,11 +385,9 @@ export interface FileRouteTypes {
     | '/cabinet/files'
     | '/faq'
     | '/troubleshooting'
-    | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/tasks'
-    | '/cabinet/trash'
     | '/devices/login'
     | '/devices/oauth-callback'
     | '/devices/cli-callback'
@@ -437,11 +415,9 @@ export interface FileRouteTypes {
   to:
     | '/faq'
     | '/troubleshooting'
-    | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/tasks'
-    | '/cabinet/trash'
     | '/devices/login'
     | '/devices/oauth-callback'
     | '/devices/cli-callback'
@@ -474,11 +450,9 @@ export interface FileRouteTypes {
     | '/cabinet/files'
     | '/_public/faq'
     | '/_public/troubleshooting'
-    | '/cabinet/encrypted'
     | '/cabinet/settings'
     | '/cabinet/shared'
     | '/cabinet/tasks'
-    | '/cabinet/trash'
     | '/devices/login'
     | '/devices/oauth-callback'
     | '/devices/cli-callback'
@@ -576,13 +550,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevicesLoginRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
-    '/cabinet/trash': {
-      id: '/cabinet/trash'
-      path: '/trash'
-      fullPath: '/cabinet/trash'
-      preLoaderRoute: typeof CabinetTrashRouteImport
-      parentRoute: typeof CabinetRouteRoute
-    }
     '/cabinet/tasks': {
       id: '/cabinet/tasks'
       path: '/tasks'
@@ -602,13 +569,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/cabinet/settings'
       preLoaderRoute: typeof CabinetSettingsRouteImport
-      parentRoute: typeof CabinetRouteRoute
-    }
-    '/cabinet/encrypted': {
-      id: '/cabinet/encrypted'
-      path: '/encrypted'
-      fullPath: '/cabinet/encrypted'
-      preLoaderRoute: typeof CabinetEncryptedRouteImport
       parentRoute: typeof CabinetRouteRoute
     }
     '/_public/troubleshooting': {
@@ -815,11 +775,9 @@ const CabinetWorkspaceRkeyRouteRouteWithChildren =
 interface CabinetRouteRouteChildren {
   CabinetDocsRouteRoute: typeof CabinetDocsRouteRouteWithChildren
   CabinetFilesRouteRoute: typeof CabinetFilesRouteRouteWithChildren
-  CabinetEncryptedRoute: typeof CabinetEncryptedRoute
   CabinetSettingsRoute: typeof CabinetSettingsRoute
   CabinetSharedRoute: typeof CabinetSharedRoute
   CabinetTasksRoute: typeof CabinetTasksRoute
-  CabinetTrashRoute: typeof CabinetTrashRoute
   CabinetIndexRoute: typeof CabinetIndexRoute
   CabinetWorkspaceRkeyRouteRoute: typeof CabinetWorkspaceRkeyRouteRouteWithChildren
   CabinetEditorRkeyRoute: typeof CabinetEditorRkeyRoute
@@ -832,11 +790,9 @@ interface CabinetRouteRouteChildren {
 const CabinetRouteRouteChildren: CabinetRouteRouteChildren = {
   CabinetDocsRouteRoute: CabinetDocsRouteRouteWithChildren,
   CabinetFilesRouteRoute: CabinetFilesRouteRouteWithChildren,
-  CabinetEncryptedRoute: CabinetEncryptedRoute,
   CabinetSettingsRoute: CabinetSettingsRoute,
   CabinetSharedRoute: CabinetSharedRoute,
   CabinetTasksRoute: CabinetTasksRoute,
-  CabinetTrashRoute: CabinetTrashRoute,
   CabinetIndexRoute: CabinetIndexRoute,
   CabinetWorkspaceRkeyRouteRoute: CabinetWorkspaceRkeyRouteRouteWithChildren,
   CabinetEditorRkeyRoute: CabinetEditorRkeyRoute,
