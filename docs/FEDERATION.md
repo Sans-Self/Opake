@@ -217,11 +217,14 @@ When a member deletes their own records:
 
 The indexer is load-bearing for correctness in this model:
 
-1. **Follow chains.** Maintain `chain_heads (workspace_id, kind, path) → (head_uri, head_cid)` for every keyring chain, workspace-root chain, and nested directory chain. Updated in-transaction with each record insert via compare-and-set against the prior head.
+1. **Follow chains.** Maintain `chain_heads (workspace_id, kind) → (head_uri, head_cid)` for exactly two chains per workspace: the keyring chain (`kind='keyring'`) and the workspace-root directory chain (`kind='workspace_root'`). Updated in-transaction with each record insert via compare-and-set against the prior head. Nested directory chains are deliberately **not** tracked — see the note below.
 2. **Validate authority.** At each supersede write, validate against the keyring state at the supersede's `createdAt`. Editor writes must pass the additivity check.
 3. **Detect fork conflicts** and emit `chain-forked` events for client retry.
-4. **Path lookup.** Clients ask the indexer for the canonical URI at any `(workspace_id, path)` directly; the head is always available in `chain_heads` without traversing the supersede chain.
-5. **Filter dangling at-uri references** in canonical listings (silent filter with a debug-flag for tooling).
+4. **Filter dangling at-uri references** in canonical listings (silent filter with a debug-flag for tooling).
+
+### Why no per-path chain heads
+
+The indexer cannot key chains by path: paths derive from directory names, and names are encrypted metadata the indexer never sees. A `path` column would require plaintext names server-side, violating the always-encrypted-metadata invariant. Instead, clients discover subtree heads by walking canonical listings downward from the workspace root — the two tracked heads are the entry points, and everything below them is reachable through listing entries. This is the read-side contract of `ChainHeadProvider` in opake-core: keyring head and root-directory head, nothing per-path.
 
 ### Authority validation timing
 
@@ -242,9 +245,9 @@ Discoverability of which keyrings to bootstrap is separate: typically firehose s
 
 ## Upward traversal
 
-Directory records carry **no `parent` field**. The indexer's `chain_heads` table resolves parent queries: compute the parent path string from the current path, look up the canonical head at that `(workspace_id, path)`. One index hit per breadcrumb level.
+Directory records carry **no `parent` field**. Parent resolution happens client-side: the client holds the decrypted tree (built by walking down from the workspace root), so breadcrumbs and parent lookups are reads against its own projection. The indexer cannot resolve parents — that would require path-keyed lookups over encrypted names it never sees.
 
-Storing `parent: at-uri` on records would make them fragile under any record-identity change (e.g., supersede), forcing children to be rewritten whenever a parent's identity changes. Indexer-resolved parents survive supersede chains transparently.
+Storing `parent: at-uri` on records would make them fragile under any record-identity change (e.g., supersede), forcing children to be rewritten whenever a parent's identity changes. Client-resolved parents survive supersede chains transparently, since the client rebuilds its projection from canonical listings.
 
 ## What this gives up
 
