@@ -74,7 +74,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
   end
 
   describe "check_directory_supersede/4 — editor" do
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "pure add passes (own contribution, nothing dropped)" do
       own = "at://did:plc:bob/app.opake.document/own"
 
@@ -86,7 +86,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
              ) == :ok
     end
 
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "advance passes when the substitute supersedes the dropped entry" do
       seed_f2(@f1)
 
@@ -98,7 +98,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
              ) == :ok
     end
 
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "bare delete is rejected" do
       assert Authority.check_directory_supersede(
                @workspace_id,
@@ -108,7 +108,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
              ) == {:rejected, :additivity_violation}
     end
 
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "substitute that supersedes nothing is rejected (disguised delete)" do
       seed_f2(nil)
 
@@ -120,7 +120,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
              ) == {:rejected, :additivity_violation}
     end
 
-    # spec:directory-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
+    # spec:tree-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
     test "substitute not yet indexed is rejected (heals on reprocess)" do
       # f2 referenced as an entry but its record hasn't landed — no
       # supersede claim is resolvable, so the dropped f1 reads as a bare
@@ -135,7 +135,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
   end
 
   describe "check_directory_supersede/4 — role gates" do
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "manager faces no additivity constraint (bare delete allowed)" do
       put_record(%{
         uri: @keyring_uri,
@@ -150,7 +150,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
                :ok
     end
 
-    # spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "viewer cannot author a directory supersede" do
       assert Authority.check_directory_supersede(@workspace_id, @d1, @viewer_did, [
                entry(@f1),

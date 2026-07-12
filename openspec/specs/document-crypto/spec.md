@@ -183,5 +183,5 @@ Owned by other specs and not legislated here:
 - Which URI (genesis vs head) a wrap or an indexer call must use, and the identity invariant behind `Keyring::wrap_anchor` — the workspace-identity spec.
 - Membership authority, the keyring supersede chain, rotation-on-removal mechanics, and who may author a rotation — the workspace-membership spec.
 - Grant records, share flows, and recipient management — the sharing-grants spec. This spec only fixes that grant wraps exist and bind the document's `WrapContext::Document { uri }`.
-- Directory key wrapping (`directKeyWrapping` / `keyringKeyWrapping`) and directory metadata encryption — the directory-chains spec. Directories reuse the same primitives (content key, hybrid wrap, `keyringRef`) but carry no blob.
+- Directory key wrapping (`directKeyWrapping` / `keyringKeyWrapping`) and directory metadata encryption — the tree-chains spec. Directories reuse the same primitives (content key, hybrid wrap, `keyringRef`) but carry no blob.
 - Identity derivation from the BIP-39 mnemonic and the published `publicKey/self` record — outside this spec; documented in docs/CRYPTO.md and docs/ARCHITECTURE.md.

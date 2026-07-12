@@ -112,12 +112,12 @@ A manager changes a member's role by writing a supersede carrying the prior memb
 
 - Rotation after leave: forward secrecy against a leaver requires a manager to rotate afterwards. Should a manager's daemon rotate automatically on observing a leave? Related to auto key rotation (#90) and the unreliable bulk re-encryption noted in open work — a rotation whose re-encryption doesn't complete degrades to the historical-key fallback.
 - Atomic hand-over: a lone manager who wants out of a populated workspace must promote-then-leave as two supersedes, with a fork-race window between them. Is a combined "transfer management and leave" operation worth its own primitive?
-- Viewer enforcement surface: viewers are excluded from directory and keyring authorship (this spec + directory-chains), but read access is capability-based (holding a wrap), not checked per-operation. Confirm there is no surface where a viewer's write would be accepted.
+- Viewer enforcement surface: viewers are excluded from directory and keyring authorship (this spec + tree-chains), but read access is capability-based (holding a wrap), not checked per-operation. Confirm there is no surface where a viewer's write would be accepted.
 
 ## Non-requirements
 
 - Genesis identity, AEAD wrap anchoring, head-vs-genesis resolution — workspace-identity spec.
-- What editors may do to directory contents (wiki-semantics additivity) — directory-chains spec.
+- What editors may do to directory contents (wiki-semantics additivity) — tree-chains spec.
 - The wrap algorithm, key hierarchy, and rotation-aware decryption mechanics — document-crypto spec.
 - Person-to-person sharing and invitations — sharing-grants spec (`spec:sharing-grants § Invitation targets hold the stable resource id`).
 - Workspace destruction — deliberately unspecified; see workspace-identity open questions.

@@ -150,4 +150,4 @@ Owned by other specs and intentionally not legislated here:
 - Workspace membership, keyring group keys, and roles — workspace-membership and workspace-identity specs.
 - Wrap-context construction, the hybrid X25519 + ML-KEM-768 KEM, and metadata encryption internals — document-crypto spec. This spec references `WrapContext::Document` as a binding contract but does not define it.
 - The indexer's SSE token issuance, reconnect, and topic-subscription mechanics — the client-sync layer; this spec only requires that grant events reach both parties' personal topics.
-- Directory-chain and document supersede semantics — directory-chains spec.
+- Directory-chain and document supersede semantics — tree-chains spec.

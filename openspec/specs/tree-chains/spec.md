@@ -1,4 +1,4 @@
-# directory-chains Specification
+# tree-chains Specification
 
 ## Purpose
 

@@ -20,7 +20,7 @@ import {
 // head no longer lists it, the destination's does, and both survive a reload
 // that rebuilds the tree from indexer chain heads.
 test(`moves a document between folders and it survives reload ${cite(
-  "directory-chains",
+  "tree-chains",
   "Consumers build the live tree from chain heads only",
 )}`, async ({ page }) => {
   test.setTimeout(240_000);

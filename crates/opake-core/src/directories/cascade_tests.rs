@@ -93,7 +93,7 @@ async fn single_level_supersede_writes_leaf_and_returns_head() {
     }
 }
 
-// spec:directory-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
+// spec:tree-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
 #[tokio::test]
 async fn two_level_supersede_threads_child_cid_into_parent() {
     let mock = MockTransport::new();
@@ -167,7 +167,7 @@ async fn two_level_supersede_threads_child_cid_into_parent() {
     }
 }
 
-// spec:directory-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
+// spec:tree-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order
 #[tokio::test]
 async fn add_child_appends_new_listing_entry_at_parent() {
     let mock = MockTransport::new();

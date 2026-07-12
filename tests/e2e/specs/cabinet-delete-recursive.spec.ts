@@ -1,7 +1,7 @@
 // Recursive folder deletion: a folder holding a nested subfolder and a
 // document is removed through the descendant-count confirmation, and the whole
 // subtree stays gone after a reload. Uncited: recursive teardown and orphan GC
-// are non-requirements / future work in directory-chains, so no cite applies.
+// are non-requirements / future work in tree-chains, so no cite applies.
 import { test, expect } from "../fixtures";
 import {
   cabinetPath,

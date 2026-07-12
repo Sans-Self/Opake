@@ -20,7 +20,7 @@ import {
 // which discards the optimistic keeper and rebuilds from the indexer snapshot
 // — proves the head-only tree carries it.
 test(`creates a folder at the cabinet root and it survives reload ${cite(
-  "directory-chains",
+  "tree-chains",
   "Consumers build the live tree from chain heads only",
 )}`, async ({ page }) => {
   test.setTimeout(180_000);
@@ -72,7 +72,7 @@ test("creates a nested folder and navigates in and out", async ({ page }) => {
 // path's chain head with updated metadata. Surviving a reload proves the
 // renamed record is the canonical head, not a transient client relabel.
 test(`renames a directory and the new name is canonical after reload ${cite(
-  "directory-chains",
+  "tree-chains",
   "A path's canonical state is the head of a supersede chain",
 )}`, async ({ page }) => {
   test.setTimeout(180_000);

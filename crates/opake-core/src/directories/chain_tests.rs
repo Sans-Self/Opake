@@ -113,7 +113,7 @@ async fn fetch_chain_node_propagates_not_found() {
 
 // -- walk_back_to_genesis --
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_returns_genesis_only_when_no_supersedes() {
     let mock = MockTransport::new();
@@ -129,7 +129,7 @@ async fn walk_back_returns_genesis_only_when_no_supersedes() {
     assert!(chain[0].record.supersedes.is_none());
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_traverses_chain_in_head_to_genesis_order() {
     let mock = MockTransport::new();
@@ -167,7 +167,7 @@ async fn walk_back_traverses_chain_in_head_to_genesis_order() {
     );
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_rejects_cycle() {
     // A → B → A. Walking back from A revisits A on the third hop and must
@@ -191,7 +191,7 @@ async fn walk_back_rejects_cycle() {
     }
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_propagates_missing_intermediate() {
     let mock = MockTransport::new();
@@ -215,7 +215,7 @@ async fn walk_back_propagates_missing_intermediate() {
 // tail to an expected genesis URI so an indexer that lies about which
 // chain a head belongs to can't slip a foreign head past us.
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn verify_and_walk_chain_accepts_matching_genesis() {
     let mock = MockTransport::new();
@@ -235,7 +235,7 @@ async fn verify_and_walk_chain_accepts_matching_genesis() {
     assert_eq!(chain[1].uri, URI_GENESIS);
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn verify_and_walk_chain_accepts_genesis_only_chain() {
     // Freshly-created workspace: head and genesis are the same record.
@@ -254,7 +254,7 @@ async fn verify_and_walk_chain_accepts_genesis_only_chain() {
     assert!(chain[0].record.supersedes.is_none());
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn verify_and_walk_chain_rejects_wrong_genesis() {
     // The indexer's claimed head walks back to a *real* genesis, but
@@ -282,7 +282,7 @@ async fn verify_and_walk_chain_rejects_wrong_genesis() {
     }
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn verify_and_walk_chain_propagates_broken_chain() {
     // Walking back fails partway through. The verification wrapper
@@ -300,7 +300,7 @@ async fn verify_and_walk_chain_propagates_broken_chain() {
     assert!(matches!(err, Error::NotFound(_)));
 }
 
-// spec:directory-chains § A path's canonical state is the head of a supersede chain
+// spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn verify_and_walk_chain_propagates_cycle() {
     // A → B → A cycle. ChainCycle should propagate through, not get
@@ -585,14 +585,14 @@ mod directory_additivity {
         None
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn passes_genesis_only() {
         let records = vec![(DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None))];
         verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn passes_editor_additive_supersede() {
         // Bob (editor) adds "doc3" while preserving doc1 + doc2.
@@ -606,7 +606,7 @@ mod directory_additivity {
         verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn rejects_editor_non_additive_supersede() {
         // Bob (editor) supersedes but drops doc2. Should reject.
@@ -632,7 +632,7 @@ mod directory_additivity {
         }
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn allows_manager_non_additive_supersede() {
         // Alice (manager) deletes doc2. Allowed because managers are
@@ -647,7 +647,7 @@ mod directory_additivity {
         verify_directory_additivity(&records, alice_is_manager, none_supersedes).unwrap();
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn skips_supersedes_with_missing_prior() {
         // If the prior isn't in the snapshot, we can't verify — skip
@@ -662,7 +662,7 @@ mod directory_additivity {
         verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn checks_every_supersede_in_chain() {
         // Three-record chain. Middle supersede is non-additive — must be
@@ -689,7 +689,7 @@ mod directory_additivity {
         }
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn passes_editor_advance_when_dropped_entry_is_superseded() {
         // Bob (editor) edits doc2 → doc2b, where doc2b supersedes doc2. The
@@ -706,7 +706,7 @@ mod directory_additivity {
         verify_directory_additivity(&records, no_managers, supersedes_of).unwrap();
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn rejects_editor_substitute_that_supersedes_wrong_entry() {
         // doc2 dropped, doc9 added, but doc9 supersedes some unrelated docX —
@@ -728,7 +728,7 @@ mod directory_additivity {
         }
     }
 
-    // spec:directory-chains § Editor supersedes are additive; managers are unrestricted
+    // spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     #[test]
     fn rejects_editor_bare_delete_even_with_unrelated_supersedes() {
         // doc2 simply removed; nothing added supersedes it. Still a delete.
