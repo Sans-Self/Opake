@@ -92,6 +92,49 @@ mod tests {
         assert!(err.to_string().contains("AT-URI"), "got: {err}");
     }
 
+    // Revocation deletes the grant record and does nothing else — in
+    // particular it does not re-encrypt the blob under a fresh content key.
+    // A recipient who already downloaded the document holds the unwrapped
+    // content key and the ciphertext; after revocation, that cached key still
+    // decrypts the unchanged blob. This is intended, documented behavior
+    // (design decision 4, the git-crypt model): revoke stops future discovery,
+    // not access already obtained. This test PINS the limitation so nobody
+    // "fixes" it into a revocation guarantee the operation cannot make — true
+    // revocation requires re-encrypting under a new content key, which is a
+    // separate, deferred operation.
+    // spec:sharing-grants § Revocation stops future discovery but not historical access
+    #[tokio::test]
+    async fn revocation_does_not_reach_a_cached_content_key() {
+        use crate::crypto::{decrypt_blob, encrypt_blob, generate_content_key, OsRng};
+
+        // The recipient already downloaded: they cache the content key and the
+        // ciphertext they fetched from the owner's PDS.
+        let content_key = generate_content_key(&mut OsRng);
+        let plaintext = b"the secret document body";
+        let cached_ciphertext = encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
+
+        // The owner revokes — a single successful grant deletion.
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: b"{}".to_vec(),
+        });
+        let mut client = mock_client(mock.clone());
+        let grant_uri = format!("at://{}/app.opake.grant/tid123", TEST_DID);
+        revoke_grant(&mut client, &grant_uri).await.unwrap();
+
+        // Revoke performed exactly one network effect — the delete. It did NOT
+        // re-upload a re-encrypted blob.
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1, "revoke must be a single delete, no re-encrypt upload");
+        assert!(reqs[0].url.contains("deleteRecord"));
+
+        // The cached key still decrypts the unchanged ciphertext.
+        let recovered = decrypt_blob(&content_key, &cached_ciphertext).unwrap();
+        assert_eq!(recovered, plaintext, "revocation must not invalidate a cached key");
+    }
+
     #[tokio::test]
     async fn pds_404() {
         let mock = MockTransport::new();

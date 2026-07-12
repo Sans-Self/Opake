@@ -170,8 +170,16 @@ e2e-cli:
 e2e-web: _dev-env-check
     cd tests && bunx playwright test --project=e2e
 
+# Rebuild the dev-env CLI image iff the working-tree CLI sources changed since
+# it was baked. The federation tier runs the compiled binary baked into that
+# image, so without this gate a stale image silently certifies an old binary
+# against current source. `ensure` compares a src-hash label to the working
+# tree and rebuilds on mismatch (docker layer cache makes the no-op case cheap).
+_dev-env-cli-fresh:
+    @dev-env/build/build-cli.sh ensure
+
 # CLI federation tier against the dev-env
-e2e-federation: _dev-env-check
+e2e-federation: _dev-env-check _dev-env-cli-fresh
     cd tests && OPAKE_TEST_ENV=devenv bunx vitest run tests/federation/
 
 # Run all e2e tests

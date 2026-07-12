@@ -22,12 +22,7 @@ echo "== indexer (mix release) =="
 docker build -t opake-devenv-indexer:pinned -f "$HERE/indexer.Dockerfile" "$REPO/apps/indexer"
 
 echo "== cli (opake, for bootstrap) =="
-CLICTX="$(mktemp -d)"
-cp "$REPO/Cargo.toml" "$REPO/Cargo.lock" "$CLICTX/"
-cp -R "$REPO/crates" "$CLICTX/crates"
-mkdir -p "$CLICTX/apps" && cp -R "$REPO/apps/cli" "$CLICTX/apps/cli"
-find "$CLICTX" -type d -name target -prune -exec rm -rf {} + 2>/dev/null || true
-docker build -t opake-devenv-cli:pinned -f "$HERE/cli.Dockerfile" "$CLICTX"
-rm -rf "$CLICTX"
+# Single source of truth for the CLI image (bakes the src-hash freshness label).
+"$HERE/build-cli.sh" build
 
 echo "== all images built =="

@@ -152,6 +152,73 @@ export async function deleteKeyringRecord(actor: string, rkey: string): Promise<
   if (res.code !== 0) throw new Error(`delkr ${rkey} failed: ${res.stderr}`);
 }
 
+/**
+ * Stash then delete an actor's `publicKey/self` record so a share to them
+ * hits `RecipientNotReady`. The dev-env bootstrap seeds every actor with a
+ * published key, so this is the only way to reach the not-ready branch; the
+ * record is preserved for `restorePublicKey` rather than regenerated.
+ */
+export async function unpublishPublicKey(actor: string): Promise<void> {
+  const res = await docker(
+    ["exec", CLI_CONTAINER, "bash", "/work-helper.sh", "delpubkey", actor],
+    30_000,
+  );
+  if (res.code !== 0) throw new Error(`delpubkey ${actor} failed: ${res.stderr}`);
+}
+
+/** Restore the `publicKey/self` record stashed by `unpublishPublicKey`. */
+export async function restorePublicKey(actor: string): Promise<void> {
+  const res = await docker(
+    ["exec", CLI_CONTAINER, "bash", "/work-helper.sh", "putpubkey", actor],
+    30_000,
+  );
+  if (res.code !== 0) throw new Error(`putpubkey ${actor} failed: ${res.stderr}`);
+}
+
+/**
+ * Rewrite a record's `createdAt` in place, preserving every other field
+ * (including real encrypted payloads). Ages a genuine pending share past its
+ * 7-day TTL without a real wait and without hand-forging a record.
+ */
+export async function backdateRecord(
+  actor: string,
+  collection: string,
+  rkey: string,
+  createdAt: string,
+): Promise<void> {
+  const res = await docker(
+    ["exec", CLI_CONTAINER, "bash", "/work-helper.sh", "backdate", actor, collection, rkey, createdAt],
+    30_000,
+  );
+  if (res.code !== 0) throw new Error(`backdate ${collection}/${rkey} failed: ${res.stderr}`);
+}
+
+/**
+ * Encrypt-and-upload a small text document into the actor's personal cabinet;
+ * returns its AT-URI. The CLI genesis-creates the cabinet root on first write,
+ * so no prior seeding is required. Mirrors `uploadTextToWorkspace` without the
+ * `--workspace` flag.
+ */
+export async function uploadTextToCabinet(
+  actor: string,
+  filename: string,
+  content: string,
+): Promise<string> {
+  const path = `/tmp/${actor}-${filename}`;
+  const b64 = Buffer.from(content, "utf8").toString("base64");
+  const write = await docker([
+    "exec",
+    CLI_CONTAINER,
+    "bash",
+    "-c",
+    `echo ${b64} | base64 -d > ${path}`,
+  ]);
+  if (write.code !== 0) throw new Error(`stage ${path} failed: ${write.stderr}`);
+  const res = await cli(actor, ["upload", path]);
+  if (res.code !== 0) throw new Error(`cabinet upload failed: ${res.stderr}`);
+  return parseCreateUri(res.stdout);
+}
+
 /** Parse the at-uri a `workspace create` prints ("name → at://…/rkey"). */
 export function parseCreateUri(stdout: string): string {
   const m = stdout.match(/at:\/\/[^\s]+/);

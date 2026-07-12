@@ -6,7 +6,10 @@ config :opake_indexer, OpakeIndexer.Repo,
   hostname: "localhost",
   database: "opake_indexer_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # Core-scaled pooling grabs ~36 connections on a big machine and saturates
+  # postgres (max_connections) when runs overlap; async DataCase throughput
+  # plateaus well below that.
+  pool_size: min(System.schedulers_online() * 2, 12)
 
 config :opake_indexer, OpakeIndexerWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],

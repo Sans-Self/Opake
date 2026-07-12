@@ -111,3 +111,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         .await
     }
 }
+
+#[cfg(test)]
+#[path = "sharing_tests.rs"]
+mod tests;

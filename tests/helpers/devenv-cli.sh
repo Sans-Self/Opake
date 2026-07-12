@@ -8,6 +8,17 @@
 #   delkr <name> <rkey> delete one app.opake.keyring record over XRPC, authored
 #                       by the actor's own session — drives genesis / sole-record
 #                       deletes without a dedicated CLI verb
+#   delpubkey <name>    stash then delete an actor's app.opake.publicKey/self
+#                       record — makes a fully-seeded fixture actor "not ready"
+#                       so a share to them hits RecipientNotReady (the condition
+#                       is otherwise unreachable: bootstrap seeds every actor)
+#   putpubkey <name>    restore the publicKey/self record stashed by delpubkey,
+#                       returning the actor to "ready" (recipient can be shared to)
+#   backdate <name> <collection> <rkey> <iso>
+#                       rewrite one record's createdAt in place (getRecord →
+#                       jq → putRecord), preserving all other fields including
+#                       real encrypted payloads — ages a pending share past its
+#                       TTL without a 7-day wait or a hand-built fake record
 set -euo pipefail
 
 FIXTURES=/fixtures/actors.json
@@ -44,6 +55,43 @@ case "$cmd" in
     curl -fsS -X POST "$base/xrpc/com.atproto.repo.deleteRecord" \
       -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
       -d "{\"repo\":\"$did\",\"collection\":\"app.opake.keyring\",\"rkey\":\"$rkey\"}" >/dev/null
+    echo ok
+    ;;
+  delpubkey)
+    name="$1"; dir="/work/$name"
+    did=$(cat "$dir/.did"); base=$(cat "$dir/.pds"); san=${did//:/_}
+    jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
+    # Stash the current record value so putpubkey can restore it verbatim.
+    curl -fsS "$base/xrpc/com.atproto.repo.getRecord?repo=$did&collection=app.opake.publicKey&rkey=self" \
+      | jq -c '.value' > "$dir/.pubkey.json"
+    curl -fsS -X POST "$base/xrpc/com.atproto.repo.deleteRecord" \
+      -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
+      -d "{\"repo\":\"$did\",\"collection\":\"app.opake.publicKey\",\"rkey\":\"self\"}" >/dev/null
+    echo ok
+    ;;
+  putpubkey)
+    name="$1"; dir="/work/$name"
+    did=$(cat "$dir/.did"); base=$(cat "$dir/.pds"); san=${did//:/_}
+    jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
+    record=$(cat "$dir/.pubkey.json")
+    jq -n --arg repo "$did" --argjson record "$record" \
+      '{repo:$repo,collection:"app.opake.publicKey",rkey:"self",record:$record}' \
+      | curl -fsS -X POST "$base/xrpc/com.atproto.repo.putRecord" \
+        -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
+        -d @- >/dev/null
+    echo ok
+    ;;
+  backdate)
+    name="$1"; coll="$2"; rkey="$3"; iso="$4"; dir="/work/$name"
+    did=$(cat "$dir/.did"); base=$(cat "$dir/.pds"); san=${did//:/_}
+    jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
+    value=$(curl -fsS "$base/xrpc/com.atproto.repo.getRecord?repo=$did&collection=$coll&rkey=$rkey" \
+      | jq -c --arg iso "$iso" '.value | .createdAt = $iso')
+    jq -n --arg repo "$did" --arg coll "$coll" --arg rkey "$rkey" --argjson record "$value" \
+      '{repo:$repo,collection:$coll,rkey:$rkey,record:$record}' \
+      | curl -fsS -X POST "$base/xrpc/com.atproto.repo.putRecord" \
+        -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
+        -d @- >/dev/null
     echo ok
     ;;
   *)

@@ -61,7 +61,21 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     event_type = "#{record.collection}:delete"
     payload = %{uri: record.uri}
 
-    fan_out(record, event_type, payload)
+    # Normalize the Ecto struct into the plain-map shape the upsert path hands
+    # fan_out. Structs don't implement Access, so a struct reaching fan_out's
+    # bracket lookups (attrs[:record_jsonb] / [:workspace_id] / [:author_did])
+    # raises — and the rescue below used to swallow it, silently dropping every
+    # grant / directory / document delete broadcast. One shape crosses fan_out
+    # now; the rescue stays as a safety net but is no longer load-bearing.
+    attrs = %{
+      collection: record.collection,
+      uri: record.uri,
+      author_did: record.author_did,
+      workspace_id: record.workspace_id,
+      record_jsonb: record.record_jsonb
+    }
+
+    fan_out(attrs, event_type, payload)
   rescue
     e -> Logger.warning("[Broadcaster] record delete broadcast failed: #{inspect(e)}")
   end
