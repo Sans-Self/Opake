@@ -31,6 +31,17 @@ The PDS is external. It's already running. This project talks to it over XRPC.
 13. **Granular OAuth scopes.** Per-collection `repo:app.opake.*` scopes instead of the catch-all `transition:generic`. The scope string is built from `crate::scope::OPAKE_COLLECTIONS` — single source of truth. Adding a new collection means adding it to `OPAKE_COLLECTIONS` (compile-time test enforces this), the lexicon JSON, the permission set (`app.opake.authFullAccess`), and the indexer consumer if indexed.
 14. **Core is the protocol; keep it legible.** opake-core is the product surface a builder reads to understand Opake on its own — records, crypto, key hierarchy, chain walking, the trust model. The protocol is the product; the web app is convenience. Reactive-client machinery — the SSE keepers, bootstrap/stream sequencing, watchers, optimistic overlays — is *not* protocol: a reader shouldn't have to learn how one client keeps a live projection to understand Opake, and the CLI proves the point by syncing without any of it. New client-sync logic (snapshot/stream reconciliation, debouncing, optimistic state) belongs in the client layer — `opake-wasm`, the SDK, or `opake-react` — never core. The keepers currently sit in core for a packaging reason (they must be WASM-compatible Rust and core is the shared home), not because they're protocol; treat that as a boundary to respect, not extend, and a candidate to eventually lift out. The one thing that earns core placement is a genuine *protocol contract* — e.g. a monotonic indexer cursor that defines the snapshot/stream consistency model every client must honor. A client-side workaround that compensates for the lack of such a contract is convenience, and stays in the client.
 
+## Spec Workflow
+
+Specs and change artifacts are never hand-written. All spec work goes through the opsx skills, which drive the openspec CLI (`bunx @fission-ai/openspec` — bare `openspec` is not on PATH):
+
+- `/opsx:propose` — create a change and generate its artifact set (proposal, delta specs, design, tasks)
+- `/opsx:apply` — implement an approved change
+- `/opsx:sync` — merge delta specs into canon under `openspec/specs/`
+- `/opsx:archive` — archive a completed change (offers sync)
+
+Scaffolding a change dir by hand, writing a delta spec outside a change, or editing canon specs directly instead of syncing a delta are all workflow violations — the CLI's scaffolding and status tracking are the source of truth for what a change contains and whether it's apply-ready. Federation-class changes require the spec delta reviewed (red-penned) before implementation starts. `just spec-lint` guards citation integrity; it does not check semantics, so cite the requirement that actually governs the behavior under test.
+
 ## Documentation
 
 - **[README.md](README.md)** — Usage, roadmap, build instructions

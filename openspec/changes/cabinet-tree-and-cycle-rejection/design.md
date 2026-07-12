@@ -2,7 +2,7 @@
 
 ## Context
 
-The change is mostly documentation (a new canon spec + one directory-chains requirement + citation repoints); the one piece of engineering is lowering cycle refusal into `FileManager::move_entry`.
+The change is mostly documentation (two new canon specs, the directory-chains → tree-chains capability rename, citation repoints); the one piece of engineering is lowering cycle refusal into `FileManager::move_entry`. The shared cycle invariant lives in tree-topology — a shape invariant belongs to neither write model, and filing it under either context spec was the same misfiling class the change exists to fix.
 
 Current state: `check_cycle(tree, source_uri, target_dir_uri)` (crates/opake-core/src/directories/move_entry.rs) decides the invariant against a loaded `DirectoryTree`, but only the CLI calls it (apps/cli/src/commands/move_cmd.rs). The web duplicates the rule as UI logic (Move dialog disables the source and its descendants). `FileManager::move_entry` — the domain API both clients route through, and the only thing a raw SDK caller sees — never checks. Neither of its arms holds a `DirectoryTree`: the cabinet arm does two record fetches and an `applyWrites`; the workspace arm resolves paths against chain heads but never builds a tree.
 
@@ -15,7 +15,7 @@ Current state: `check_cycle(tree, source_uri, target_dir_uri)` (crates/opake-cor
 
 **Non-Goals:**
 
-- Indexer-side cycle validation (open question in the directory-chains delta; separate change if pursued).
+- Indexer-side cycle validation (open question carried in tree-topology; separate change if pursued).
 - Repairing an already-written cycle or hardening every tree consumer against malicious cyclic input (risk noted below; the domain-API guard prevents the honest-client case only).
 
 ## Decisions
@@ -42,6 +42,12 @@ Core's `ensure_root` is the single root-creation path (upload with no directory 
 - [Extra reads on directory moves — one fetch per subtree directory] → acceptable: directory moves are rare and subtrees shallow in practice; document moves (the hot path) skip entirely.
 - [TOCTOU: topology changes between the walk and the write] → cabinet is single-writer (own repo), so effectively none. Workspace: a concurrent supersede can race the check like it can race the move itself; existing fork detection covers the collision, and the indexer-side validation open question owns the adversarial case.
 - [Tree consumers may not tolerate a cycle that got written anyway (hostile client)] → out of scope to fix here, but implementation SHOULD add one defensive unit test that `DirectoryTree`/`collect_descendants` terminates on cyclic input rather than hanging; if it doesn't terminate, that becomes its own ticket rather than silently shipping.
+
+## Canon edit outside the delta grammar
+
+The tree-chains cabinet scope-out bullet (a `## Non-requirements` item, unaddressable by ADDED/MODIFIED/REMOVED/RENAMED Requirements sections) narrows at sync time from "this spec covers workspace directory chains" to scoping out chain machinery only:
+
+> Cabinet (personal, non-workspace) chain machinery. Cabinet trees use a `self`-rkey root and direct key wrapping with no supersede chain, additivity check, or fork handling; their structure and write semantics live in the tree-cabinet spec. Tree-shape invariants that hold in both contexts — cycle refusal at the domain API — live in the tree-topology spec, not here.
 
 ## Migration Plan
 

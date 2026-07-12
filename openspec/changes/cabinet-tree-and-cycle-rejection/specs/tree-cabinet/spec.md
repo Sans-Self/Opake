@@ -1,8 +1,8 @@
-# cabinet-tree
+# tree-cabinet
 
 Define the personal (non-workspace) tree: a single-repo directory tree on the owner's own PDS with a fixed root, mutated by in-place record updates rather than supersede chains. The cabinet is the simple case the federation machinery deliberately does not apply to — one writer, one repo, no curatorial turns — and its semantics are correspondingly simpler: writes are `putRecord`/`applyWrites` updates against stable URIs, moves are atomic, and deletion orders target records before listing entries so an interruption leaves a visible dangling reference rather than an invisible orphan.
 
-This spec owns tree structure and write semantics only. What a document or directory record encrypts and how (direct wrapping to the owner) is document-crypto's; everything chain-shaped — supersedes, additivity, cascades, forks — is directory-chains', which explicitly scopes the cabinet out.
+This spec owns cabinet-specific tree structure and write semantics only. What a document or directory record encrypts and how (direct wrapping to the owner) is document-crypto's; everything chain-shaped — supersedes, additivity, cascades, forks — is tree-chains', which scopes cabinet chain machinery out. Shape invariants that hold in both contexts are tree-topology's: cycle refusal at the domain API (`spec:tree-topology § A move that would create a cycle is refused at the domain API`) applies to cabinet moves exactly as it does to workspace moves.
 
 ## ADDED Requirements
 
@@ -66,17 +66,6 @@ Deleting a cabinet document SHALL batch the record delete and the parent-listing
 - **THEN** the operation is refused with the document/subdirectory counts and nothing is written
 - Verified in crates/opake-core/src/directories/remove.rs (`remove_directory` empty check)
 
-### Requirement: A move that would create a cycle is refused at the domain API
-
-`FileManager::move_entry` SHALL refuse a move whose target directory is the source or any descendant of the source, before any write, in both cabinet and workspace contexts (`check_cycle`, crates/opake-core/src/directories/move_entry.rs). A written cycle detaches the subtree from the root and makes it unreachable. Client-layer checks (the CLI command's `check_cycle` call, the web Move dialog disabling the source and its descendants) remain as earlier surfaces for the same rule, but the domain API is the enforcement boundary — a caller that skips the UI still cannot write a cycle.
-
-#### Scenario: folder cannot move into its own descendant
-
-- **GIVEN** folders `a/` and `a/b/`
-- **WHEN** the owner attempts to move `a/` into `a/b/`
-- **THEN** the move is refused and no directory record is written
-- Verified end to end in "refuses moving a folder into its own descendant" (tests/e2e/specs/cabinet-move.spec.ts); decision logic in crates/opake-core/src/directories/move_entry_tests.rs
-
 ### Requirement: A missing root is created on demand
 
 An operation that needs the cabinet root when no root record exists SHALL create it rather than fail or silently do nothing (`FileManager::ensure_root` → `get_or_create_root`, crates/opake-core/src/manager/directory.rs). A missing root is a normal state, not an error: a fresh account has never written one, and a recursive root delete removes it deliberately. Clients SHALL NOT treat a missing root as "nothing to do" — a client that short-circuits a write on a missing root strands the user in a cabinet that can never receive its first file.
@@ -97,4 +86,4 @@ An operation that needs the cabinet root when no root record exists SHALL create
 
 ## Non-requirements
 
-- Dangling-entry repair and orphan collection. The deletion ordering deliberately prefers a dangling listing entry over an orphaned record on interruption; the tree builder tolerates the dangle and nothing sweeps it. Repair belongs to a future garbage-collection capability spec (shared with directory-chains' orphan-GC deferral), not here.
+- Dangling-entry repair and orphan collection. The deletion ordering deliberately prefers a dangling listing entry over an orphaned record on interruption; the tree builder tolerates the dangle and nothing sweeps it. Repair belongs to a future garbage-collection capability spec, deferred from tree-topology (which owns the dangling/orphan vocabulary), not here.
