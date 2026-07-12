@@ -1,5 +1,3 @@
-use opake_core::client::dpop::DpopKeyPair;
-use opake_core::client::oauth_discovery::generate_pkce;
 use opake_core::crypto::{
     ContentKey, DirectoryMetadata, DocumentMetadata, EncryptedPayload, GrantMetadata,
     KeyringMetadata, OsRng,
@@ -136,50 +134,8 @@ fn content_key_from_slice(bytes: &[u8]) -> Result<ContentKey, JsError> {
 }
 
 // ---------------------------------------------------------------------------
-// OAuth / DPoP exports
+// Identity exports
 // ---------------------------------------------------------------------------
-
-#[wasm_bindgen(js_name = generateDpopKeyPair)]
-pub fn generate_dpop_key_pair() -> Result<JsValue, JsError> {
-    let keypair = DpopKeyPair::generate(&mut OsRng);
-    serde_wasm_bindgen::to_value(&keypair).map_err(|e| JsError::new(&e.to_string()))
-}
-
-#[wasm_bindgen(js_name = createDpopProof)]
-pub fn create_dpop_proof_js(
-    keypair_json: JsValue,
-    method: &str,
-    url: &str,
-    timestamp: f64,
-    nonce: Option<String>,
-    access_token: Option<String>,
-) -> Result<String, JsError> {
-    let keypair: DpopKeyPair =
-        serde_wasm_bindgen::from_value(keypair_json).map_err(|e| JsError::new(&e.to_string()))?;
-    opake_core::client::dpop::create_dpop_proof(
-        &keypair,
-        method,
-        url,
-        timestamp as i64,
-        nonce.as_deref(),
-        access_token.as_deref(),
-        &mut OsRng,
-    )
-    .map_err(|e| JsError::new(&e.to_string()))
-}
-
-// PkceChallengeDto moved to `bindings::PkceChallengeDto`.
-use bindings::PkceChallengeDto;
-
-#[wasm_bindgen(js_name = generatePkce)]
-pub fn generate_pkce_js() -> Result<JsValue, JsError> {
-    let pkce = generate_pkce(&mut OsRng);
-    let dto = PkceChallengeDto {
-        verifier: pkce.verifier,
-        challenge: pkce.challenge,
-    };
-    serde_wasm_bindgen::to_value(&dto).map_err(|e| JsError::new(&e.to_string()))
-}
 
 #[wasm_bindgen(js_name = generateIdentity)]
 pub fn generate_identity_js(did: &str) -> Result<JsValue, JsError> {

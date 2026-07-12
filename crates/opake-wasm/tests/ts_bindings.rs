@@ -20,25 +20,19 @@ use opake_wasm::bindings::{
     ChainForkedEventDto, CreateWorkspaceResultDto, DeleteRecursiveResultDto,
     DirectorySnapshotEntry, DirectoryTreeSnapshot, DocumentMetadataDto, DownloadResult,
     EncryptedPayloadDto, GrantEntryDto, InboxGrantDto, InboxSnapshotDto, ListWorkspacesResultDto,
-    MutationResultDto, PairRequestResultDto, PendingShareEntryDto, PkceChallengeDto,
-    ResolvedGrantMetadataDto, ResolvedIdentityDto, TreeWithMetadataDto, TypedEntry,
-    WorkspaceEntryDto, WorkspaceSnapshotDto, WorkspaceSyncResultDto,
+    MutationResultDto, PairRequestResultDto, PendingShareEntryDto, ResolvedGrantMetadataDto,
+    ResolvedIdentityDto, TreeWithMetadataDto, TypedEntry, WorkspaceEntryDto, WorkspaceSnapshotDto,
+    WorkspaceSyncResultDto,
 };
 
 // ---------------------------------------------------------------------------
-// Crypto / OAuth
+// Crypto
 // ---------------------------------------------------------------------------
 
 #[test]
 fn emit_encrypted_payload() {
     EncryptedPayloadDto::export().expect("EncryptedPayloadDto");
     assert!(generated("EncryptedPayload.ts").exists());
-}
-
-#[test]
-fn emit_pkce_challenge() {
-    PkceChallengeDto::export().expect("PkceChallengeDto");
-    assert!(generated("PkceChallenge.ts").exists());
 }
 
 // ---------------------------------------------------------------------------

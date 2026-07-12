@@ -88,22 +88,6 @@ impl From<EncryptedPayload> for EncryptedPayloadDto {
     }
 }
 
-/// PKCE challenge pair for OAuth — `PkceChallenge` in opake-core doesn't
-/// derive Serialize, so this wrapper exists to give it a wire shape.
-#[derive(Serialize)]
-#[cfg_attr(feature = "ts-bindings", derive(TS))]
-#[cfg_attr(
-    feature = "ts-bindings",
-    ts(
-        export,
-        export_to = "../../../packages/opake-sdk/src/generated/PkceChallenge.ts"
-    )
-)]
-pub struct PkceChallengeDto {
-    pub verifier: String,
-    pub challenge: String,
-}
-
 // ---------------------------------------------------------------------------
 // File operations: downloads, mutations, recursive deletes
 // ---------------------------------------------------------------------------
