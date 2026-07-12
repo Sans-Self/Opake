@@ -26,8 +26,13 @@ const COMPOSE_FILE = fileURLToPath(
   new URL("../../dev-env/docker-compose.yml", import.meta.url),
 );
 // Distinct from the compose-managed service containers; this is the suite's
-// own ephemeral CLI runner, created and destroyed by the harness.
-const CLI_CONTAINER = "opake-fed-cli";
+// own ephemeral CLI runner, created and destroyed by the harness. Vitest runs
+// test files in parallel worker processes, so the name is per-process — two
+// federation files each spinning up a runner must not collide on one name (a
+// shared name races the docker daemon into an "RWLayer unexpectedly nil"
+// half-created container). Each worker owns its container and its own login
+// state; the dev-env tolerates concurrent sessions for a fixture actor.
+const CLI_CONTAINER = `opake-fed-cli-${process.pid}`;
 
 // Inside the network the CLI reaches services by their compose names. The PDS
 // URL per account is written into config.toml (http, internal), so DID-doc
@@ -186,6 +191,71 @@ export async function memberCount(actor: string, name: string): Promise<number |
   const line = res.stdout.split("\n").find((l) => l.includes(name));
   const m = line?.match(/(\d+) member\(s\)/);
   return m ? Number(m[1]) : null;
+}
+
+// `workspace ls -l` prints the chain HEAD URI (its authority is the DID hosting
+// the current head), not the genesis URI — see the `ls` command's own comment.
+// A supersede mints a new head record, so this value churns on every membership
+// change while the genesis URI (captured at `create`) stays fixed. The churn
+// tests read it to prove the head moved past genesis and kept moving, precisely
+// the condition under which a head-keyed call site would 403.
+
+/** The chain-head URI the indexer reports for a workspace in `ls -l`, or null. */
+export async function headUri(actor: string, name: string): Promise<string | null> {
+  const res = await cli(actor, ["workspace", "ls", "-l"]);
+  if (res.code !== 0) return null;
+  const line = res.stdout.split("\n").find((l) => l.includes(name));
+  // `[^\s]+` stops at the tab before the `(member)` role tag, so this is the
+  // bare URI even when the actor is a non-hosting member.
+  const m = line?.match(/at:\/\/[^\s]+/);
+  return m ? m[0] : null;
+}
+
+/** Group-key rotation counter the indexer reports for a workspace, or null. */
+export async function rotationCount(actor: string, name: string): Promise<number | null> {
+  const res = await cli(actor, ["workspace", "ls", "-l"]);
+  if (res.code !== 0) return null;
+  const line = res.stdout.split("\n").find((l) => l.includes(name));
+  const m = line?.match(/rotation:(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Encrypt-and-upload a small text document into a workspace; returns its AT-URI.
+ * The plaintext is staged inside the container via base64 (no shell-quoting
+ * hazard) before the CLI reads and encrypts it client-side.
+ */
+export async function uploadTextToWorkspace(
+  actor: string,
+  workspace: string,
+  filename: string,
+  content: string,
+): Promise<string> {
+  const path = `/tmp/${actor}-${filename}`;
+  const b64 = Buffer.from(content, "utf8").toString("base64");
+  const write = await docker([
+    "exec",
+    CLI_CONTAINER,
+    "bash",
+    "-c",
+    `echo ${b64} | base64 -d > ${path}`,
+  ]);
+  if (write.code !== 0) throw new Error(`stage ${path} failed: ${write.stderr}`);
+  const res = await cli(actor, ["upload", path, "--workspace", workspace]);
+  if (res.code !== 0) throw new Error(`upload to ${workspace} failed: ${res.stderr}`);
+  return parseCreateUri(res.stdout);
+}
+
+/** First-time cross-PDS workspace-member download, printing plaintext to stdout. */
+export async function downloadAsMember(actor: string, docUri: string): Promise<CliResult> {
+  return cli(actor, ["download", "--workspace-member", docUri, "--stdout"]);
+}
+
+/** Resolve a fixture actor by name (for actors not identified by PDS slot). */
+export function actorByName(name: string): DevenvActor {
+  const actor = devenvActors().find((a) => a.name === name);
+  if (!actor) throw new Error(`no fixture actor named ${name}`);
+  return actor;
 }
 
 export function actorOnPds(pds: string): DevenvActor {
