@@ -1,15 +1,9 @@
 #!/bin/sh
 set -e
 
-# Skip on branches without Rust code (e.g. crosslink/hub coordination branch)
+# Skip on branches without Rust code
 if [ ! -f Cargo.toml ]; then
     exit 0
-fi
-
-# Link issue references in CHANGELOG.md
-if [ -f tools/crosslink-issue-renderer/link-changelog.sh ] && [ -f CHANGELOG.md ]; then
-    sh tools/crosslink-issue-renderer/link-changelog.sh https://issues.opake.app CHANGELOG.md
-    git add CHANGELOG.md
 fi
 
 # Rust checks (only if Rust files are staged)

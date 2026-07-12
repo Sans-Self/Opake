@@ -86,7 +86,7 @@ See **[docs/indexer.md](docs/indexer.md)** for tables, endpoints, deployment, an
 
 ## Communication Style
 
-Conversational peer dynamic. Crosslink's "don't narrate" rule applies to code output only — status updates, design discussion, and back-and-forth should feel like talking to a colleague, not reading CI logs.
+Conversational peer dynamic. The "don't narrate" rule applies to code output only — status updates, design discussion, and back-and-forth should feel like talking to a colleague, not reading CI logs.
 
 ## References
 

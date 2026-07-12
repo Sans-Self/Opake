@@ -130,8 +130,7 @@ By submitting a pull request, you agree that your contribution is licensed under
 
 ## Project management
 
-This project uses [crosslink](https://github.com/forecast-bio/crosslink) for
-issue tracking and AI agent workflow. After cloning, run `crosslink init` to
-set up hooks and the local issue database. The rule files in
-`.crosslink/rules/` have been trimmed from crosslink's defaults — Rust-specific
-rules are deferred to `cargo clippy` and the project's `CLAUDE.md`.
+Issues are tracked on GitHub in the private `Opake-at/Opake` repository. Use the
+`gh` CLI (`gh issue list`, `gh issue create`, `gh issue view`) to browse and file
+work. Coding standards live in `CLAUDE.md`; Rust style is enforced by
+`cargo fmt` and `cargo clippy`.
