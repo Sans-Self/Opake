@@ -1,6 +1,39 @@
 // Fake PDS lifecycle for e2e tests.
 
 import { createFakePds, type FakePds, type Account } from "fake-pds";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Which backing network the CLI tier runs against. The default is the
+// in-process fake-pds (fast, hermetic, no docker). `OPAKE_TEST_ENV=devenv`
+// selects the dockerized local atproto network under dev-env/ — real PLC,
+// three federated PDSes, relay, jetstream, and the indexer — so the
+// federation suite can exercise cross-PDS membership and indexer-observed
+// outcomes that fake-pds cannot model. Nothing below the fake path reads
+// this; it only gates the federation suite and its resolution helpers.
+export type TestEnv = "fake" | "devenv";
+
+export function testEnv(): TestEnv {
+  return process.env.OPAKE_TEST_ENV === "devenv" ? "devenv" : "fake";
+}
+
+export interface DevenvActor {
+  readonly name: string;
+  readonly handle: string;
+  readonly pds: string;
+  readonly mnemonic: string;
+  readonly password: string;
+}
+
+// Fixture actors are defined once in dev-env/fixtures/actors.json (the same
+// file the bootstrap script and the Playwright harness read) so there is no
+// second copy to drift. Only meaningful in devenv mode.
+export function devenvActors(): readonly DevenvActor[] {
+  const path = fileURLToPath(
+    new URL("../../dev-env/fixtures/actors.json", import.meta.url),
+  );
+  return JSON.parse(readFileSync(path, "utf8")).actors;
+}
 
 export const TEST_ACCOUNTS: readonly Account[] = [
   { did: "did:plc:alice", handle: "alice.test" },

@@ -139,11 +139,34 @@ indexer-cursor-now:
 
 # ---------------------------------------------------------------------------
 # E2E tests
+#
+# Two tiers gate on the hermetic dev-env (dev-env/) being up + bootstrapped
+# (`just dev-env-up`); both fail fast with a clear message otherwise:
+#   just e2e-web         — Playwright browser suite (tests/e2e), real OAuth
+#                          against the local PDSes, one worker per fixture actor
+#   just e2e-federation  — CLI federation tier (tests/federation), cross-PDS
+#                          membership + keyring-delete outcomes via the indexer
+# The default `just validate` runs neither: it stays hermetic-without-docker
+# (unit + fake-pds CLI tier). Run the dev-env tiers explicitly when touching
+# federation, membership, or the indexer pipeline.
 # ---------------------------------------------------------------------------
+
+# Fail fast unless the dev-env indexer is serving through Caddy on :443.
+_dev-env-check:
+    @curl -fsS -k --resolve indexer.test:443:127.0.0.1 https://indexer.test/api/health >/dev/null 2>&1 \
+      || { echo "dev-env is not up — run 'just dev-env-up' first"; exit 1; }
 
 # Run CLI e2e tests (requires a running PDS)
 e2e-cli:
     cd tests && bun test tests/cli/
+
+# Web e2e (Playwright) against the dev-env
+e2e-web: _dev-env-check
+    cd tests && bunx playwright test --project=e2e
+
+# CLI federation tier against the dev-env
+e2e-federation: _dev-env-check
+    cd tests && OPAKE_TEST_ENV=devenv bunx vitest run tests/federation/
 
 # Run all e2e tests
 e2e: e2e-cli
@@ -180,6 +203,33 @@ push-images: images
     docker push {{ registry }}/opake/indexer:latest
     docker push {{ registry }}/opake/web:{{ tag }}
     docker push {{ registry }}/opake/web:latest
+
+# ---------------------------------------------------------------------------
+# Hermetic dev environment (dev-env/) — local PLC + 3 PDSes + relay +
+# jetstream + indexer. See dev-env/README.md.
+# ---------------------------------------------------------------------------
+
+# Build the dev-env's custom images (relay, jetstream, indexer, cli)
+dev-env-build:
+    cd dev-env && ./build/build-images.sh
+
+# Start the stack (healthcheck-gated) and bootstrap the fixture actors
+dev-env-up: dev-env-build
+    cd dev-env && docker compose up -d --wait
+    cd dev-env && docker compose run --rm bootstrap /bootstrap/bootstrap.sh
+
+# Stop the stack, keep data
+dev-env-down:
+    cd dev-env && docker compose down
+
+# Pristine reset: wipe all volumes (incl. jetstream cursor), restart, re-bootstrap
+dev-env-reset:
+    cd dev-env && docker compose down -v
+    just dev-env-up
+
+# Tail dev-env logs (optionally one service)
+dev-env-logs service="":
+    cd dev-env && docker compose logs -f {{ service }}
 
 # ---------------------------------------------------------------------------
 # Setup

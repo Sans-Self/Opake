@@ -50,6 +50,15 @@ HASH_RE = re.compile(r"`([0-9a-f]{7,40})`")
 # requirement names ("the document's rotation"), so single quotes do NOT
 # terminate — cite inside double quotes or backticks, never single quotes.
 CITE_RE = re.compile(r"spec:([a-z0-9-]+)\s*§\s*([^\"`\n]+)")
+# Tests may cite via the `cite("capability", "Requirement name")` helper
+# (tests/e2e/fixtures.ts), which builds the `spec:` tag at runtime — so the
+# literal never appears in source. Recognize the call form directly.
+# Double-quoted args only (apostrophes are legal inside requirement names, so
+# single-quoted delimiters would truncate them — same rule as CITE_RE);
+# tolerant of multi-line calls and a trailing comma.
+CITE_CALL_RE = re.compile(
+    r'cite\(\s*"([a-z0-9-]+)"\s*,\s*"([^"]+)"\s*,?\s*\)'
+)
 REQUIREMENT_RE = re.compile(r"^### Requirement: (.+)$", re.MULTILINE)
 DELTA_SECTION_RE = re.compile(r"^## (ADDED|MODIFIED|REMOVED) Requirements\b")
 
@@ -162,7 +171,8 @@ def main() -> int:
         if "node_modules" in test_file.parts:
             continue
         rel = test_file.relative_to(ROOT)
-        for capability, req in CITE_RE.findall(test_file.read_text()):
+        text = test_file.read_text()
+        for capability, req in CITE_RE.findall(text) + CITE_CALL_RE.findall(text):
             check_citation(rel, capability, req)
             citers.setdefault((capability, normalize(req)), []).append((rel, None))
 

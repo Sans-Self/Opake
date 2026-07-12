@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import initWasm, {
   deriveIdentityFromMnemonic,
-} from "../../web/src/wasm/opake-wasm/opake.js";
+} from "../../packages/opake-sdk/wasm/opake.js";
 
 // Known seed phrase for deterministic test identities
 const TEST_SEED_PHRASE =
@@ -26,7 +26,7 @@ async function ensureWasm(): Promise<void> {
     // Load WASM binary directly (the default init uses fetch which doesn't work in Node/Bun)
     const wasmPath = resolve(
       import.meta.dirname,
-      "../../web/src/wasm/opake-wasm/opake_bg.wasm",
+      "../../packages/opake-sdk/wasm/opake_bg.wasm",
     );
     const wasmBytes = readFileSync(wasmPath);
     await initWasm(wasmBytes);
