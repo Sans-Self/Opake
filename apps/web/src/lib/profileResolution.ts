@@ -9,7 +9,13 @@
 // indexer is already cached at the CDN, but coalescing local duplicates
 // avoids N parallel fetches when a workspace has many members.
 
-const PUBLIC_API = "https://public.api.bsky.app";
+// Bluesky appview for cosmetic member-profile (handle/avatar) lookups.
+// Overridable via VITE_BSKY_APPVIEW_URL so the dev-env can neutralize it
+// (empty → same-origin, 404 → graceful null); left unset it targets the live
+// public appview. Without this gate the fetch escapes to public.api.bsky.app,
+// which the e2e hermeticity blockade fails. Mirrors stores/auth.ts.
+const PUBLIC_API =
+  (import.meta.env.VITE_BSKY_APPVIEW_URL as string | undefined) ?? "https://public.api.bsky.app";
 
 export interface MemberProfile {
   readonly handle: string | null;

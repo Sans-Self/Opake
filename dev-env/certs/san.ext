@@ -1,0 +1,2 @@
+subjectAltName = DNS:pds-a.test, DNS:pds-b.test, DNS:pds-c.test, DNS:*.pds-a.test, DNS:*.pds-b.test, DNS:*.pds-c.test, DNS:plc.test, DNS:indexer.test
+extendedKeyUsage = serverAuth

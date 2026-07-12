@@ -11,7 +11,10 @@ config :opake_indexer,
   compression: :zstd,
   # Persist the cursor to Postgres at most once per N milliseconds, no
   # matter how many events flow through the indexer in between.
-  cursor_save_interval_ms: 5_000
+  cursor_save_interval_ms: 5_000,
+  # Base URL for did:plc document resolution (auth key fetching, backfill).
+  # Overridden in hermetic dev/test environments running a local PLC.
+  plc_directory_url: "https://plc.directory"
 
 config :opake_indexer, OpakeIndexerWeb.Endpoint,
   url: [host: "localhost"],

@@ -402,6 +402,20 @@ export class Opake {
     await wasm.loginWithAppPasswordWasm(handle, appPassword, adapter);
   }
 
+  /**
+   * Point `did:plc` resolution at a different PLC directory (hermetic
+   * dev/test environments running a local PLC).
+   *
+   * Process-level, set-once configuration — hence a static, not an
+   * instance method: the first call wins for the lifetime of the WASM
+   * module and later calls are ignored. Call during app boot, before any
+   * login or resolution runs. Defaults to the public `plc.directory`.
+   */
+  static async setPlcDirectoryUrl(url: string): Promise<void> {
+    const wasm = await initWasm();
+    wasm.setPlcDirectoryUrl(url);
+  }
+
   // ---------------------------------------------------------------------------
   // Initialization
   // ---------------------------------------------------------------------------

@@ -155,7 +155,8 @@ defmodule OpakeIndexer.Backfill do
 
   @spec resolve_pds(String.t()) :: {:ok, String.t()} | {:error, term()}
   defp resolve_pds(did) do
-    url = "https://plc.directory/#{did}"
+    plc_url = Application.fetch_env!(:opake_indexer, :plc_directory_url)
+    url = "#{plc_url}/#{did}"
 
     case Req.get(url) do
       {:ok, %{status: 200, body: body}} ->

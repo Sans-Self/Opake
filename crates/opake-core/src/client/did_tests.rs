@@ -321,3 +321,35 @@ fn handle_from_did_document_empty() {
     };
     assert_eq!(handle_from_did_document(&doc), None);
 }
+
+#[test]
+fn resolve_plc_base_default() {
+    assert_eq!(resolve_plc_base(None, None), "https://plc.directory");
+}
+
+#[test]
+fn resolve_plc_base_env_beats_default() {
+    assert_eq!(
+        resolve_plc_base(None, Some("http://localhost:2582")),
+        "http://localhost:2582"
+    );
+}
+
+#[test]
+fn resolve_plc_base_override_beats_env() {
+    assert_eq!(
+        resolve_plc_base(
+            Some("http://plc.dev.internal"),
+            Some("http://localhost:2582")
+        ),
+        "http://plc.dev.internal"
+    );
+}
+
+#[test]
+fn resolve_plc_base_strips_trailing_slash() {
+    assert_eq!(
+        resolve_plc_base(Some("http://localhost:2582/"), None),
+        "http://localhost:2582"
+    );
+}

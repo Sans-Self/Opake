@@ -1,0 +1,37 @@
+# TLS front for the whole dev-env host boundary (single egress-capable service).
+# One cert covers every vhost (SAN list). All reached from the host/browser via
+# --host-resolver-rules MAP *.test 127.0.0.1:443 + the dev CA (ignoreHTTPSErrors
+# in Playwright, or SSL_CERT_FILE for native clients).
+{
+	admin off
+	auto_https off
+}
+
+# Apex + wildcard per PDS. Wildcard carries per-handle handle resolution
+# (https://alice.pds-a.test/.well-known/atproto-did — the PDS answers it for its
+# own accounts) plus the OAuth authorize/consent pages and XRPC.
+pds-a.test, *.pds-a.test {
+	tls /certs/pds.crt /certs/pds.key
+	reverse_proxy http://pds-a:3000
+}
+pds-b.test, *.pds-b.test {
+	tls /certs/pds.crt /certs/pds.key
+	reverse_proxy http://pds-b:3000
+}
+pds-c.test, *.pds-c.test {
+	tls /certs/pds.crt /certs/pds.key
+	reverse_proxy http://pds-c:3000
+}
+
+# PLC directory — browser WASM resolver override (VITE_PLC_DIRECTORY_URL) points
+# here so did:plc resolution stays local (no plc.directory escape).
+plc.test {
+	tls /certs/pds.crt /certs/pds.key
+	reverse_proxy http://plc:2582
+}
+
+# Indexer API/SSE — VITE_INDEXER_URL points here.
+indexer.test {
+	tls /certs/pds.crt /certs/pds.key
+	reverse_proxy http://indexer:6100
+}

@@ -1,0 +1,47 @@
+{
+  "_comment": "PUBLIC TEST VECTORS for the hermetic dev-env. Not secrets. Never valid on a live PDS. See generate_mnemonics.py.",
+  "actors": [
+    {
+      "name": "alice",
+      "handle": "alice.pds-a.test",
+      "pds": "pds-a",
+      "mnemonic": "bunker unique foot hammer nation input dance castle laugh logic nurse degree that pond mystery pupil return useful basket east way antique foster student",
+      "password": "opake-devenv-pw"
+    },
+    {
+      "name": "bob",
+      "handle": "bob.pds-a.test",
+      "pds": "pds-a",
+      "mnemonic": "royal lion wood supply beyond relief letter apology eagle model spell attract again collect valley pottery lens service decrease century worth resemble life foster",
+      "password": "opake-devenv-pw"
+    },
+    {
+      "name": "carol",
+      "handle": "carol.pds-b.test",
+      "pds": "pds-b",
+      "mnemonic": "mandate library avocado guitar apology promote usage measure direct reopen wall sponsor leisure teach team arrange wagon diary vivid genre special arrest dentist skin",
+      "password": "opake-devenv-pw"
+    },
+    {
+      "name": "dave",
+      "handle": "dave.pds-b.test",
+      "pds": "pds-b",
+      "mnemonic": "omit two crystal deer win burst marble dinner math clean traffic motion vendor jealous heavy silent talent swear shoulder nasty fitness swim achieve column",
+      "password": "opake-devenv-pw"
+    },
+    {
+      "name": "eve",
+      "handle": "eve.pds-c.test",
+      "pds": "pds-c",
+      "mnemonic": "abuse purpose absorb insane kick finish wire smart suit ostrich obvious duty crop lock anger decide correct flash void exist hedgehog balcony yard choose",
+      "password": "opake-devenv-pw"
+    },
+    {
+      "name": "frank",
+      "handle": "frank.pds-c.test",
+      "pds": "pds-c",
+      "mnemonic": "access curve able suspect dutch august trigger face gospel lunar coast wood finger evoke define trade foam pen reject shiver melody isolate assault family",
+      "password": "opake-devenv-pw"
+    }
+  ]
+}

@@ -20,7 +20,11 @@ import { loading } from "@/stores/app";
 // Duck-typed to avoid importing OpakeError eagerly.
 const DEAD_SESSION_SIGNALS = ["401", "AuthenticationFailed", "invalid_grant"];
 
-const PUBLIC_API = "https://public.api.bsky.app";
+// Bluesky appview for cosmetic profile (avatar/banner) lookups. Overridable so
+// a hermetic dev-env can point it local or disable it (empty = skip) — without
+// it the fetch escapes to live public.api.bsky.app, which the e2e blockade fails.
+const PUBLIC_API =
+  (import.meta.env.VITE_BSKY_APPVIEW_URL as string | undefined) ?? "https://public.api.bsky.app";
 
 /** Only accept avatar/banner URLs from known Bluesky CDN origins. */
 function isSafeCdnUrl(url: string): boolean {
@@ -34,6 +38,7 @@ function isSafeCdnUrl(url: string): boolean {
 
 /** Fire-and-forget profile fetch — populates avatarUrl/bannerUrl after session is active. */
 function fetchProfileInBackground(did: string): void {
+  if (!PUBLIC_API) return; // disabled (e.g. hermetic dev-env)
   void fetch(`${PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(did)}`)
     .then((r) => (r.ok ? (r.json() as Promise<{ avatar?: string; banner?: string }>) : null))
     .then((profile) => {
@@ -72,12 +77,35 @@ const loadStorage = () => import("@opake/sdk/storage/indexeddb");
  * so a user-configured indexer still beats the host default.
  */
 async function seedIndexerUrl(opake: import("@opake/sdk").Opake): Promise<void> {
+  await seedPlcDirectoryUrl();
   const envUrl = import.meta.env.VITE_INDEXER_URL as string | undefined;
   if (!envUrl) return;
   try {
     await opake.setIndexerUrl(envUrl);
   } catch (err) {
     console.warn("[auth] setIndexerUrl failed:", err);
+  }
+}
+
+// Point the WASM did:plc resolver at a dev-env-local PLC directory when
+// configured (VITE_PLC_DIRECTORY_URL). The override is process-level set-once
+// (OnceLock in core), so this guards to a single effective call and must run
+// before any handle/DID resolution — seedIndexerUrl (its only caller) runs at
+// every Opake.init, ahead of login. Without it the browser WASM falls back to
+// production plc.directory; in the e2e harness the route blockade fails loudly
+// on that escape.
+// eslint-disable-next-line functional/no-let
+let plcDirectorySeeded = false;
+async function seedPlcDirectoryUrl(): Promise<void> {
+  if (plcDirectorySeeded) return;
+  plcDirectorySeeded = true;
+  const url = import.meta.env.VITE_PLC_DIRECTORY_URL as string | undefined;
+  if (!url) return;
+  try {
+    const { Opake } = await loadSdk();
+    await Opake.setPlcDirectoryUrl(url);
+  } catch (err) {
+    console.warn("[auth] setPlcDirectoryUrl failed:", err);
   }
 }
 
@@ -462,6 +490,9 @@ export const useAuthStore = create<AuthStore>()(
       const done = loading("login");
       try {
         const { Opake } = await loadSdk();
+        // Point the did:plc resolver at the dev-env PLC BEFORE the first
+        // handle/DID resolution (startLogin resolves handle → did:plc → PDS).
+        await seedPlcDirectoryUrl();
         const { authUrl, pending } = await Opake.startLogin(handle, {
           redirectUri: redirectUri(),
         });

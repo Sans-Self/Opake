@@ -73,6 +73,16 @@ pub fn build_info() -> String {
     format!("{} {}", env!("OPAKE_BUILD_EPOCH"), env!("OPAKE_GIT_HASH"))
 }
 
+/// Point `did:plc` resolution at a local PLC directory (hermetic dev/test
+/// environments). Process-level configuration: call once during app boot,
+/// before any resolution runs — the first call wins and later calls are
+/// ignored. Browser WASM has no environment variables, so this is the only
+/// override path on the web.
+#[wasm_bindgen(js_name = setPlcDirectoryUrl)]
+pub fn set_plc_directory_url(url: String) {
+    opake_core::client::set_plc_directory_url(url);
+}
+
 #[wasm_bindgen(js_name = generateContentKey)]
 pub fn generate_content_key() -> Vec<u8> {
     let key = opake_core::crypto::generate_content_key(&mut OsRng);

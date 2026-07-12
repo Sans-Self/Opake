@@ -4,8 +4,9 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
   DID → DID document → PDS service endpoint → `app.opake.publicKey/self` record
   → `signingKey.$bytes` (32-byte Ed25519 key).
 
-  Supports `did:plc:` (via plc.directory) and `did:web:` (via .well-known).
-  Implements `KeyFetcherBehaviour` so tests can substitute a Mox mock.
+  Supports `did:plc:` (via the configured PLC directory) and `did:web:`
+  (via .well-known). Implements `KeyFetcherBehaviour` so tests can
+  substitute a Mox mock.
   """
 
   @behaviour OpakeIndexer.Auth.KeyFetcherBehaviour
@@ -27,7 +28,7 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
   end
 
   defp resolve_did_document("did:plc:" <> _ = did) do
-    url = "https://plc.directory/#{did}"
+    url = "#{plc_directory_url()}/#{did}"
     fetch_json(url)
   end
 
@@ -80,6 +81,10 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
         {:error, "signing key must be 32 bytes, got #{byte_size(bytes)}"}
       end
     end
+  end
+
+  defp plc_directory_url do
+    Application.fetch_env!(:opake_indexer, :plc_directory_url)
   end
 
   defp fetch_json(url) do

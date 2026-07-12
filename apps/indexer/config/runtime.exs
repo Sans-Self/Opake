@@ -12,6 +12,10 @@ if jetstream_url = System.get_env("JETSTREAM_URL") do
   config :opake_indexer, :jetstream_url, jetstream_url
 end
 
+if plc_directory_url = System.get_env("PLC_DIRECTORY_URL") do
+  config :opake_indexer, :plc_directory_url, plc_directory_url
+end
+
 if cors_origin = System.get_env("CORS_ORIGIN") do
   config :opake_indexer, :cors_origin, cors_origin
 end

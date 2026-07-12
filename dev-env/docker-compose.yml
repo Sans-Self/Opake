@@ -1,0 +1,290 @@
+# Opake dev-env — hermetic local atproto network (3 PDSes).
+#
+# Topology:  PLC(+pg) → 3×PDS (each behind Caddy TLS) → relay → jetstream
+#            → indexer(+pg). Bootstrap runs the opake CLI inside the network.
+#
+# Custom images are prebuilt by ./build/build-images.sh (the justfile calls it
+# before `up`). Everything is pinned.
+#
+# Networks:
+#   internal — internal:true, NO external egress. Carries ALL inter-service
+#     traffic. Its subnet is deliberately in PUBLIC (non-reserved) space
+#     (11.10.0.0/24 = US-DoD dark space, never routed on the internet) because
+#     the indigo relay's SSRF guard rejects RFC1918/loopback IPs with no config
+#     to disable it — public-range container IPs pass IsPublicIPAddress().
+#     FOOTGUN: the host installs a route for this subnet to the docker bridge;
+#     only ever use a range the host will never contact (NEVER 8.8.0.0/16 etc).
+#   edge — plain bridge, host-published ports only. ONLY Caddy attaches here, so
+#     Caddy is the single boundary crossing; every other service is
+#     internal-only and therefore provably egress-blocked.
+name: opake-devenv
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 11.10.0.0/24
+  edge:
+    driver: bridge
+
+volumes:
+  plc-db-data:
+  pds-a-data:
+  pds-b-data:
+  pds-c-data:
+  relay-data:
+  jetstream-data:
+  indexer-db-data:
+
+x-pds-common: &pds-common
+  image: ghcr.io/bluesky-social/pds:0.4
+  restart: unless-stopped
+  networks: [internal]
+  healthcheck:
+    # PDS image has node but not curl/wget; use node itself.
+    test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/xrpc/_health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+    interval: 5s
+    timeout: 4s
+    retries: 40
+    start_period: 20s
+
+x-pds-env: &pds-env
+  PDS_PORT: "3000"
+  PDS_DID_PLC_URL: http://plc:2582
+  PDS_DATA_DIRECTORY: /pds
+  PDS_BLOBSTORE_DISK_LOCATION: /pds/blocks
+  PDS_BLOB_UPLOAD_LIMIT: "52428800"
+  PDS_JWT_SECRET: 5beac450669fbed0a828c38f533d9c34
+  PDS_ADMIN_PASSWORD: 101642ca520d8df36b77a979
+  # One entry per PDS subdomain, so handles are a single label under them
+  # (alice.pds-a.test = "alice" + ".pds-a.test"). A bare ".test" would treat
+  # "alice.pds-a" as one label and reject the dot (InvalidHandle).
+  PDS_SERVICE_HANDLE_DOMAINS: .pds-a.test,.pds-b.test,.pds-c.test
+  PDS_INVITE_REQUIRED: "true"
+  PDS_RATE_LIMITS_ENABLED: "false"
+  LOG_ENABLED: "true"
+  # Auto-announce to the relay on account/record activity (no manual crawl).
+  PDS_CRAWLERS: http://relay:2470
+  # Neutralize every outbound URL so nothing reaches for the public network.
+  # (Egress is already blocked by the internal network; this is belt+braces and
+  # documents intent.)
+  PDS_BSKY_APP_VIEW_URL: http://localhost:3000
+  PDS_BSKY_APP_VIEW_DID: did:web:localhost
+  PDS_REPORT_SERVICE_URL: http://localhost:3000
+  PDS_REPORT_SERVICE_DID: did:web:localhost
+  # No SMTP — PDS logs invite/verification mails instead of sending.
+
+services:
+  # ---- PLC directory + its postgres ----------------------------------------
+  plc-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: plc
+      POSTGRES_PASSWORD: plc
+      POSTGRES_DB: plc
+    volumes:
+      - plc-db-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plc"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  plc:
+    image: opake-devenv-plc:pinned
+    restart: unless-stopped
+    environment:
+      # Shipped entrypoint (service/index.js) reads DB_CREDS_JSON, NOT DATABASE_URL.
+      DB_CREDS_JSON: '{"username":"plc","password":"plc","host":"plc-db","port":"5432","database":"plc"}'
+      DB_MIGRATE_CREDS_JSON: '{"username":"plc","password":"plc","host":"plc-db","port":"5432","database":"plc"}'
+      ENABLE_MIGRATIONS: "true"
+      PORT: "2582"
+    depends_on:
+      plc-db:
+        condition: service_healthy
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:2582/_health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 40
+      start_period: 10s
+
+  # ---- three PDSes ----------------------------------------------------------
+  pds-a:
+    <<: *pds-common
+    environment:
+      <<: *pds-env
+      PDS_HOSTNAME: pds-a.test
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: 1275f6be1b84a981327124feb9edd21739e37acf6be83c03d9cf8fcbc6c47d9b
+    volumes:
+      - pds-a-data:/pds
+    depends_on:
+      plc:
+        condition: service_healthy
+
+  pds-b:
+    <<: *pds-common
+    environment:
+      <<: *pds-env
+      PDS_HOSTNAME: pds-b.test
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: 21cd32151ff99fdaf3ad3c5fe9c954c145ef2c3c6345c63a6f65c55dffc95e92
+    volumes:
+      - pds-b-data:/pds
+    depends_on:
+      plc:
+        condition: service_healthy
+
+  pds-c:
+    <<: *pds-common
+    environment:
+      <<: *pds-env
+      PDS_HOSTNAME: pds-c.test
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: f7ae7e7db58eb3143e24009da9f6583890d2ab2d7494ebbde6055a7586b8b2ca
+    volumes:
+      - pds-c-data:/pds
+    depends_on:
+      plc:
+        condition: service_healthy
+
+  # ---- Caddy: TLS front for the PDSes + the only host boundary -------------
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs/pds.crt:/certs/pds.crt:ro
+      - ./certs/pds.key:/certs/pds.key:ro
+    depends_on:
+      pds-a: { condition: service_healthy }
+      pds-b: { condition: service_healthy }
+      pds-c: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:443:443"
+    networks:
+      internal:
+        aliases: [pds-a.test, pds-b.test, pds-c.test]
+      edge:
+    healthcheck:
+      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O-", "https://pds-a.test/xrpc/_health"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+
+  # ---- indigo relay (STOCK; internal-only for reliable SSRF resolution) ----
+  relay:
+    image: opake-devenv-relay:pinned
+    restart: unless-stopped
+    command: ["serve"]
+    environment:
+      RELAY_API_BIND: ":2470"
+      DATABASE_URL: sqlite:///data/relay/relay.sqlite
+      RELAY_PERSIST_DIR: /data/relay/persist
+      RELAY_ADMIN_PASSWORD: relayadmin
+      RELAY_PLC_HOST: http://plc:2582
+      SSL_CERT_FILE: /certs/ca.crt
+      RELAY_LENIENT_SYNC_VALIDATION: "true"
+      RELAY_TRUSTED_DOMAINS: "*"
+      LOG_LEVEL: info
+    volumes:
+      - relay-data:/data/relay
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    depends_on:
+      plc: { condition: service_healthy }
+      caddy: { condition: service_healthy }
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:2470/xrpc/_health"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+
+  # ---- jetstream (built from source; serves /subscribe on :8080) -----------
+  jetstream:
+    image: opake-devenv-jetstream:pinned
+    restart: unless-stopped
+    command:
+      - "serve"
+      - "--addr=:8080"
+      - "--debug-addr=:8085"
+      - "--relay-url=http://relay:2470"
+      - "--plc-url=http://plc:2582"
+      - "--data-dir=/data"
+    volumes:
+      - jetstream-data:/data
+    depends_on:
+      relay: { condition: service_healthy }
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8085/healthz"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+
+  # ---- indexer + its postgres ----------------------------------------------
+  indexer-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: indexer
+      POSTGRES_DB: opake_indexer
+    volumes:
+      - indexer-db-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  indexer:
+    image: opake-devenv-indexer:pinned
+    restart: unless-stopped
+    environment:
+      PHX_SERVER: "1"
+      PORT: "6100"
+      DATABASE_URL: postgres://indexer:indexer@indexer-db:5432/opake_indexer
+      SECRET_KEY_BASE: c3d25aadfa229cadcd1247e4e233dd2e40d8bf694ed598f502633758af1f20c8b4681482e42a614c
+      JETSTREAM_URL: ws://jetstream:8080/subscribe
+      PLC_DIRECTORY_URL: http://plc:2582
+      INDEXER_ENABLED: "true"
+      # Web e2e harness runs on the host at :5173; allow its cross-origin calls.
+      CORS_ORIGIN: http://127.0.0.1:5199
+    # Wrapper trusts the dev CA (OS store) before boot so Req can fetch records
+    # over the PDSes' https endpoints (auth key fetch + backfill). Config-only.
+    entrypoint: ["/dev-entrypoint.sh"]
+    volumes:
+      - ./build/indexer-entrypoint.sh:/dev-entrypoint.sh:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    depends_on:
+      indexer-db: { condition: service_healthy }
+      jetstream: { condition: service_healthy }
+      plc: { condition: service_healthy }
+    networks: [internal]
+    # HEALTHCHECK is baked into the image (curl /api/health).
+
+  # ---- bootstrap (opake CLI; run on demand, never long-running) ------------
+  # Invoked by ./bootstrap/bootstrap.sh via `docker compose run --rm bootstrap`.
+  bootstrap:
+    image: opake-devenv-cli:pinned
+    profiles: ["tools"]
+    environment:
+      OPAKE_PLC_DIRECTORY: http://plc:2582
+      PDS_ADMIN_PASSWORD: 101642ca520d8df36b77a979
+      # The CLI fetches foreign-PDS records over the Caddy https endpoints;
+      # rustls honors SSL_CERT_FILE for the dev CA.
+      SSL_CERT_FILE: /certs/ca.crt
+    volumes:
+      - ./bootstrap:/bootstrap:ro
+      - ./fixtures:/fixtures:ro
+      - ./certs:/certs:ro
+    networks: [internal]
+    entrypoint: ["/bin/bash"]

@@ -236,10 +236,37 @@ pub async fn get_blob_public(
 
 const PLC_DIRECTORY: &str = "https://plc.directory";
 
-/// Override the PLC directory URL via environment variable.
-/// Used in testing with a fake PDS that also serves DID documents.
+/// Runtime override for the PLC directory base URL.
+///
+/// Environment variables are inert in browser WASM, so web clients need a
+/// programmatic path to point DID resolution at a local PLC (hermetic
+/// dev/test environments). Set once at startup; later calls are ignored.
+static PLC_DIRECTORY_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Point `did:plc` resolution at a different PLC directory.
+///
+/// First call wins; subsequent calls are no-ops (the resolver base is
+/// process-level configuration, not per-request state). Native callers can
+/// use the `OPAKE_PLC_DIRECTORY` environment variable instead.
+pub fn set_plc_directory_url(url: impl Into<String>) {
+    let _ = PLC_DIRECTORY_OVERRIDE.set(url.into());
+}
+
+/// Resolution order: programmatic override, `OPAKE_PLC_DIRECTORY` env var
+/// (native; always absent in browser WASM), then the public directory.
 fn plc_directory_url() -> String {
-    std::env::var("OPAKE_PLC_DIRECTORY").unwrap_or_else(|_| PLC_DIRECTORY.to_string())
+    resolve_plc_base(
+        PLC_DIRECTORY_OVERRIDE.get().map(String::as_str),
+        std::env::var("OPAKE_PLC_DIRECTORY").ok().as_deref(),
+    )
+}
+
+fn resolve_plc_base(override_url: Option<&str>, env_url: Option<&str>) -> String {
+    override_url
+        .or(env_url)
+        .unwrap_or(PLC_DIRECTORY)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Fetch a DID document from the PLC directory (did:plc) or .well-known (did:web).
