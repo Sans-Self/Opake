@@ -41,7 +41,7 @@ SSE `keyring:upsert` events route to `apply_keyring_to_workspace_keeper`:
 4. Acquire the `WorkspaceKeeper` mutex and call `apply_keyring_record` (upsert or delete).
 5. `WorkspaceKeeper` deduplicates: if the new entry equals the existing one (SSE echo after a local write), no callbacks fire.
 
-SSE `keyring:delete` events skip step 1–3 and call `keeper.delete(uri)` directly.
+SSE `keyring:delete` events skip step 1–3 and call `keeper.apply_keyring_delete(payload)`, which dispatches on the indexer-resolved chain outcome carried in the payload (`unchanged` / `rolled_back` / `torn_down` — see [flows/keyrings.md](flows/keyrings.md)). Only `torn_down` removes the entry, keyed by the payload's `workspace_id`; the keeper never matches the deleted URI against tracked keys, so deleting a living workspace's genesis record leaves its sidebar entry alone. A `rolled_back` delete is followed by a `keyring:upsert` of the restored head, which rebuilds the entry through the normal upsert path above.
 
 **Optimistic insert**
 

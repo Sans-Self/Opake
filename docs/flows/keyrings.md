@@ -153,6 +153,45 @@ Before replacing the group key, the old rotation's remaining member entries are 
 
 Existing documents encrypted under the old group key stay as-is. New uploads use the new group key. Removed members' wrapped keys are excluded from history, so they cannot recover old group keys from the record.
 
+## Keyring Record Deletion
+
+Anyone can delete keyring records from their own PDS — the chain is distributed (genesis on the creator's PDS, each supersede on the authoring manager's), so a delete tombstone is ordinary record cleanup, not a workspace operation. What the delete *means* depends on where the record sat in the supersede chain, and only the indexer can resolve that. It broadcasts the resolution as an `outcome` on the `keyring:delete` SSE payload; clients act on the outcome and never compare the deleted URI against tracked state.
+
+| Deleted record | Outcome | Indexer | Clients |
+|---|---|---|---|
+| Genesis or superseded intermediate | `unchanged` | Chain head untouched | No-op — the genesis URI identifies the workspace, not a live record |
+| Chain head, live record remains | `rolled_back` | Head rolls back to the **newest live record**; restored record re-broadcast as `keyring:upsert` | Delete is a no-op; the follow-up upsert rebuilds the entry (member set, rotation, metadata) |
+| Sole live record | `torn_down` | `chain_heads` rows for the workspace removed | Keeper drops the entry keyed by `workspace_id` |
+
+```mermaid
+sequenceDiagram
+    participant PDS as Authoring PDS
+    participant FH as Firehose
+    participant IX as Indexer
+    participant SSE as SSE Topics
+    participant Client as Member Client
+
+    PDS->>FH: delete app.opake.keyring/<rkey>
+    FH->>IX: dispatch_delete(uri)
+    IX->>IX: soft-delete row, resolve outcome vs chain head
+    IX->>SSE: keyring:delete {uri, workspace_id, outcome}
+
+    alt outcome = rolled_back
+        IX->>SSE: keyring:upsert (restored head record)
+        SSE->>Client: delete (no-op) + upsert (rebuild entry)
+    else outcome = unchanged
+        SSE->>Client: delete (no-op)
+    else outcome = torn_down
+        SSE->>Client: delete → keeper drops workspace_id
+    end
+```
+
+The rollback target is the newest live record for the workspace rather than the tombstone's `supersedes` link: soft-deleted rows are purged after 7 days, so the direct-predecessor link can dangle, and following it would misclassify a living chain as torn down. `torn_down` is exactly "no live record remains" — at that point no wrapped group keys exist anywhere and the workspace is materially dead. A payload without a recognizable outcome (older indexer) deserializes as `unchanged`, so a version-skewed client can go stale but never wrongly drops a workspace.
+
+Note that a head delete *undoes* whatever that head changed: deleting the supersede that removed Bob reinstates Bob's membership, because the restored record still carries his wrapped key. This is inherent to chain rollback, not special-cased — the re-broadcast upsert carries the restored member set and every client rebuilds from it.
+
+See the keyring-tombstones spec (`openspec/specs/keyring-tombstones/spec.md`) for the normative contract.
+
 ## Upload with Workspace
 
 Workspace uploads split by caller role, but both write the canonical `app.opake.document` record to the **caller's** PDS — federated, atproto-shaped. The keyring (which holds the group key wrapped to each member) and the directory record (which holds the entry list) stay on the workspace owner's PDS.

@@ -128,10 +128,14 @@ impl SseConnection for MockSseConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::sse::events::SseDeletePayload;
+    use crate::indexer::sse::events::SseKeyringDeletePayload;
 
     fn delete_event(uri: &str) -> SseEvent {
-        SseEvent::KeyringDelete(SseDeletePayload { uri: uri.into() })
+        SseEvent::KeyringDelete(SseKeyringDeletePayload {
+            uri: uri.into(),
+            workspace_id: None,
+            outcome: Default::default(),
+        })
     }
 
     #[tokio::test]

@@ -187,13 +187,17 @@ impl<T: SseTransport> SseConsumer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexer::sse::events::{SseDeletePayload, SseEvent};
+    use crate::indexer::sse::events::{SseEvent, SseKeyringDeletePayload};
     use crate::indexer::sse::mock::MockSseTransport;
     use std::cell::RefCell;
     use std::rc::Rc;
 
     fn delete(uri: &str) -> SseEvent {
-        SseEvent::KeyringDelete(SseDeletePayload { uri: uri.into() })
+        SseEvent::KeyringDelete(SseKeyringDeletePayload {
+            uri: uri.into(),
+            workspace_id: None,
+            outcome: Default::default(),
+        })
     }
 
     /// Build a consumer that uses deterministic jitter (always 0.5 → no

@@ -128,6 +128,26 @@ defmodule OpakeIndexer.Queries.RecordQueries do
     )
   end
 
+  @doc """
+  The newest live keyring record for a workspace — the rollback target
+  when the chain head is deleted. Newest-live wins over the tombstone's
+  `supersedes` link, which can dangle once intermediate tombstones are
+  purged (see `TombstoneCleanup`). Returns `nil` when no live record
+  remains, i.e. the chain is torn down.
+  """
+  @spec newest_live_keyring(String.t()) :: RecordSchema.t() | nil
+  def newest_live_keyring(workspace_id) do
+    from(r in RecordSchema,
+      where:
+        r.collection == ^@keyring_collection and
+          r.workspace_id == ^workspace_id and
+          is_nil(r.deleted_at),
+      order_by: [desc: r.indexed_at, desc: r.uri],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
   # -- Membership query ----------------------------------------------
 
   @doc """

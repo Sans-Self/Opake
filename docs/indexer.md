@@ -244,6 +244,8 @@ data: <json payload>
 
 Types include `keyring:upsert` / `keyring:delete`, `grant:upsert` / `grant:delete`, `directory:upsert` / `directory:delete`, `document:upsert` / `document:delete`, and the matching `*:proposal` events for the update collections. A keepalive comment is emitted every 15 seconds to survive proxy idle timeouts.
 
+Delete payloads are `{uri}` — except `keyring:delete`, which carries `{uri, workspace_id, outcome}` with the resolved chain outcome: `unchanged` (deleted record was not the head), `rolled_back` (head deleted; the chain rolled back to the newest live record, which is re-broadcast as a `keyring:upsert` on the same topics), or `torn_down` (no live record remains; the workspace's tracked chains were removed). Clients dispatch on the outcome instead of matching the deleted URI against tracked state — see [flows/keyrings.md](flows/keyrings.md#keyring-record-deletion).
+
 Each DID is capped at a small number of concurrent SSE connections (tracked in ETS); additional connections return `429`. Token exchange is one-shot — the consumer must POST again after losing the connection.
 
 ## Firehose Collections
@@ -251,7 +253,7 @@ Each DID is capped at a small number of concurrent SSE connections (tracked in E
 | Collection | Events | Effect |
 |------------|--------|--------|
 | `app.opake.grant` | create/update/delete | Index/remove in `grants` |
-| `app.opake.keyring` | create/update/delete | Upsert `keyrings` row; replace `keyring_members` (with roles) |
+| `app.opake.keyring` | create/update/delete | Upsert `keyrings` row; replace `keyring_members` (with roles). Deletes resolve a chain outcome: head delete rolls `chain_heads` back to the newest live record (or tears the workspace's chains down if none remains); non-head deletes leave the chain untouched |
 | `app.opake.keyringUpdate` | create/update/delete | Index/remove in `keyring_updates` (add/remove-member proposals) |
 | `app.opake.document` | create/update/delete | Keyring-encrypted documents → `documents`. Direct-encrypted documents are ignored by the indexer. |
 | `app.opake.documentUpdate` | create/update/delete | Index/remove in `document_updates` |

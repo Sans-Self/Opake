@@ -201,7 +201,11 @@ fn snapshot_entries_are_sorted_by_uri() {
         sample_entry("at://a/kr/b", 1),
     ]);
     let snap = keeper.snapshot();
-    let uris: Vec<&str> = snap.entries.iter().map(|e| e.workspace_id.as_str()).collect();
+    let uris: Vec<&str> = snap
+        .entries
+        .iter()
+        .map(|e| e.workspace_id.as_str())
+        .collect();
     assert_eq!(uris, vec!["at://a/kr/a", "at://a/kr/b", "at://a/kr/c"]);
 }
 
@@ -260,8 +264,12 @@ fn make_keyring_envelope(
             // Garbage metadata — tests that exercise unwrap-failure feed
             // wrong keys, so decryption fails before we get here either way.
             encrypted_metadata: EncryptedMetadata {
-                ciphertext: AtBytes { encoded: String::new() },
-                nonce: AtBytes { encoded: String::new() },
+                ciphertext: AtBytes {
+                    encoded: String::new(),
+                },
+                nonce: AtBytes {
+                    encoded: String::new(),
+                },
             },
             supersedes: None,
             workspace_id: None,
@@ -295,8 +303,14 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     let entry = try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys());
 
     let entry = entry.expect("unwrap failure must return Some, not None");
-    assert_eq!(entry.workspace_id, "at://did:plc:alice/app.opake.keyring/abc");
-    assert!(entry.name.is_none(), "name should be None when unwrap fails");
+    assert_eq!(
+        entry.workspace_id,
+        "at://did:plc:alice/app.opake.keyring/abc"
+    );
+    assert!(
+        entry.name.is_none(),
+        "name should be None when unwrap fails"
+    );
     assert!(
         entry.description.is_none(),
         "description should be None when unwrap fails"
@@ -447,6 +461,84 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
         0,
         "workspace must drop from the removed member's sidebar"
     );
+}
+
+/// Regression: the wasm dispatch used to key a `keyring:delete` on the
+/// deleted URI (`keeper.delete(&payload.uri)`). Keeper entries are keyed
+/// on genesis, so deleting the genesis *record* of a living workspace —
+/// legitimate PDS cleanup; the genesis URI identifies the workspace, not
+/// a live record — matched the entry and dropped a workspace whose chain
+/// head, keys, and members were all intact. The keeper must act on the
+/// indexer-resolved outcome: `unchanged` never touches tracked state,
+/// even when the deleted URI equals a tracked key.
+#[test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__genesis_delete_tombstone_drops_living_workspace() {
+    use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
+
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(genesis, 0)]);
+
+    let payload = SseKeyringDeletePayload {
+        uri: genesis.into(),
+        workspace_id: Some(genesis.into()),
+        outcome: KeyringDeleteOutcome::Unchanged,
+    };
+    // The trap the old dispatch fell into: the deleted URI matches the
+    // tracked key exactly.
+    assert_eq!(payload.uri, keeper.snapshot().entries[0].workspace_id);
+
+    keeper.apply_keyring_delete(&payload);
+
+    assert_eq!(
+        keeper.entry_count(),
+        1,
+        "an unchanged-outcome tombstone must never drop a living workspace"
+    );
+}
+
+/// `rolled_back` leaves the entry alone — the follow-up `keyring:upsert`
+/// of the restored head carries the rebuild.
+#[test]
+fn rolled_back_delete_defers_to_the_follow_up_upsert() {
+    use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
+
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let head = "at://did:plc:alice/app.opake.keyring/head2";
+
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(genesis, 0)]);
+
+    keeper.apply_keyring_delete(&SseKeyringDeletePayload {
+        uri: head.into(),
+        workspace_id: Some(genesis.into()),
+        outcome: KeyringDeleteOutcome::RolledBack,
+    });
+
+    assert_eq!(keeper.entry_count(), 1, "rollback must not drop the entry");
+}
+
+/// `torn_down` removes the entry keyed by the payload's workspace
+/// identity — matching what the next bootstrap would show, since the
+/// indexer has already dropped the workspace's tracked chains.
+#[test]
+fn torn_down_delete_drops_the_entry_by_workspace_id() {
+    use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
+
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(genesis, 0)]);
+
+    keeper.apply_keyring_delete(&SseKeyringDeletePayload {
+        uri: genesis.into(),
+        workspace_id: Some(genesis.into()),
+        outcome: KeyringDeleteOutcome::TornDown,
+    });
+
+    assert_eq!(keeper.entry_count(), 0, "torn down workspace must drop");
 }
 
 /// DID absent from member list → None → keeper deletes the workspace.

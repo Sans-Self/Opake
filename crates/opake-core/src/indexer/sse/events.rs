@@ -17,12 +17,56 @@ use crate::indexer::types::IndexerEnvelope;
 use crate::records::{Directory, Document, Grant, Keyring};
 
 // ---------------------------------------------------------------------------
-// Delete payload — uri-only tombstone
+// Delete payloads
 // ---------------------------------------------------------------------------
 
+/// Uri-only tombstone, used by directory/document/grant deletes.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SseDeletePayload {
     pub uri: String,
+}
+
+/// Resolved chain outcome of a keyring record delete. Only the indexer,
+/// which holds the chain, can tell what a delete meant — clients act on
+/// this resolution instead of re-deriving it from the deleted URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyringDeleteOutcome {
+    /// The chain head was deleted and rolled back to the newest live
+    /// record. A `keyring:upsert` of the restored record follows on the
+    /// same topics; clients rebuild through the ordinary upsert path.
+    RolledBack,
+    /// No live record remains in the chain — the workspace's keys are
+    /// gone everywhere and its tracked state is removed.
+    TornDown,
+    /// The deleted record was not the chain head; tracked state is
+    /// untouched. Deleting genesis or a superseded intermediate lands
+    /// here — the genesis URI identifies the workspace, not a live
+    /// record. Also the fail-safe under version skew: an absent or
+    /// unrecognized outcome deserializes to this, so a client may
+    /// under-react but never wrongly drop a living workspace.
+    #[default]
+    #[serde(other)]
+    Unchanged,
+}
+
+/// Payload of `app.opake.keyring:delete`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SseKeyringDeletePayload {
+    pub uri: String,
+    /// Genesis keyring URI. Absent on legacy bare-URI payloads.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub outcome: KeyringDeleteOutcome,
+}
+
+impl SseKeyringDeletePayload {
+    /// The workspace identity this delete belongs to, falling back to
+    /// the deleted URI when the payload predates the outcome contract.
+    pub fn workspace_id(&self) -> &str {
+        self.workspace_id.as_deref().unwrap_or(&self.uri)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +118,7 @@ pub enum SseEvent {
     DocumentUpsert(IndexerEnvelope<Document>),
     DocumentDelete(SseDeletePayload),
     KeyringUpsert(IndexerEnvelope<Keyring>),
-    KeyringDelete(SseDeletePayload),
+    KeyringDelete(SseKeyringDeletePayload),
     GrantUpsert(IndexerEnvelope<Grant>),
     GrantDelete(SseDeletePayload),
 
@@ -152,12 +196,8 @@ impl SseEvent {
             "app.opake.keyring:delete" => {
                 Self::KeyringDelete(decode(data, "app.opake.keyring:delete")?)
             }
-            "app.opake.grant:upsert" => {
-                Self::GrantUpsert(decode(data, "app.opake.grant:upsert")?)
-            }
-            "app.opake.grant:delete" => {
-                Self::GrantDelete(decode(data, "app.opake.grant:delete")?)
-            }
+            "app.opake.grant:upsert" => Self::GrantUpsert(decode(data, "app.opake.grant:upsert")?),
+            "app.opake.grant:delete" => Self::GrantDelete(decode(data, "app.opake.grant:delete")?),
             "chain:forked" => Self::ChainForked(decode(data, "chain:forked")?),
             other => {
                 log::debug!("[sse] ignoring unknown event type: {other}");
@@ -183,9 +223,9 @@ impl SseEvent {
                 .as_deref()
                 .or(Some(env.uri.as_str())),
             Self::ChainForked(f) => Some(f.workspace_id.as_str()),
+            Self::KeyringDelete(p) => Some(p.workspace_id()),
             Self::DirectoryDelete(_)
             | Self::DocumentDelete(_)
-            | Self::KeyringDelete(_)
             | Self::GrantUpsert(_)
             | Self::GrantDelete(_)
             | Self::Reconnect => None,
@@ -255,6 +295,72 @@ mod tests {
             }
             _ => panic!("expected DirectoryDelete"),
         }
+    }
+
+    #[test]
+    fn decodes_keyring_delete_with_outcome() {
+        for (wire, expected) in [
+            ("unchanged", KeyringDeleteOutcome::Unchanged),
+            ("rolled_back", KeyringDeleteOutcome::RolledBack),
+            ("torn_down", KeyringDeleteOutcome::TornDown),
+        ] {
+            let json = format!(
+                r#"{{"uri": "at://did:plc:alice/app.opake.keyring/head",
+                     "workspace_id": "at://did:plc:alice/app.opake.keyring/genesis",
+                     "outcome": "{wire}"}}"#
+            );
+            let event =
+                SseEvent::from_name_and_data("app.opake.keyring:delete", json.as_bytes()).unwrap();
+            match event {
+                SseEvent::KeyringDelete(p) => {
+                    assert_eq!(p.outcome, expected);
+                    assert_eq!(
+                        p.workspace_id(),
+                        "at://did:plc:alice/app.opake.keyring/genesis"
+                    );
+                }
+                _ => panic!("expected KeyringDelete"),
+            }
+        }
+    }
+
+    /// Version-skew fail-safe: a bare `{uri}` payload from an indexer
+    /// that predates the outcome contract must default to `Unchanged`
+    /// (never wrongly drop a workspace) and fall back to the deleted
+    /// URI as the workspace identity.
+    #[test]
+    fn keyring_delete_without_outcome_defaults_to_unchanged() {
+        let json = br#"{"uri": "at://did:plc:alice/app.opake.keyring/genesis"}"#;
+        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        match event {
+            SseEvent::KeyringDelete(p) => {
+                assert_eq!(p.outcome, KeyringDeleteOutcome::Unchanged);
+                assert_eq!(
+                    p.workspace_id(),
+                    "at://did:plc:alice/app.opake.keyring/genesis"
+                );
+            }
+            _ => panic!("expected KeyringDelete"),
+        }
+    }
+
+    #[test]
+    fn keyring_delete_unknown_outcome_defaults_to_unchanged() {
+        let json = br#"{"uri": "at://a", "workspace_id": "at://g", "outcome": "exploded"}"#;
+        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        match event {
+            SseEvent::KeyringDelete(p) => {
+                assert_eq!(p.outcome, KeyringDeleteOutcome::Unchanged);
+            }
+            _ => panic!("expected KeyringDelete"),
+        }
+    }
+
+    #[test]
+    fn keyring_delete_workspace_id_surfaces_on_event() {
+        let json = br#"{"uri": "at://a", "workspace_id": "at://g", "outcome": "torn_down"}"#;
+        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        assert_eq!(event.workspace_id(), Some("at://g"));
     }
 
     #[test]

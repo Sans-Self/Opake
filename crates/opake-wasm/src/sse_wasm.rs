@@ -263,9 +263,7 @@ impl WasmFileManagerHandle {
 
         // Pick scope based on the FileManager's context.
         let handle = match &self.context {
-            opake_core::manager::FileContext::Cabinet(_) => {
-                keeper.watch_cabinet(directory_uri, cb)
-            }
+            opake_core::manager::FileContext::Cabinet(_) => keeper.watch_cabinet(directory_uri, cb),
             opake_core::manager::FileContext::Workspace(ws) => {
                 keeper.watch_workspace(ws.uri.clone(), directory_uri, cb)
             }
@@ -287,9 +285,7 @@ impl WasmFileManagerHandle {
         {
             let keeper = self.tree_keeper.lock().await;
             let already = match &self.context {
-                opake_core::manager::FileContext::Cabinet(_) => {
-                    keeper.cabinet_tree().is_some()
-                }
+                opake_core::manager::FileContext::Cabinet(_) => keeper.cabinet_tree().is_some(),
                 opake_core::manager::FileContext::Workspace(ws) => {
                     keeper.workspace_tree(&ws.uri).is_some()
                 }
@@ -325,10 +321,8 @@ impl WasmFileManagerHandle {
             TreeInstall::Cabinet => {
                 let guard = self.opake.lock().await;
                 let identity = guard.identity();
-                let x25519_private_key =
-                    *identity.x25519_private_key_bytes().map_err(wasm_err)?;
-                let ml_kem_private_key =
-                    *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
+                let x25519_private_key = *identity.x25519_private_key_bytes().map_err(wasm_err)?;
+                let ml_kem_private_key = *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
                 drop(guard);
 
                 let mut keeper = self.tree_keeper.lock().await;
@@ -731,8 +725,15 @@ async fn replay_workspace_gate(
     let buffered = gate.borrow_mut().finish();
     let current_gen = generation.get();
     for event in &buffered {
-        apply_keyring_to_workspace_keeper(opake_rc, keeper_rc, gate, generation, current_gen, event)
-            .await;
+        apply_keyring_to_workspace_keeper(
+            opake_rc,
+            keeper_rc,
+            gate,
+            generation,
+            current_gen,
+            event,
+        )
+        .await;
     }
 }
 
@@ -782,7 +783,8 @@ async fn replay_inbox_gate(
     let buffered = gate.borrow_mut().finish();
     let current_gen = generation.get();
     for event in &buffered {
-        apply_grant_to_inbox_keeper(opake_rc, keeper_rc, gate, generation, current_gen, event).await;
+        apply_grant_to_inbox_keeper(opake_rc, keeper_rc, gate, generation, current_gen, event)
+            .await;
     }
 }
 
@@ -929,8 +931,9 @@ async fn wasm_sleep(duration: Duration) {
 ///
 /// `KeyringUpsert`: build an entry from the record using the caller's
 /// identity. `Some` → upsert; `None` (DID absent from member list,
-/// i.e. we were rotated out) → delete. `KeyringDelete`: delete by URI.
-/// Other events are no-ops.
+/// i.e. we were rotated out) → delete. `KeyringDelete`: dispatch on the
+/// indexer-resolved outcome — only `torn_down` removes the entry, keyed
+/// by the payload's `workspace_id`. Other events are no-ops.
 ///
 /// Acquires the opake lock **first** (for identity), then drops it
 /// before acquiring the workspace_keeper lock. Both callers — this
@@ -990,7 +993,7 @@ async fn apply_keyring_to_workspace_keeper(
             if generation.get() != my_generation {
                 return;
             }
-            keeper.delete(&payload.uri);
+            keeper.apply_keyring_delete(payload);
         }
         _ => {}
     }

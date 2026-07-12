@@ -104,6 +104,8 @@ The typed boundary ends where `WorkspaceId` would have to cross into opake-crypt
 
 The SSE dispatch layer SHALL derive the workspace identity from the event's record (`record.workspace_id.unwrap_or(envelope.uri)`) before invoking any keeper operation. Keeper entries are keyed on genesis; passing the envelope URI is correct only for genesis events and silently wrong for every event on a superseded chain.
 
+For keyring delete events the record is gone, so the identity SHALL come from the payload's `workspace_id`, and whether any keeper operation runs at all is governed by the payload's outcome (`spec:keyring-tombstones § Clients act on the outcome, never on URI matching`): only `torn_down` removes an entry, keyed by the payload's `workspace_id` — never by the deleted `uri`.
+
 #### Scenario: removed member's sidebar drops the workspace
 
 - **GIVEN** member B of a workspace whose SSE consumer is connected
@@ -117,6 +119,13 @@ The SSE dispatch layer SHALL derive the workspace identity from the event's reco
 - **WHEN** it is fed a keyring envelope whose URI differs from its `workspace_id` and whose member list excludes the local DID
 - **THEN** the genesis-keyed keeper entry is removed
 - Covered by `bug__removal_supersede_drops_workspace_keyed_by_genesis` (crates/opake-core/src/indexer/workspace_keeper/tests.rs)
+
+#### Scenario: genesis delete tombstone leaves the keeper entry
+
+- **GIVEN** the wasm keyring dispatch tracking a workspace whose chain has superseded past genesis
+- **WHEN** it is fed a keyring delete payload whose `uri` equals the tracked `workspace_id` and whose outcome is `unchanged`
+- **THEN** the keeper entry survives — the delete is record cleanup, not destruction
+- Regression: `bug__genesis_delete_tombstone_drops_living_workspace` (crates/opake-core/src/indexer/workspace_keeper/tests.rs)
 
 ### Requirement: Membership authority is the live chain head
 
@@ -139,7 +148,7 @@ Membership checks SHALL evaluate the member list of the resolved chain head, nev
 ## Open questions
 
 - Workspace destruction: deliberately unspecified for now (decided 2026-07-08). There is no destruction operation, and none can be built on record deletion: the keyring chain is distributed — genesis on the creator's PDS, each supersede on the authoring manager's PDS — so no single party can delete it, and FEDERATION.md explicitly allows the genesis record to be deleted while the workspace lives on (the genesis URI identifies the workspace, not a live record). Two constraints bind future work meanwhile:
-  - A keyring delete tombstone SHALL NOT drop a workspace from tracked state. Tombstones are record cleanup, never destruction. The current keeper behavior violates this by accident — `delete(payload.uri)` matches when the deleted record is genesis — and needs correcting whenever the dispatch is next touched (audit finding 6).
+  - A keyring delete tombstone SHALL NOT drop a workspace whose chain still has a live record. Tombstones are record cleanup, not destruction; a workspace whose last live record is deleted has no wrapped keys anywhere and its tracked state is removed (decided 2026-07-11). The delete-outcome contract is `spec:keyring-tombstones § The indexer resolves every keyring delete to an outcome`; clients act on the indexer-resolved outcome, never on matching the deleted URI against tracked state. Regression: `bug__genesis_delete_tombstone_drops_living_workspace` (crates/opake-core/src/indexer/workspace_keeper/tests.rs).
   - When destruction is designed, the leading candidate is a terminal supersede (a keyring record marking the chain ended), not deletion: it rides the existing chain mechanics — single-manager authority, fork detection, upsert dispatch with full context — and should land with the supersede/fork custody design pass. Record litter after destruction is garbage collection: best-effort, client-initiated, out of scope here.
   - UX until then: members exit via leave or removal (the workspace-membership spec), and hiding dead workspaces is client-local state.
 - Departure does not re-home documents: entries referencing a departed member's PDS stay valid but unguaranteed — the ex-member may delete records or the account outright, dangling the entries. Account deletion is the forcing function: it's unobservable in advance, so recovery-after is impossible and the answer is replication-before (mirroring encrypted blobs across member PDSes needs no key material). Custody transfer (re-home on leave, mechanically the cross-author substitute cascade) and a replication policy are queued as their own design pass (decided 2026-07-08).

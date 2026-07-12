@@ -328,6 +328,16 @@ defmodule OpakeIndexer.Firehose do
         Logger.info("[Indexer] delete for unknown record: #{uri}")
         emit_event_telemetry(nil, :delete, :ok)
 
+      %{collection: @keyring_collection} = record ->
+        RecordQueries.soft_delete(uri, now)
+        outcome = resolve_keyring_delete(record)
+        emit_event_telemetry(@keyring_collection, :delete, :ok)
+        Broadcaster.broadcast_keyring_delete(record, outcome_name(outcome))
+
+        with {:rolled_back, restored} <- outcome do
+          broadcast_restored_head(restored)
+        end
+
       %{collection: collection} = record ->
         RecordQueries.soft_delete(uri, now)
         maybe_rollback_chain(record)
@@ -336,29 +346,52 @@ defmodule OpakeIndexer.Firehose do
     end
   end
 
-  defp maybe_rollback_chain(%{collection: @keyring_collection, workspace_id: workspace_id, uri: uri})
+  # Resolves what a keyring delete means for the tracked chain. Only a
+  # head delete moves anything: deleting genesis or a superseded
+  # intermediate leaves the chain untouched — the genesis URI identifies
+  # the workspace, not a live record. On a head delete the rollback
+  # target is the newest live record for the workspace, not the
+  # tombstone's `supersedes` link, which can dangle once intermediate
+  # tombstones are purged. No live record left means the workspace's
+  # keys are gone everywhere: tear down its tracked chains.
+  defp resolve_keyring_delete(%{workspace_id: workspace_id, uri: uri})
        when is_binary(workspace_id) do
     case ChainHeadQueries.get(workspace_id, "keyring") do
       %{head_uri: ^uri} ->
-        case predecessor_record(uri) do
-          {:ok, pred} ->
-            ChainHeadQueries.rollback(
-              workspace_id,
-              "keyring",
-              uri,
-              pred.uri,
-              pred.cid
-            )
-
-          :none ->
-            # Genesis keyring deleted — tear down the entire workspace's
-            # tracked chains. Records stay (soft-deleted) for audit.
+        case RecordQueries.newest_live_keyring(workspace_id) do
+          nil ->
             ChainHeadQueries.delete_all(workspace_id)
+            :torn_down
+
+          restored ->
+            ChainHeadQueries.rollback(workspace_id, "keyring", uri, restored.uri, restored.cid)
+            {:rolled_back, restored}
         end
 
       _ ->
-        :ok
+        :unchanged
     end
+  end
+
+  # Orphan row (predecessor never indexed): no tracked chain exists.
+  defp resolve_keyring_delete(_record), do: :unchanged
+
+  defp outcome_name(:unchanged), do: "unchanged"
+  defp outcome_name(:torn_down), do: "torn_down"
+  defp outcome_name({:rolled_back, _}), do: "rolled_back"
+
+  # A rollback changes the current member set, rotation, and metadata
+  # back to the restored record's contents. Clients rebuild through the
+  # ordinary upsert path, so re-emit the restored record as a normal
+  # keyring:upsert — broadcast only, no dispatch re-entry.
+  defp broadcast_restored_head(restored) do
+    envelope = %{
+      uri: restored.uri,
+      record: restored.record_jsonb,
+      indexedAt: DateTime.to_iso8601(restored.indexed_at)
+    }
+
+    Broadcaster.broadcast_record_upsert(restored, envelope)
   end
 
   defp maybe_rollback_chain(%{collection: @directory_collection, workspace_id: workspace_id, uri: uri, is_workspace_root: true})

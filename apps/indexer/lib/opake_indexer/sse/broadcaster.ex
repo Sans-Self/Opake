@@ -6,8 +6,10 @@ defmodule OpakeIndexer.SSE.Broadcaster do
 
     * **Record envelopes** — `{collection}:upsert` and `{collection}:delete`.
       The payload is `{record: <verbatim PDS JSON>, indexedAt}` for upserts
-      and `{uri}` for deletes. No reshaping happens here — the JSON that
-      the PDS signed is the JSON we forward.
+      and `{uri}` for deletes — except keyring deletes, which carry
+      `{uri, workspace_id, outcome}` so clients act on the resolved chain
+      outcome instead of guessing from the URI. No reshaping happens here —
+      the JSON that the PDS signed is the JSON we forward.
 
     * **Notifications** — `chain:forked`. Flat payload describing a
       detected fork race for client-side retry. Not record-shaped.
@@ -62,6 +64,36 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     fan_out(record, event_type, payload)
   rescue
     e -> Logger.warning("[Broadcaster] record delete broadcast failed: #{inspect(e)}")
+  end
+
+  @doc """
+  Broadcast a keyring delete with its resolved chain outcome.
+
+  Payload: `%{uri, workspace_id, outcome}` where outcome is
+  `"unchanged"` (deleted record was not the head), `"rolled_back"`
+  (head deleted, chain rolled back — a `keyring:upsert` of the restored
+  record follows), or `"torn_down"` (no live record remains). For an
+  orphan row without a `workspace_id`, the tombstone's own URI stands
+  in as the workspace identity.
+
+  Fans out to the workspace topic and to the deleted record's members'
+  personal topics.
+  """
+  def broadcast_keyring_delete(record, outcome) do
+    workspace_id = record.workspace_id || record.uri
+    event_type = "#{@keyring_collection}:delete"
+    payload = %{uri: record.uri, workspace_id: workspace_id, outcome: outcome}
+
+    broadcast(Topics.workspace(workspace_id), event_type, payload)
+
+    for entry <- record.record_jsonb["members"] || [] do
+      did = get_in(entry, ["wrappedKey", "did"])
+      if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
+    end
+
+    :ok
+  rescue
+    e -> Logger.warning("[Broadcaster] keyring delete broadcast failed: #{inspect(e)}")
   end
 
   @doc """

@@ -203,6 +203,31 @@ impl WorkspaceKeeper {
         }
     }
 
+    /// Apply a `keyring:delete` event per the indexer-resolved outcome —
+    /// never by matching the deleted URI against tracked keys. The
+    /// deleted URI equals a genesis-keyed entry whenever someone cleans
+    /// up a genesis record, and dropping the entry then would kill a
+    /// living workspace's sidebar.
+    ///
+    /// `Unchanged` is record cleanup. `RolledBack` is followed by a
+    /// `keyring:upsert` of the restored head that rebuilds the entry
+    /// through [`apply_keyring_record`]. Only `TornDown` — no live
+    /// record remains in the chain — removes the entry, keyed by the
+    /// payload's workspace identity.
+    ///
+    /// [`apply_keyring_record`]: Self::apply_keyring_record
+    pub fn apply_keyring_delete(
+        &mut self,
+        payload: &crate::indexer::sse::events::SseKeyringDeletePayload,
+    ) {
+        use crate::indexer::sse::events::KeyringDeleteOutcome;
+
+        match payload.outcome {
+            KeyringDeleteOutcome::Unchanged | KeyringDeleteOutcome::RolledBack => {}
+            KeyringDeleteOutcome::TornDown => self.delete(payload.workspace_id()),
+        }
+    }
+
     // -- Watcher API --
 
     /// Install a watcher. The callback fires **once immediately** with
@@ -312,11 +337,13 @@ pub fn try_build_entry(
         }
     };
 
-    let (name, description, icon) =
-        match crypto::decrypt_metadata::<KeyringMetadata>(&group_key, &keyring.encrypted_metadata) {
-            Ok(meta) => (Some(meta.name), meta.description, meta.icon),
-            Err(_) => (None, None, None),
-        };
+    let (name, description, icon) = match crypto::decrypt_metadata::<KeyringMetadata>(
+        &group_key,
+        &keyring.encrypted_metadata,
+    ) {
+        Ok(meta) => (Some(meta.name), meta.description, meta.icon),
+        Err(_) => (None, None, None),
+    };
 
     Some(WorkspaceEntry {
         workspace_id: workspace_id.to_string(),
