@@ -18,5 +18,5 @@
 
 ## 4. Archive
 
-- [ ] 4.1 Canon reflects the rename (the rename itself is the sync)
-- [ ] 4.2 Archive the change
+- [x] 4.1 Canon reflects the rename (the rename itself is the sync)
+- [x] 4.2 Archive the change
