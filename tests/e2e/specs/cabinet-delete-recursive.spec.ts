@@ -1,8 +1,10 @@
 // Recursive folder deletion: a folder holding a nested subfolder and a
 // document is removed through the descendant-count confirmation, and the whole
-// subtree stays gone after a reload. Uncited: recursive teardown and orphan GC
-// are non-requirements / future work in tree-chains, so no cite applies.
-import { test, expect } from "../fixtures";
+// subtree stays gone after a reload. Deletion orders descendant records before
+// the parent listing entry (post-order children first, then the target, then
+// the parent update); dangling-entry repair and orphan GC remain deferred
+// non-requirements.
+import { test, expect, cite } from "../fixtures";
 import {
   cabinetPath,
   createFolder,
@@ -16,7 +18,10 @@ import {
   useTallViewport,
 } from "../cabinet-helpers";
 
-test("recursively deletes a folder with nested children", async ({ page }) => {
+test(`recursively deletes a folder with nested children ${cite(
+  "tree-cabinet",
+  "Deletion removes target records before the parent listing entry",
+)}`, async ({ page }) => {
   test.setTimeout(240_000);
   await useTallViewport(page);
   await gotoCabinetRoot(page);

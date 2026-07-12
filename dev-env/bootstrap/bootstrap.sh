@@ -73,13 +73,20 @@ for i in $(seq 0 $((n - 1))); do
   echo "   published app.opake.publicKey/self"
 
   # Genesis-create the cabinet root directory with a first write. A recovered
-  # cabinet has no root until something is written; `opake ls`/`mkdir`/web
-  # upload all fail with "no root directory" until then (mkdir creates an
-  # orphan child, not the root — only a document upload materializes it). The
-  # web UI does NOT create the root on first write (product gap, tracked in
-  # findings), so the e2e web doc-upload spec needs the root to already exist.
-  # One tiny upload per actor establishes it; the placeholder is benign (the
-  # e2e specs create their own uniquely-named folders/files).
+  # cabinet has no root until something is written; `opake ls`/`mkdir` fail with
+  # "no root directory" until then (mkdir creates an orphan child, not the root
+  # — only a document upload materializes it). Most actors are seeded so the
+  # cabinet specs load against a ready tree.
+  #
+  # `frank` is left DELIBERATELY UNSEEDED: its cabinet has no root, modelling a
+  # recovered web-only user who has never written. The cabinet-fresh-root spec
+  # uses frank to prove the web's first write now creates the root on demand
+  # (core's ensure_root, no JS-side root construction). Frank is otherwise
+  # unused — workers map only to alice/bob/carol/dave (playwright workers: 4).
+  if [ "$name" = "frank" ]; then
+    echo "   left cabinet UNSEEDED (fresh web-only-user fixture)"
+    continue
+  fi
   seed="$WORK/.cabinet-init"
   printf 'opake cabinet root seed\n' > "$seed"
   opake --as "$did" upload "$seed" >/dev/null

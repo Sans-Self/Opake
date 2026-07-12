@@ -16,12 +16,13 @@ import {
   useTallViewport,
 } from "../cabinet-helpers";
 
-// Moving a document out of one folder into another: the source's canonical
-// head no longer lists it, the destination's does, and both survive a reload
-// that rebuilds the tree from indexer chain heads.
+// Moving a document out of one folder into another is a single atomic
+// applyWrites — the source record drops the entry, the target record gains it,
+// never both or neither. After a reload that rebuilds the tree from indexer
+// records, the source no longer lists it and the destination does.
 test(`moves a document between folders and it survives reload ${cite(
-  "tree-chains",
-  "Consumers build the live tree from chain heads only",
+  "tree-cabinet",
+  "A cabinet move is one atomic applyWrites",
 )}`, async ({ page }) => {
   test.setTimeout(240_000);
   await useTallViewport(page);
@@ -75,10 +76,13 @@ test(`moves a document between folders and it survives reload ${cite(
 });
 
 // A folder cannot be moved into itself or any of its descendants — the Move
-// dialog disables those destinations. Uncited: cycle prevention is a UI guard,
-// not a named protocol requirement. Exercising it proves the dialog refuses
-// the illegal move up front rather than the client rejecting it after a write.
-test("refuses moving a folder into its own descendant", async ({ page }) => {
+// dialog disables those destinations as the friendly early surface, while the
+// domain API refuses the same move regardless of what the UI did. Exercising
+// the dialog proves the illegal move is refused up front, not after a write.
+test(`refuses moving a folder into its own descendant ${cite(
+  "tree-topology",
+  "A move that would create a cycle is refused at the domain API",
+)}`, async ({ page }) => {
   test.setTimeout(240_000);
   await useTallViewport(page);
   await gotoCabinetRoot(page);

@@ -840,3 +840,45 @@ fn tree_change_uri_and_is_effective() {
     assert_eq!(noop.uri(), None);
     assert!(!noop.is_effective());
 }
+
+/// Defensive: a directory tree containing a cycle (A lists B, B lists A)
+/// must not send `collect_descendants` into an unbounded walk. The
+/// domain-API cycle guard keeps honest clients from ever writing such a
+/// tree, but a hostile or buggy writer can, and every tree consumer
+/// should terminate on it rather than hang.
+///
+/// IGNORED: `collect_descendants` re-expands cycle members forever — its
+/// post-order marker is per-stack-entry, not a global visited set — so
+/// this test currently times out. Tracked as a follow-up (tree-topology's
+/// "cycle tolerance in tree consumers" open question); unignore once the
+/// walk is bounded.
+#[test]
+#[ignore = "collect_descendants does not terminate on a cyclic tree — hardening deferred (tree-topology open question)"]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__collect_descendants_terminates_on_cyclic_tree() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let dir_a = "at://did:plc:test/app.opake.directory/cycleA".to_string();
+    let dir_b = "at://did:plc:test/app.opake.directory/cycleB".to_string();
+    let tree = DirectoryTree::from_records(vec![
+        (
+            dir_a.clone(),
+            dummy_directory_with_entries("A", vec![dir_b.clone()]),
+        ),
+        (
+            dir_b.clone(),
+            dummy_directory_with_entries("B", vec![dir_a.clone()]),
+        ),
+    ]);
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let count = tree.collect_descendants(&dir_a).len();
+        let _ = tx.send(count);
+    });
+
+    if rx.recv_timeout(Duration::from_secs(2)).is_err() {
+        panic!("collect_descendants did not terminate on cyclic input within 2s");
+    }
+}

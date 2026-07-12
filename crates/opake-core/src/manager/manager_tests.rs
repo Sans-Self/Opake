@@ -908,3 +908,170 @@ mod workspace_delete_cascade {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cycle refusal at the domain API — both contexts.
+//
+// `FileManager::move_entry` refuses a move whose target is the moved
+// directory itself or one of its descendants, derived from the manager's
+// own reads, before any write. The CLI's `check_cycle` and the web Move
+// dialog remain as earlier surfaces for the same rule.
+// ---------------------------------------------------------------------------
+
+mod move_entry_cycle {
+    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
+    use crate::crypto::{generate_content_key, OsRng};
+    use crate::directories::tests::{dummy_directory_with_entries, get_record_response};
+    use crate::manager::types::FileContext;
+    use crate::opake::Opake;
+    use crate::records::Directory;
+    use crate::storage::{Identity, NoopStorage};
+    use crate::test_utils::MockTransport;
+    use crate::workspace::Workspace;
+
+    fn did_doc_response(did: &str, pds_url: &str) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "id": did,
+                "alsoKnownAs": [],
+                "service": [{
+                    "id": "#atproto_pds",
+                    "type": "AtprotoPersonalDataServer",
+                    "serviceEndpoint": pds_url,
+                }]
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn get_directory_response(uri: &str, cid: &str, directory: &Directory) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": uri,
+                "cid": cid,
+                "value": directory,
+            }))
+            .unwrap(),
+        }
+    }
+
+    /// A cabinet directory move into one of its own descendants is refused
+    /// by the domain API itself — the guard walks the moved directory's
+    /// subtree via `get_record` and refuses before any write.
+    // spec:tree-topology § A move that would create a cycle is refused at the domain API
+    #[tokio::test]
+    async fn cabinet_move_into_own_descendant_refused_at_domain_api() {
+        const DID: &str = "did:plc:test";
+        let root_uri = format!("at://{DID}/app.opake.directory/self");
+        let dir_a = format!("at://{DID}/app.opake.directory/dirA");
+        let dir_b = format!("at://{DID}/app.opake.directory/dirB");
+
+        // Guard fetches A's record; A lists B, so moving A into B is a cycle.
+        let mock = MockTransport::new();
+        mock.enqueue(get_record_response(
+            &dir_a,
+            &dummy_directory_with_entries("A", vec![dir_b.clone()]),
+        ));
+
+        let session = Session::Legacy(LegacySession {
+            did: DID.into(),
+            handle: "test.handle".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        });
+        let client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
+        let identity = Identity::generate(DID, &mut OsRng);
+        let mut opake = Opake::new(client, DID.into(), identity, OsRng, NoopStorage, || {
+            1_700_000_000_000_000
+        })
+        .unwrap();
+
+        let ctx = opake.cabinet_context().unwrap();
+        let mut mgr = opake.file_manager(&ctx);
+        let err = mgr.move_entry(&dir_a, &root_uri, &dir_b).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("descendants"),
+            "expected descendant-cycle refusal, got {err:?}"
+        );
+        // Only the guard's read happened; nothing was written.
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1, "guard reads, then refuses before any write");
+        assert!(reqs[0].url.contains("getRecord"));
+    }
+
+    /// The workspace arm refuses the same cycle before the phase-1
+    /// source-removal cascade — the guard runs before any chain-head
+    /// lookup, so no listing on any PDS changes.
+    // spec:tree-topology § A move that would create a cycle is refused at the domain API
+    #[tokio::test]
+    async fn workspace_move_into_own_descendant_refused_before_cascade() {
+        const ALICE: &str = "did:plc:alice";
+        const KEYRING: &str = "at://did:plc:alice/app.opake.keyring/ws1";
+        let root_uri = format!("at://{ALICE}/app.opake.directory/ws-ws1");
+        let dir_a = format!("at://{ALICE}/app.opake.directory/dirA");
+        let dir_b = format!("at://{ALICE}/app.opake.directory/dirB");
+
+        // Guard walks A's subtree via fetch_chain_node: DID doc + getRecord(A).
+        // A lists B, so A → B is refused before the chain-head lookup or any
+        // cascade write.
+        let mock = MockTransport::new();
+        mock.enqueue(did_doc_response(ALICE, "https://pds.alice"));
+        mock.enqueue(get_directory_response(
+            &dir_a,
+            "bafydira",
+            &dummy_directory_with_entries("A", vec![dir_b.clone()]),
+        ));
+
+        let session = Session::Legacy(LegacySession {
+            did: ALICE.into(),
+            handle: "alice.test".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        });
+        let client = XrpcClient::with_session(mock.clone(), "https://pds.alice".into(), session);
+        let identity = Identity::generate(ALICE, &mut OsRng);
+        let mut opake = Opake::new(client, ALICE.into(), identity, OsRng, NoopStorage, || {
+            1_700_000_000_000_000
+        })
+        .unwrap();
+        opake.set_indexer_url("https://indexer.test".into());
+
+        let workspace = Workspace::from_keyring(
+            KEYRING.into(),
+            "Alice's WS".into(),
+            None,
+            ALICE.into(),
+            generate_content_key(&mut OsRng),
+            1,
+            Vec::new(),
+            vec![ALICE.into()],
+        );
+        let ctx = FileContext::Workspace(workspace);
+        let mut mgr = opake.file_manager(&ctx);
+        let err = mgr.move_entry(&dir_a, &root_uri, &dir_b).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("descendants"),
+            "expected descendant-cycle refusal, got {err:?}"
+        );
+        // DID resolution + the one directory read; no chain-head lookup,
+        // no cascade.
+        let reqs = mock.requests();
+        assert_eq!(
+            reqs.len(),
+            2,
+            "guard reads, then refuses before any cascade"
+        );
+        assert!(
+            !reqs.iter().any(|r| r.url.contains("chain_heads")
+                || r.url.contains("applyWrites")
+                || r.url.contains("createRecord")),
+            "no chain-head lookup or write may fire before refusal"
+        );
+    }
+}

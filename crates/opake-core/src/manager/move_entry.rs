@@ -37,6 +37,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             ));
         }
 
+        self.reject_cycle(entry_uri, target_dir).await?;
+
         let now = self.opake.now();
 
         match &self.context {
@@ -211,5 +213,77 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         self.invalidate_directory_cache().await;
         Ok(MutationOutcome::Applied)
+    }
+
+    /// Refuse a move that would create a cycle: a directory cannot move
+    /// into itself or into one of its own descendants — either detaches
+    /// the subtree from the root and makes it unreachable. Enforced here,
+    /// at the domain API, so a caller that bypasses the CLI's or web's
+    /// own check still cannot write a cycle.
+    ///
+    /// The descendant set is derived from the manager's own reads rather
+    /// than a caller-supplied tree, so it reflects the same records the
+    /// move would write against: the cabinet arm re-fetches each directory
+    /// via `get_record`, the workspace arm via `fetch_chain_node`.
+    /// Documents have no listing and cannot create a cycle, so the walk
+    /// runs only when the moved entry is itself a directory.
+    async fn reject_cycle(&mut self, entry_uri: &str, target_dir: &str) -> Result<(), Error> {
+        let parsed = atproto::parse_at_uri(entry_uri)?;
+        if parsed.collection != directories::DIRECTORY_COLLECTION {
+            return Ok(());
+        }
+        if entry_uri == target_dir {
+            return Err(Error::InvalidRecord(
+                "cannot move a directory into itself".into(),
+            ));
+        }
+
+        // Walk the moved directory's subtree downward, collecting directory
+        // URIs. `visited` bounds the walk even on a pre-existing (hostile)
+        // cycle so the guard terminates rather than looping forever.
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = vec![entry_uri.to_owned()];
+        while let Some(dir_uri) = stack.pop() {
+            if !visited.insert(dir_uri.clone()) {
+                continue;
+            }
+            for target in self.fetch_directory_entry_targets(&dir_uri).await? {
+                let is_directory = atproto::parse_at_uri(&target)
+                    .map(|u| u.collection == directories::DIRECTORY_COLLECTION)
+                    .unwrap_or(false);
+                if !is_directory {
+                    continue;
+                }
+                if target == target_dir {
+                    return Err(Error::InvalidRecord(
+                        "cannot move a directory into one of its descendants".into(),
+                    ));
+                }
+                stack.push(target);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Read a directory record's child target URIs via the current
+    /// context's fetch path — `get_record` for the cabinet's own repo,
+    /// `fetch_chain_node` for a workspace's (possibly cross-PDS) chain head.
+    async fn fetch_directory_entry_targets(&mut self, dir_uri: &str) -> Result<Vec<String>, Error> {
+        if self.context.is_cabinet() {
+            let parsed = atproto::parse_at_uri(dir_uri)?;
+            let record = self
+                .opake
+                .client
+                .get_record(&parsed.authority, &parsed.collection, &parsed.rkey)
+                .await?;
+            let directory: Directory = serde_json::from_value(record.value)?;
+            Ok(directory.entries.into_iter().map(|e| e.target).collect())
+        } else {
+            let node =
+                directories::fetch_chain_node::<Directory>(self.opake.client.transport(), dir_uri)
+                    .await?;
+            Ok(node.record.entries.into_iter().map(|e| e.target).collect())
+        }
     }
 }

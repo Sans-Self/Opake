@@ -54,9 +54,13 @@ test(`uploads a file into a subfolder and downloads it with its filename ${cite(
 
 // Delete goes through the "Delete file?" confirmation. Gone-after-reload
 // proves the removal is a committed curatorial write, not just an optimistic
-// row hide. Uncited: document deletion has no dedicated canon requirement
-// (historical-access and GC semantics are non-requirements / future work).
-test("deletes a file and it stays gone after reload", async ({ page }) => {
+// row hide. Deleting a document batches the record delete with the parent
+// listing update — the record goes before the entry — in one applyWrites;
+// historical-access and orphan GC semantics remain deferred non-requirements.
+test(`deletes a file and it stays gone after reload ${cite(
+  "tree-cabinet",
+  "Deletion removes target records before the parent listing entry",
+)}`, async ({ page }) => {
   test.setTimeout(180_000);
   await useTallViewport(page);
   await gotoCabinetRoot(page);

@@ -217,6 +217,7 @@ async fn remove_nonempty_without_recursive_errors() {
         .await
         .unwrap_err();
 
+    // spec:tree-cabinet § Deletion removes target records before the parent listing entry
     let msg = err.to_string();
     assert!(msg.contains("not empty"), "got: {msg}");
     assert!(msg.contains("-r"), "should suggest -r, got: {msg}");
@@ -257,7 +258,9 @@ async fn remove_recursive_nested() {
     let mut resolver = MockNameResolver::new(&[]);
     let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
 
-    // Post-order: sunset.jpg, Vacation, beach.jpg, then Photos itself
+    // Post-order: sunset.jpg, Vacation, beach.jpg, then Photos itself —
+    // descendant records before the parent, parent listing updated last.
+    // spec:tree-cabinet § Deletion removes target records before the parent listing entry
     mock.enqueue(delete_ok()); // sunset.jpg
     mock.enqueue(delete_ok()); // Vacation
     mock.enqueue(delete_ok()); // beach.jpg

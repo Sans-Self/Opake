@@ -163,6 +163,7 @@ async fn cycle_self_reference() {
     ])
     .await;
 
+    // spec:tree-topology § A move that would create a cycle is refused at the domain API
     let err = check_cycle(&tree, DIR_A_URI, DIR_A_URI).unwrap_err();
     assert!(err.to_string().contains("into itself"));
 }
@@ -182,6 +183,7 @@ async fn cycle_into_descendant() {
     ])
     .await;
 
+    // spec:tree-topology § A move that would create a cycle is refused at the domain API
     let err = check_cycle(&tree, DIR_A_URI, DIR_B_URI).unwrap_err();
     assert!(err.to_string().contains("descendants"));
 }

@@ -15,13 +15,14 @@ import {
   useTallViewport,
 } from "../cabinet-helpers";
 
-// Creating a directory supersedes its parent (the parent's entry list is
-// state, not a diff). That the folder is still present after a fresh load —
-// which discards the optimistic keeper and rebuilds from the indexer snapshot
-// — proves the head-only tree carries it.
+// Creating a directory updates the cabinet root record in place — add-entry
+// rewrites the same rkey's entry list, no supersede chain. That the folder is
+// still present after a fresh load — which discards the optimistic keeper and
+// rebuilds from the indexer snapshot — proves the updated root record is
+// canonical, listed by itself rather than by any successor.
 test(`creates a folder at the cabinet root and it survives reload ${cite(
-  "tree-chains",
-  "Consumers build the live tree from chain heads only",
+  "tree-cabinet",
+  "Cabinet curatorial writes mutate directory records in place",
 )}`, async ({ page }) => {
   test.setTimeout(180_000);
   await useTallViewport(page);
@@ -68,12 +69,13 @@ test("creates a nested folder and navigates in and out", async ({ page }) => {
   await expect(folderRow(page, parent)).toBeVisible({ timeout: 30_000 });
 });
 
-// A rename is a curatorial supersede: a new directory record carrying the
-// path's chain head with updated metadata. Surviving a reload proves the
-// renamed record is the canonical head, not a transient client relabel.
+// A cabinet rename is an in-place update: the same directory record's
+// encryptedMetadata is re-encrypted and putRecord'd under the same rkey — no
+// supersede chain. Surviving a reload proves the same record URI holds the new
+// name, not a transient client relabel.
 test(`renames a directory and the new name is canonical after reload ${cite(
-  "tree-chains",
-  "A path's canonical state is the head of a supersede chain",
+  "tree-cabinet",
+  "Cabinet curatorial writes mutate directory records in place",
 )}`, async ({ page }) => {
   test.setTimeout(180_000);
   await useTallViewport(page);

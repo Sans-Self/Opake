@@ -790,11 +790,18 @@ export function FileView({
       e.target.value = "";
       if (!file) return;
 
-      const parent = currentDirectoryUri ?? snapshot?.rootUri;
-      if (!parent) {
+      // Gate on the tree being loaded, not on a root existing: a fresh
+      // cabinet has no root directory yet, and the first upload bootstraps
+      // one (core's `ensure_root` runs inside WASM off the `undefined`
+      // directory below). Conflict-check against the current dir / root,
+      // falling back to "" (no parent) for an empty cabinet — which has no
+      // children to clash with. Bailing on a missing root here stranded a
+      // web-only user before their first file.
+      if (!snapshot) {
         toastError("Tree not loaded yet");
         return;
       }
+      const parent = currentDirectoryUri ?? snapshot.rootUri ?? "";
       const check = checkAvailability(file.name, parent);
       if (!check.ok) {
         toastError(check.message);

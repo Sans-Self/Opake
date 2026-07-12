@@ -77,10 +77,18 @@ export const test = blockadeTest.extend<
   { actor: Actor },
   { workerActor: Actor }
 >({
-  // One actor per worker → disjoint state across parallel workers.
+  // One actor per parallel slot → disjoint state across parallel workers.
+  // Index by parallelIndex, NOT workerIndex: workerIndex increments every time
+  // Playwright spins up a fresh worker process (which it does as workers recycle
+  // across file-jobs), so `workerIndex % ACTORS.length` drifts past the parallel
+  // count and eventually maps a spec onto actors 4/5 (eve/frank). frank is left
+  // unseeded (the cabinet-fresh-root fixture), so a seeded-actor spec landing on
+  // it would find no root and fail. parallelIndex is stable in [0, workers), so
+  // the shared pool only ever draws alice/bob/carol/dave — all seeded — and
+  // frank stays reserved for the specs that opt into it explicitly.
   workerActor: [
     async ({}, use, workerInfo) => {
-      const actor = ACTORS[workerInfo.workerIndex % ACTORS.length]!;
+      const actor = ACTORS[workerInfo.parallelIndex % ACTORS.length]!;
       await use(actor);
     },
     { scope: "worker" },
