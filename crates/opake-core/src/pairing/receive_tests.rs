@@ -1,4 +1,4 @@
-use crate::client::{LegacySession, Session, XrpcClient};
+use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
 use crate::crypto::ML_KEM_SK_LEN;
 use crate::error::Error;
 use crate::pairing::request::PAIR_STATE_VERSION;
@@ -6,7 +6,7 @@ use crate::records::PairResponse;
 use crate::storage::{CachedCollection, CachedRecord, Config, Identity};
 use crate::test_utils::MockTransport;
 
-use super::complete_pair_response;
+use super::{complete_pair_response, decrypt_pair_response};
 
 const TEST_DID: &str = "did:plc:test";
 const X25519_PRIV_LEN: usize = 32;
@@ -116,6 +116,102 @@ fn valid_pair_state() -> Vec<u8> {
     blob.extend_from_slice(&[0u8; X25519_PRIV_LEN]);
     blob.extend_from_slice(&[0u8; ML_KEM_SK_LEN]);
     blob
+}
+
+/// Strip base64 padding from every `$bytes` value, the way a PDS
+/// re-serializes them on CBOR→JSON read.
+fn strip_bytes_padding(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(s)) = map.get_mut("$bytes") {
+                while s.ends_with('=') {
+                    s.pop();
+                }
+            }
+            map.values_mut().for_each(strip_bytes_padding);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(strip_bytes_padding),
+        _ => {}
+    }
+}
+
+// spec:auth-pairing § Completion authenticates the received identity against the published key
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__pair_response_with_pds_unpadded_base64_decrypts() {
+    use crate::crypto::{encrypt_blob, generate_content_key, wrap_key, OsRng, WrapContext};
+    use crate::records::{PublicKeyRecord, PAIR_REQUEST_COLLECTION};
+    use crate::test_utils::TestKeys;
+
+    let sender = TestKeys::generate(TEST_DID);
+    let device = TestKeys::generate(TEST_DID);
+
+    // Respond-side construction, mirroring respond_to_pair_request.
+    let mut rng = OsRng;
+    let content_key = generate_content_key(&mut rng);
+    let identity_json = serde_json::to_vec(&sender.identity).unwrap();
+    let payload = encrypt_blob(&content_key, &identity_json, &mut rng).unwrap();
+    let wrapped = wrap_key(
+        &content_key,
+        &device.public_keys(),
+        TEST_DID,
+        &WrapContext::PairResponse,
+        &mut rng,
+    )
+    .unwrap();
+
+    let response = PairResponse {
+        opake_version: crate::records::SCHEMA_VERSION,
+        request: format!("at://{TEST_DID}/{PAIR_REQUEST_COLLECTION}/rk1"),
+        wrapped_key: wrapped,
+        ciphertext: crate::records::AtBytes::from_raw(&payload.ciphertext),
+        nonce: crate::records::AtBytes::from_raw(&payload.nonce),
+        algo: "aes-256-gcm".into(),
+        created_at: "2026-07-12T00:00:00Z".into(),
+    };
+
+    // Round-trip through JSON with padding stripped everywhere, as a PDS
+    // serves it back.
+    let mut wire = serde_json::to_value(&response).unwrap();
+    strip_bytes_padding(&mut wire);
+    let response: PairResponse = serde_json::from_value(wire).unwrap();
+
+    // The published publicKey/self record comes back unpadded too.
+    let record = PublicKeyRecord::new(
+        &sender.x25519_pub,
+        &sender.ml_kem_pub,
+        "2026-07-12T00:00:00Z",
+    );
+    let mut record_value = serde_json::to_value(&record).unwrap();
+    strip_bytes_padding(&mut record_value);
+    let entry = serde_json::json!({
+        "uri": format!("at://{TEST_DID}/app.opake.publicKey/self"),
+        "cid": "bafyrecord",
+        "value": record_value,
+    });
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: entry.to_string().into_bytes(),
+    });
+    let mut client = mock_client(mock);
+
+    let received = decrypt_pair_response(
+        &mut client,
+        TEST_DID,
+        &response,
+        &device.x25519_priv,
+        &device.ml_kem_priv,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(received.did, sender.identity.did);
+    assert_eq!(
+        received.x25519_private_key,
+        sender.identity.x25519_private_key
+    );
 }
 
 // spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair

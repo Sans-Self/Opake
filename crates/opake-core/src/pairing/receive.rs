@@ -157,11 +157,12 @@ async fn decrypt_pair_response(
         &crate::crypto::WrapContext::PairResponse,
     )?;
 
-    let ciphertext = BASE64.decode(&response.ciphertext.encoded).map_err(|e| {
+    let ciphertext = response.ciphertext.decode().map_err(|e| {
         Error::Decryption(format!("invalid base64 in pair response ciphertext: {e}"))
     })?;
-    let nonce_bytes = BASE64
-        .decode(&response.nonce.encoded)
+    let nonce_bytes = response
+        .nonce
+        .decode()
         .map_err(|e| Error::Decryption(format!("invalid base64 in pair response nonce: {e}")))?;
     let nonce_len = nonce_bytes.len();
     let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
@@ -184,13 +185,11 @@ async fn decrypt_pair_response(
         .await?;
     let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
 
-    let published_x25519 = BASE64
-        .decode(&published.x25519_public_key.encoded)
-        .map_err(|e| {
-            Error::InvalidRecord(format!(
-                "invalid base64 in published X25519 public key: {e}"
-            ))
-        })?;
+    let published_x25519 = published.x25519_public_key.decode().map_err(|e| {
+        Error::InvalidRecord(format!(
+            "invalid base64 in published X25519 public key: {e}"
+        ))
+    })?;
     let received_x25519 = BASE64.decode(&identity.x25519_public_key).map_err(|e| {
         Error::InvalidRecord(format!(
             "invalid base64 in received identity X25519 public key: {e}"
@@ -202,13 +201,11 @@ async fn decrypt_pair_response(
         ));
     }
 
-    let published_ml_kem = BASE64
-        .decode(&published.ml_kem_public_key.encoded)
-        .map_err(|e| {
-            Error::InvalidRecord(format!(
-                "invalid base64 in published ML-KEM public key: {e}"
-            ))
-        })?;
+    let published_ml_kem = published.ml_kem_public_key.decode().map_err(|e| {
+        Error::InvalidRecord(format!(
+            "invalid base64 in published ML-KEM public key: {e}"
+        ))
+    })?;
     let received_ml_kem = BASE64.decode(&identity.ml_kem_public_key).map_err(|e| {
         Error::InvalidRecord(format!(
             "invalid base64 in received identity ML-KEM public key: {e}"
