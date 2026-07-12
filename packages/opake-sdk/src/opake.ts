@@ -157,6 +157,16 @@ export class Opake {
   private readonly storage: Storage;
   private refreshPromise: Promise<void> | null = null;
 
+  // In-flight operation tracking. Every async method that touches the WASM
+  // context runs through `track()`: wasm-bindgen borrows `&self` for the whole
+  // future of an `async fn(&self)`, so calling `ctx.free()` while such a borrow
+  // is live panics with "attempted to take ownership of Rust value while it was
+  // borrowed". A `destroy()` that arrives mid-operation (provider unmount,
+  // logout) is therefore deferred until the last in-flight op settles.
+  private inFlightOps = 0;
+  private disposeRequested = false;
+  private destroyed = false;
+
   /**
    * The DID this Opake was constructed for.
    *
@@ -458,7 +468,7 @@ export class Opake {
    */
   @wrapWasmErrors
   async setIndexerUrl(url: string): Promise<void> {
-    await this.requireContext().setIndexerUrl(url);
+    await this.track(() => this.requireContext().setIndexerUrl(url));
   }
 
   /**
@@ -470,7 +480,7 @@ export class Opake {
    */
   @wrapWasmErrors
   async checkSession(): Promise<void> {
-    await this.requireContext().checkSession();
+    await this.track(() => this.requireContext().checkSession());
   }
 
   // ---------------------------------------------------------------------------
@@ -503,9 +513,8 @@ export class Opake {
   }
 
   private async doRefresh(): Promise<void> {
-    const ctx = this.requireContext();
     try {
-      await ctx.proactiveRefresh();
+      await this.track(() => this.requireContext().proactiveRefresh());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("opake: proactive token refresh failed:", msg);
@@ -536,8 +545,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   async cabinet(): Promise<FileManager> {
-    const ctx = this.requireContext();
-    const handle = await ctx.cabinet();
+    const handle = await this.track(() => this.requireContext().cabinet());
     return new FileManager(handle);
   }
 
@@ -563,7 +571,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   async workspace(keyringUri: string): Promise<FileManager> {
-    return new FileManager(await this.requireContext().workspaceByUri(keyringUri));
+    return new FileManager(
+      await this.track(() => this.requireContext().workspaceByUri(keyringUri)),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -586,9 +596,11 @@ export class Opake {
     name: string,
     description?: string,
   ): Promise<{ keyringUri: string; key: Uint8Array }> {
-    return this.requireContext()
-      .createWorkspace(name, description ?? null)
-      .then(createWorkspaceResultSchema.parse);
+    return this.track(() =>
+      this.requireContext()
+        .createWorkspace(name, description ?? null)
+        .then(createWorkspaceResultSchema.parse),
+    );
   }
 
   /**
@@ -606,9 +618,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   listWorkspaces(): Promise<readonly WorkspaceEntry[]> {
-    return this.requireContext()
-      .listWorkspaces()
-      .then(listWorkspacesResultSchema.parse);
+    return this.track(() =>
+      this.requireContext().listWorkspaces().then(listWorkspacesResultSchema.parse),
+    );
   }
 
   /**
@@ -620,7 +632,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   listWorkspaceMembers(keyringUri: string): Promise<readonly WorkspaceMember[]> {
-    return this.requireContext().listWorkspaceMembers(keyringUri) as Promise<
+    return this.track(() => this.requireContext().listWorkspaceMembers(keyringUri)) as Promise<
       readonly WorkspaceMember[]
     >;
   }
@@ -639,10 +651,8 @@ export class Opake {
     // Core resolves the recipient's hybrid public-key bundle internally
     // — fewer byte arrays crossing the WASM boundary, single resolution
     // path on owner + non-owner branches.
-    return this.requireContext().addWorkspaceMember(
-      keyringUri,
-      memberDid,
-      role,
+    return this.track(() =>
+      this.requireContext().addWorkspaceMember(keyringUri, memberDid, role),
     ) as Promise<MutationResult>;
   }
 
@@ -657,7 +667,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   removeWorkspaceMember(keyringUri: string, memberDid: string): Promise<{ rotation: number }> {
-    return this.requireContext().removeWorkspaceMember(keyringUri, memberDid) as Promise<{
+    return this.track(() =>
+      this.requireContext().removeWorkspaceMember(keyringUri, memberDid),
+    ) as Promise<{
       rotation: number;
     }>;
   }
@@ -666,7 +678,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   leaveWorkspace(keyringUri: string): Promise<MutationResult> {
-    return this.requireContext().leaveWorkspace(keyringUri) as Promise<MutationResult>;
+    return this.track(() =>
+      this.requireContext().leaveWorkspace(keyringUri),
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -680,11 +694,13 @@ export class Opake {
     keyringUri: string,
     updates: { name?: string; description?: string; icon?: string },
   ): Promise<MutationResult> {
-    return this.requireContext().updateWorkspaceMetadata(
-      keyringUri,
-      updates.name ?? null,
-      updates.description ?? null,
-      updates.icon ?? null,
+    return this.track(() =>
+      this.requireContext().updateWorkspaceMetadata(
+        keyringUri,
+        updates.name ?? null,
+        updates.description ?? null,
+        updates.icon ?? null,
+      ),
     ) as Promise<MutationResult>;
   }
 
@@ -696,10 +712,8 @@ export class Opake {
     memberDid: string,
     role: WorkspaceRole,
   ): Promise<MutationResult> {
-    return this.requireContext().updateMemberRole(
-      keyringUri,
-      memberDid,
-      role,
+    return this.track(() =>
+      this.requireContext().updateMemberRole(keyringUri, memberDid, role),
     ) as Promise<MutationResult>;
   }
 
@@ -715,7 +729,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   resolveIdentity(handleOrDid: string): Promise<ResolvedIdentity> {
-    return this.requireContext().resolveIdentity(handleOrDid).then(resolvedIdentitySchema.parse);
+    return this.track(() =>
+      this.requireContext().resolveIdentity(handleOrDid).then(resolvedIdentitySchema.parse),
+    );
   }
 
   /**
@@ -727,7 +743,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   publishPublicKey(): Promise<string> {
-    return this.requireContext().publishPublicKey();
+    return this.track(() => this.requireContext().publishPublicKey());
   }
 
   // ---------------------------------------------------------------------------
@@ -742,7 +758,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   getAccountConfig(): Promise<AccountConfig | null> {
-    return this.requireContext().getAccountConfig() as Promise<AccountConfig | null>;
+    return this.track(() =>
+      this.requireContext().getAccountConfig(),
+    ) as Promise<AccountConfig | null>;
   }
 
   /**
@@ -760,7 +778,6 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   async updateAccountConfig(updates: AccountConfigPatch): Promise<AccountConfig> {
-    const ctx = this.requireContext();
     // WASM AccountConfigUpdates uses `double_option` serde semantics:
     // absent = leave alone, explicit null = clear, value = set.
     // Only include keys the caller explicitly provided.
@@ -772,7 +789,7 @@ export class Opake {
       // string or explicit null — both forwarded; Rust interprets null as clear.
       patch.indexerUrl = updates.indexerUrl;
     }
-    const record = await ctx.updateAccountConfig(patch);
+    const record = await this.track(() => this.requireContext().updateAccountConfig(patch));
     return record as AccountConfig;
   }
 
@@ -875,7 +892,12 @@ export class Opake {
       }
     };
 
-    const pending = this.requireContext().watchWorkspaces(adapter);
+    // Registration borrows the context for the duration of its future — count
+    // it as an in-flight op so a destroy() racing it is deferred (see `track`).
+    const ctx = this.requireContext();
+    this.inFlightOps += 1;
+    const pending = ctx.watchWorkspaces(adapter);
+    void pending.finally(() => this.finishOp());
     let closed = false;
     let wasmWatcher: WasmWorkspaceWatcherHandle | null = null;
 
@@ -886,7 +908,7 @@ export class Opake {
           void w.close();
           return;
         }
-        wasmWatcher = w as WasmWorkspaceWatcherHandle;
+        wasmWatcher = w;
       },
       (err: unknown) => {
         console.warn("[opake-sdk] watchWorkspaces registration failed:", err);
@@ -938,7 +960,10 @@ export class Opake {
       }
     };
 
-    const pending = this.requireContext().watchChainForks(adapter);
+    const ctx = this.requireContext();
+    this.inFlightOps += 1;
+    const pending = ctx.watchChainForks(adapter);
+    void pending.finally(() => this.finishOp());
     let closed = false;
     let wasmWatcher: WasmChainForkWatcherHandle | null = null;
 
@@ -948,7 +973,7 @@ export class Opake {
           void w.close();
           return;
         }
-        wasmWatcher = w as WasmChainForkWatcherHandle;
+        wasmWatcher = w;
       },
       (err: unknown) => {
         console.warn("[opake-sdk] watchChainForks registration failed:", err);
@@ -975,7 +1000,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   syncWorkspaceByUri(keyringUri: string): Promise<WorkspaceSyncResult | null> {
-    return this.requireContext().syncWorkspaceByUri(keyringUri).then(syncSingleResultSchema.parse);
+    return this.track(() =>
+      this.requireContext().syncWorkspaceByUri(keyringUri).then(syncSingleResultSchema.parse),
+    );
   }
 
   /** Retry pending shares — resolve recipients and create grants. */
@@ -988,7 +1015,7 @@ export class Opake {
     still_pending: number;
     failed: number;
   }> {
-    return this.requireContext().retryPendingSharesViaOpake();
+    return this.track(() => this.requireContext().retryPendingSharesViaOpake());
   }
 
   // ---------------------------------------------------------------------------
@@ -1006,9 +1033,11 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   listInbox(): Promise<readonly InboxGrant[]> {
-    return this.requireContext()
-      .listInbox()
-      .then((raw) => inboxGrantsSchema.parse(raw)) as Promise<readonly InboxGrant[]>;
+    return this.track(() =>
+      this.requireContext()
+        .listInbox()
+        .then((raw) => inboxGrantsSchema.parse(raw)),
+    );
   }
 
   /**
@@ -1022,7 +1051,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   downloadFromGrant(grantUri: string): Promise<DownloadResult> {
-    return this.requireContext().downloadFromGrant(grantUri).then(downloadResultSchema.parse);
+    return this.track(() =>
+      this.requireContext().downloadFromGrant(grantUri).then(downloadResultSchema.parse),
+    );
   }
 
   /**
@@ -1037,9 +1068,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   resolveGrantMetadata(grantUri: string): Promise<ResolvedGrantMetadata> {
-    return this.requireContext()
-      .resolveGrantMetadata(grantUri)
-      .then(resolvedGrantMetadataSchema.parse);
+    return this.track(() =>
+      this.requireContext().resolveGrantMetadata(grantUri).then(resolvedGrantMetadataSchema.parse),
+    );
   }
 
   /**
@@ -1052,16 +1083,18 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   listPendingShares(): Promise<readonly PendingShareEntry[]> {
-    return this.requireContext()
-      .listPendingShares()
-      .then((raw) => pendingShareEntriesSchema.parse(raw)) as Promise<readonly PendingShareEntry[]>;
+    return this.track(() =>
+      this.requireContext()
+        .listPendingShares()
+        .then((raw) => pendingShareEntriesSchema.parse(raw)),
+    );
   }
 
   /** Cancel (delete) a pending share by its AT-URI. */
   @wrapWasmErrors
   @withTokenGuard
   cancelPendingShare(uri: string): Promise<void> {
-    return this.requireContext().cancelPendingShare(uri);
+    return this.track(() => this.requireContext().cancelPendingShare(uri));
   }
 
   /**
@@ -1102,7 +1135,10 @@ export class Opake {
       }
     };
 
-    const pending = this.requireContext().watchInbox(adapter);
+    const ctx = this.requireContext();
+    this.inFlightOps += 1;
+    const pending = ctx.watchInbox(adapter);
+    void pending.finally(() => this.finishOp());
     let closed = false;
     let wasmWatcher: WasmInboxWatcherHandle | null = null;
 
@@ -1112,7 +1148,7 @@ export class Opake {
           void w.close();
           return;
         }
-        wasmWatcher = w as WasmInboxWatcherHandle;
+        wasmWatcher = w;
       },
       (err: unknown) => {
         console.warn("[opake-sdk] watchInbox registration failed:", err);
@@ -1186,7 +1222,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   listPairRequests(): Promise<readonly import("./types").PendingPairRequest[]> {
-    return pairingList(this.requireContext());
+    return this.track(() => pairingList(this.requireContext()));
   }
 
   /** Approve a pair request (existing device). Encrypts and sends the identity. */
@@ -1197,11 +1233,13 @@ export class Opake {
     x25519EphemeralPublicKey: Uint8Array,
     mlKemEphemeralPublicKey: Uint8Array,
   ): Promise<void> {
-    return pairingApprove(
-      this.requireContext(),
-      requestUri,
-      x25519EphemeralPublicKey,
-      mlKemEphemeralPublicKey,
+    return this.track(() =>
+      pairingApprove(
+        this.requireContext(),
+        requestUri,
+        x25519EphemeralPublicKey,
+        mlKemEphemeralPublicKey,
+      ),
     );
   }
 
@@ -1209,14 +1247,14 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   cleanupExpiredPairRequests(): Promise<number> {
-    return pairingCleanupExpired(this.requireContext());
+    return this.track(() => pairingCleanupExpired(this.requireContext()));
   }
 
   /** Delete stale grants whose recipients have no valid public key. */
   @wrapWasmErrors
   @withTokenGuard
   healStaleGrants(): Promise<number> {
-    return this.requireContext().healStaleGrants();
+    return this.track(() => this.requireContext().healStaleGrants());
   }
 
   // ---------------------------------------------------------------------------
@@ -1227,7 +1265,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   createInvitation(keyringUri: string, role: string): Promise<{ uri: string; token: string }> {
-    return this.requireContext().createInvitation(keyringUri, role) as Promise<{
+    return this.track(() => this.requireContext().createInvitation(keyringUri, role)) as Promise<{
       uri: string;
       token: string;
     }>;
@@ -1237,10 +1275,9 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   async listInvitations(): Promise<readonly import("./types").InvitationEntry[]> {
-    const raw = (await this.requireContext().listInvitations()) as readonly Record<
-      string,
-      unknown
-    >[];
+    const raw = (await this.track(() =>
+      this.requireContext().listInvitations(),
+    )) as readonly Record<string, unknown>[];
     return raw.map((r) => ({
       uri: r.uri as string,
       target: r.target as string,
@@ -1258,7 +1295,7 @@ export class Opake {
   @wrapWasmErrors
   @withTokenGuard
   revokeInvitation(invitationUri: string): Promise<void> {
-    return this.requireContext().revokeInvitation(invitationUri);
+    return this.track(() => this.requireContext().revokeInvitation(invitationUri));
   }
 
   // ---------------------------------------------------------------------------
@@ -1297,6 +1334,51 @@ export class Opake {
    * After calling `destroy()`, all methods will throw.
    */
   destroy(): void {
+    // Idempotent: a second destroy (StrictMode double-unmount, logout after
+    // provider teardown) is a no-op once teardown has begun.
+    if (this.destroyed) return;
+    this.destroyed = true;
+
+    if (this.inFlightOps > 0) {
+      // Ops are still borrowing the context — defer the free until they
+      // drain. Detach the finalizer now so a GC sweep can't race the free.
+      this.disposeRequested = true;
+      unregisterCleanup(this);
+      return;
+    }
+
+    this.performFree();
+  }
+
+  /**
+   * Run a context-touching operation under in-flight tracking.
+   *
+   * Rejects immediately if the instance is destroyed (or a deferred destroy
+   * is pending — no new ops once teardown starts). Otherwise holds the
+   * in-flight count for the op's future and frees the context once the count
+   * returns to zero if a destroy was requested meanwhile.
+   */
+  private track<T>(op: () => Promise<T>): Promise<T> {
+    if (!this.ctx || this.destroyed) {
+      return Promise.reject(new OpakeError("Unknown", "Opake instance has been destroyed"));
+    }
+    this.inFlightOps += 1;
+    // The op must run synchronously so the WASM `&self` borrow is taken before
+    // any `destroy()` on the same tick can observe the in-flight count. The
+    // async wrapper invokes `op()` synchronously while turning a synchronous
+    // throw into a rejection, so `finally` always runs and the in-flight count
+    // can never be stranded above zero.
+    return (async () => op())().finally(() => this.finishOp());
+  }
+
+  private finishOp(): void {
+    this.inFlightOps -= 1;
+    if (this.inFlightOps === 0 && this.disposeRequested) {
+      this.performFree();
+    }
+  }
+
+  private performFree(): void {
     if (this.ctx) {
       unregisterCleanup(this);
       this.ctx.free();
@@ -1306,7 +1388,7 @@ export class Opake {
 
   /** @internal */
   private requireContext(): WasmOpakeContext {
-    if (!this.ctx) {
+    if (!this.ctx || this.destroyed) {
       throw new OpakeError("Unknown", "Opake instance has been destroyed");
     }
     return this.ctx;

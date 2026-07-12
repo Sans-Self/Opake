@@ -122,10 +122,57 @@ export interface DirectoryWatcher {
 export class FileManager {
   private handle: WasmFileManager | null;
 
+  // In-flight operation tracking. Every async method that touches the WASM
+  // handle runs through `track()`, which holds a borrow of the JS handle for
+  // the lifetime of its future (wasm-bindgen borrows `&self` across the whole
+  // async fn). Calling `handle.free()` while such a borrow is live panics with
+  // "attempted to take ownership of Rust value while it was borrowed". So a
+  // `dispose()` that arrives mid-operation is deferred: no new ops are
+  // admitted, and the actual free fires when the last in-flight op settles.
+  private inFlightOps = 0;
+  private disposeRequested = false;
+  private disposed = false;
+
   /** @internal — use `opake.cabinet()` or `opake.workspace(keyringUri)` instead. */
   constructor(handle: WasmFileManager) {
     this.handle = handle;
     registerCleanup(this, handle, this);
+  }
+
+  /**
+   * Run a handle-touching operation under in-flight tracking.
+   *
+   * Rejects immediately if the manager is disposed (or a deferred dispose is
+   * pending — no new ops once teardown starts). Otherwise increments the
+   * in-flight count for the duration of the op's future and frees the handle
+   * once the count returns to zero if a dispose was requested meanwhile.
+   */
+  private track<T>(op: () => Promise<T>): Promise<T> {
+    if (!this.handle || this.disposed) {
+      return Promise.reject(parseWasmError(new Error("FileManager has been disposed")));
+    }
+    this.inFlightOps += 1;
+    // The op must run synchronously so the WASM `&self` borrow is taken before
+    // any `dispose()` on the same tick can observe the in-flight count. The
+    // async wrapper invokes `op()` synchronously while turning a synchronous
+    // throw into a rejection, so `finally` always runs and the in-flight count
+    // can never be stranded above zero.
+    return (async () => op())().finally(() => this.finishOp());
+  }
+
+  private finishOp(): void {
+    this.inFlightOps -= 1;
+    if (this.inFlightOps === 0 && this.disposeRequested) {
+      this.performFree();
+    }
+  }
+
+  private performFree(): void {
+    if (this.handle) {
+      unregisterCleanup(this);
+      this.handle.free();
+      this.handle = null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -172,13 +219,15 @@ export class FileManager {
       directoryUri?: string;
     },
   ): Promise<UploadResult> {
-    return this.requireHandle().upload(
-      data,
-      filename,
-      mimeType,
-      options?.description ?? null,
-      options?.tags ? [...options.tags] : null,
-      options?.directoryUri ?? null,
+    return this.track(() =>
+      this.requireHandle().upload(
+        data,
+        filename,
+        mimeType,
+        options?.description ?? null,
+        options?.tags ? [...options.tags] : null,
+        options?.directoryUri ?? null,
+      ),
     ) as Promise<UploadResult>;
   }
 
@@ -202,7 +251,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   download(documentUri: string): Promise<DownloadResult> {
-    return this.requireHandle().download(documentUri).then(downloadResultSchema.parse);
+    return this.track(() =>
+      this.requireHandle().download(documentUri).then(downloadResultSchema.parse),
+    );
   }
 
   /**
@@ -223,9 +274,8 @@ export class FileManager {
    */
   @wrapWasmErrors
   delete(documentUri: string, parentDirectoryUri: string): Promise<MutationResult> {
-    return this.requireHandle().delete(
-      documentUri,
-      parentDirectoryUri,
+    return this.track(() =>
+      this.requireHandle().delete(documentUri, parentDirectoryUri),
     ) as Promise<MutationResult>;
   }
 
@@ -241,10 +291,8 @@ export class FileManager {
    */
   @wrapWasmErrors
   move(entryUri: string, sourceDirUri: string, targetDirUri: string): Promise<MutationResult> {
-    return this.requireHandle().moveEntry(
-      entryUri,
-      sourceDirUri,
-      targetDirUri,
+    return this.track(() =>
+      this.requireHandle().moveEntry(entryUri, sourceDirUri, targetDirUri),
     ) as Promise<MutationResult>;
   }
 
@@ -267,7 +315,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   createDirectory(name: string, parentUri?: string): Promise<UploadResult> {
-    return this.requireHandle().createDirectory(name, parentUri ?? null) as Promise<UploadResult>;
+    return this.track(() =>
+      this.requireHandle().createDirectory(name, parentUri ?? null),
+    ) as Promise<UploadResult>;
   }
 
   /**
@@ -329,7 +379,7 @@ export class FileManager {
    */
   @wrapWasmErrors
   ensureRoot(): Promise<string> {
-    return this.requireHandle().ensureRoot();
+    return this.track(() => this.requireHandle().ensureRoot());
   }
 
   /**
@@ -351,11 +401,11 @@ export class FileManager {
    */
   @wrapWasmErrors
   loadTree(): Promise<DirectoryTreeSnapshot> {
-    return (
+    return this.track(() =>
       (this.requireHandle().loadTree() as Promise<{ snapshot: unknown }>)
         // Zod 4 z.record() with .transform() inner schemas loses type info.
         // Runtime validation is correct — the cast bridges the inference gap.
-        .then((r) => directoryTreeSnapshotSchema.parse(r.snapshot) as DirectoryTreeSnapshot)
+        .then((r) => directoryTreeSnapshotSchema.parse(r.snapshot) as DirectoryTreeSnapshot),
     );
   }
 
@@ -371,12 +421,11 @@ export class FileManager {
   syncAndLoadTree(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    return this.requireHandle()
-      .syncAndLoadTree(directoryUri ?? null)
-      .then(treeWithMetadataSchema.parse) as Promise<{
-      snapshot: DirectoryTreeSnapshot;
-      metadata: Record<string, DocumentMetadata>;
-    }>;
+    return this.track(() =>
+      this.requireHandle()
+        .syncAndLoadTree(directoryUri ?? null)
+        .then(treeWithMetadataSchema.parse),
+    );
   }
 
   /**
@@ -391,12 +440,11 @@ export class FileManager {
   loadTreeWithMetadata(
     directoryUri?: string,
   ): Promise<{ snapshot: DirectoryTreeSnapshot; metadata: Record<string, DocumentMetadata> }> {
-    return this.requireHandle()
-      .loadTreeWithMetadata(directoryUri ?? null)
-      .then(treeWithMetadataSchema.parse) as Promise<{
-      snapshot: DirectoryTreeSnapshot;
-      metadata: Record<string, DocumentMetadata>;
-    }>;
+    return this.track(() =>
+      this.requireHandle()
+        .loadTreeWithMetadata(directoryUri ?? null)
+        .then(treeWithMetadataSchema.parse),
+    );
   }
 
   /**
@@ -414,7 +462,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   getDocumentMetadata(documentUri: string): Promise<DocumentMetadata> {
-    return this.requireHandle().getDocumentMetadata(documentUri).then(documentMetadataSchema.parse);
+    return this.track(() =>
+      this.requireHandle().getDocumentMetadata(documentUri).then(documentMetadataSchema.parse),
+    );
   }
 
   /**
@@ -427,7 +477,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   renameDirectory(directoryUri: string, newName: string): Promise<MutationResult> {
-    return this.requireHandle().renameDirectory(directoryUri, newName) as Promise<MutationResult>;
+    return this.track(() =>
+      this.requireHandle().renameDirectory(directoryUri, newName),
+    ) as Promise<MutationResult>;
   }
 
   /**
@@ -440,9 +492,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   deleteRecursive(directoryUri: string): Promise<DeleteRecursiveResult> {
-    return this.requireHandle()
-      .deleteRecursive(directoryUri)
-      .then(deleteRecursiveResultSchema.parse);
+    return this.track(() =>
+      this.requireHandle().deleteRecursive(directoryUri).then(deleteRecursiveResultSchema.parse),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -460,11 +512,13 @@ export class FileManager {
     documentUri: string,
     updates: { filename?: string; description?: string; tags?: readonly string[] },
   ): Promise<MutationResult> {
-    return this.requireHandle().updateMetadata(
-      documentUri,
-      updates.filename ?? null,
-      updates.tags ? [...updates.tags] : null,
-      updates.description ?? null,
+    return this.track(() =>
+      this.requireHandle().updateMetadata(
+        documentUri,
+        updates.filename ?? null,
+        updates.tags ? [...updates.tags] : null,
+        updates.description ?? null,
+      ),
     ) as Promise<MutationResult>;
   }
 
@@ -476,7 +530,9 @@ export class FileManager {
    */
   @wrapWasmErrors
   updateContent(documentUri: string, newContent: Uint8Array): Promise<MutationResult> {
-    return this.requireHandle().updateContent(documentUri, newContent) as Promise<MutationResult>;
+    return this.track(() =>
+      this.requireHandle().updateContent(documentUri, newContent),
+    ) as Promise<MutationResult>;
   }
 
   // ---------------------------------------------------------------------------
@@ -504,13 +560,15 @@ export class FileManager {
     permissions: string,
     note?: string,
   ): Promise<MutationResult> {
-    return this.requireHandle().share(
-      documentUri,
-      recipientDid,
-      recipientX25519PublicKey,
-      recipientMlKemPublicKey,
-      permissions,
-      note ?? null,
+    return this.track(() =>
+      this.requireHandle().share(
+        documentUri,
+        recipientDid,
+        recipientX25519PublicKey,
+        recipientMlKemPublicKey,
+        permissions,
+        note ?? null,
+      ),
     ) as Promise<MutationResult>;
   }
 
@@ -521,7 +579,7 @@ export class FileManager {
    */
   @wrapWasmErrors
   revokeShare(grantUri: string): Promise<void> {
-    return this.requireHandle().revokeShare(grantUri);
+    return this.track(() => this.requireHandle().revokeShare(grantUri));
   }
 
   /**
@@ -534,9 +592,11 @@ export class FileManager {
    */
   @wrapWasmErrors
   listShares(): Promise<readonly GrantEntry[]> {
-    return this.requireHandle()
-      .listShares()
-      .then((raw) => grantEntriesSchema.parse(raw)) as Promise<readonly GrantEntry[]>;
+    return this.track(() =>
+      this.requireHandle()
+        .listShares()
+        .then((raw) => grantEntriesSchema.parse(raw)),
+    );
   }
 
   /**
@@ -560,7 +620,9 @@ export class FileManager {
     permissions: string,
     note: string | null,
   ): Promise<string> {
-    return this.requireHandle().createPendingShare(documentUri, recipient, permissions, note);
+    return this.track(() =>
+      this.requireHandle().createPendingShare(documentUri, recipient, permissions, note),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -623,7 +685,12 @@ export class FileManager {
       }
     };
 
-    const pending = this.requireHandle().watchDirectory(directoryUri, adapter);
+    // Registration borrows the handle for the duration of its future, so it
+    // counts as an in-flight op — a dispose() racing the registration is
+    // deferred until it settles (see `track`).
+    const handle = this.requireHandle();
+    this.inFlightOps += 1;
+    const pending = handle.watchDirectory(directoryUri, adapter);
     let closed = false;
     let wasmWatcher: WasmDirectoryWatcher | null = null;
 
@@ -640,6 +707,7 @@ export class FileManager {
         console.warn("[opake-sdk] watchDirectory registration failed:", err);
       },
     );
+    void pending.finally(() => this.finishOp());
 
     return {
       close: () => {
@@ -664,11 +732,20 @@ export class FileManager {
    * instance can create new FileManagers after this.
    */
   dispose(): void {
-    if (this.handle) {
+    // Idempotent: a second dispose (StrictMode double-unmount, disposeAll
+    // after an individual release) is a no-op once teardown has begun.
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (this.inFlightOps > 0) {
+      // Ops are still borrowing the handle — defer the free until they
+      // drain. Detach the finalizer now so a GC sweep can't race the free.
+      this.disposeRequested = true;
       unregisterCleanup(this);
-      this.handle.free();
-      this.handle = null;
+      return;
     }
+
+    this.performFree();
   }
 
   /** TC39 Explicit Resource Management support. */
@@ -677,7 +754,7 @@ export class FileManager {
   }
 
   private requireHandle(): WasmFileManager {
-    if (!this.handle) {
+    if (!this.handle || this.disposed) {
       throw parseWasmError(new Error("FileManager has been disposed"));
     }
     return this.handle;

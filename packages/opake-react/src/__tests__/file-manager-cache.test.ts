@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { FileManager } from "@opake/sdk";
 import { FileManagerCache } from "../file-manager-cache";
 import { asOpake, createMockOpake } from "./mock-opake";
 
@@ -170,6 +171,45 @@ describe("FileManagerCache", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(fm.isDisposed()).toBe(true);
+  });
+
+  it("release-at-zero during an in-flight op defers the underlying free (real SDK)", async () => {
+    // Unlike the other tests, this one uses a REAL FileManager wrapping a fake
+    // WASM handle, so the cache's release() drives the SDK's deferred-free
+    // behavior end-to-end: an unmount that releases the last reference while a
+    // mutation is still in flight must NOT free the handle mid-borrow.
+    let freeCount = 0;
+    let resolveOp!: (value: { uri: string }) => void;
+    const opPromise = new Promise<{ uri: string }>((resolve) => {
+      resolveOp = resolve;
+    });
+    const handle = {
+      upload: vi.fn(() => opPromise),
+      free: vi.fn(() => {
+        freeCount += 1;
+      }),
+    };
+    const realFm = new FileManager(
+      handle as unknown as ConstructorParameters<typeof FileManager>[0],
+    );
+
+    const mock = createMockOpake();
+    mock.cabinet.mockImplementation(async () => realFm as never);
+
+    const cache = new FileManagerCache(asOpake(mock));
+
+    const acquired = await cache.acquire(null);
+    const inFlight = acquired.upload(new Uint8Array(), "f.txt", "text/plain");
+
+    // Last reference released mid-op — dispose is requested but deferred.
+    cache.release(null);
+    expect(freeCount).toBe(0);
+
+    resolveOp({ uri: "at://x" });
+    await inFlight;
+
+    // Op settled → the deferred free now fires exactly once.
+    expect(freeCount).toBe(1);
   });
 });
 
