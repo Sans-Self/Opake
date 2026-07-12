@@ -438,46 +438,6 @@ mod keyring_supersede {
         assert_eq!(result.keyring_uri, head_uri);
     }
 
-    /// Regression: `create_invitation` used to store the caller-supplied
-    /// URI verbatim as the invitation target. The WASM binding receives a
-    /// head URI from JS, so an invitation created right before a
-    /// supersede would point at a keyring record that's no longer the
-    /// chain head. Typing the parameter as `WorkspaceId` forces the
-    /// caller to resolve first, so the stored target is always the
-    /// stable genesis id.
-    ///
-    /// See workspace-identity spec, "invitation target survives
-    /// membership churn" (audit finding 3).
-    // spec:workspace-identity § Head URI use is limited to head-record operations and resolution input
-    #[tokio::test]
-    #[allow(non_snake_case)] // bug__ regression-naming convention
-    async fn bug__create_invitation_stores_genesis_target() {
-        let mock = MockTransport::new();
-        let invitation_uri = format!("at://{ALICE_DID}/app.opake.invitation/inv1");
-        mock.enqueue(create_record_response(&invitation_uri, "bafyinv"));
-
-        let mut opake = opake_for(ALICE_DID, mock.clone());
-        let (uri, _token) = opake
-            .create_invitation(&WorkspaceId::from_resolved(WORKSPACE_ID), "editor")
-            .await
-            .unwrap();
-        assert_eq!(uri, invitation_uri);
-
-        let reqs = mock.requests();
-        let create = reqs
-            .iter()
-            .find(|r| r.url.contains("createRecord"))
-            .expect("createRecord");
-        match &create.body {
-            Some(RequestBody::Json(v)) => {
-                let written: crate::records::Invitation =
-                    serde_json::from_value(v["record"].clone()).expect("record body");
-                assert_eq!(written.target, WORKSPACE_ID);
-            }
-            _ => panic!("expected JSON body"),
-        }
-    }
-
     const CAROL_DID: &str = "did:plc:carol";
 
     /// Happy path for `leave_workspace`: an editor authors a self-removal

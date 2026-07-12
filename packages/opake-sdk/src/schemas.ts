@@ -240,14 +240,12 @@ export const grantEntrySchema = z
     document: z.string(),
     recipient: z.string(),
     created_at: z.string(),
-    expires_at: z.string().nullable().optional(),
   })
   .transform((r) => ({
     uri: r.uri,
     document: r.document,
     recipient: r.recipient,
     createdAt: r.created_at,
-    expiresAt: r.expires_at ?? null,
   }));
 
 export type GrantEntry = z.output<typeof grantEntrySchema>;

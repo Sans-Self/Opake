@@ -81,7 +81,6 @@ mod tests {
             document: doc.into(),
             recipient: recipient.into(),
             encrypted_metadata: dummy_encrypted_metadata(),
-            expires_at: None,
             created_at: "2026-03-01T12:00:00Z".into(),
         }
     }

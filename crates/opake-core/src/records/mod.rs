@@ -11,8 +11,6 @@ mod defs;
 mod directory;
 mod document;
 mod grant;
-mod invitation;
-mod invitation_acceptance;
 mod keyring;
 mod pair_request;
 mod pair_response;
@@ -36,8 +34,6 @@ pub use defs::{
 pub use directory::{entry_target_uri, Directory, ListingEntry};
 pub use document::{DirectEncryption, Document, Encryption, KeyringEncryption};
 pub use grant::Grant;
-pub use invitation::{Invitation, INVITATION_COLLECTION};
-pub use invitation_acceptance::{InvitationAcceptance, INVITATION_ACCEPTANCE_COLLECTION};
 pub use keyring::{KeyHistoryEntry, Keyring};
 pub use pair_request::{PairRequest, PAIR_REQUEST_ALGO, PAIR_REQUEST_COLLECTION};
 pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};

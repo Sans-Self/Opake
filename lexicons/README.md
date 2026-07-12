@@ -31,8 +31,6 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `app.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
 | `app.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
 | `app.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
-| `app.opake.invitation` | record | Workspace invitation with token and optional role/expiry |
-| `app.opake.invitationAcceptance` | record | Acceptance of a workspace invitation |
 | `app.opake.keyringUpdate` | record | A proposed update to a workspace keyring (member add/remove, metadata, role change) |
 | `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
 | `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |

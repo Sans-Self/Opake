@@ -169,7 +169,6 @@ fn fixture_envelope(
                 },
                 algo: "x25519-mlkem768-hkdf-a256kw-v2".to_string(),
             },
-            expires_at: None,
             encrypted_metadata: EncryptedMetadata {
                 ciphertext: AtBytes {
                     encoded: String::new(),

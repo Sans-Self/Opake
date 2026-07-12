@@ -470,7 +470,6 @@ pub struct GrantEntryDto {
     pub document: String,
     pub recipient: String,
     pub created_at: String,
-    pub expires_at: Option<String>,
 }
 
 impl From<&GrantEntry> for GrantEntryDto {
@@ -480,7 +479,6 @@ impl From<&GrantEntry> for GrantEntryDto {
             document: g.document.clone(),
             recipient: g.recipient.clone(),
             created_at: g.created_at.clone(),
-            expires_at: g.expires_at.clone(),
         }
     }
 }

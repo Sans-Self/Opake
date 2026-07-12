@@ -55,6 +55,8 @@ The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_s
 
 A manager adds a member by wrapping the current group key to the recipient's published hybrid public keys and appending the wrap to a superseding keyring record. Adding a DID already in the member list SHALL be rejected. The wrap's AEAD anchor is the genesis URI (`spec:workspace-identity § Group-key wraps are AEAD-bound to genesis`); the role is assigned at add time.
 
+Direct manager add is the only admission channel: no invitation, request-to-join, or other self-service path exists.
+
 #### Scenario: duplicate add rejected
 
 - **GIVEN** bob already in the member list
@@ -119,5 +121,5 @@ A manager changes a member's role by writing a supersede carrying the prior memb
 - Genesis identity, AEAD wrap anchoring, head-vs-genesis resolution — workspace-identity spec.
 - What editors may do to directory contents (wiki-semantics additivity) — tree-chains spec.
 - The wrap algorithm, key hierarchy, and rotation-aware decryption mechanics — document-crypto spec.
-- Person-to-person sharing and invitations — sharing-grants spec (`spec:sharing-grants § Invitation targets hold the stable resource id`).
+- Person-to-person sharing — sharing-grants spec (`spec:sharing-grants § Sharing is cabinet-only`).
 - Workspace destruction — deliberately unspecified; see workspace-identity open questions.

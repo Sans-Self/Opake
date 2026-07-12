@@ -10,8 +10,6 @@ pub struct Grant {
     pub document: String,
     pub recipient: String,
     pub wrapped_key: WrappedKey,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<String>,
     pub encrypted_metadata: EncryptedMetadata,
     pub created_at: String,
 }
@@ -29,7 +27,6 @@ impl Grant {
             document,
             recipient,
             wrapped_key,
-            expires_at: None,
             encrypted_metadata,
             created_at,
         }

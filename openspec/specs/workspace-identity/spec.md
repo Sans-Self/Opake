@@ -58,14 +58,14 @@ Every workspace-scoped indexer request (`/workspace`, `/workspace/snapshot`, `/w
 
 The head URI SHALL be used only for: (a) PDS record operations on the head record itself — putRecord in place, or writing the record that supersedes it — and (b) as input to workspace resolution. Resolution SHALL fetch the record at the given URI to obtain the live member list, then derive genesis per the identity requirement. `resolve_workspace_by_uri` and `resolve_foreign_workspace` require head input by design; this is the sanctioned boundary between the two URI kinds.
 
-Long-lived references — invitation targets, cache keys, routes, stored record fields — SHALL NOT hold a head URI.
+Long-lived references — cache keys, routes, stored record fields — SHALL NOT hold a head URI.
 
-#### Scenario: invitation target survives membership churn
+#### Scenario: a stored record field survives membership churn
 
-- **GIVEN** an invitation created for a workspace
-- **WHEN** the workspace keyring is superseded before the invitation is redeemed
-- **THEN** the invitation's `target` still identifies the workspace
-- The binding resolves first and core stores the genesis id as `target`. Regression: `bug__create_invitation_stores_genesis_target`
+- **GIVEN** a directory record created in a workspace
+- **WHEN** the workspace keyring is superseded
+- **THEN** the record's `workspaceId` still identifies the workspace, because it stores the genesis id, never a head URI
+- Regression: genesis-root cascade asserts `workspace_id == genesis` (crates/opake-core/src/manager/manager_tests.rs)
 
 ### Requirement: The WASM boundary resolves to genesis before core operations
 
@@ -73,7 +73,7 @@ Keyring URIs supplied by JS are head URIs. Every WASM binding that invokes a wor
 
 The two URI kinds SHALL be distinct types on the Rust side of the boundary: a `WorkspaceId` newtype for the genesis URI and a separate type for head URIs, so that handing one where the other is expected fails to compile. Genesis-keyed core and indexer signatures SHALL accept `WorkspaceId`, not a raw string. `Workspace::uri` and resolution are the only constructors of `WorkspaceId`; bindings obtain one by resolving, never by wrapping a JS argument.
 
-The typed boundary ends where `WorkspaceId` would have to cross into opake-crypto or into a serialized record field. `WorkspaceId` is a domain concept: opake-crypto sits below opake-core in the dependency graph and takes wrap contexts as plain URIs (`WrapContext::Keyring`), and record fields (`Invitation.target`, `KeyringUploadParams.workspace_id`) are wire format, which the newtype deliberately doesn't deserialize into. Chain-generic helpers that walk directory and keyring chains alike (`verify_and_walk_chain`) also take the genesis as a plain URI — a directory chain's genesis is not a workspace identity. Below that line call sites convert via `as_str()`, and the guarantee is carried by the typed signature above them — the last typed function before the conversion is responsible for having received a genuine `WorkspaceId`, so every `as_str()` sits directly under one.
+The typed boundary ends where `WorkspaceId` would have to cross into opake-crypto or into a serialized record field. `WorkspaceId` is a domain concept: opake-crypto sits below opake-core in the dependency graph and takes wrap contexts as plain URIs (`WrapContext::Keyring`), and record fields (`KeyringUploadParams.workspace_id`) are wire format, which the newtype deliberately doesn't deserialize into. Chain-generic helpers that walk directory and keyring chains alike (`verify_and_walk_chain`) also take the genesis as a plain URI — a directory chain's genesis is not a workspace identity. Below that line call sites convert via `as_str()`, and the guarantee is carried by the typed signature above them — the last typed function before the conversion is responsible for having received a genuine `WorkspaceId`, so every `as_str()` sits directly under one.
 
 #### Scenario: a new binding cannot skip resolution
 

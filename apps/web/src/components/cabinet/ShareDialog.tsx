@@ -17,8 +17,13 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   const [documentUri, setDocumentUri] = useState<string | null>(null);
   const [documentName, setDocumentName] = useState("");
   const [recipientHandle, setRecipientHandle] = useState("");
-  const [status, setStatus] = useState<"idle" | "resolving" | "sharing" | "done" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "resolving" | "sharing" | "notReady" | "queuing" | "done" | "error"
+  >("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  // The recipient input as entered when resolution said RecipientNotReady —
+  // queuing must target exactly what the user confirmed the warning for.
+  const [notReadyRecipient, setNotReadyRecipient] = useState<string | null>(null);
 
   const session = useAuthStore((s) => s.session);
   // Sharing is cabinet-only (gated upstream via allowSharing).
@@ -32,6 +37,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       setRecipientHandle("");
       setStatus("idle");
       setErrorMessage("");
+      setNotReadyRecipient(null);
     }, MODAL_TRANSITION_MS);
   }, []);
 
@@ -42,6 +48,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       setRecipientHandle("");
       setStatus("idle");
       setErrorMessage("");
+      setNotReadyRecipient(null);
       dialogRef.current?.showModal();
       // Focus the input after dialog opens
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -78,12 +85,11 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
         );
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
-          await fileManager.createPendingShare(documentUri, recipient, "read", null);
-          setStatus("done");
-          toastSuccess(
-            `${recipient} hasn't set up Opake yet. Share queued — completes automatically once they log in (expires in 7 days).`,
-          );
-          dismiss();
+          // Never queue silently: surface the warning and let queuing be an
+          // explicit second step.
+          // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+          setNotReadyRecipient(recipient);
+          setStatus("notReady");
           return;
         }
         throw resolveError;
@@ -104,7 +110,26 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
     }
   }, [documentUri, session, recipientHandle, documentName, fileManager, dismiss]);
 
-  const busy = status === "resolving" || status === "sharing";
+  const handleQueueShare = useCallback(async () => {
+    if (!documentUri || !notReadyRecipient || !fileManager) return;
+
+    setStatus("queuing");
+    try {
+      await fileManager.createPendingShare(documentUri, notReadyRecipient, "read", null);
+      setStatus("done");
+      toastSuccess(
+        `Share queued for ${notReadyRecipient} — completes automatically once they set up Opake (expires in 7 days).`,
+      );
+      dismiss();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to queue share";
+      setErrorMessage(message);
+      setStatus("error");
+      toastError(message);
+    }
+  }, [documentUri, notReadyRecipient, fileManager, dismiss]);
+
+  const busy = status === "resolving" || status === "sharing" || status === "queuing";
 
   return (
     <dialog ref={dialogRef} className="modal" aria-label="Share file">
@@ -130,7 +155,15 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
             type="text"
             placeholder="alice.bsky.social"
             value={recipientHandle}
-            onChange={(e) => setRecipientHandle(e.target.value.replace(/[^a-zA-Z0-9.:_-]/g, ""))}
+            onChange={(e) => {
+              setRecipientHandle(e.target.value.replace(/[^a-zA-Z0-9.:_-]/g, ""));
+              // Editing the recipient invalidates a shown not-ready warning —
+              // queuing must never target a handle the user has since changed.
+              if (status === "notReady") {
+                setStatus("idle");
+                setNotReadyRecipient(null);
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !busy && recipientHandle.trim()) {
                 void handleShare();
@@ -149,6 +182,16 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
             <p className="text-text-muted mt-1 text-xs">Resolving recipient…</p>
           )}
           {status === "sharing" && <p className="text-text-muted mt-1 text-xs">Creating grant…</p>}
+          {(status === "notReady" || status === "queuing") && notReadyRecipient && (
+            <div className="alert alert-warning mt-3 items-start gap-2 rounded-lg p-3" role="alert">
+              <p className="text-xs">
+                <span className="font-medium">{notReadyRecipient}</span> hasn't set up Opake yet,
+                so they can't receive this share until they publish an encryption key. You can
+                queue the share — it completes automatically once they join and expires after 7
+                days.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="modal-action justify-center gap-2">
@@ -159,14 +202,25 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
           >
             Cancel
           </button>
-          <button
-            onClick={() => void handleShare()}
-            disabled={busy || !recipientHandle.trim()}
-            className="btn btn-primary btn-sm gap-1.5 rounded-lg text-xs"
-          >
-            {busy && <span className="loading loading-spinner loading-xs" />}
-            Share
-          </button>
+          {status === "notReady" || status === "queuing" ? (
+            <button
+              onClick={() => void handleQueueShare()}
+              disabled={busy}
+              className="btn btn-warning btn-sm gap-1.5 rounded-lg text-xs"
+            >
+              {busy && <span className="loading loading-spinner loading-xs" />}
+              Queue share
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleShare()}
+              disabled={busy || !recipientHandle.trim()}
+              className="btn btn-primary btn-sm gap-1.5 rounded-lg text-xs"
+            >
+              {busy && <span className="loading loading-spinner loading-xs" />}
+              Share
+            </button>
+          )}
         </div>
       </div>
       <form method="dialog" className="modal-backdrop">

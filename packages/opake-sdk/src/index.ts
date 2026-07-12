@@ -64,7 +64,6 @@ export {
 } from "./types";
 export type { AwaitPairOptions } from "./pairing";
 export {
-  type InvitationEntry,
   type TaskDef,
   type GrantEntry,
   type InboxGrant,

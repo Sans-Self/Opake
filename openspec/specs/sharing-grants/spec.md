@@ -4,7 +4,7 @@
 
 Define person-to-person document sharing: how one user hands another access to a single cabinet document, how the recipient discovers and opens it, and what revocation does and doesn't buy.
 
-Sharing is deliberately separate from workspace membership. A workspace shares a whole keyring chain and its documents through group keys (see the workspace-identity and workspace-membership specs); a share hands out one document's content key, wrapped to one recipient, as a standalone record. The two never mix: sharing is guarded to the cabinet, and the PDS-only download layer refuses keyring-encrypted documents outright rather than guess at group keys (`1a797ab`). This spec owns the grant lifecycle, public-key discovery, indexer-mediated inbox delivery, the pending-share queue, invitations, and revocation semantics. It does not own the wrap-context construction or the KEM (the document-crypto spec does), nor workspace identity or membership.
+Sharing is deliberately separate from workspace membership. A workspace shares a whole keyring chain and its documents through group keys (see the workspace-identity and workspace-membership specs); a share hands out one document's content key, wrapped to one recipient, as a standalone record. The two never mix: sharing is guarded to the cabinet, and the PDS-only download layer refuses keyring-encrypted documents outright rather than guess at group keys (`1a797ab`). This spec owns the grant lifecycle, public-key discovery, indexer-mediated inbox delivery, the pending-share queue, and revocation semantics. It does not own the wrap-context construction or the KEM (the document-crypto spec does), nor workspace identity or membership.
 
 Terms:
 
@@ -78,9 +78,15 @@ The recipient's inbox SHALL be bootstrapped by a full fetch from the indexer's `
 
 ### Requirement: A share to a not-yet-ready recipient is queued, not dropped
 
-When resolution returns `RecipientNotReady`, the owner MAY enqueue an `app.opake.pendingShare` record on their own PDS instead of failing. The pending record SHALL carry the target document, the recipient as the user entered it, and the grant metadata encrypted under the document's content key, so the queue holds no plaintext and the grant can be reconstructed later. Pending shares SHALL expire after `DEFAULT_PENDING_SHARE_TTL_SECONDS` (7 days).
+When resolution returns `RecipientNotReady`, the client SHALL warn the user that the recipient exists but has not set up Opake — the recipient cannot receive the share until they publish an encryption key — before offering to queue. The owner MAY then enqueue an `app.opake.pendingShare` record on their own PDS instead of failing. The pending record SHALL carry the target document, the recipient as the user entered it, and the grant metadata encrypted under the document's content key, so the queue holds no plaintext and the grant can be reconstructed later. Pending shares SHALL expire after `DEFAULT_PENDING_SHARE_TTL_SECONDS` (7 days).
 
 Pending shares are the owner's own outgoing queue and are not indexed: retry SHALL be driven by the daemon listing the owner's `pendingShare` records, re-resolving each recipient, and — once a recipient publishes a key — fetching the content key, creating the grant with the original metadata, and deleting the pending record. A recipient still without a key SHALL leave the record queued; a document that fails permanently (deleted, corrupt, undecryptable) SHALL be skipped for its siblings in the same pass.
+
+#### Scenario: sharing to a not-ready recipient warns before queuing
+
+- **GIVEN** a valid DID whose PDS has no `publicKey/self` record
+- **WHEN** the owner shares a document to it
+- **THEN** the client surfaces a warning that the recipient has not set up Opake, and queues the share only as an explicit follow-up, never silently
 
 #### Scenario: a queued share completes once the recipient sets up Opake
 
@@ -97,7 +103,7 @@ Pending shares are the owner's own outgoing queue and are not indexed: retry SHA
 
 ### Requirement: Revocation stops future discovery but not historical access
 
-Revoking a share SHALL delete the grant record (design decision 4). Deletion SHALL be guarded to the grant collection so no other record type can be removed through the revoke path. Deleting the grant stops indexer-mediated discovery — the entry disappears from the recipient's inbox via `grant:delete` — but SHALL NOT be presented as revoking access already obtained: the recipient may have cached the unwrapped content key or the plaintext, and the blob is not re-encrypted. `expiresAt` on a grant is advisory only; clients may stop serving on it, but the wrapped key remains valid until the document is re-encrypted under a new content key.
+Revoking a share SHALL delete the grant record (design decision 4). Deletion SHALL be guarded to the grant collection so no other record type can be removed through the revoke path. Deleting the grant stops indexer-mediated discovery — the entry disappears from the recipient's inbox via `grant:delete` — but SHALL NOT be presented as revoking access already obtained: the recipient may have cached the unwrapped content key or the plaintext, and the blob is not re-encrypted. A grant carries no expiry; it is open-ended until revoked. Time-boxed sharing, if ever wanted, is a designed feature with a writer and an enforcer, not a record field.
 
 #### Scenario: revoke deletes the grant and clears the inbox entry
 
@@ -122,27 +128,6 @@ Grant creation and the pending-share queue SHALL be available only from `FileCon
 - **WHEN** `share` or `create_pending_share` is called
 - **THEN** it returns an error stating sharing is cabinet-only, without writing any record
 
-### Requirement: Invitation targets hold the stable resource id
-
-An `app.opake.invitation` SHALL carry a random token, a `type` (`workspace` or `share`), and a `target` AT-URI of the resource being offered. For workspace invitations, `target` SHALL be the stable workspace identity (the genesis keyring URI), so the invitation survives keyring supersede; the identity rule and the ban on head URIs in long-lived references are owned by `spec:workspace-identity § Head URI use is limited to head-record operations and resolution input` and are not restated here. `maxUses` / `uses` bound redemptions; `expiresAt` bounds lifetime.
-
-Acceptance SHALL be recorded as an `app.opake.invitationAcceptance` record on the acceptor's PDS pointing at the invitation; it records intent and does not itself grant membership or access.
-
-#### Scenario: a workspace invitation survives keyring supersede
-
-- **GIVEN** a workspace invitation created before the keyring is superseded
-- **WHEN** the keyring supersedes before redemption
-- **THEN** the invitation's `target` still identifies the workspace, because it stores the genesis id
-- Regression: `bug__create_invitation_stores_genesis_target` (see workspace-identity spec)
-
-## Open questions
-
-- Share-type invitations are lexicon-only. `app.opake.invitation` defines `type: "share"` with a document-URI target, but core constructs only workspace invitations (`Invitation::workspace`; `create_invitation` takes a `WorkspaceId` and role). There is no code path that mints a share invitation or redeems one into a grant. Decide whether share invitations are a real second sharing channel (link-based, no pre-known recipient DID) or should be dropped from the lexicon until built.
-- Invitations are descoped from the web UI. The invite-link dialog was removed because it produced links to an `/invite` route that never existed, and although `acceptInvitation` is exported through WASM and the SDK, no client calls it. The lexicons (`app.opake.invitation`, `app.opake.invitationAcceptance`) and the SDK/WASM surface remain. Building the full flow — creation UI, a redemption route that resolves the token and writes the acceptance record, and the owner-side discovery that completes the add — is its own future change. Decide the redemption UX before invitations are advertised as usable.
-- Grant healing only prunes; it does not re-wrap. `heal_stale_grants` deletes grants whose recipient has no `publicKey/self` (account gone or never set up) but does not detect a recipient who rotated their key and re-wrap to the new one (crates/opake-core/src/sharing/heal.rs, "Future"). Until re-wrapping lands, a recipient key rotation silently strips their access to previously shared documents. Decide whether re-wrap-on-rotation belongs to the daemon healing pass and how it learns the old-vs-new key.
-- Grants have no expiry in practice. The create path never sets `expiresAt` (`GrantParams` has no expiry field), so every grant is open-ended and `expiresAt` handling is untested end to end. Decide whether cabinet shares should support an owner-set expiry and what "advisory" enforcement clients actually owe it.
-- Sharing workspace documents person-to-person is out of scope today and tangled with custody: a shared workspace document lives on a member's PDS and is reached through group keys, so a cross-workspace share would need its own key handoff. Queued behind the supersede/fork custody design pass (see workspace-identity open questions).
-
 ## Non-requirements
 
 Owned by other specs and intentionally not legislated here:
@@ -151,3 +136,10 @@ Owned by other specs and intentionally not legislated here:
 - Wrap-context construction, the hybrid X25519 + ML-KEM-768 KEM, and metadata encryption internals — document-crypto spec. This spec references `WrapContext::Document` as a binding contract but does not define it.
 - The indexer's SSE token issuance, reconnect, and topic-subscription mechanics — the client-sync layer; this spec only requires that grant events reach both parties' personal topics.
 - Directory-chain and document supersede semantics — tree-chains spec.
+
+Deferred, not owned by another spec:
+
+- Invitations. No invitation channel exists — the `app.opake.invitation` / `app.opake.invitationAcceptance` machinery was removed wholesale because no working loop was ever built. A future feature must design creation, redemption, and owner-side acceptance discovery from scratch.
+- Grant expiry. Grants are open-ended until revoked; time-boxed sharing would be a designed feature with a writer and an enforcer, not a record field.
+- Re-wrap on recipient key rotation. Grant healing prunes recipients with no key but does not re-wrap to a rotated key; deferred behind the identity-rotation design pass (not daemon availability — healing already runs as a daemon task on CLI and web). Issue #7.
+- Person-to-person sharing of workspace documents. A workspace document lives on a member's PDS and is reached through group keys, not grants; a cross-workspace share needs its own key handoff, deferred behind the fork/custody design pass. Issue #20.

@@ -20,6 +20,10 @@ pub struct NewShareCommand {
     /// Optional note to the recipient
     #[arg(short, long)]
     note: Option<String>,
+
+    /// Queue the share if the recipient hasn't set up Opake yet
+    #[arg(long)]
+    queue: bool,
 }
 
 impl Execute for NewShareCommand {
@@ -56,16 +60,24 @@ impl Execute for NewShareCommand {
                 let display = recipient.handle.as_deref().unwrap_or(&recipient.did);
                 println!("shared with {} → {}", display, grant_uri);
             }
-            Err(Error::NotFound(_)) => {
-                // Recipient hasn't set up Opake — queue pending share.
-                mgr.create_pending_share(&uri, &self.recipient, "read", self.note.as_deref())
-                    .await?;
-
+            Err(Error::RecipientNotReady(_)) => {
+                // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
                 println!(
-                    "{} hasn't set up Opake yet. Share queued — it will complete \
-                     automatically once they log in (expires in 7 days).",
+                    "{} exists but hasn't set up Opake yet — they can't receive \
+                     this share until they publish an encryption key.",
                     self.recipient
                 );
+
+                if self.queue {
+                    mgr.create_pending_share(&uri, &self.recipient, "read", self.note.as_deref())
+                        .await?;
+                    println!(
+                        "Share queued — it will complete automatically once they \
+                         set up Opake (expires in 7 days)."
+                    );
+                } else {
+                    println!("Re-run with --queue to queue the share for when they join.");
+                }
             }
             Err(e) => return Err(e.into()),
         }

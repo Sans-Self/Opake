@@ -195,7 +195,6 @@ export interface GrantEntry {
   readonly document: string;
   readonly recipient: string;
   readonly createdAt: string;
-  readonly expiresAt: string | null;
 }
 
 /** An incoming grant as indexed by the Indexer (shared-with-me). */
@@ -233,23 +232,6 @@ export interface PendingShareEntry {
   readonly uri: string;
   readonly document: string;
   readonly recipient: string;
-  readonly createdAt: string;
-}
-
-// ---------------------------------------------------------------------------
-// Invitations
-// ---------------------------------------------------------------------------
-
-/** A workspace invitation as returned by listInvitations. */
-export interface InvitationEntry {
-  readonly uri: string;
-  readonly target: string;
-  readonly invitationType: string;
-  readonly role: string | null;
-  readonly token: string;
-  readonly maxUses: number | null;
-  readonly uses: number;
-  readonly expiresAt: string | null;
   readonly createdAt: string;
 }
 

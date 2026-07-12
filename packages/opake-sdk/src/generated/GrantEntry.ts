@@ -5,4 +5,4 @@
  * but drops the encrypted metadata envelope (which stays opaque on the
  * JS side — the SDK decrypts it via `resolveGrantMetadata`).
  */
-export type GrantEntryDto = { uri: string, document: string, recipient: string, created_at: string, expires_at: string | null, };
+export type GrantEntryDto = { uri: string, document: string, recipient: string, created_at: string, };

@@ -422,7 +422,7 @@ try {
 
 export const listOutgoingShares = `const grants = await fm.listShares();
 for (const g of grants) {
-  // g: { uri, document, recipient, createdAt, expiresAt }
+  // g: { uri, document, recipient, createdAt }
   console.log(\`Shared \${g.document} with \${g.recipient}\`);
 }
 

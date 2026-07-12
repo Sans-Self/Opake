@@ -15,8 +15,6 @@
             "app.opake.directory",
             "app.opake.document",
             "app.opake.grant",
-            "app.opake.invitation",
-            "app.opake.invitationAcceptance",
             "app.opake.keyring",
             "app.opake.pairRequest",
             "app.opake.pairResponse",

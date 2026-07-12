@@ -104,7 +104,6 @@ mod tests {
                     },
                     algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
-                expires_at: None,
                 encrypted_metadata: EncryptedMetadata {
                     ciphertext: AtBytes {
                         encoded: String::new(),

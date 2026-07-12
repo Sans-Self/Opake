@@ -30,11 +30,6 @@
             "ref": "app.opake.defs#wrappedKey",
             "description": "The document's content encryption key, wrapped to the recipient's DID public key."
           },
-          "expiresAt": {
-            "type": "string",
-            "format": "datetime",
-            "description": "Optional expiration. After this time, clients should stop serving the content (advisory — the wrapped key remains valid unless the document is re-encrypted)."
-          },
           "encryptedMetadata": {
             "type": "ref",
             "ref": "app.opake.defs#encryptedMetadata",

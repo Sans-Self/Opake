@@ -11,7 +11,6 @@ pub struct GrantEntry {
     pub document: String,
     pub recipient: String,
     pub encrypted_metadata: EncryptedMetadata,
-    pub expires_at: Option<String>,
     pub created_at: String,
 }
 
@@ -26,7 +25,6 @@ pub async fn list_grants(
         document: grant.document,
         recipient: grant.recipient,
         encrypted_metadata: grant.encrypted_metadata,
-        expires_at: grant.expires_at,
         created_at: grant.created_at,
     })
     .await

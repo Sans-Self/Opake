@@ -28,9 +28,7 @@ use crate::error::Error;
 use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
-use crate::records::{
-    Invitation, InvitationAcceptance, Role, INVITATION_ACCEPTANCE_COLLECTION, INVITATION_COLLECTION,
-};
+use crate::records::Role;
 use crate::storage::{Identity, Storage};
 use crate::workspace::{Workspace, WorkspaceId};
 
@@ -1137,78 +1135,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         self.write_keyring_supersede(workspace_id, prior_uri, prior)
             .await
-    }
-
-    // -- Invitations --
-
-    /// Create a workspace invitation with a random token.
-    ///
-    /// `workspace_id` is the genesis URI — the invitation target must
-    /// survive membership churn, so it's stamped with the stable
-    /// identity rather than whatever head URI the caller happened to
-    /// hold when the invitation was created.
-    /// Returns `(invitation_uri, token)`.
-    pub async fn create_invitation(
-        &mut self,
-        workspace_id: &WorkspaceId,
-        role: &str,
-    ) -> Result<(String, String), Error> {
-        let token = self.generate_token();
-        let now = self.now();
-        let record =
-            Invitation::workspace(workspace_id.as_str().to_string(), role, token.clone(), now);
-        let record_ref = self
-            .client
-            .create_record(INVITATION_COLLECTION, None, &record)
-            .await?;
-        self.auto_persist_session().await?;
-        Ok((record_ref.uri, token))
-    }
-
-    /// List all invitations on the caller's PDS.
-    pub async fn list_invitations(&mut self) -> Result<Vec<(String, Invitation)>, Error> {
-        let page = self
-            .client
-            .list_records(INVITATION_COLLECTION, Some(100), None)
-            .await?;
-        let mut invitations = Vec::new();
-        for entry in page.records {
-            let invitation: Invitation = serde_json::from_value(entry.value)?;
-            invitations.push((entry.uri, invitation));
-        }
-        self.auto_persist_session().await?;
-        Ok(invitations)
-    }
-
-    /// Delete an invitation record (revoke).
-    pub async fn revoke_invitation(&mut self, invitation_uri: &str) -> Result<(), Error> {
-        let at_uri = atproto::parse_at_uri(invitation_uri)?;
-        self.client
-            .delete_record(&at_uri.collection, &at_uri.rkey)
-            .await?;
-        self.auto_persist_session().await?;
-        Ok(())
-    }
-
-    /// Accept an invitation by writing an acceptance record to the caller's PDS.
-    /// Returns the acceptance record URI.
-    pub async fn accept_invitation(&mut self, invitation_uri: &str) -> Result<String, Error> {
-        let now = self.now();
-        let record = InvitationAcceptance::new(invitation_uri.to_string(), now);
-        let record_ref = self
-            .client
-            .create_record(INVITATION_ACCEPTANCE_COLLECTION, None, &record)
-            .await?;
-        self.auto_persist_session().await?;
-        Ok(record_ref.uri)
-    }
-
-    /// Generate a random URL-safe token for invitations.
-    fn generate_token(&mut self) -> String {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-        let mut bytes = [0u8; 24];
-        self.rng.fill_bytes(&mut bytes);
-        URL_SAFE_NO_PAD.encode(bytes)
     }
 
     /// Download and decrypt a file using a grant (cross-PDS, recipient side).
