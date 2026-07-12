@@ -144,6 +144,30 @@ def main() -> int:
     # (capability, requirement) -> [(citing file, citing capability | None)]
     citers: dict[tuple[str, str], list[tuple[Path, str | None]]] = {}
 
+    # Requirements ADDED by active (non-archived) changes resolve everywhere,
+    # not just inside their own delta files: tests written while a change is
+    # in flight cite the new requirements before the sync-to-canon at archive.
+    # An abandoned change makes such cites dangle again on the next run.
+    changes_root = ROOT / "openspec" / "changes"
+    changes = (
+        sorted(c for c in changes_root.iterdir() if c.is_dir() and c.name != "archive")
+        if changes_root.exists()
+        else []
+    )
+    change_sections = {
+        change: {
+            d.parent.name: load_delta_sections(d)
+            for d in sorted((change / "specs").rglob("spec.md"))
+        }
+        for change in changes
+    }
+    in_flight = {
+        (cap, req)
+        for sections in change_sections.values()
+        for cap, secs in sections.items()
+        for req in secs.get("ADDED", set())
+    }
+
     def check_citation(
         loc: str,
         capability: str,
@@ -152,7 +176,7 @@ def main() -> int:
     ) -> None:
         checked["citations"] += 1
         req = normalize(req)
-        if (capability, req) in extra:
+        if (capability, req) in extra or (capability, req) in in_flight:
             return
         if capability not in requirements:
             errors.append(f"{loc}: cited capability does not exist: {capability}")
@@ -209,27 +233,16 @@ def main() -> int:
                 check_citation(f"{rel}:{lineno}", capability, req)
                 citers.setdefault((capability, normalize(req)), []).append((rel, None))
 
-    changes_root = ROOT / "openspec" / "changes"
-    changes = (
-        sorted(c for c in changes_root.iterdir() if c.is_dir() and c.name != "archive")
-        if changes_root.exists()
-        else []
-    )
     for change in changes:
         deltas = {
             d.parent.name: d for d in sorted((change / "specs").rglob("spec.md"))
         }
-        sections = {cap: load_delta_sections(d) for cap, d in deltas.items()}
-        added = {
-            (cap, req)
-            for cap, secs in sections.items()
-            for req in secs.get("ADDED", set())
-        }
+        sections = change_sections[change]
 
         for cap, delta in deltas.items():
             rel = delta.relative_to(ROOT)
             for capability, req in CITE_RE.findall(delta.read_text()):
-                check_citation(str(rel), capability, req, extra=added)
+                check_citation(str(rel), capability, req)
 
         for cap, secs in sections.items():
             for req in sorted(secs.get("REMOVED", set())):
