@@ -29,54 +29,76 @@ function PairRequestPage() {
   const [state, setState] = useState<RequestState>({ step: "generating" });
   const { addLoading, removeLoading } = useAppStore();
   const abortRef = useRef<AbortController | null>(null);
+  // Live rkey of the outstanding pair-request. Held in a ref, not read off
+  // `state`, so the cleanup below sees the current value instead of the stale
+  // one captured when the effect first ran — otherwise a mid-pair navigate
+  // never cancels the request and orphans it on the PDS. Cleared once approval
+  // arrives, since a consumed request no longer needs cancelling.
+  const outstandingRkeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
     const controller = new AbortController();
     abortRef.current = controller;
+    // Read through a call rather than the property directly: an early
+    // `if (aborted) return` narrows the property to `false` for the rest of
+    // the async flow, which then trips no-unnecessary-condition on later
+    // checks even though the signal can flip when teardown aborts it.
+    const isAborted = () => controller.signal.aborted;
 
-    async function init() {
-      if (useAuthStore.getState().session.status !== "active") return;
-
+    const createRequest = async (): Promise<{
+      rkey: string;
+      fingerprint: string;
+      uri: string;
+    } | null> => {
       addLoading("pair-request-init");
-      let info: { rkey: string; fingerprint: string; uri: string } | null = null;
       try {
         pairInitState.current ??= createPairRequest().then((r) => ({
           rkey: r.rkey,
           uri: r.uri,
           fingerprint: formatFingerprint(r.x25519EphemeralPublicKey),
         }));
-        info = await pairInitState.current;
-
-        if (cancelled) return;
-        setState({
-          step: "waiting",
-          fingerprint: info.fingerprint,
-          requestRkey: info.rkey,
-          requestUri: info.uri,
-        });
+        return await pairInitState.current;
       } catch (err) {
         console.error("[pairing] init failed:", err);
-        if (cancelled) return;
-        setState({
-          step: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-        return;
+        if (!isAborted()) {
+          setState({
+            step: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return null;
       } finally {
         pairInitState.current = null;
         removeLoading("pair-request-init");
       }
+    };
+
+    async function init() {
+      if (useAuthStore.getState().session.status !== "active") return;
+
+      const info = await createRequest();
+      if (info === null || isAborted()) return;
+
+      outstandingRkeyRef.current = info.rkey;
+      setState({
+        step: "waiting",
+        fingerprint: info.fingerprint,
+        requestRkey: info.rkey,
+        requestUri: info.uri,
+      });
 
       try {
         await awaitPairCompletion(info.rkey, { signal: controller.signal });
-        if (cancelled) return;
+        if (isAborted()) return;
+        // Approval received — the request is consumed, so there's nothing left
+        // to cancel on teardown.
+        outstandingRkeyRef.current = null;
         setState({ step: "receiving" });
         await useAuthStore.getState().finalizePairing();
         setState({ step: "success" });
         setTimeout(() => navigate({ to: "/cabinet" }), 1500);
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (isAborted()) return;
         console.error("[pairing] completion failed:", err);
         setState({
           step: "error",
@@ -87,17 +109,14 @@ function PairRequestPage() {
 
     void init();
     return () => {
-      cancelled = true;
       controller.abort();
       abortRef.current = null;
       // Fire-and-forget: if the user walks away before the request was
       // created, there's nothing to cancel; if it was, we tear it down so
       // the PDS and storage don't retain orphan state.
-      const s = useAuthStore.getState();
-      const rkey =
-        state.step === "waiting" ? state.requestRkey : undefined;
-      if (rkey && s.session.status === "active") {
-        void cancelPairRequest(rkey).catch(() => {});
+      const rkey = outstandingRkeyRef.current;
+      if (rkey && useAuthStore.getState().session.status === "active") {
+        void cancelPairRequest(rkey).catch(() => undefined);
       }
     };
   }, [navigate, addLoading, removeLoading]);

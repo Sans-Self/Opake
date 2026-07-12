@@ -128,7 +128,7 @@ function ErrorBanner({ message, onRetry }: { readonly message: string; readonly 
           Try again
         </button>
         <button
-          onClick={clearCacheAndReload}
+          onClick={() => void clearCacheAndReload()}
           disabled={clearing}
           className="btn btn-ghost btn-sm"
         >

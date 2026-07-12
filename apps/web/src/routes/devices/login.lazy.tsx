@@ -6,11 +6,11 @@ import { useAuthStore } from "@/stores/auth";
 // entry gives visitors a concrete starting point if they don't yet have an
 // atproto account — and signals to existing users that their handle from
 // any of these places already works here.
-const ATMOSPHERE_APPS: ReadonlyArray<{
+const ATMOSPHERE_APPS: readonly {
   readonly name: string;
   readonly href: string;
   readonly description: string;
-}> = [
+}[] = [
   {
     name: "Bluesky",
     href: "https://bsky.app",

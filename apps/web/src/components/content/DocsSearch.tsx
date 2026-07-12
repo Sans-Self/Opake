@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
@@ -23,6 +23,23 @@ interface DocsSearchProps {
 export function DocsSearch({ open, onOpenChange }: DocsSearchProps) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Reset the query whenever the palette toggles so reopening starts fresh.
+  // Tracking the previous `open` and adjusting during render is React's
+  // prescribed alternative to resetting derived state inside an effect.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    setQuery("");
+  }
+
+  // A command palette must take keyboard focus the moment it appears — the
+  // input is only in the DOM once `open`, so focus is moved here rather than
+  // via the (accessibility-flagged) autoFocus prop.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
 
   // Global Cmd+K / Ctrl+K toggle. Ignore when a modifier besides the intended
   // meta/ctrl is active, to avoid intercepting browser shortcuts like Ctrl+Shift+K.
@@ -44,11 +61,6 @@ export function DocsSearch({ open, onOpenChange }: DocsSearchProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onOpenChange]);
 
-  // Clear the query on close so reopening starts fresh.
-  useEffect(() => {
-    if (!open) setQuery("");
-  }, [open]);
-
   const hits = useMemo(() => searchDocs(query), [query]);
 
   const onSelect = (hit: SearchHit) => {
@@ -65,17 +77,22 @@ export function DocsSearch({ open, onOpenChange }: DocsSearchProps) {
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      role="presentation"
-      onClick={() => onOpenChange(false)}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-4 pt-[10vh]"
-    >
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]">
+      {/* Click-outside-to-close as a real button so it's keyboard-activatable;
+          kept out of the tab order since Escape already closes the palette and
+          cmdk traps focus within the dialog. */}
+      <button
+        type="button"
+        aria-label="Close search"
+        tabIndex={-1}
+        onClick={() => onOpenChange(false)}
+        className="absolute inset-0 cursor-default bg-black/30"
+      />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Search documentation"
-        onClick={(event) => event.stopPropagation()}
-        className="bg-base-100 border-border-accent/40 w-full max-w-xl overflow-hidden rounded-xl border shadow-panel-lg"
+        className="bg-base-100 border-border-accent/40 relative w-full max-w-xl overflow-hidden rounded-xl border shadow-panel-lg"
       >
         <Command
           label="Search documentation"
@@ -85,7 +102,7 @@ export function DocsSearch({ open, onOpenChange }: DocsSearchProps) {
           <div className="border-border-accent/30 flex items-center gap-2 border-b px-4 py-3">
             <MagnifyingGlassIcon size={16} aria-hidden="true" className="text-text-muted" />
             <Command.Input
-              autoFocus
+              ref={inputRef}
               value={query}
               onValueChange={setQuery}
               placeholder="Search docs…"
@@ -146,11 +163,15 @@ interface DocsSearchButtonProps {
 }
 
 export function DocsSearchButton({ onClick, compact = false }: DocsSearchButtonProps) {
-  // Detect macOS once on mount — we need to pick ⌘ vs Ctrl for the hint.
-  const [isMac, setIsMac] = useState(false);
-  useEffect(() => {
-    setIsMac(/mac/i.test(navigator.platform) || /mac/i.test(navigator.userAgent));
-  }, []);
+  // Detect macOS to pick ⌘ vs Ctrl for the hint. Read through
+  // useSyncExternalStore so the server renders "Ctrl" and the client swaps to
+  // the real value on hydration without a mismatch — and without touching the
+  // deprecated navigator.platform.
+  const isMac = useSyncExternalStore(
+    () => () => undefined,
+    () => /mac/i.test(navigator.userAgent),
+    () => false,
+  );
   const modifierKey = isMac ? "⌘" : "Ctrl";
 
   return (

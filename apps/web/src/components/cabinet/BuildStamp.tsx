@@ -31,10 +31,10 @@ export function useWasmBuildInfo(): WasmBuildState {
   const [state, setState] = useState<WasmBuildState>(LOADING);
 
   useEffect(() => {
-    let alive = true;
+    const controller = new AbortController();
     wasmBuildInfo()
       .then((info) => {
-        if (!alive) return;
+        if (controller.signal.aborted) return;
         setState(
           info
             ? { text: `wasm built ${info.builtAt} · ${info.gitHash}`, stale: false }
@@ -45,16 +45,14 @@ export function useWasmBuildInfo(): WasmBuildState {
         );
       })
       .catch((e: unknown) => {
-        if (alive) {
+        if (!controller.signal.aborted) {
           setState({
             text: `buildInfo error: ${e instanceof Error ? e.message : String(e)}`,
             stale: true,
           });
         }
       });
-    return () => {
-      alive = false;
-    };
+    return () => controller.abort();
   }, []);
 
   return state;

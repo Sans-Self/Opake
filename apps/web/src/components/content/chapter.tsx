@@ -170,7 +170,6 @@ export function PlatformToggle({ children }: PlatformToggleProps) {
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
               ref={(el) => {
-                // eslint-disable-next-line functional/immutable-data -- ref array mutation is the React pattern
                 tabRefs.current[index] = el;
               }}
               onClick={() => setActive(name)}

@@ -311,23 +311,30 @@ export interface DocGroupBlock {
 export function nextDoc(currentSlug: string): DocMeta | null {
   const index = DOCS_REGISTRY.findIndex((d) => d.slug === currentSlug);
   if (index === -1) return null;
-  const current = DOCS_REGISTRY[index]!;
-  for (let i = index + 1; i < DOCS_REGISTRY.length; i++) {
-    const candidate = DOCS_REGISTRY[i]!;
-    if (candidate.slug === "faq") continue; // FAQ is cross-cutting, not a chapter
-    const sameGroup = current.group !== undefined && candidate.group === current.group;
-    const sameFlatCategory =
-      current.group === undefined &&
-      candidate.group === undefined &&
-      candidate.category === current.category;
-    if (sameGroup || sameFlatCategory) return candidate;
-    // Stop walking once we leave the current group or flat-category band —
-    // we don't want `sdk/identity` to point at `react/overview` just because
-    // it comes later in the array.
-    if (current.group !== undefined && candidate.group !== current.group) return null;
-    if (current.group === undefined && candidate.category !== current.category) return null;
-  }
-  return null;
+  const current = DOCS_REGISTRY[index];
+
+  // Same reading sequence as `current`: a shared group for nested pages, or a
+  // shared flat category for ungrouped ones.
+  const continuesSequence = (candidate: DocMeta): boolean =>
+    current.group !== undefined
+      ? candidate.group === current.group
+      : candidate.group === undefined && candidate.category === current.category;
+
+  // Leaving the current band — the point where "next" becomes nothing, so we
+  // don't let `sdk/identity` point at `react/overview` further down the array.
+  const endsSequence = (candidate: DocMeta): boolean =>
+    current.group !== undefined
+      ? candidate.group !== current.group
+      : candidate.category !== current.category;
+
+  // The first candidate after `current` that either continues the sequence or
+  // ends it decides the answer; anything before that (FAQ, or a grouped page
+  // sitting inside a flat category's band) is walked past.
+  const candidate = DOCS_REGISTRY.slice(index + 1).find(
+    (c) => c.slug !== "faq" && (continuesSequence(c) || endsSequence(c)),
+  );
+
+  return candidate && continuesSequence(candidate) ? candidate : null;
 }
 
 export function partitionCategoryForSidebar(category: DocCategory): {
@@ -335,30 +342,20 @@ export function partitionCategoryForSidebar(category: DocCategory): {
   readonly groups: readonly DocGroupBlock[];
 } {
   const docs = docsByCategory(category);
-  const ungrouped: DocMeta[] = [];
-  const groupMap = new Map<string, DocMeta[]>();
+  const ungrouped: readonly DocMeta[] = docs.filter((doc) => doc.group === undefined);
 
-  for (const doc of docs) {
-    if (doc.group === undefined) {
-      ungrouped.push(doc);
-      continue;
-    }
-    const existing = groupMap.get(doc.group);
-    if (existing) {
-      existing.push(doc);
-    } else {
-      groupMap.set(doc.group, [doc]);
-    }
-  }
+  // Group keys in first-appearance order — the sidebar renders groups in the
+  // order they first show up in the registry.
+  const groupKeys = docs.reduce<readonly string[]>((keys, doc) => {
+    if (doc.group === undefined || keys.includes(doc.group)) return keys;
+    return [...keys, doc.group];
+  }, []);
 
-  const groups: DocGroupBlock[] = [];
-  for (const [key, groupDocs] of groupMap) {
-    groups.push({
-      key,
-      label: GROUP_META[key] ?? key,
-      docs: groupDocs,
-    });
-  }
+  const groups: readonly DocGroupBlock[] = groupKeys.map((key) => ({
+    key,
+    label: GROUP_META[key] ?? key,
+    docs: docs.filter((doc) => doc.group === key),
+  }));
 
   return { ungrouped, groups };
 }

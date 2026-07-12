@@ -39,25 +39,16 @@ export function searchDocs(query: string): readonly SearchHit[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
-  const prefixMatches: SearchHit[] = [];
-  const titleContainsMatches: SearchHit[] = [];
-  const descriptionMatches: SearchHit[] = [];
-
-  for (const hit of ALL_HITS) {
+  const prefixMatches: readonly SearchHit[] = ALL_HITS.filter((hit) =>
+    hit.docTitle.toLowerCase().startsWith(q),
+  );
+  const titleContainsMatches: readonly SearchHit[] = ALL_HITS.filter((hit) => {
     const title = hit.docTitle.toLowerCase();
-    const description = hit.docDescription.toLowerCase();
-
-    if (title.startsWith(q)) {
-      // eslint-disable-next-line functional/immutable-data -- builder array
-      prefixMatches.push(hit);
-    } else if (title.includes(q)) {
-      // eslint-disable-next-line functional/immutable-data -- builder array
-      titleContainsMatches.push(hit);
-    } else if (description.includes(q)) {
-      // eslint-disable-next-line functional/immutable-data -- builder array
-      descriptionMatches.push(hit);
-    }
-  }
+    return !title.startsWith(q) && title.includes(q);
+  });
+  const descriptionMatches: readonly SearchHit[] = ALL_HITS.filter(
+    (hit) => !hit.docTitle.toLowerCase().includes(q) && hit.docDescription.toLowerCase().includes(q),
+  );
 
   return [...prefixMatches, ...titleContainsMatches, ...descriptionMatches];
 }
