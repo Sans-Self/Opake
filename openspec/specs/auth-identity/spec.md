@@ -88,7 +88,7 @@ The `Mnemonic` type SHALL zeroize on drop and SHALL redact its words from debug 
 
 ## Open questions
 
-- Identity rotation to a new phrase does not exist at any layer. All current rotation machinery (crates/opake-core/src/reencryption.rs, keyring rotation) rotates group keys; nothing derives a new identity, re-wraps content keys wrapped to the old X25519/ML-KEM (cabinet direct-wraps, incoming grants, keyring membership wraps), republishes `publicKey/self`, and retires the old keys. Until it exists, a compromised phrase has no remediation. Own design pass; intersects share healing's rotation behavior.
+- Identity rotation to a new phrase does not exist at any layer. All current rotation machinery (keyring rotation and its re-wrap sweep) rotates group keys; nothing derives a new identity, re-wraps content keys wrapped to the old X25519/ML-KEM (cabinet direct-wraps, incoming grants, keyring membership wraps), republishes `publicKey/self`, and retires the old keys. Until it exists, a compromised phrase has no remediation. Own design pass; intersects share healing's rotation behavior.
 - Backups are untestable while an identity exists: recovery refuses on an identity-holding device, and no surface offers a read-only "does this phrase match this identity?" check. The comparison logic exists (`check_published_key_mismatch`, apps/cli/src/commands/recover.rs) — exposing it as a verify affordance (CLI and web) converts a write-path refusal into a testable backup.
 
 ## Non-requirements
