@@ -182,6 +182,16 @@ _dev-env-cli-fresh:
 e2e-federation: _dev-env-check _dev-env-cli-fresh
     cd tests && OPAKE_TEST_ENV=devenv bunx vitest run tests/federation/
 
+# Gate run: both reactive tiers from a pristine baseline. Resets the dev-env
+# (wipes all fixture state) and forces fresh logins, so a red is attributable
+# to the change under test — never to accumulated stack state (stale tokens,
+# fixture buildup, workspace-count degradation). Use before commit/archive
+# decisions. Running the tiers on an AGED stack instead is a soak run: new
+# failures there are accumulation findings, not gate noise — file them.
+e2e-gate: dev-env-reset
+    cd tests && E2E_REAUTH=1 bunx playwright test --project=e2e
+    just e2e-federation
+
 # Run all e2e tests
 e2e: e2e-cli
 
