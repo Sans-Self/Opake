@@ -19,6 +19,7 @@ pub mod chain_fork_keeper;
 pub mod client;
 pub mod daemon;
 pub mod inbox_keeper;
+pub mod retry;
 pub mod sse;
 pub mod tree_keeper;
 pub mod types;

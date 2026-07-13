@@ -13,9 +13,10 @@ async function createWorkspace(page: import("@playwright/test").Page, name: stri
   const dialog = page.getByRole("dialog", { name: "Create workspace" });
   await dialog.getByLabel("Workspace name").fill(name);
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
-  // The sidebar entry is an optimistic keeper insert (it appears before the
-  // indexer has seen the record — the SSE echo later confirms it), so its
-  // visibility says nothing about indexing. Poll, don't sleep.
+  // There is no optimistic keeper insert: the sidebar entry appears only when
+  // the indexer's SSE echo delivers it, so its visibility means the indexer
+  // can already answer for it (it is immediately actionable). The dialog holds
+  // its in-flight state until that echo lands. Poll for the entry, don't sleep.
   const link = page.getByRole("link", { name });
   await expect(link).toBeVisible({ timeout: 30_000 });
   return link;
@@ -23,9 +24,15 @@ async function createWorkspace(page: import("@playwright/test").Page, name: stri
 
 // The creator becomes a manager (one of the three roles — there is no owner):
 // manager-only controls on the settings page are enabled for them.
+// The sidebar entry appears only via the SSE echo (no optimistic insert), and
+// the moment it is visible the creator can open settings and use manager-only
+// controls — the entry is actionable as soon as it is shown.
 test(`creates a workspace and the creator holds a manager role ${cite(
   "workspace-membership",
   "Three roles, no owner",
+)} ${cite(
+  "indexer-consistency",
+  "Client projections contain only indexer-confirmed state",
 )}`, async ({ page }) => {
   const name = `ws-create-${uniq()}`;
   const link = await createWorkspace(page, name);
@@ -46,9 +53,10 @@ test(`creates a workspace and the creator holds a manager role ${cite(
 test(`renames a workspace without changing its genesis identity ${cite(
   "workspace-identity",
   "Genesis URI is the workspace identity",
+)} ${cite(
+  "indexer-consistency",
+  "Dependent operations tolerate the visibility gap",
 )}`, async ({ page }) => {
-  // The save-retry loop below can spend up to 30s waiting out the indexing
-  // race before the two 30s propagation assertions even start.
   test.setTimeout(90_000);
   const oldName = `ws-rename-${uniq()}`;
   const link = await createWorkspace(page, oldName);
@@ -61,18 +69,15 @@ test(`renames a workspace without changing its genesis identity ${cite(
   const newName = `${oldName}-renamed`;
   await page.locator("#ws-name").fill(newName);
 
-  // FINDING, product bug: mutating a just-created workspace races the indexer.
-  // Every keyring supersede resolves the chain head through the indexer
-  // (`fetch_keyring_chain_head`), which 403s "not a member of this workspace"
-  // — at the creator — until the genesis keyring is indexed (relay→jetstream→
-  // indexer, ~0.3–2s). The client retries nothing; the settings page surfaces
-  // the raw 403 as an error toast. Until the client tolerates not-yet-indexed
-  // workspaces, retry the save until the "Workspace updated" toast confirms
-  // the supersede was written.
-  await expect(async () => {
-    await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Workspace updated").first()).toBeVisible({ timeout: 4_000 });
-  }).toPass({ timeout: 30_000 });
+  // The first mutation of a just-created workspace races the indexer: the
+  // keyring supersede resolves the chain head through the indexer
+  // (`fetch_keyring_chain_head`), which 403s "not a member" at the creator
+  // until the genesis keyring is indexed. The client now absorbs that window
+  // — `fetch_keyring_chain_head` retries the resolution on a bounded backoff
+  // — so a single save succeeds; only true exhaustion surfaces an error. No
+  // test-side retry loop: if this save 403s, the contract is broken.
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Workspace updated").first()).toBeVisible({ timeout: 30_000 });
 
   // New name propagates to the sidebar; identity (rkey) is stable. The name
   // appears on more than one link (sidebar nav + breadcrumb) — first() suffices.

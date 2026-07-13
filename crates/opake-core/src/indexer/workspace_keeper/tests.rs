@@ -76,6 +76,11 @@ fn bootstrap_sets_loaded_and_notifies_watcher() {
 }
 
 #[test]
+// The keeper is patched only by indexer-derived inputs (bootstrap snapshot +
+// SSE echo), and re-applying an already-present entry is a no-op — so a
+// snapshot/stream overlap delivering the same record twice cannot double it.
+// spec:indexer-consistency § Snapshot and stream jointly lose nothing
+// spec:indexer-consistency § Client projections contain only indexer-confirmed state
 fn upsert_with_identical_entry_does_not_refire() {
     let mut keeper = WorkspaceKeeper::new();
     keeper.bootstrap(vec![sample_entry("at://a/kr/1", 1)]);

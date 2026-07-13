@@ -29,6 +29,7 @@ defmodule OpakeIndexer.Schemas.Record do
     field :is_workspace_root, :boolean, default: false
     field :cid, :string
     field :indexed_at, :utc_datetime_usec
+    field :updated_at, :utc_datetime_usec
     field :deleted_at, :utc_datetime_usec
     field :record_jsonb, :map
   end
@@ -45,9 +46,18 @@ defmodule OpakeIndexer.Schemas.Record do
       :is_workspace_root,
       :cid,
       :indexed_at,
+      :updated_at,
       :deleted_at,
       :record_jsonb
     ])
-    |> validate_required([:uri, :collection, :author_did, :cid, :indexed_at, :record_jsonb])
+    |> validate_required([
+      :uri,
+      :collection,
+      :author_did,
+      :cid,
+      :indexed_at,
+      :updated_at,
+      :record_jsonb
+    ])
   end
 end

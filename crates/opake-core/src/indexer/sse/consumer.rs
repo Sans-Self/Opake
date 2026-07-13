@@ -247,6 +247,7 @@ mod tests {
         }
     }
 
+    // spec:indexer-consistency § Ordering is guaranteed per topic only
     #[tokio::test]
     async fn delivers_events_in_order() {
         let transport = MockSseTransport::new();
@@ -264,6 +265,10 @@ mod tests {
         }
     }
 
+    // The synthetic Reconnect is the caller's cue to full-resync, which is the
+    // mechanism that closes the gap when PubSub dropped events during an outage
+    // — the seam that makes sync-then-stream lose nothing.
+    // spec:indexer-consistency § Snapshot and stream jointly lose nothing
     #[tokio::test]
     async fn reconnect_after_error_emits_synthetic_event() {
         let transport = MockSseTransport::new();

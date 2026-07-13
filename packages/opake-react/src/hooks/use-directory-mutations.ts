@@ -36,7 +36,14 @@ export function useCreateDirectory(keyringUri: string | null) {
           ...snapshot.directories,
           [input.parentUri]: {
             ...parent,
-            entries: [...parent.entries, { uri: placeholderUri, type: "directory" as const }],
+            entries: [
+              ...parent.entries,
+              // `pending: true` marks this as a provisional overlay entry so
+              // the UI renders it non-actionable + visibly pending until the
+              // echo replaces it (indexer-consistency: provisional entries
+              // cannot be operated on).
+              { uri: placeholderUri, type: "directory" as const, pending: true },
+            ],
           },
           [placeholderUri]: { name: input.name, entries: [], parentUri: input.parentUri },
         },

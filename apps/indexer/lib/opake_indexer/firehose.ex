@@ -48,6 +48,7 @@ defmodule OpakeIndexer.Firehose do
 
   alias OpakeIndexer.Authority
   alias OpakeIndexer.Jetstream.Event
+  alias OpakeIndexer.Firehose.ConsumeLag
   alias OpakeIndexer.Firehose.State
 
   alias OpakeIndexer.Queries.{
@@ -89,6 +90,10 @@ defmodule OpakeIndexer.Firehose do
     State.bump_total()
     State.mark_event_received()
     if collection, do: State.bump_collection(collection)
+    # Real consume events carry a firehose timestamp; frames without one
+    # (e.g. non-commit control frames) are not consume events, so they
+    # contribute no lag sample.
+    if is_integer(time_us), do: ConsumeLag.record_lag(now, time_us)
 
     case payload do
       :ignore ->
@@ -169,24 +174,25 @@ defmodule OpakeIndexer.Firehose do
                attrs.record_jsonb["members"] || []
              ),
            {:ok, _} <- upsert_record(attrs, now) do
-        chain_outcome = advance_or_create_chain(
-          "keyring",
-          workspace_id,
-          attrs.uri,
-          attrs.cid,
-          prior_uri,
-          fn fork ->
-            Broadcaster.broadcast_chain_forked(%{
-              workspace_id: workspace_id,
-              scope: "keyring",
-              path: nil,
-              your_uri: attrs.uri,
-              fork_point_uri: prior_uri,
-              winner_uri: fork.head_uri,
-              winner_cid: fork.head_cid
-            })
-          end
-        )
+        chain_outcome =
+          advance_or_create_chain(
+            "keyring",
+            workspace_id,
+            attrs.uri,
+            attrs.cid,
+            prior_uri,
+            fn fork ->
+              Broadcaster.broadcast_chain_forked(%{
+                workspace_id: workspace_id,
+                scope: "keyring",
+                path: nil,
+                your_uri: attrs.uri,
+                fork_point_uri: prior_uri,
+                winner_uri: fork.head_uri,
+                winner_cid: fork.head_cid
+              })
+            end
+          )
 
         emit_event_telemetry(@keyring_collection, :upsert, status_of_chain(chain_outcome))
 
@@ -227,7 +233,9 @@ defmodule OpakeIndexer.Firehose do
     auth_check =
       cond do
         # Cabinet directories — no workspace, no chain, no authority check.
-        is_nil(workspace_id) -> :ok
+        is_nil(workspace_id) ->
+          :ok
+
         # Workspace directories — authority depends on supersede vs genesis.
         true ->
           Authority.check_directory_supersede(
@@ -394,7 +402,12 @@ defmodule OpakeIndexer.Firehose do
     Broadcaster.broadcast_record_upsert(restored, envelope)
   end
 
-  defp maybe_rollback_chain(%{collection: @directory_collection, workspace_id: workspace_id, uri: uri, is_workspace_root: true})
+  defp maybe_rollback_chain(%{
+         collection: @directory_collection,
+         workspace_id: workspace_id,
+         uri: uri,
+         is_workspace_root: true
+       })
        when is_binary(workspace_id) do
     case ChainHeadQueries.get(workspace_id, "workspace_root") do
       %{head_uri: ^uri} ->

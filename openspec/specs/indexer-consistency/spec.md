@@ -1,6 +1,10 @@
-# indexer-consistency (delta)
+# indexer-consistency Specification
 
-## ADDED Requirements
+## Purpose
+
+Define the consistency contract between the write pipeline — client → PDS commit → firehose → indexer consumer → postgres → SSE — and every reader. Acceptance (a PDS commits a write) and visibility (the indexer can answer for it) are distinct events with no bounded interval between them; the pipeline is honestly eventually consistent, and clients carry the burden of tolerating the gap. This capability writes down what the firehose cursor guarantees, what snapshots and streams guarantee jointly, what a client may never assume about its own accepted writes, how a projection may be populated, and how the pipeline's own lag is measured — the last being the data the write-visibility successor design depends on.
+
+## Requirements
 
 ### Requirement: The cursor is strictly monotonic
 
@@ -36,12 +40,19 @@ This seam is why sync-then-stream reconnect is sound: Phoenix PubSub does not bu
 
 ### Requirement: indexed_at is first-seen
 
-`indexed_at` records when the indexer first consumed a record's URI and SHALL be immutable thereafter: upserts triggered by later events for the same URI (updates, supersedes, echoes, replays) SHALL NOT modify it. Pagination cursors and `changes_since` filters built on `indexed_at` therefore observe a stable total order — a record never moves position in the sequence after first insertion.
+`indexed_at` records when the indexer first consumed a record's URI and SHALL be immutable thereafter: upserts triggered by later events for the same URI (updates, supersedes, echoes, replays) SHALL NOT modify it. Pagination cursors ordered by `indexed_at` therefore observe a stable total order — a record never moves position in the sequence after first insertion.
+
+First-seen ordering is a pagination property, not a delta-delivery filter. The indexer SHALL additionally maintain a last-write watermark (`updated_at`), set on every upsert, and incremental-sync queries (`changes_since`) SHALL deliver a record when its `updated_at` or `deleted_at` exceeds the requested cursor. An in-place update IS re-delivered by incremental sync; only its pagination position is stable. A delta filter built on `indexed_at` alone is defective under this contract: record types that mutate in place (directory records under curatorial writes) become permanently invisible to catch-up sync, so a client that reconciles by incremental sync silently loses every mutation between its cursor and the present.
 
 #### Scenario: update does not reposition a record
 
 - **WHEN** a record indexed at time T1 is updated by a later event at time T2
-- **THEN** its `indexed_at` remains T1, a pagination pass ordered by `indexed_at` returns it in the same position as before the update, and `changes_since(T1)` does not re-deliver it
+- **THEN** its `indexed_at` remains T1 and a pagination pass ordered by `indexed_at` returns it in the same position as before the update
+
+#### Scenario: in-place update is delivered by incremental sync
+
+- **WHEN** a record indexed at time T1 is updated in place at time T2 and a client requests `changes_since(T)` with T1 < T < T2
+- **THEN** the response delivers the updated record, while its pagination position remains keyed to T1
 
 ### Requirement: Acceptance does not imply visibility
 
@@ -83,14 +94,26 @@ Within a single SSE topic, events are delivered in cursor order. Across topics �
 
 A client projection — a keeper's tree, workspace list, inbox, or any other locally maintained view of indexed state — SHALL be patched exclusively by indexer-derived inputs: snapshots and SSE events. A client SHALL NOT insert an anticipated write into a projection ahead of the indexer confirming it. Visibility in a projection and authorization for dependent operations thereby become the same event: anything a projection shows, the indexer can already answer for.
 
-Operation-in-flight state is exempt and remains permitted: a busy dialog, a disabled control, a progress affordance scoped to a running operation. Such state is ephemeral, tied to the operation's lifetime, and never takes the form of an entry in a projection. The line is representational — feedback about *an operation* is fine; a record that doesn't exist yet in the indexer's answer is not.
+Operation-in-flight state is exempt and remains permitted: a busy dialog, a disabled control, a progress affordance scoped to a running operation. Such state is ephemeral and tied to the operation's lifetime.
 
-Optimistic projection entries may return as a designed feature — a provisional entry that can confirm or retract itself against an explicit visibility signal — if the write-visibility successor lands. Until then they are forbidden, not discouraged.
+An operation-scoped overlay MAY render provisional entries ahead of the indexer's echo, only under all of the following conditions:
+
+1. **The projection stays pure.** The overlay is render-layer state projected over the snapshot at display time; the underlying projection (keeper state) remains patched exclusively by indexer-derived inputs, and the overlay dies with the operation that spawned it.
+2. **Pending is explicit.** A provisional entry carries a first-class pending marker in the rendered entry type. Provisionality SHALL NOT be inferred from coincidental properties (missing metadata, URI shape) — an entry whose safety depends on an unrelated field failing open is non-conforming even when currently harmless.
+3. **Provisional entries are non-actionable and visibly pending.** No operation SHALL accept a provisional entry as its target, and the pending state is visually distinct — a provisional entry can never become an authorization belief, a dependent-operation input, or a mutation target.
+4. **Every provisional entry self-retracts.** It is replaced by the echo or removed at a bounded timeout; it is never persisted and never survives its operation.
+
+Entries failing any condition are the forbidden class of this requirement. Fully actionable optimistic entries may return as a designed feature — a provisional entry that confirms or retracts itself against an explicit visibility signal — if the write-visibility successor lands; until then, anything beyond the conditioned overlay above is forbidden, not discouraged.
 
 #### Scenario: workspace creation surfaces on the echo, not before
 
 - **WHEN** a client creates a workspace and the create operation completes against the PDS
 - **THEN** the workspace appears in the client's workspace projection only when the indexer's event or snapshot delivers it, and the create flow signals in-flight state until that happens
+
+#### Scenario: a provisional entry cannot be operated on
+
+- **WHEN** an operation's provisional entry (an uploading document, a just-created directory) is rendered ahead of its echo
+- **THEN** open, rename, move, delete, and share are unavailable on it, it is visibly pending, and it is replaced by the echo or retracted at the timeout
 
 #### Scenario: a projection entry is always actionable
 
@@ -112,3 +135,13 @@ This is the decision procedure for the write-visibility successor: whether the t
 
 - **WHEN** no events arrive for an interval
 - **THEN** the lag measurement does not grow against wall clock, and an operator can distinguish an idle pipeline from a stalled one
+
+## Open questions
+
+- Write-visibility successor: a client that has just written a record cannot yet *await* its visibility — there is no cursor-exposure surface (e.g. a response header or `HEAD /api/visible` reporting "processed through cursor X") and no per-record visibility probe. The design is deliberately gated on the lag distribution the consume-lag requirement produces: whether awaiting a known write is an invisible beat or a designed waiting state depends on whether the p50/p95/p99 tail under realistic load is hundreds of milliseconds or minutes. Revisit once that data exists.
+
+## Non-requirements
+
+- Optimistic projection entries — forbidden by *Client projections contain only indexer-confirmed state*. They may return as a designed feature (a provisional entry that confirms or retracts itself against an explicit visibility signal) only if the write-visibility successor lands; until then, absent.
+- Client-side telemetry of any kind — the consume-lag measurement is derived server-side from data the indexer already holds; no client sends metrics. Signal-collection plumbing belongs to the parked telemetry capability when it lands, which will name this measurement as one of its first collectors.
+- SSE payload changes — carrying `time_us` on events is part of the write-visibility successor design, not needed for this contract.

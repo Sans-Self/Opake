@@ -22,6 +22,10 @@ export type OpakeErrorKind =
   | "Serialization"
   | "Mnemonic"
   | "Sse"
+  // The indexer had not caught up with a prior own-write within the bounded
+  // retry window — the pipeline is behind, distinct from a real authorization
+  // denial. Lets the UI say "still syncing" rather than "not permitted".
+  | "VisibilityTimeout"
   | "Unknown";
 
 /**
@@ -65,6 +69,7 @@ const KNOWN_KINDS = new Set<string>([
   "Serialization",
   "Mnemonic",
   "Sse",
+  "VisibilityTimeout",
 ]);
 
 /**

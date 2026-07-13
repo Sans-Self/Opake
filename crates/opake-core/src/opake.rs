@@ -56,6 +56,14 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     /// repeated base64-decode + heap allocation of the 2400-byte ML-KEM-768
     /// decapsulation key.
     pub(crate) cached_private_keys: OwnedPrivateKeys,
+    /// Injected async sleep used to space out retries when a dependent
+    /// operation waits for the indexer to catch up with a prior own-write
+    /// (see [`crate::indexer::retry`]). Platform-supplied — `tokio::time`
+    /// on native, `setTimeout` on the web — via [`Opake::set_sleep_fn`], the
+    /// same injection pattern the SSE reconnect loop uses. When unset (e.g.
+    /// a bare test context), the visibility-gap retry degrades to a single
+    /// attempt rather than fabricating a runtime dependency inside core.
+    pub(crate) sleep_fn: Option<crate::indexer::retry::SleepFn>,
 }
 
 /// Indexer URL baked into the binary at compile time.
@@ -90,22 +98,16 @@ pub async fn authenticated_client<T: Transport, S: Storage>(
     ))
 }
 
-/// Outcome of [`Opake::create_workspace`]. Carries the fields the caller
-/// needs to build an optimistic view entry that matches the eventual SSE
-/// echo exactly — `created_at` and `rotation` are the values actually
-/// written into the genesis keyring record, not values the caller would
-/// otherwise have to guess (a second `now()` call or a hardcoded rotation
-/// would never dedup against the echo).
+/// Outcome of [`Opake::create_workspace`]. The workspace's sidebar entry is
+/// not built from this — that arrives via the indexer echo/snapshot, never
+/// optimistically. What the caller genuinely needs at creation time is the
+/// stable identity (to key the group-key cache and to await the echo) and
+/// the group key itself.
 pub struct CreatedWorkspace {
     /// The genesis keyring URI (also the workspace's stable identity).
     pub keyring_uri: String,
     /// The unwrapped group key for the new workspace.
     pub key: ContentKey,
-    /// The `createdAt` timestamp written into the keyring record.
-    pub created_at: String,
-    /// The rotation written into the genesis keyring record (always the
-    /// genesis rotation).
-    pub rotation: u64,
 }
 
 /// Result of a first-time cross-PDS member download.
@@ -142,7 +144,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             runtime_indexer_url: None,
             config_indexer_url: None,
             cached_private_keys,
+            sleep_fn: None,
         })
+    }
+
+    /// Install the async sleep used by the dependent-operation retry
+    /// ([`crate::indexer::retry`]). Front-ends call this at construction with
+    /// their platform sleep — `tokio::time::sleep` on the CLI/daemon, a
+    /// `setTimeout` promise on the web — mirroring how they inject
+    /// `now_micros`. Without it the visibility-gap retry cannot wait and
+    /// degrades to a single attempt.
+    pub fn set_sleep_fn(&mut self, sleep_fn: crate::indexer::retry::SleepFn) {
+        self.sleep_fn = Some(sleep_fn);
     }
 
     // -- Factory --
@@ -541,9 +554,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Workspace management (keyring operations) --
 
-    /// Create a new workspace. Returns the created keyring URI + group key
-    /// plus the `created_at` / `rotation` actually written, so a caller can
-    /// build an optimistic view entry that dedups against the SSE echo.
+    /// Create a new workspace. Returns the created keyring URI (the stable
+    /// workspace identity) and the group key. The sidebar entry is delivered
+    /// by the indexer echo/snapshot, not built optimistically from this.
     pub async fn create_workspace(
         &mut self,
         name: &str,
@@ -569,13 +582,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         )
         .await?;
         self.auto_persist_session().await?;
-        Ok(CreatedWorkspace {
-            keyring_uri,
-            key,
-            created_at: now,
-            // Genesis keyrings start at rotation 0 (see keyrings::create_keyring).
-            rotation: 0,
-        })
+        Ok(CreatedWorkspace { keyring_uri, key })
     }
 
     /// Sync all workspaces: load the chain head tree for each.
@@ -738,7 +745,57 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// Closing staleness requires out-of-band signals (polling each
     /// member's `listRecords`), which is accepted as a distributed-systems
     /// posture, not a security failure.
+    ///
+    /// This is the resolution boundary the consistency contract names: the
+    /// input to a create-then-mutate operation depends on the indexer having
+    /// consumed a prior own-write. A workspace creator's genesis keyring, for
+    /// instance, is not queryable the instant the PDS accepts it — the
+    /// membership-gated chain-head endpoint 403s as "not a member" until the
+    /// firehose delivers the commit. So this wraps the single-shot resolution
+    /// in a bounded retry: visibility-gap responses (403/404/absent head) are
+    /// absorbed on a backoff schedule, and only the window's exhaustion
+    /// surfaces an error — a [`Error::VisibilityTimeout`] distinct from a real
+    /// authorization denial (see [`crate::indexer::retry`]).
     async fn fetch_keyring_chain_head(
+        &mut self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(String, crate::records::Keyring), Error> {
+        use crate::indexer::retry::{is_visibility_gap, VisibilityRetry};
+
+        let start = (self.now_micros_fn)();
+        let mut schedule = VisibilityRetry::new();
+        loop {
+            match self.fetch_keyring_chain_head_once(workspace_id).await {
+                Ok(head) => return Ok(head),
+                Err(error) if is_visibility_gap(&error) => {
+                    let elapsed_ms = (self.now_micros_fn)().saturating_sub(start) / 1_000;
+                    // Without an injected sleeper (a bare test context) we
+                    // cannot wait, so surface the gap error rather than spin.
+                    let Some(sleep) = self.sleep_fn.as_mut() else {
+                        return Err(error);
+                    };
+                    match schedule.next_delay(elapsed_ms) {
+                        Some(delay) => sleep(delay).await,
+                        None => {
+                            return Err(Error::VisibilityTimeout {
+                                operation: format!(
+                                    "resolving keyring chain head for {workspace_id}"
+                                ),
+                                waited_ms: elapsed_ms,
+                            })
+                        }
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Single-shot keyring chain-head resolution — one indexer round-trip,
+    /// chain walk, and authority verification. The retrying wrapper is
+    /// [`fetch_keyring_chain_head`]; call this directly only where retry is
+    /// explicitly unwanted.
+    async fn fetch_keyring_chain_head_once(
         &mut self,
         workspace_id: &WorkspaceId,
     ) -> Result<(String, crate::records::Keyring), Error> {

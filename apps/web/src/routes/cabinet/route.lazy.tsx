@@ -11,10 +11,8 @@ import { clearPreviewCache } from "@/components/cabinet/FilePreview";
 import { evictAllReadmeCaches } from "@/components/cabinet/DirectoryReadme";
 import { getOpake, useAuthStore } from "@/stores/auth";
 import { taskStore } from "@/stores/tasks";
-import { loading } from "@/stores/app";
 import { startDaemon } from "@opake/daemon";
 import { Opake } from "@opake/sdk";
-import { toastError, toastSuccess } from "@/stores/toast";
 
 function CabinetLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -77,18 +75,9 @@ function CabinetLayout() {
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
 
-  const handleCreateWorkspace = useCallback((name: string, description: string | undefined) => {
-    // The new workspace appears in the sidebar automatically via the
-    // SSE `keyring:upsert` echo — no explicit refresh needed.
-    const done = loading("create-workspace");
-    void getOpake()
-      .createWorkspace(name, description ?? "")
-      .then(() => toastSuccess("Workspace created"))
-      .catch((err: unknown) => {
-        toastError(err instanceof Error ? err.message : "Failed to create workspace");
-      })
-      .finally(() => done());
-  }, []);
+  // Creation, in-flight state, and the visibility wait for the SSE echo are
+  // owned by CreateWorkspaceDialog — it must run inside OpakeProvider to
+  // observe the workspace keeper, so the whole flow lives there.
 
   return (
     <OpakeProvider opake={getOpake()}>
@@ -133,7 +122,7 @@ function CabinetLayout() {
           </div>
         </main>
 
-        <CreateWorkspaceDialog ref={dialogRef} onConfirm={handleCreateWorkspace} />
+        <CreateWorkspaceDialog ref={dialogRef} />
       </div>
     </OpakeProvider>
   );

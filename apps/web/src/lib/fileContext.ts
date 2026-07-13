@@ -67,6 +67,9 @@ export function snapshotToFileItems(
         modified: "",
         decrypted: true,
         tags: [],
+        // First-class provisional marker from the optimistic overlay — never
+        // inferred from the URI or metadata state.
+        pending: entry.pending,
       };
     }
 
@@ -89,6 +92,7 @@ export function snapshotToFileItems(
         decrypted: true,
         tags: [...meta.tags],
         description: meta.description ?? undefined,
+        pending: entry.pending,
       };
     }
 
@@ -104,6 +108,7 @@ export function snapshotToFileItems(
       modified: "",
       decrypted: false,
       tags: [],
+      pending: entry.pending,
     };
   });
 

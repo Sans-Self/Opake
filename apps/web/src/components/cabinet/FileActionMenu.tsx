@@ -72,6 +72,13 @@ export function FileActionMenu(props: FileActionMenuProps) {
   const downloading = useAppStore((s) => s.isLoading(`download:${item.uri}`));
   const deleting = useAppStore((s) => s.isLoading(`delete:${item.uri}`));
 
+  // A provisional (pending) entry has no indexer-visible record behind it yet,
+  // so it can never be an operation's target — no action menu, for folders and
+  // files alike (indexer-consistency: provisional entries cannot be operated on).
+  if (item.pending) {
+    return null;
+  }
+
   if (item.kind !== "folder" && (!item.decrypted || item.name === "[Keyring encrypted]")) {
     return null;
   }

@@ -38,7 +38,8 @@ defmodule OpakeIndexer.Application do
       [
         OpakeIndexer.TombstoneCleanup,
         OpakeIndexer.Jetstream.Consumer,
-        OpakeIndexer.Firehose.Heartbeat
+        OpakeIndexer.Firehose.Heartbeat,
+        OpakeIndexer.Firehose.ConsumeLag
       ]
     else
       []

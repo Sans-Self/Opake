@@ -913,7 +913,7 @@ fn make_token_fetcher(opake_rc: Rc<Mutex<WasmOpake>>, indexer_url: String) -> To
 /// Promise-based sleep using JS `setTimeout`. Works in any context with
 /// a global `setTimeout` (Window, Worker). Used by `SseConsumer` for
 /// exponential-backoff reconnect timing.
-async fn wasm_sleep(duration: Duration) {
+pub(crate) async fn wasm_sleep(duration: Duration) {
     let ms = duration.as_millis() as i32;
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         let global = js_sys::global();

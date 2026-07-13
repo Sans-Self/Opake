@@ -39,6 +39,12 @@ pub async fn build_opake(storage: &FileStorage, did: &str) -> anyhow::Result<Cli
     )
     .await?;
 
+    // Platform sleep for the dependent-operation visibility-gap retry — the
+    // same tokio timer the SSE reconnect loop uses. Without it a fresh-
+    // workspace mutation would 403 on the genesis-indexing race instead of
+    // waiting the window out.
+    opake.set_sleep_fn(Box::new(|d| Box::pin(tokio::time::sleep(d))));
+
     if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
         opake.set_indexer_url(url);
     }

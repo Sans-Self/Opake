@@ -188,6 +188,13 @@ export type DocumentMetadata = z.output<typeof documentMetadataSchema>;
 const typedEntrySchema = z.object({
   uri: z.string(),
   type: z.enum(["document", "directory"]),
+  // Render-layer marker. Never emitted by the indexer/WASM — the keeper
+  // snapshot is always indexer-confirmed state. An operation-scoped
+  // optimistic overlay sets this on the provisional entries it projects
+  // over the snapshot at display time, so downstream rendering can treat a
+  // provisional entry as first-class pending rather than inferring it from
+  // URI shape or missing metadata.
+  pending: z.boolean().optional(),
 });
 
 const directoryInfoSchema = z

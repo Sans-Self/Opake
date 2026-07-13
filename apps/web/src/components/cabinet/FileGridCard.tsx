@@ -3,7 +3,7 @@ import { LockIcon } from "@phosphor-icons/react";
 import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
 import { fileIconElement, fileIconColors } from "./FileIcons";
-import type { FileItem } from "./types";
+import { isActionable, type FileItem } from "./types";
 
 interface FileGridCardProps {
   readonly item: FileItem;
@@ -45,7 +45,10 @@ export function FileGridCard({
 }: FileGridCardProps) {
   const { bg, text } = fileIconColors(item);
   const isFolder = item.kind === "folder";
-  const isClickable = isFolder || item.decrypted;
+  // A pending (provisional overlay) entry is never clickable — it has no
+  // indexer-visible record to open. `isActionable` folds that in.
+  const isClickable = isActionable(item);
+  const displayName = item.pending && !item.decrypted ? "Uploading…" : item.name;
 
   const cardClassName = [
     "card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all",
@@ -69,10 +72,13 @@ export function FileGridCard({
       }
       role={isClickable ? "button" : "article"}
       tabIndex={isClickable ? 0 : undefined}
+      aria-busy={item.pending ? true : undefined}
       aria-label={
-        item.decrypted
-          ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
-          : "Decrypting…"
+        item.pending
+          ? `${displayName}, pending`
+          : item.decrypted
+            ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
+            : "Decrypting…"
       }
       className={cardClassName}
     >
@@ -108,7 +114,15 @@ export function FileGridCard({
         <LockIcon size={13} className="text-text-faint relative z-10" />
       </div>
 
-      {item.decrypted ? (
+      {item.pending ? (
+        <div className="text-base-content mb-0.5 flex items-center gap-1.5 truncate text-xs">
+          <span className="loading loading-spinner loading-xs text-text-faint" aria-hidden="true" />
+          <span className="truncate">{displayName}</span>
+          <span className="badge badge-xs badge-ghost text-text-faint border-base-300/50 border">
+            Pending
+          </span>
+        </div>
+      ) : item.decrypted ? (
         <div className="text-base-content mb-0.5 truncate text-xs">{item.name}</div>
       ) : (
         <div className="skeleton mb-0.5 h-4 w-24 rounded" />

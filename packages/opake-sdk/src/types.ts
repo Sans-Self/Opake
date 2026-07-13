@@ -76,6 +76,15 @@ export interface DirectoryTreeSnapshot {
 export interface DirectoryEntry {
   readonly uri: string;
   readonly type: "document" | "directory";
+  /**
+   * Render-layer provisional marker. Absent on every indexer-derived entry
+   * (keeper snapshots carry only indexer-confirmed state). An operation-scoped
+   * optimistic overlay sets `true` on the provisional entries it projects over
+   * the snapshot at display time, so rendering treats them as first-class
+   * pending — non-actionable and visibly pending — rather than inferring
+   * provisionality from URI shape or missing metadata.
+   */
+  readonly pending?: boolean;
 }
 
 export interface DirectoryInfo {

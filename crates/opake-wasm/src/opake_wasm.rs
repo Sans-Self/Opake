@@ -184,31 +184,14 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         drop(opake);
 
-        // Optimistic insert — the sidebar shows the new workspace immediately
-        // rather than waiting 1–4s for the SSE echo to arrive. Every field
-        // is built from what was actually written (created_at + rotation
-        // come back from create_workspace, not a fresh now() / hardcoded
-        // guess) so this entry is byte-equal to the entry the echo will
-        // produce via `try_build_entry` — the keeper's dedup short-circuits
-        // and there's no spurious re-render or clobber. At creation time
-        // head_uri == workspace_id (genesis), membership is self-as-manager.
-        let optimistic = opake_core::indexer::workspace_keeper::WorkspaceEntry {
-            workspace_id: created.keyring_uri.clone(),
-            head_uri: created.keyring_uri.clone(),
-            rotation: created.rotation,
-            member_count: 1,
-            created_at: Some(created.created_at.clone()),
-            name: Some(name.to_string()),
-            description: description.clone(),
-            icon: None,
-            my_role: Some("manager".to_string()),
-        };
-
-        {
-            let mut keeper = self.workspace_keeper.lock().await;
-            keeper.upsert(optimistic);
-        }
-
+        // No optimistic keeper insert: the workspace projection is patched
+        // only by indexer-derived inputs (snapshot + SSE echo), so a sidebar
+        // entry appears exactly when the indexer can already answer for it —
+        // visibility and actionability become the same event, and a fresh
+        // entry is never one that 403s on first use. The create flow signals
+        // in-flight state until the `keyring:upsert` echo delivers the entry
+        // (see the web create dialog); the returned URI lets the caller await
+        // that arrival rather than fabricate a provisional row here.
         to_js(&crate::bindings::CreateWorkspaceResultDto {
             keyring_uri: created.keyring_uri,
             key: created.key.0.to_vec(),

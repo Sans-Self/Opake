@@ -73,7 +73,14 @@ export function useUpload(keyringUri: string | null) {
           ...snapshot.directories,
           [input.directoryUri]: {
             ...dir,
-            entries: [...dir.entries, { uri: placeholderUri, type: "document" as const }],
+            // `pending: true` marks this as a provisional overlay entry so the
+            // UI renders it non-actionable + visibly pending until the echo
+            // replaces it (indexer-consistency: provisional entries cannot be
+            // operated on).
+            entries: [
+              ...dir.entries,
+              { uri: placeholderUri, type: "document" as const, pending: true },
+            ],
           },
         },
       };

@@ -33,6 +33,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Mnemonic(_) => "Mnemonic",
         Error::Storage(_) => "Storage",
         Error::Sse(_) => "Sse",
+        Error::VisibilityTimeout { .. } => "VisibilityTimeout",
     };
     JsError::new(&format!("{kind}: {e}"))
 }
@@ -61,7 +62,7 @@ pub async fn make_opake_from_storage(
     did: Option<&str>,
     storage: crate::js_storage::JsStorageAdapter,
 ) -> Result<WasmOpake, JsError> {
-    Opake::for_account(
+    let mut opake = Opake::for_account(
         JsStorage::new(storage),
         did,
         WasmTransport::new(),
@@ -69,7 +70,14 @@ pub async fn make_opake_from_storage(
         crate::now_micros,
     )
     .await
-    .map_err(wasm_err)
+    .map_err(wasm_err)?;
+
+    // Platform sleep for the dependent-operation visibility-gap retry — the
+    // same setTimeout-backed timer the SSE reconnect loop uses. Lets a fresh-
+    // workspace mutation wait out the genesis-indexing race instead of 403ing.
+    opake.set_sleep_fn(Box::new(|d| Box::pin(crate::sse_wasm::wasm_sleep(d))));
+
+    Ok(opake)
 }
 
 /// Build a cabinet FileContext from an Opake.

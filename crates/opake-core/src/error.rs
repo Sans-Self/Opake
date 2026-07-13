@@ -115,6 +115,17 @@ pub enum Error {
 
     #[error("SSE error: {0}")]
     Sse(String),
+
+    /// A dependent operation waited for the indexer to become consistent with
+    /// a prior own-write (resolving a just-written chain head, passing a
+    /// membership check for a workspace just created) and the bounded retry
+    /// window elapsed before the write became visible. Distinct from `Auth`
+    /// and `Indexer { status: 403 }` — those mean "you are not authorized";
+    /// this means "the pipeline had not caught up in time". Callers and UI
+    /// use the distinction to say "the indexer is behind" rather than falsely
+    /// telling a workspace's owner they are not a member of it.
+    #[error("indexer visibility wait timed out after {waited_ms}ms while {operation}")]
+    VisibilityTimeout { operation: String, waited_ms: u64 },
 }
 
 // Crypto-shaped errors can originate either inside opake-crypto (wrap_key,

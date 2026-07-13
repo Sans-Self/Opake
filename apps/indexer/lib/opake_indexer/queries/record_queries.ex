@@ -18,20 +18,38 @@ defmodule OpakeIndexer.Queries.RecordQueries do
   @keyring_collection "app.opake.keyring"
   @grant_collection "app.opake.grant"
 
+  @doc """
+  Upsert a record. `updated_at` is the last-write watermark: it is stamped
+  fresh from the event's `indexed_at` (the write's wall-clock now) on both the
+  insert and the conflict-update path. On conflict `indexed_at` is preserved
+  (first-seen, immutable) while `updated_at` is replaced — it is not in the
+  `replace_all_except` list — so `changes_since` re-delivers in-place updates
+  without repositioning the record's pagination order.
+
+  See spec:indexer-consistency § indexed_at is first-seen.
+  """
   @spec upsert(map()) :: {:ok, RecordSchema.t()} | {:error, Ecto.Changeset.t()}
   def upsert(attrs) do
     %RecordSchema{}
-    |> RecordSchema.changeset(attrs)
+    |> RecordSchema.changeset(stamp_updated_at(attrs))
     |> Repo.insert(
-      on_conflict: {:replace_all_except, [:uri]},
+      on_conflict: {:replace_all_except, [:uri, :indexed_at]},
       conflict_target: :uri
     )
+  end
+
+  # `updated_at` tracks the write's wall-clock now, which the dispatch path
+  # carries in `indexed_at`. Deriving it here keeps every caller (firehose
+  # dispatch and tests) honest without threading a second timestamp through.
+  defp stamp_updated_at(attrs) do
+    now = Map.get(attrs, :indexed_at) || Map.get(attrs, "indexed_at")
+    Map.put(attrs, :updated_at, now)
   end
 
   @spec soft_delete(String.t(), DateTime.t()) :: {non_neg_integer(), nil}
   def soft_delete(uri, now) do
     from(r in RecordSchema, where: r.uri == ^uri)
-    |> Repo.update_all(set: [deleted_at: now])
+    |> Repo.update_all(set: [deleted_at: now, updated_at: now])
   end
 
   @spec lookup(String.t()) :: RecordSchema.t() | nil
@@ -80,7 +98,7 @@ defmodule OpakeIndexer.Queries.RecordQueries do
       where:
         r.collection == ^collection and
           r.workspace_id == ^workspace_id and
-          (r.indexed_at > ^since or r.deleted_at > ^since)
+          (r.updated_at > ^since or r.deleted_at > ^since)
     )
     |> Repo.all()
   end
@@ -102,7 +120,7 @@ defmodule OpakeIndexer.Queries.RecordQueries do
         r.collection == ^collection and
           r.author_did == ^author_did and
           is_nil(r.workspace_id) and
-          (r.indexed_at > ^since or r.deleted_at > ^since)
+          (r.updated_at > ^since or r.deleted_at > ^since)
     )
     |> Repo.all()
   end
