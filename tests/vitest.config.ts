@@ -11,6 +11,9 @@ export default defineConfig({
   test: {
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Pipeline preflight for the federation tier — self-gates on
+    // OPAKE_TEST_ENV=devenv, so it no-ops for the default fake-pds run.
+    globalSetup: ["./helpers/pipeline-preflight.federation.ts"],
     exclude: [
       "node_modules/**",
       // Playwright owns e2e/ and spikes/ — their *.spec.ts import

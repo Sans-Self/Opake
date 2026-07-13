@@ -77,6 +77,38 @@ export async function stackIsUp(): Promise<boolean> {
   return res.code === 0 && res.stdout.trim() !== "";
 }
 
+/**
+ * Fetch the indexer's public health snapshot from inside the compose network
+ * (the dev-env indexer is internal-only; only Caddy is host-published). Used
+ * best-effort by the pipeline preflight to name cursor/lag evidence on a
+ * stalled-pipeline failure — the [ConsumeLag] log line is referenced, not
+ * parsed. Returns a compact one-line summary, or a reason it was unavailable;
+ * requires the shared CLI container (`startCli`) to be running.
+ */
+export async function indexerHealth(): Promise<string> {
+  const res = await docker(
+    ["exec", CLI_CONTAINER, "curl", "-fsS", "http://indexer:6100/api/health"],
+    15_000,
+  );
+  if (res.code !== 0) return `unavailable (${res.stderr.trim() || "curl failed"})`;
+  try {
+    const h = JSON.parse(res.stdout) as {
+      indexer_connected?: boolean;
+      cursor_time?: string | null;
+      cursor_age_secs?: number | null;
+      events?: { last_event_age_ms?: number | null };
+    };
+    return (
+      `indexer_connected=${h.indexer_connected} ` +
+      `cursor_time=${h.cursor_time ?? "none"} ` +
+      `cursor_age_secs=${h.cursor_age_secs ?? "none"} ` +
+      `last_event_age_ms=${h.events?.last_event_age_ms ?? "none"}`
+    );
+  } catch {
+    return res.stdout.trim().slice(0, 300);
+  }
+}
+
 // The in-container helper (login + keyring delete) is a real shell file rather
 // than an inlined string — bash parameter expansion (${did//:/_}) collides with
 // JS template interpolation, and a standalone script stays readable and lintable.

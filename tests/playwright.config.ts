@@ -30,6 +30,10 @@ const devenvEnv = Object.fromEntries(
 
 export default defineConfig({
   testDir: "./e2e",
+  // Pipeline-liveness preflight (PDS → firehose → indexer) before any project,
+  // including auth setup: a stalled pipeline fails the run in seconds,
+  // attributed, instead of every SSE-echo spec burning its timeout.
+  globalSetup: "./e2e/pipeline-preflight.global.ts",
   // Actors partition workers (fixtures.ts maps workerIndex → fixture actor);
   // capped so each worker owns a distinct actor's state (no shared mutation).
   workers: 4,
