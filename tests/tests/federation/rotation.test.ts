@@ -27,7 +27,6 @@ import {
   downloadAsMember,
   login,
   memberCount,
-  parseCreateUri,
   pollUntil,
   rotationCount,
   startCli,
@@ -171,9 +170,7 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
       // Three add+remove cycles → rotation climbs to 3. The owner is the
       // constant manager and retains every historical key.
       const churn = [memberDid, lateDid, memberDid];
-      // eslint-disable-next-line functional/no-let
-      for (let i = 0; i < churn.length; i++) {
-        const did = churn[i];
+      for (const [i, did] of churn.entries()) {
         expect((await cli(OWNER, ["workspace", "add-member", ws, did])).code).toBe(0);
         expect(await pollUntil(async () => (await memberCount(OWNER, ws)) === 2)).toBe(true);
         expect((await cli(OWNER, ["workspace", "remove-member", ws, did, "-y"])).code).toBe(0);
