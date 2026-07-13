@@ -79,3 +79,56 @@ SSE `grant:delete` events:
 `wipeState` → `InboxKeeper::uninstall_all` (clears entries, watchers, resets `loaded`). See the `WorkspaceKeeper` section above for the reason `stopSseConsumer` doesn't drain the keepers itself.
 
 See `InboxKeeper` in `crates/opake-core/src/indexer/inbox_keeper/` and `apply_grant_to_inbox_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
+
+## Background maintenance — multi-runner coordination
+
+Maintenance tasks (pending-share retry, pair-request cleanup) can run on more than one runner at once: a CLI daemon and one or more open web tabs, or two of a user's devices. No runner owns the work — coordination happens per record, at the PDS, through atproto's optimistic concurrency. The contract these tasks satisfy lives in [docs/BACKGROUND_WORK.md](BACKGROUND_WORK.md); the sequence below is the case worth seeing drawn.
+
+Two runners drain the pending-share queue at the same time. Both list the same pending share, both find the recipient ready, both complete it. The completion write is an idempotent `putRecord` at the pending share's own rkey, so the two writes target the *same* record slot rather than appending two grants:
+
+```mermaid
+sequenceDiagram
+    participant A as Runner A (daemon)
+    participant PDS as Owner's PDS
+    participant B as Runner B (web tab)
+
+    Note over A,B: Both list the queue and see pendingShare/x (recipient now ready)
+    A->>PDS: listRecords (pendingShare)
+    B->>PDS: listRecords (pendingShare)
+
+    Note over A,B: Both derive grant rkey = x, wrap the key independently
+    A->>PDS: putRecord (grant @ rkey x)
+    PDS-->>A: 200 OK — grant created
+    A->>PDS: deleteRecord (pendingShare/x)
+    PDS-->>A: 200 OK
+
+    Note over B: B is a beat behind
+    B->>PDS: putRecord (grant @ rkey x)
+    PDS-->>B: 200 OK — overwrites A's grant with an equivalent one
+    B->>PDS: deleteRecord (pendingShare/x)
+    PDS-->>B: NotFound — A already deleted it
+    Note over B: NotFound on the cleanup delete is success, not error — the grant exists
+```
+
+The repo ends with exactly one grant regardless of interleaving. Runner B's `putRecord` overwrites rather than duplicates because both runners chose the same rkey; B's `deleteRecord` finding the record already gone is the expected idempotent outcome, not a failure.
+
+For tasks that mutate a record in place rather than upsert-or-delete — the incoming key-rotation re-wrap sweep is the first — the same coordination uses a true compare-and-swap: read the record and its CID, compute the fix, and write with `swapRecord` set to that CID (`put_record_conditional` / `delete_record_conditional`). A write the PDS rejects because the CID moved surfaces as `Error::CasConflict`, which the runner reads as "another runner finished this" — it re-derives the item and skips:
+
+```mermaid
+sequenceDiagram
+    participant A as Runner A
+    participant PDS as PDS
+    participant B as Runner B
+
+    Note over A,B: Both read record R at CID c1 and compute the same fix
+    A->>PDS: putRecord (R, swapRecord = c1)
+    PDS-->>A: 200 OK — R now at CID c2
+    B->>PDS: putRecord (R, swapRecord = c1)
+    PDS-->>B: 400 InvalidSwap — R is no longer at c1
+    Note over B: CasConflict → re-derive R
+    B->>PDS: getRecord (R)
+    PDS-->>B: R at c2, already fixed
+    Note over B: Nothing left to do — skip
+```
+
+Derivation targets are re-resolved per item at write time against the current chain head, never against a plan computed at sweep start: a head that moves mid-sweep (a second rotation, say) makes the stale plan's items yield fresh derived work, never a wrong write. See [docs/BACKGROUND_WORK.md](BACKGROUND_WORK.md#the-multi-device-walkthrough) for why this is safe and [spec `indexer-consistency` § Acceptance does not imply visibility](../openspec/specs/indexer-consistency/spec.md) for why indexer lag can waste an attempt but never corrupt one.

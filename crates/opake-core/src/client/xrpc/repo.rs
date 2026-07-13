@@ -60,15 +60,40 @@ impl<T: Transport> super::XrpcClient<T> {
         rkey: &str,
         record: &R,
     ) -> Result<RecordRef, Error> {
+        self.put_record_conditional(collection, rkey, record, None)
+            .await
+    }
+
+    /// Upsert a record conditioned on its current CID via `putRecord`'s
+    /// `swapRecord`. This is the per-record compare-and-swap primitive.
+    ///
+    /// `swap_record`:
+    /// - `Some(cid)` — the write commits only if the record at
+    ///   `collection/rkey` still has CID `cid`. If it moved, the PDS rejects
+    ///   with [`Error::CasConflict`]: another writer got there first, and a
+    ///   background runner should re-derive the item and skip.
+    /// - `None` — an unconditional upsert (identical to [`Self::put_record`]).
+    ///
+    /// spec:background-work § Concurrency is resolved per record by compare-and-swap
+    pub async fn put_record_conditional<R: Serialize>(
+        &mut self,
+        collection: &str,
+        rkey: &str,
+        record: &R,
+        swap_record: Option<&str>,
+    ) -> Result<RecordRef, Error> {
         trace!("putting record {}/{}", collection, rkey);
         let did = self.did()?.to_owned();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "repo": did,
             "collection": collection,
             "rkey": rkey,
             "record": record_with_type(collection, record),
         });
+        if let Some(cid) = swap_record {
+            body["swapRecord"] = serde_json::Value::String(cid.to_owned());
+        }
 
         let mut request = HttpRequest {
             method: HttpMethod::Post,
@@ -142,14 +167,35 @@ impl<T: Transport> super::XrpcClient<T> {
 
     /// Delete a record via `com.atproto.repo.deleteRecord`.
     pub async fn delete_record(&mut self, collection: &str, rkey: &str) -> Result<(), Error> {
+        self.delete_record_conditional(collection, rkey, None).await
+    }
+
+    /// Delete a record conditioned on its current CID via `deleteRecord`'s
+    /// `swapRecord`. The delete-side compare-and-swap primitive.
+    ///
+    /// `swap_record`:
+    /// - `Some(cid)` — the delete commits only if the record still has CID
+    ///   `cid`; otherwise the PDS rejects with [`Error::CasConflict`].
+    /// - `None` — an unconditional delete (identical to [`Self::delete_record`]).
+    ///
+    /// spec:background-work § Concurrency is resolved per record by compare-and-swap
+    pub async fn delete_record_conditional(
+        &mut self,
+        collection: &str,
+        rkey: &str,
+        swap_record: Option<&str>,
+    ) -> Result<(), Error> {
         trace!("deleting record {}/{}", collection, rkey);
         let did = self.did()?.to_owned();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "repo": did,
             "collection": collection,
             "rkey": rkey,
         });
+        if let Some(cid) = swap_record {
+            body["swapRecord"] = serde_json::Value::String(cid.to_owned());
+        }
 
         let mut request = HttpRequest {
             method: HttpMethod::Post,

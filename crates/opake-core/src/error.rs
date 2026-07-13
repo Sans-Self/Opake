@@ -126,6 +126,16 @@ pub enum Error {
     /// telling a workspace's owner they are not a member of it.
     #[error("indexer visibility wait timed out after {waited_ms}ms while {operation}")]
     VisibilityTimeout { operation: String, waited_ms: u64 },
+
+    /// A conditional write (`swapRecord`/`swapCid`) was rejected because the
+    /// record's CID moved between the read and the write — the PDS's optimistic
+    /// concurrency reporting that another writer committed first. For background
+    /// maintenance this is not a failure: the loser re-derives the item and
+    /// almost always finds it already done, then skips. Kept distinct from
+    /// `Xrpc` so a sweep's retry loop can `matches!` it and treat it as "someone
+    /// else finished this" rather than surfacing an error to the user.
+    #[error("compare-and-swap conflict: {0}")]
+    CasConflict(String),
 }
 
 // Crypto-shaped errors can originate either inside opake-crypto (wrap_key,

@@ -127,12 +127,19 @@ mod tests {
         // Revoke performed exactly one network effect — the delete. It did NOT
         // re-upload a re-encrypted blob.
         let reqs = mock.requests();
-        assert_eq!(reqs.len(), 1, "revoke must be a single delete, no re-encrypt upload");
+        assert_eq!(
+            reqs.len(),
+            1,
+            "revoke must be a single delete, no re-encrypt upload"
+        );
         assert!(reqs[0].url.contains("deleteRecord"));
 
         // The cached key still decrypts the unchanged ciphertext.
         let recovered = decrypt_blob(&content_key, &cached_ciphertext).unwrap();
-        assert_eq!(recovered, plaintext, "revocation must not invalidate a cached key");
+        assert_eq!(
+            recovered, plaintext,
+            "revocation must not invalidate a cached key"
+        );
     }
 
     #[tokio::test]

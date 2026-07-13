@@ -133,10 +133,12 @@ sequenceDiagram
     PDS-->>CLI: Document with owner's wrappedKey
     CLI->>CLI: unwrap content key, wrap to recipient
 
-    CLI->>PDS: createRecord (grant)
+    CLI->>PDS: putRecord (grant @ pendingShare rkey)
     PDS-->>CLI: { uri }
     CLI->>PDS: deleteRecord (pendingShare)
     PDS-->>CLI: 200 OK
 ```
+
+Completion writes the grant at the **pending share's own rkey** via an idempotent `putRecord`, not at a fresh rkey via `createRecord`. That is what keeps the retry runner exactly-once when more than one runner is live — a daemon and an open tab, say. Both derive the same grant rkey from the same pending record and upsert there, so the repo converges on one grant instead of one per runner. The `deleteRecord` that follows is idempotent cleanup: a runner that finds the pending record already gone treats that as done. See [Background maintenance](../FLOWS.md#background-maintenance--multi-runner-coordination) for the full race walkthrough and [docs/BACKGROUND_WORK.md](../BACKGROUND_WORK.md) for the contract.
 
 Pending shares expire after 7 days. The daemon also deletes expired records on each pass.

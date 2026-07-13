@@ -18,7 +18,7 @@ use crate::error::Error;
 use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
 use crate::resolve::{self, ResolvedIdentity};
 
-use super::create::{create_grant, GrantParams};
+use super::create::{put_grant_at, GrantParams};
 
 /// Enqueue a pending share for a recipient that hasn't set up Opake yet.
 ///
@@ -300,7 +300,19 @@ pub async fn retry_pending_shares(
                 }
             };
 
-        // Create the grant with the original metadata
+        // Create the grant with the original metadata.
+        //
+        // The grant is written at the pending share's own rkey via an
+        // idempotent `putRecord`, not at a fresh PDS-allocated rkey. This is
+        // what makes completion exactly-once under concurrent runners: a daemon
+        // and an open tab (or two devices) that both reach this share derive the
+        // same grant rkey and upsert there, so the repo converges on one grant
+        // instead of one-per-runner. The pending delete that follows is the
+        // cleanup, and it is idempotent too — a second runner (or a torn prior
+        // pass) finds the pending record already gone and treats that as done.
+        //
+        // spec:background-work § Duplicate execution is harmless
+        // spec:background-work § Tasks interrupt at item granularity
         let grant_params = GrantParams {
             document_uri: &entry.document,
             recipient_did: &recipient.did,
@@ -314,23 +326,28 @@ pub async fn retry_pending_shares(
             created_at: &entry.created_at,
         };
 
-        match create_grant(client, &grant_params, rng).await {
+        match put_grant_at(client, &grant_params, &at_uri.rkey, rng).await {
             Ok(grant_uri) => {
-                info!("pending share {}: grant created → {grant_uri}", entry.uri);
-                if let Err(e) = client
+                info!("pending share {}: grant written → {grant_uri}", entry.uri);
+                match client
                     .delete_record(PENDING_SHARE_COLLECTION, &at_uri.rkey)
                     .await
                 {
-                    warn!(
-                        "pending share {}: grant created but failed to delete pending record: {e}",
-                        entry.uri
-                    );
+                    // Already gone (another runner cleared it, or a prior torn
+                    // pass) is success, not failure — the grant exists either way.
+                    Ok(()) | Err(Error::NotFound(_)) => {}
+                    Err(e) => {
+                        warn!(
+                            "pending share {}: grant written but failed to delete pending record: {e}",
+                            entry.uri
+                        );
+                    }
                 }
                 result.completed += 1;
             }
             Err(e) => {
                 warn!(
-                    "pending share {}: failed to create grant for {}: {e}",
+                    "pending share {}: failed to write grant for {}: {e}",
                     entry.uri, entry.recipient
                 );
                 result.failed += 1;

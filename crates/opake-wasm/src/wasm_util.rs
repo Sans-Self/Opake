@@ -34,6 +34,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Storage(_) => "Storage",
         Error::Sse(_) => "Sse",
         Error::VisibilityTimeout { .. } => "VisibilityTimeout",
+        Error::CasConflict(_) => "CasConflict",
     };
     JsError::new(&format!("{kind}: {e}"))
 }

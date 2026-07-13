@@ -258,8 +258,15 @@ Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` 
 
 `Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. `Workspace::from_keyring` is `pub(crate)`, so the only way to produce a `Workspace` outside opake-core is through the resolution methods (`resolve_workspace`, `file_context`, `workspaceByUri`) — this keeps the invariant that the URI, owner, group key, and rotation all came from the same verified keyring record. The WASM layer uses `WasmFileManagerHandle`, which shares an `Rc<Mutex<WasmOpake>>` with the parent `WasmOpakeHandle` and creates short-lived `FileManager` borrows inside each JS method (wasm_bindgen can't carry lifetimes across the boundary). The shared `Mutex` queues concurrent async operations instead of panicking on aliased `&mut self`. WASM persistence goes through `JsStorage`, a `Storage` impl that calls back into a JS-side `IndexedDbStorage`; `NoopStorage` is tests only. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
 
+## Background Work
+
+Some maintenance runs outside any user action: retrying a share to a recipient who wasn't ready, deleting expired pair requests, and (with the key-rotation change) re-wrapping keyring entries after a rotation. Two tiers run it. The **CLI daemon** is a committed runner — long-lived, unthrottled, expected to drain work sets. The **web client** is an opportunistic runner — it runs maintenance only while a tab is open and visible, and promises nothing, because a tab's lifetime isn't ours to extend and the service-worker alternative is disqualified (group keys can't leave page-WASM; see decision 12 above).
+
+The design that follows from this: no protocol guarantee depends on background work completing, each task's remaining work is *derived* from records rather than stored (a dead runner leaves nothing to recover), and duplicate execution is harmless. When two runners collide on one record, they arbitrate per-record at the PDS — an idempotent upsert at a derived rkey, or a `swapRecord` compare-and-swap — never a lease, leader, or ownership claim. See **[BACKGROUND_WORK.md](BACKGROUND_WORK.md)** for the full contract, the multi-device walkthrough, and the checklist for designing a new task.
+
 ## Further Reading
 
+- **[BACKGROUND_WORK.md](BACKGROUND_WORK.md)** — Background-task contract, runner tiers, multi-device CAS coordination
 - **[CRYPTO.md](CRYPTO.md)** — Algorithms, constants, key hierarchy, operation reference
 - **[CRATE_STRUCTURE.md](CRATE_STRUCTURE.md)** — Detailed file tree for all crates and the web frontend
 - **[STORAGE.md](STORAGE.md)** — Storage abstraction, local record cache, file permissions

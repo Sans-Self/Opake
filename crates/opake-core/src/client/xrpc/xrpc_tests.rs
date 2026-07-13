@@ -83,6 +83,22 @@ fn error_404_returns_not_found() {
     assert!(matches!(err, Error::NotFound(_)));
 }
 
+// -- InvalidSwap maps to CasConflict --
+
+// spec:background-work § Concurrency is resolved per record by compare-and-swap
+#[test]
+fn invalid_swap_returns_cas_conflict() {
+    let r = response(
+        400,
+        r#"{"error":"InvalidSwap","message":"Record was at a different CID"}"#,
+    );
+    let err = check_response(&r).unwrap_err();
+    assert!(
+        matches!(err, Error::CasConflict(_)),
+        "expected CasConflict, got: {err}"
+    );
+}
+
 // -- Non-JSON error bodies --
 
 #[test]
@@ -324,4 +340,131 @@ async fn put_record_sends_rkey_and_returns_ref() {
     assert_eq!(sent_body["rkey"], "self");
     assert_eq!(sent_body["collection"], "app.opake.publicKey");
     assert_eq!(sent_body["repo"], "did:plc:test");
+}
+
+// -- Conditional writes (compare-and-swap) --
+
+// spec:background-work § Concurrency is resolved per record by compare-and-swap
+#[tokio::test]
+async fn put_record_conditional_sends_swap_record() {
+    let mock = MockTransport::new();
+    mock.enqueue(success_response(
+        &serde_json::json!({ "uri": "at://did:plc:test/c/r", "cid": "bafy2" }).to_string(),
+    ));
+
+    let mut client = mock_client(mock.clone());
+    let record = serde_json::json!({ "hello": "world" });
+    client
+        .put_record_conditional("app.opake.grant", "r", &record, Some("bafyPRIOR"))
+        .await
+        .unwrap();
+
+    let reqs = mock.requests();
+    let sent = match &reqs[0].body {
+        Some(RequestBody::Json(v)) => v.clone(),
+        _ => panic!("expected JSON body"),
+    };
+    assert_eq!(sent["swapRecord"], "bafyPRIOR");
+}
+
+// spec:background-work § Concurrency is resolved per record by compare-and-swap
+#[tokio::test]
+async fn delete_record_conditional_sends_swap_record() {
+    let mock = MockTransport::new();
+    mock.enqueue(success_response("{}"));
+
+    let mut client = mock_client(mock.clone());
+    client
+        .delete_record_conditional("app.opake.grant", "r", Some("bafyPRIOR"))
+        .await
+        .unwrap();
+
+    let reqs = mock.requests();
+    let sent = match &reqs[0].body {
+        Some(RequestBody::Json(v)) => v.clone(),
+        _ => panic!("expected JSON body"),
+    };
+    assert_eq!(sent["swapRecord"], "bafyPRIOR");
+}
+
+// A rejected conditional write surfaces as CasConflict, not a generic Xrpc
+// error — the distinction a sweep needs to skip instead of fail.
+// spec:background-work § Concurrency is resolved per record by compare-and-swap
+#[tokio::test]
+async fn conditional_write_conflict_surfaces_cas_conflict() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 400,
+        headers: vec![],
+        body: br#"{"error":"InvalidSwap","message":"Record was at a different CID"}"#.to_vec(),
+    });
+
+    let mut client = mock_client(mock.clone());
+    let record = serde_json::json!({ "hello": "world" });
+    let err = client
+        .put_record_conditional("app.opake.grant", "r", &record, Some("bafySTALE"))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, Error::CasConflict(_)),
+        "expected CasConflict, got: {err}"
+    );
+}
+
+// The full contract behaviour: a runner's conditional write loses the CAS,
+// re-derives the item, finds it already done, and skips — the loss is not an
+// error the caller propagates. This models a sweep's inner loop against a
+// record another runner finished first.
+// spec:background-work § Concurrency is resolved per record by compare-and-swap
+#[tokio::test]
+async fn cas_conflict_drives_re_derive_and_skip_not_error() {
+    // First attempt: the PDS rejects the conditional write (someone else won).
+    // Re-derivation then reads the record and sees it already reflects the
+    // target state, so there is nothing left to write.
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 400,
+        headers: vec![],
+        body: br#"{"error":"InvalidSwap","message":"Record was at a different CID"}"#.to_vec(),
+    });
+    // Re-derivation's read: the record is already at the desired state.
+    mock.enqueue(success_response(
+        &serde_json::json!({
+            "uri": "at://did:plc:test/app.opake.grant/r",
+            "cid": "bafyWINNER",
+            "value": { "done": true },
+        })
+        .to_string(),
+    ));
+
+    let mut client = mock_client(mock.clone());
+    let record = serde_json::json!({ "done": true });
+
+    // The sweep's per-item logic, inline: attempt the conditional write; on a
+    // CAS conflict, re-derive and skip if the work is already done.
+    let outcome: Result<&str, Error> = async {
+        match client
+            .put_record_conditional("app.opake.grant", "r", &record, Some("bafySTALE"))
+            .await
+        {
+            Ok(_) => Ok("wrote"),
+            Err(Error::CasConflict(_)) => {
+                // Re-derive: read the current record; it is already done.
+                let current = client
+                    .get_record("did:plc:test", "app.opake.grant", "r")
+                    .await?;
+                if current.value.get("done") == Some(&serde_json::Value::Bool(true)) {
+                    Ok("skipped: already done")
+                } else {
+                    // Would retry with the fresh CID; unreachable in this scenario.
+                    Err(Error::CasConflict("still contended".into()))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+    .await;
+
+    assert_eq!(outcome.unwrap(), "skipped: already done");
 }

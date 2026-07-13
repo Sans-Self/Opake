@@ -5,8 +5,10 @@
 // `OpakeContext` — the SDK calls `opake.cleanupExpiredPairRequests()`,
 // `opake.healStaleGrants()`, `opake.retryPendingShares()`, and
 // `opake.proactiveRefresh()` directly. This module is intentionally
-// narrow: constants that the Service Worker and the CLI need to agree
-// on, and the task registry the daemon reads.
+// narrow: the shared task registry the daemon reads, and the interval
+// constants the CLI (committed runner) and the web timer (opportunistic
+// runner) agree on. There is no service-worker runner — group keys never
+// leave page-WASM, which disqualifies it (see docs/BACKGROUND_WORK.md).
 
 use opake_core::indexer::daemon;
 use opake_core::pairing::DEFAULT_PAIR_REQUEST_TTL_SECONDS;

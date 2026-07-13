@@ -40,9 +40,14 @@ fn opake_with_mock(mock: MockTransport) -> Opake<MockTransport, OsRng, NoopStora
     });
     let client = XrpcClient::with_session(mock, "https://pds.test".into(), session);
     let identity = Identity::generate(CALLER_DID, &mut OsRng);
-    Opake::new(client, CALLER_DID.into(), identity, OsRng, NoopStorage, || {
-        1_700_000_000_000_000
-    })
+    Opake::new(
+        client,
+        CALLER_DID.into(),
+        identity,
+        OsRng,
+        NoopStorage,
+        || 1_700_000_000_000_000,
+    )
     .unwrap()
 }
 
@@ -56,7 +61,13 @@ async fn share_from_workspace_context_is_refused_and_writes_nothing() {
 
     let recipient = TestKeys::generate("did:plc:recipient");
     let err = mgr
-        .share(DOC_URI, "did:plc:recipient", recipient.public_keys(), "read", None)
+        .share(
+            DOC_URI,
+            "did:plc:recipient",
+            recipient.public_keys(),
+            "read",
+            None,
+        )
         .await
         .unwrap_err();
 

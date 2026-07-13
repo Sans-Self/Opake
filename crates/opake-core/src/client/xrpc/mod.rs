@@ -241,8 +241,17 @@ pub fn check_response(response: &HttpResponse) -> Result<(), Error> {
             .as_deref()
             .is_some_and(|c| c.ends_with("NotFound"));
 
+    // A rejected conditional write. atproto reports `swapRecord`/`swapCommit`
+    // mismatches with the `InvalidSwap` error name (HTTP 400). Surface it as a
+    // distinct variant so a background sweep can tell "another runner got here
+    // first" apart from a genuine request failure — the concurrency contract
+    // rests on this distinction.
+    let is_swap_conflict = error_code.as_deref() == Some("InvalidSwap");
+
     if is_not_found {
         Err(Error::NotFound(message))
+    } else if is_swap_conflict {
+        Err(Error::CasConflict(message))
     } else {
         Err(Error::Xrpc {
             status: response.status,

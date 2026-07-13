@@ -52,7 +52,30 @@ function CabinetLayout() {
         },
       });
     });
-    return () => handle?.stop();
+
+    // Dev/test-only drain handle: the web tier's maintenance timers are
+    // best-effort and slow (the share-retry tick is 300s with no leading
+    // fire), so a cross-tier e2e can't observe the drain by waiting. This
+    // exposes the existing `retryPendingShares` entry point so the test can
+    // drive the drain on demand and race it against the CLI runner. It adds
+    // no machinery and is stripped from production builds — the only effect
+    // is making the already-present drain callable.
+    if (import.meta.env.DEV) {
+      (
+        window as unknown as {
+          __opakeMaintenance?: { retryPendingShares: () => Promise<unknown> };
+        }
+      ).__opakeMaintenance = {
+        retryPendingShares: () => getOpake().retryPendingShares(),
+      };
+    }
+
+    return () => {
+      handle?.stop();
+      if (import.meta.env.DEV) {
+        delete (window as unknown as { __opakeMaintenance?: unknown }).__opakeMaintenance;
+      }
+    };
   }, []);
 
   // Scroll lock + Escape handler when mobile drawer is open

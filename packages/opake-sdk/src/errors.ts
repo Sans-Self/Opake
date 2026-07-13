@@ -26,6 +26,10 @@ export type OpakeErrorKind =
   // retry window — the pipeline is behind, distinct from a real authorization
   // denial. Lets the UI say "still syncing" rather than "not permitted".
   | "VisibilityTimeout"
+  // A conditional (compare-and-swap) write lost the race — the record's CID
+  // moved before the write landed. For background maintenance this is "another
+  // runner finished first", not a failure; the runner re-derives and skips.
+  | "CasConflict"
   | "Unknown";
 
 /**
@@ -70,6 +74,7 @@ const KNOWN_KINDS = new Set<string>([
   "Mnemonic",
   "Sse",
   "VisibilityTimeout",
+  "CasConflict",
 ]);
 
 /**
