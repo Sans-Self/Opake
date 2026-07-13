@@ -53,6 +53,36 @@ After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry`
 
 See `WorkspaceKeeper` in `crates/opake-core/src/indexer/workspace_keeper/` and `apply_keyring_to_workspace_keeper` in `crates/opake-wasm/src/sse_wasm.rs`.
 
+## Key rotation — event and live adoption
+
+A rotation is one synchronous keyring supersede, followed by every live client adopting it from the SSE echo. No client reloads or re-bootstraps to keep reading; the sweep that follows is hygiene only (see [CRYPTO.md § Key Rotation](CRYPTO.md#key-rotation) and [BACKGROUND_WORK.md](BACKGROUND_WORK.md)).
+
+```mermaid
+sequenceDiagram
+    participant M as Manager (remover)
+    participant PDS as Manager's PDS
+    participant IX as Indexer
+    participant B as Member B (live tab)
+
+    Note over M: remove_workspace_member
+    M->>M: mint new group key (rotation n+1)
+    M->>M: wrap new key to each remaining member
+    M->>M: push prior rotation into keyHistory
+    M->>PDS: createRecord (keyring supersede)
+    Note over PDS: workspace is now fully correct — forward secrecy holds,<br/>every remaining member reads every document. Nothing else must run.
+    PDS-->>IX: firehose → keyring:upsert
+    IX-->>B: SSE keyring:upsert (rotation n+1)
+    Note over B: tree keeper adopts in place
+    B->>B: unwrap new group key from the event record
+    B->>B: archive prior key (derive_historical_keys)
+    B->>B: re-decrypt cached directory names
+    Note over B: names stay readable — no reload
+```
+
+The adoption step is `TreeKeeper::adopt_keyring_rotation` (`crates/opake-core/src/indexer/tree_keeper/`): the keeper retains the caller's private keys so it can unwrap the freshly-minted group key straight from the event, rather than triggering an indexer refetch. A projection that needed a reload to read post-rotation state would be defective. The `WorkspaceKeeper` adopts the same way through `try_build_entry` (it rebuilds the entry — including a fresh group-key unwrap — on every keyring event).
+
+Adding a member is a supersede **without** rotation: the admitting manager wraps the current key and every retained `keyHistory` key to the joiner, so a post-rotation joiner reads pre-rotation documents (`add_workspace_member`).
+
 ## Inbox live updates
 
 The inbox (incoming shares) is kept current without polling via the SSE consumer and `InboxKeeper`.
@@ -112,7 +142,7 @@ sequenceDiagram
 
 The repo ends with exactly one grant regardless of interleaving. Runner B's `putRecord` overwrites rather than duplicates because both runners chose the same rkey; B's `deleteRecord` finding the record already gone is the expected idempotent outcome, not a failure.
 
-For tasks that mutate a record in place rather than upsert-or-delete — the incoming key-rotation re-wrap sweep is the first — the same coordination uses a true compare-and-swap: read the record and its CID, compute the fix, and write with `swapRecord` set to that CID (`put_record_conditional` / `delete_record_conditional`). A write the PDS rejects because the CID moved surfaces as `Error::CasConflict`, which the runner reads as "another runner finished this" — it re-derives the item and skips:
+For tasks that mutate a record in place rather than upsert-or-delete — the key-rotation re-wrap sweep is the first consumer — the same coordination uses a true compare-and-swap: read the record and its CID, compute the fix, and write with `swapRecord` set to that CID (`put_record_conditional` / `delete_record_conditional`). A write the PDS rejects because the CID moved surfaces as `Error::CasConflict`, which the runner reads as "another runner finished this" — it re-derives the item and skips:
 
 ```mermaid
 sequenceDiagram

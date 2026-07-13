@@ -273,7 +273,9 @@ The new device's ephemeral private bundle is persisted to local Storage (32 + 24
 
 ## Key Rotation
 
-On member removal, the group key rotates:
+### The rotation event
+
+On member removal, the group key rotates inside the single operation that triggers it:
 
 1. Archive current `members` array into `keyHistory` (minus the removed member)
 2. Generate new group key
@@ -281,9 +283,25 @@ On member removal, the group key rotates:
 4. Increment `rotation` counter
 5. Re-encrypt keyring metadata under new group key
 
-Documents encrypted under the old group key remain readable — clients look up the document's `rotation` in `keyHistory` to find the old wrapped group key. New documents use the new group key. The removed member cannot decrypt anything created after rotation.
+This is **one bounded write with no blob work** — per-document content keys are wrapped under the group key precisely so rotating the group key never re-encrypts ciphertext (key hierarchy, above). The moment the keyring supersede lands, the workspace is fully correct: forward secrecy holds against the removed member, and every remaining member can still read every document. Nothing else has to run — not the sweep below, not any background task. (The lifecycle contract for this is the `key-rotation` capability under `openspec/specs/`.)
 
-Old group keys are stored locally per-rotation in `keyrings/<rkey>.json`:
+Adding a member does **not** rotate. The admitting manager wraps the current group key *and* every retained `keyHistory` key to the joiner, so a member admitted after N rotations can still read documents written under all N prior generations. You cannot grant a rotation the admitting manager no longer holds.
+
+### Rotation-selected reads and key history
+
+Documents encrypted under an old group key remain readable — a reader looks up the document's `keyringRef.rotation` in `keyHistory` to recover the wrapped group key of that generation. New documents use the current key. `keyHistory` grows by one retained key per rotation; readers walk it, so an unswept workspace pays a proportionally longer walk. That is a **performance cost only, never a correctness cliff** — a historical key is never pruned while any live document's wrap still references its rotation.
+
+Live clients adopt a rotation from the SSE event itself — the new key is unwrapped straight from the keyring record, the prior key is archived, and cached directory names re-decrypt in place. No reload, re-login, or re-bootstrap is required to keep reading after a rotation.
+
+### The re-wrap sweep — and what rotation does *not* do
+
+Rotation is **forward secrecy only.** It stops the removed member from reading content created *after* the rotation. It does **not** retroactively revoke content they already fetched or could have unwrapped while they were a member — the same posture grants carry (`sharing-grants`). There is no cryptographic take-back of data a device already held.
+
+The re-wrap sweep migrates existing documents' content-key wraps from historical group keys to the current one. Its **only** effect is to bound the `keyHistory` walk readers perform — **it has no security effect whatsoever.** A re-wrap cannot revoke anything a former member could already unwrap; the content key it re-wraps is byte-for-byte the same key. Anyone who believes the sweep "completes" revocation has the model backwards: revocation is what rotation already did (forward), and the sweep is pure hygiene.
+
+The sweep is therefore a background task under the [background-work contract](BACKGROUND_WORK.md): its work set is derived from records (documents whose `keyringRef.rotation` trails the head), each re-wrap is a single CAS-conditioned write, duplicate or interrupted runners re-derive the remainder, and completion is never required for any guarantee. `crates/opake-core/src/rewrap.rs` holds the primitive; `Opake::sweep_owned_documents_rewrap` orchestrates it; the CLI daemon drains it and the web tier runs it opportunistically.
+
+Old group keys are also cached locally per-rotation in `keyrings/<rkey>.json`:
 ```json
 { "keys": [{ "rotation": 0, "group_key": "base64..." }, { "rotation": 1, "group_key": "base64..." }] }
 ```

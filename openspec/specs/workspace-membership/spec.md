@@ -112,7 +112,7 @@ A manager changes a member's role by writing a supersede carrying the prior memb
 
 ## Open questions
 
-- Rotation after leave: forward secrecy against a leaver requires a manager to rotate afterwards. Should a manager's daemon rotate automatically on observing a leave? Related to auto key rotation (#90) and the unreliable bulk re-encryption noted in open work — a rotation whose re-encryption doesn't complete degrades to the historical-key fallback.
+- Rotation after leave: forward secrecy against a leaver requires a manager to rotate afterwards. Should a manager's daemon rotate automatically on observing a leave? Related to auto key rotation (#90). The rotation event itself is synchronous and self-sufficient (`spec:key-rotation § The rotation event is synchronous and self-sufficient`); the only open matter here is trigger policy.
 - Atomic hand-over: a lone manager who wants out of a populated workspace must promote-then-leave as two supersedes, with a fork-race window between them. Is a combined "transfer management and leave" operation worth its own primitive?
 - Viewer enforcement surface: viewers are excluded from directory and keyring authorship (this spec + tree-chains), but read access is capability-based (holding a wrap), not checked per-operation. Confirm there is no surface where a viewer's write would be accepted.
 

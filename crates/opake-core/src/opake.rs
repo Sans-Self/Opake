@@ -902,6 +902,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         workspace_id: &WorkspaceId,
         key: &ContentKey,
+        historical_keys: &[crate::workspace::HistoricalKey],
         member_did: &str,
         role: Role,
     ) -> Result<MutationOutcome, Error> {
@@ -920,13 +921,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             ml_kem: &resolved.ml_kem_public_key,
         };
 
+        // Wraps for this workspace are anchored to its stable (genesis) URI so
+        // they survive future supersedes.
+        let wrap_ctx = crate::crypto::WrapContext::Keyring {
+            uri: workspace_id.as_str(),
+        };
+
         let wrapped = crate::crypto::wrap_key(
             key,
             &member_public_keys,
             member_did,
-            &crate::crypto::WrapContext::Keyring {
-                uri: workspace_id.as_str(),
-            },
+            &wrap_ctx,
             &mut self.rng,
         )?;
 
@@ -935,6 +940,35 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             wrapped_key: wrapped,
             role,
         });
+
+        // Admission grants the full history, not just the current key: for
+        // every retained rotation the admitting manager can still unwrap,
+        // wrap that key for the joiner so documents written under prior
+        // rotations remain readable to them. A rotation the manager lacks is
+        // simply not extended — you cannot grant a key you do not hold.
+        // spec:key-rotation § New members can read the full history they are admitted to
+        for entry in &mut new_record.key_history {
+            if entry.members.iter().any(|m| m.did() == member_did) {
+                continue;
+            }
+            let Some(historical) = historical_keys
+                .iter()
+                .find(|h| h.rotation == entry.rotation)
+            else {
+                continue;
+            };
+            let wrapped_historical = crate::crypto::wrap_key(
+                &historical.key,
+                &member_public_keys,
+                member_did,
+                &wrap_ctx,
+                &mut self.rng,
+            )?;
+            entry.members.push(crate::records::KeyringMember {
+                wrapped_key: wrapped_historical,
+                role,
+            });
+        }
 
         self.write_keyring_supersede(workspace_id, prior_uri, new_record)
             .await
@@ -1576,6 +1610,125 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     pub async fn heal_stale_grants(&mut self) -> Result<crate::sharing::HealResult, Error> {
         let result = crate::sharing::heal_stale_grants(&mut self.client).await;
         self.signoff(result).await
+    }
+
+    // -- Re-wrap sweep (background hygiene) --
+
+    /// Re-wrap every document the caller owns whose content-key wrap trails
+    /// its workspace's current rotation, bounding the key-history walk readers
+    /// perform after a rotation.
+    ///
+    /// The work set is derived purely from records — the caller's own
+    /// `app.opake.document` records, each compared against its workspace head
+    /// resolved at sweep time. Each re-wrap is an independent CAS write
+    /// conditioned on the record's current CID, so a duplicate or interrupted
+    /// runner re-derives exactly the unmigrated remainder and a document
+    /// another runner already migrated is skipped on a CAS conflict. Never
+    /// required for correctness — a workspace that is never swept stays fully
+    /// readable, it just accrues a longer history walk (`spec:key-rotation §
+    /// Unbounded key history is the accepted cost of unswept workspaces`).
+    ///
+    /// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
+    pub async fn sweep_owned_documents_rewrap(
+        &mut self,
+    ) -> Result<crate::rewrap::RewrapOutcome, Error> {
+        use crate::rewrap::{rewrap_document_to_head, RewrapItem};
+
+        let doc_uris = self.list_own_document_uris().await?;
+        // Resolved workspace heads, cached per keyring so a workspace is only
+        // resolved once even when it holds many documents.
+        let mut heads: std::collections::HashMap<String, Workspace> =
+            std::collections::HashMap::new();
+        let mut outcome = crate::rewrap::RewrapOutcome::default();
+
+        for doc_uri in &doc_uris {
+            // Peek at the record to learn which workspace it belongs to; a
+            // document with no keyring encryption is not this sweep's concern.
+            let Some(workspace_id) = self.document_keyring_uri(doc_uri).await? else {
+                outcome.not_applicable += 1;
+                continue;
+            };
+
+            if !heads.contains_key(&workspace_id) {
+                // Re-resolve the head per keyring at sweep time. A rotation
+                // that lands mid-sweep leaves later documents re-derivable on
+                // the next pass — never a write onto a superseded rotation.
+                match self.resolve_head_workspace(&workspace_id).await {
+                    Ok(ws) => {
+                        heads.insert(workspace_id.clone(), ws);
+                    }
+                    Err(e) => {
+                        log::warn!("rewrap: failed to resolve head for {workspace_id}: {e}");
+                        continue;
+                    }
+                }
+            }
+            let head = heads[&workspace_id].group_keys();
+
+            match rewrap_document_to_head(&mut self.client, &workspace_id, doc_uri, head).await {
+                Ok(RewrapItem::Rewrapped) => outcome.rewrapped += 1,
+                Ok(RewrapItem::AlreadyCurrent) => outcome.already_current += 1,
+                Ok(RewrapItem::Conflict) => outcome.conflicts += 1,
+                Ok(RewrapItem::NotApplicable) => outcome.not_applicable += 1,
+                Err(e) => {
+                    log::warn!("rewrap: {doc_uri} failed: {e}");
+                }
+            }
+        }
+
+        self.auto_persist_session().await?;
+        Ok(outcome)
+    }
+
+    /// The keyring (workspace) URI a document is encrypted for, or `None` if
+    /// it is not keyring-encrypted. One lightweight record read.
+    async fn document_keyring_uri(&mut self, doc_uri: &str) -> Result<Option<String>, Error> {
+        let at_uri = atproto::parse_at_uri(doc_uri)?;
+        let entry = self
+            .client
+            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+            .await?;
+        let document: crate::records::Document = serde_json::from_value(entry.value)?;
+        Ok(match document.encryption {
+            crate::records::Encryption::Keyring(ke) => Some(ke.keyring_ref.keyring),
+            crate::records::Encryption::Direct(_) => None,
+        })
+    }
+
+    /// Resolve a workspace to its current chain head by genesis (workspace) URI
+    /// — walk to the head, then unwrap the head group key + history.
+    async fn resolve_head_workspace(&mut self, workspace_id: &str) -> Result<Workspace, Error> {
+        let id = WorkspaceId::from_resolved(workspace_id.to_string());
+        let (head_uri, _) = self.fetch_keyring_chain_head(&id).await?;
+        self.resolve_workspace_by_uri(&head_uri).await
+    }
+
+    /// List the AT-URIs of every `app.opake.document` record in the caller's
+    /// own repo. The re-wrap sweep's candidate set is derived from these.
+    /// spec:background-work § Remaining work is derived from records, never stored
+    pub async fn list_own_document_uris(&mut self) -> Result<Vec<String>, Error> {
+        let mut uris = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self
+                .client
+                .list_records(
+                    crate::documents::DOCUMENT_COLLECTION,
+                    Some(100),
+                    cursor.as_deref(),
+                )
+                .await?;
+            if page.records.is_empty() {
+                break;
+            }
+            uris.extend(page.records.iter().map(|r| r.uri.clone()));
+            match page.cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        self.auto_persist_session().await?;
+        Ok(uris)
     }
 
     // -- Purge --

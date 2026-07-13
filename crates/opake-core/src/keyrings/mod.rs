@@ -121,7 +121,6 @@ mod indexer_workspace_tests {
                 name: name.into(),
                 description: None,
                 icon: None,
-                enforce_revocation: None,
             },
             &mut OsRng,
         )

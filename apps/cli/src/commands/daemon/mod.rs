@@ -113,6 +113,7 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
             let mut pair_tick = tokio::time::interval(task_interval("pair-cleanup"));
             let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
             let mut share_tick = tokio::time::interval(task_interval("share-retry"));
+            let mut rewrap_tick = tokio::time::interval(task_interval("rotation-rewrap"));
 
             loop {
                 tokio::select! {
@@ -127,6 +128,10 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
                     _ = share_tick.tick() => {
                         info!("running: share-retry");
                         run_share_retry(storage).await;
+                    }
+                    _ = rewrap_tick.tick() => {
+                        info!("running: rotation-rewrap");
+                        run_rotation_rewrap(storage).await;
                     }
                     _ = tokio::signal::ctrl_c() => {
                         info!("received SIGINT, shutting down");
@@ -220,6 +225,37 @@ async fn run_share_retry(storage: &FileStorage) {
         let transport = ReqwestTransport::new();
         if let Err(e) = opake.retry_pending_shares(&transport).await {
             warn!("share-retry: failed for {did}: {e}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task: rotation re-wrap sweep
+// ---------------------------------------------------------------------------
+
+async fn run_rotation_rewrap(storage: &FileStorage) {
+    let Some(config) = load_config_or_warn(storage, "rotation-rewrap") else {
+        return;
+    };
+
+    for did in config.accounts.keys() {
+        let mut opake = match build_opake(storage, did).await {
+            Ok(o) => o,
+            Err(e) => {
+                warn!("rotation-rewrap: failed to build opake for {did}: {e}");
+                continue;
+            }
+        };
+
+        match opake.sweep_owned_documents_rewrap().await {
+            Ok(outcome) if outcome.rewrapped > 0 => {
+                info!(
+                    "rotation-rewrap: {} document(s) migrated for {did} ({} conflicts)",
+                    outcome.rewrapped, outcome.conflicts
+                );
+            }
+            Ok(_) => {}
+            Err(e) => warn!("rotation-rewrap: failed for {did}: {e}"),
         }
     }
 }
@@ -391,16 +427,8 @@ async fn list_tasks(storage: &FileStorage) -> Result<()> {
                 ("grant-healing", format!("{healed} healed"))
             }
             DaemonTaskKind::ShareRetry { retried } => ("share-retry", format!("{retried} retried")),
-            DaemonTaskKind::ReEncryption { .. } => {
-                let progress = task.progress.as_ref().map_or(String::new(), |p| {
-                    let mb = p.bytes_processed / (1024 * 1024);
-                    format!(
-                        "{}/{} docs ({mb}MB)",
-                        p.completed,
-                        p.completed + p.remaining
-                    )
-                });
-                ("re-encryption", progress)
+            DaemonTaskKind::RotationRewrap { rewrapped } => {
+                ("rotation-rewrap", format!("{rewrapped} re-wrapped"))
             }
         };
         let status = match &task.status {

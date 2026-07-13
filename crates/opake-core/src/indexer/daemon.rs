@@ -43,6 +43,11 @@ pub const TASKS: &[TaskDef] = &[
         interval_seconds: 300,
         description: "Retry pending shares for recipients who haven't set up yet",
     },
+    TaskDef {
+        name: "rotation-rewrap",
+        interval_seconds: 30 * 60,
+        description: "Re-wrap documents from historical group keys to the current rotation",
+    },
     // Note: proposal sync is no longer a timer-polling task. The web
     // client runs a WASM-owned SSE consumer, the CLI daemon runs a
     // native `SseConsumer` (via `ReqwestSseTransport`), and both route
@@ -60,16 +65,10 @@ pub fn task_by_name(name: &str) -> Option<&'static TaskDef> {
 pub const SESSION_REFRESH_THRESHOLD: i64 = DEFAULT_REFRESH_THRESHOLD_SECONDS;
 
 // ---------------------------------------------------------------------------
-// Background task tracking (re-encryption, etc.)
+// Background task tracking
 // ---------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};
-
-/// Debounce window for re-encryption after member removal (seconds).
-pub const REENCRYPTION_DEBOUNCE_SECONDS: i64 = 180;
-
-/// Maximum blob data to process per re-encryption batch.
-pub const REENCRYPTION_BATCH_SIZE_BYTES: u64 = 500 * 1024 * 1024;
 
 /// Result of syncing a single workspace (chain head load + optional error).
 ///
@@ -89,8 +88,6 @@ pub struct DaemonTask {
     pub id: String,
     pub kind: DaemonTaskKind,
     pub status: TaskStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress: Option<TaskProgress>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -108,12 +105,11 @@ pub enum DaemonTaskKind {
     GrantHealing { healed: usize },
     /// Retried pending shares for recipients who hadn't set up yet.
     ShareRetry { retried: usize },
-    /// Re-wrap content keys from an old group key rotation to the current one.
-    ReEncryption {
-        keyring_uri: String,
-        from_rotation: u64,
-        to_rotation: u64,
-    },
+    /// Re-wrapped documents from historical group keys to the current
+    /// rotation. Carries only the completed count — the sweep's remaining
+    /// work is always re-derived from records, never persisted.
+    /// spec:background-work § Remaining work is derived from records, never stored
+    RotationRewrap { rewrapped: usize },
 }
 
 /// Current lifecycle state of a daemon task.
@@ -124,17 +120,4 @@ pub enum TaskStatus {
     Running,
     Completed,
     Failed(String),
-}
-
-/// Progress for a running task.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskProgress {
-    /// Documents processed by this batch so far.
-    pub completed: usize,
-    /// Documents still at the old rotation (dynamic — decreases as other
-    /// operations migrate documents).
-    pub remaining: usize,
-    /// Approximate blob bytes processed (for UI display).
-    pub bytes_processed: u64,
 }

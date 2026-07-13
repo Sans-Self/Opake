@@ -58,7 +58,6 @@ pub async fn create_keyring(
         name: params.name.to_string(),
         description: params.description.map(String::from),
         icon: None,
-        enforce_revocation: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, rng)?;
 

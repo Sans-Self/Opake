@@ -66,6 +66,28 @@ fn cabinet_keeper() -> TreeKeeper {
     keeper
 }
 
+/// Install a workspace tree with the deterministic test keypair as the
+/// caller's private keys. Convenience for the many tests that don't
+/// exercise rotation adoption and just need a tree present.
+fn install_ws(
+    keeper: &mut TreeKeeper,
+    keyring_uri: &str,
+    tree: DirectoryTree,
+    group_key: ContentKey,
+    rotation: u64,
+) {
+    let kp = test_keypair();
+    keeper.install_workspace_tree(
+        keyring_uri.into(),
+        tree,
+        group_key,
+        rotation,
+        Vec::new(),
+        kp.x25519_private,
+        kp.ml_kem_private,
+    );
+}
+
 fn sse_dir_upsert(uri: &str, name: &str, entries: Vec<String>) -> SseEvent {
     let dir = dummy_directory_with_entries(name, entries);
     SseEvent::DirectoryUpsert(IndexerEnvelope {
@@ -298,19 +320,19 @@ fn uninstall_all_drains_every_scope() {
 
     let group_key_a = ContentKey([0u8; 32]);
     let group_key_b = ContentKey([1u8; 32]);
-    keeper.install_workspace_tree(
-        ws_a.clone(),
+    install_ws(
+        &mut keeper,
+        &ws_a,
         DirectoryTree::from_records(std::iter::empty()),
         group_key_a,
         0,
-        Vec::new(),
     );
-    keeper.install_workspace_tree(
-        ws_b.clone(),
+    install_ws(
+        &mut keeper,
+        &ws_b,
         DirectoryTree::from_records(std::iter::empty()),
         group_key_b,
         0,
-        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -429,19 +451,19 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
     let mut keeper = cabinet_keeper();
     let ws_a = "at://did:plc:test/app.opake.keyring/a".to_string();
     let ws_b = "at://did:plc:test/app.opake.keyring/b".to_string();
-    keeper.install_workspace_tree(
-        ws_a.clone(),
+    install_ws(
+        &mut keeper,
+        &ws_a,
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([0u8; 32]),
         0,
-        Vec::new(),
     );
-    keeper.install_workspace_tree(
-        ws_b.clone(),
+    install_ws(
+        &mut keeper,
+        &ws_b,
         DirectoryTree::from_records(std::iter::empty()),
         ContentKey([1u8; 32]),
         0,
-        Vec::new(),
     );
 
     let cabinet_sink = RecordingSink::new();
@@ -530,93 +552,218 @@ fn multiple_watchers_same_directory_all_fire() {
     assert_eq!(c.count(), c0 + 1);
 }
 
-fn keyring_upsert_event(uri: &str, rotation: u64) -> SseEvent {
-    use crate::atproto::AtBytes;
-    use crate::records::{EncryptedMetadata, Keyring, SCHEMA_VERSION};
+/// A keyring member entry carrying `group_key` wrapped for the test
+/// identity, anchored to the workspace's stable URI.
+fn wrapped_member(group_key: &ContentKey, workspace_id: &str) -> crate::records::KeyringMember {
+    use crate::crypto::{self, OsRng, WrapContext};
+    let kp = test_keypair();
+    let wrapped_key = crypto::wrap_key(
+        group_key,
+        &kp.public_keys(),
+        TEST_DID,
+        &WrapContext::Keyring { uri: workspace_id },
+        &mut OsRng,
+    )
+    .unwrap();
+    crate::records::KeyringMember {
+        wrapped_key,
+        role: crate::records::Role::Manager,
+    }
+}
 
+/// Build a keyring record with the test identity as sole member holding
+/// `current_key` at `rotation`, plus a `keyHistory` entry per `(rotation,
+/// key)` in `history`. Genesis-shaped (head URI == workspace_id).
+fn keyring_record(
+    workspace_id: &str,
+    rotation: u64,
+    current_key: &ContentKey,
+    history: &[(u64, &ContentKey)],
+) -> crate::records::Keyring {
+    use crate::atproto::AtBytes;
+    use crate::records::{EncryptedMetadata, KeyHistoryEntry, Keyring, SCHEMA_VERSION};
+
+    Keyring {
+        opake_version: SCHEMA_VERSION,
+        algo: "aes-256-gcm".into(),
+        members: vec![wrapped_member(current_key, workspace_id)],
+        rotation,
+        key_history: history
+            .iter()
+            .map(|(rot, key)| KeyHistoryEntry {
+                rotation: *rot,
+                members: vec![wrapped_member(key, workspace_id)],
+            })
+            .collect(),
+        encrypted_metadata: EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: String::new(),
+            },
+            nonce: AtBytes {
+                encoded: String::new(),
+            },
+        },
+        supersedes: None,
+        workspace_id: Some(workspace_id.into()),
+        created_at: "2026-04-17T00:00:00Z".into(),
+        modified_at: None,
+    }
+}
+
+fn keyring_upsert_of(record: crate::records::Keyring, uri: &str) -> SseEvent {
     SseEvent::KeyringUpsert(IndexerEnvelope {
         uri: uri.into(),
-        record: Keyring {
-            opake_version: SCHEMA_VERSION,
-            algo: "aes-256-gcm".into(),
-            members: Vec::new(),
-            rotation,
-            key_history: Vec::new(),
-            encrypted_metadata: EncryptedMetadata {
-                ciphertext: AtBytes {
-                    encoded: String::new(),
-                },
-                nonce: AtBytes {
-                    encoded: String::new(),
-                },
-            },
-            supersedes: None,
-            workspace_id: Some(uri.into()),
-            created_at: "2026-04-17T00:00:00Z".into(),
-            modified_at: None,
-        },
+        record,
         indexed_at: "2026-04-17T00:00:00Z".into(),
         deleted_at: None,
     })
 }
 
+/// A keyring-encrypted directory at a specific rotation, tagged with its
+/// workspace id so keeper scope-routing lands it in the right tree.
+fn keyring_dir(
+    name: &str,
+    keyring_uri: &str,
+    group_key: &ContentKey,
+    rotation: u64,
+    entries: Vec<String>,
+) -> crate::records::Directory {
+    use crate::crypto::OsRng;
+    let (key_wrapping, encrypted_metadata) =
+        crate::directories::encrypt_keyring_directory_envelope(
+            name,
+            None,
+            keyring_uri,
+            group_key,
+            rotation,
+            &mut OsRng,
+        )
+        .unwrap();
+    let entries = entries
+        .into_iter()
+        .map(|target| crate::records::ListingEntry::new(target, "bafytest"))
+        .collect();
+    let mut dir = crate::records::Directory {
+        entries,
+        ..crate::records::Directory::new(
+            key_wrapping,
+            encrypted_metadata,
+            "2026-04-17T00:00:00Z".into(),
+        )
+    };
+    dir.workspace_id = Some(keyring_uri.into());
+    dir
+}
+
+fn dir_upsert_of(record: crate::records::Directory, uri: &str) -> SseEvent {
+    SseEvent::DirectoryUpsert(IndexerEnvelope {
+        uri: uri.into(),
+        record,
+        indexed_at: "2026-04-17T00:00:00Z".into(),
+        deleted_at: None,
+    })
+}
+
+// A live projection must adopt a rotation from the event alone: the new
+// group key is unwrapped straight from the keyring record, the prior key is
+// archived, and cached names re-decrypt — no reload. Regression for the
+// keeper that used to bump the counter and blank the names to "?".
+// spec:key-rotation § Live projections adopt a rotation completely
 #[test]
-fn keyring_rotation_invalidates_decrypted_names_and_fires_watchers() {
-    // A KeyringUpsert with a higher rotation than the installed workspace
-    // means the group key just rotated — the names cached on the tree
-    // were produced with the prior key. Invalidate them so consumers
-    // re-decrypt via the fresh group key the FileManager already holds.
-    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
-    const WS_ROOT_URI: &str = "at://did:plc:test/app.opake.directory/ws-abc";
+fn rotation_event_keeps_names_readable_across_rotation() {
+    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/rot";
+    const ROOT_URI2: &str = "at://did:plc:test/app.opake.directory/rot-root";
+    const SUB_URI: &str = "at://did:plc:test/app.opake.directory/rot-sub";
+    const NEW_URI: &str = "at://did:plc:test/app.opake.directory/rot-new";
+    use crate::crypto::{self, OsRng};
+
+    let kp = test_keypair();
+    let key0 = crypto::generate_content_key(&mut OsRng);
+    let key1 = crypto::generate_content_key(&mut OsRng);
+
+    // Rotation-0 tree: root + a "Reports" subdir, both wrapped under key0.
+    let tree = {
+        let root = keyring_dir("/", WS_URI, &key0, 0, vec![SUB_URI.into()]);
+        let sub = keyring_dir("Reports", WS_URI, &key0, 0, vec![]);
+        let mut tree = DirectoryTree::from_records(vec![
+            (ROOT_URI2.to_string(), root),
+            (SUB_URI.to_string(), sub),
+        ]);
+        // Mirror a fresh bootstrap: names readable at rotation 0.
+        let hist: Vec<crate::workspace::HistoricalKey> = Vec::new();
+        let view = crate::workspace::GroupKeys {
+            current_rotation: 0,
+            current: &key0,
+            historical: &hist,
+        };
+        let group_keys = HashMap::from([(WS_URI.to_string(), view)]);
+        tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
+        assert_eq!(tree.directory_name(SUB_URI), Some("Reports"));
+        tree
+    };
 
     let mut keeper = cabinet_keeper();
-    // Seed a workspace tree that already has a decrypted directory name.
-    let mut tree = DirectoryTree::from_records(std::iter::empty());
-    let dir = dummy_directory_with_entries("Root", vec![]);
-    tree.apply_directory_delta(
-        WS_ROOT_URI,
-        &dir,
-        &DecryptionCtx {
-            did: TEST_DID,
-            private_keys: None,
-            group_keys: &std::collections::HashMap::new(),
-        },
-    )
-    .ok();
-    // Before invalidation the directory has SOME name recorded (non-root
-    // falls back to "?" when decryption fails, which is still non-empty).
-    let before = tree.directory_name(WS_ROOT_URI).map(str::to_owned);
-    assert!(before.is_some());
-
-    keeper.install_workspace_tree(WS_URI.into(), tree, ContentKey([7u8; 32]), 1, Vec::new());
+    keeper.install_workspace_tree(
+        WS_URI.into(),
+        tree,
+        key0.clone(),
+        0,
+        Vec::new(),
+        kp.x25519_private,
+        kp.ml_kem_private,
+    );
 
     let sink = RecordingSink::new();
-    keeper.watch_workspace(WS_URI.into(), WS_ROOT_URI.into(), sink.callback());
-    let fire_count_before = sink.count();
+    keeper.watch_workspace(WS_URI.into(), ROOT_URI2.into(), sink.callback());
+    let before = sink.count();
 
+    // Rotation event: rotation 1, key1 current, key0 pushed into history.
+    let record = keyring_record(WS_URI, 1, &key1, &[(0, &key0)]);
     keeper
-        .apply_event(&keyring_upsert_event(WS_URI, 2))
+        .apply_event(&keyring_upsert_of(record, WS_URI))
         .unwrap();
 
-    // Watcher fired once, cached name wiped to empty.
-    assert_eq!(sink.count(), fire_count_before + 1);
-    let after = keeper
-        .workspace_tree(WS_URI)
-        .and_then(|t| t.directory_name(WS_ROOT_URI).map(str::to_owned));
-    assert_eq!(after.as_deref(), Some(""), "names should be cleared");
+    // Adoption notified watchers.
+    assert_eq!(sink.count(), before + 1, "rotation adoption fires watchers");
+
+    // The pre-rotation name resolves through the archived key — readable,
+    // not blanked to "?" or "".
+    assert_eq!(
+        keeper
+            .workspace_tree(WS_URI)
+            .and_then(|t| t.directory_name(SUB_URI)),
+        Some("Reports"),
+        "pre-rotation names survive an in-place rotation"
+    );
+
+    // A directory written under rotation 1 decrypts via the adopted key,
+    // with no re-bootstrap (post-rotation upload readable by a live peer).
+    let new_dir = keyring_dir("Q3", WS_URI, &key1, 1, vec![]);
+    keeper
+        .apply_event(&dir_upsert_of(new_dir, NEW_URI))
+        .unwrap();
+    assert_eq!(
+        keeper
+            .workspace_tree(WS_URI)
+            .and_then(|t| t.directory_name(NEW_URI)),
+        Some("Q3"),
+        "post-rotation entries decrypt via the adopted key without reload"
+    );
 }
 
 #[test]
 fn keyring_upsert_without_rotation_bump_is_noop() {
     const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
+    use crate::crypto::{self, OsRng};
 
+    let key = crypto::generate_content_key(&mut OsRng);
     let mut keeper = cabinet_keeper();
-    keeper.install_workspace_tree(
-        WS_URI.into(),
+    install_ws(
+        &mut keeper,
+        WS_URI,
         DirectoryTree::from_records(std::iter::empty()),
-        ContentKey([7u8; 32]),
+        key.clone(),
         5,
-        Vec::new(),
     );
 
     let sink = RecordingSink::new();
@@ -627,33 +774,35 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
     );
     let before = sink.count();
 
+    // Same rotation → metadata-only supersede; nothing key-derived changes.
+    let record = keyring_record(WS_URI, 5, &key, &[]);
     keeper
-        .apply_event(&keyring_upsert_event(WS_URI, 5))
+        .apply_event(&keyring_upsert_of(record, WS_URI))
         .unwrap();
 
     assert_eq!(sink.count(), before, "no watcher fire expected");
 }
 
 #[test]
-fn workspace_variant_does_not_pay_for_cabinet_keys() {
-    // Cabinet's 2432 bytes of key material live behind a Box, so Rust's
-    // max(variant size) layout doesn't bloat every Workspace tree. The
-    // enum is now sized by the Workspace variant; Cabinet's key payload
-    // only allocates for the (typically one) cabinet tree per identity.
+fn held_tree_boxes_key_material_out_of_line() {
+    // Both `HeldTree` variants stash their hybrid private keys behind a
+    // `Box`, so Rust's `max(variant size)` layout never inlines the
+    // ~2432-byte ML-KEM key into the enum. Without the boxes the enum
+    // would balloon to cabinet-key size for every workspace tree too.
     use crate::crypto::{MlKemPrivateKey, X25519PrivateKey};
     use std::mem::size_of;
 
-    // The raw key bytes still cost what they cost — they just live on
-    // the heap inside CabinetKeys now.
+    // The raw key bytes still cost what they cost — they just live on the
+    // heap inside `HybridPrivateKeys`.
     assert_eq!(size_of::<MlKemPrivateKey>(), 2400);
     assert_eq!(size_of::<X25519PrivateKey>(), 32);
 
-    // Cabinet inline storage would push HeldTree to >= 2432 bytes; with
-    // the Box, the enum is at most ~Workspace-sized. 2000 is a generous
-    // ceiling that still catches a regression to inline storage.
+    // Inline storage would push HeldTree to >= 2432 bytes; with the boxes,
+    // the enum stays small. 2000 is a generous ceiling that still catches a
+    // regression to inline storage in either variant.
     assert!(
         size_of::<super::HeldTree>() < 2000,
-        "HeldTree is {} bytes — Cabinet keys may have regressed to inline storage",
+        "HeldTree is {} bytes — key material may have regressed to inline storage",
         size_of::<super::HeldTree>(),
     );
 }

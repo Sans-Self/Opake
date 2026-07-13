@@ -60,6 +60,21 @@ export function runTasks(
         },
         options,
       ),
+
+    // Opportunistic tier: best-effort while a tab is open. Never promises
+    // completion — the committed CLI daemon is what drains the sweep.
+    "rotation-rewrap": () =>
+      tracked(
+        taskStore,
+        "rotation-rewrap",
+        { type: "rotationRewrap", rewrapped: 0 },
+        async () => {
+          const result = await opake.sweepRotationRewrap();
+          const rewrapped = result.rewrapped;
+          return { didWork: rewrapped > 0, kind: { type: "rotationRewrap", rewrapped } };
+        },
+        options,
+      ),
   };
 }
 

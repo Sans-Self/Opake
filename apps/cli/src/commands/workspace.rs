@@ -176,7 +176,13 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
     let resolved = resolve::resolve_identity(&transport, &ctx.pds_url, &args.member).await?;
 
     opake
-        .add_workspace_member(&workspace.id(), &workspace.key, &resolved.did, args.role)
+        .add_workspace_member(
+            &workspace.id(),
+            &workspace.key,
+            &workspace.historical_keys,
+            &resolved.did,
+            args.role,
+        )
         .await?;
 
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);

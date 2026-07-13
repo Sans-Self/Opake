@@ -1026,6 +1026,22 @@ export class Opake {
     return this.track(() => this.requireContext().retryPendingSharesViaOpake());
   }
 
+  /**
+   * Re-wrap the caller's documents from historical group keys to the current
+   * rotation. Opportunistic background hygiene — never required for
+   * correctness; a workspace left unswept stays fully readable, it just
+   * accrues a longer key-history walk.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  sweepRotationRewrap(): Promise<{
+    rewrapped: number;
+    already_current: number;
+    conflicts: number;
+  }> {
+    return this.track(() => this.requireContext().sweepRotationRewrap());
+  }
+
   // ---------------------------------------------------------------------------
   // Sharing — inbox + pending shares + cross-PDS grant download
   // ---------------------------------------------------------------------------

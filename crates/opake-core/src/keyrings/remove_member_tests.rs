@@ -24,7 +24,6 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
         name: "test-keyring".into(),
         description: None,
         icon: None,
-        enforce_revocation: None,
     };
     let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, &mut OsRng).unwrap();
 

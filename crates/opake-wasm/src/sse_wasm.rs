@@ -329,8 +329,25 @@ impl WasmFileManagerHandle {
                 keeper.install_cabinet_tree(tree, x25519_private_key, ml_kem_private_key);
             }
             TreeInstall::Workspace(uri, key, rotation, historical) => {
+                // The workspace tree retains the caller's private keys so a
+                // rotation event can be adopted in place — the new group
+                // key is unwrapped from the event record, not refetched.
+                let guard = self.opake.lock().await;
+                let identity = guard.identity();
+                let x25519_private_key = *identity.x25519_private_key_bytes().map_err(wasm_err)?;
+                let ml_kem_private_key = *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
+                drop(guard);
+
                 let mut keeper = self.tree_keeper.lock().await;
-                keeper.install_workspace_tree(uri, tree, key, rotation, historical);
+                keeper.install_workspace_tree(
+                    uri,
+                    tree,
+                    key,
+                    rotation,
+                    historical,
+                    x25519_private_key,
+                    ml_kem_private_key,
+                );
             }
         }
 
@@ -470,13 +487,14 @@ impl WasmOpakeHandle {
                         .await;
                 }
 
-                // Detect a keyring rotation against an installed workspace
-                // tree before applying. The tree_keeper bumps the rotation
-                // counter and invalidates names in place, but it holds no
-                // identity material so it can't unwrap the *new* group key
-                // — names would stay "?" until a reload. We resync the
-                // tree below to pick up the fresh key.
-                let rotation_resync_uri: Option<String> = {
+                // Apply the event to the tree keeper. A keyring rotation is
+                // adopted in place by the keeper itself — it retains the
+                // caller's private keys and unwraps the new group key
+                // straight from the event record, archiving the prior key
+                // and re-decrypting names, then notifies watchers. No
+                // reload; the projection is correct from the event alone.
+                // spec:key-rotation § Live projections adopt a rotation completely
+                {
                     let mut keeper = tree_keeper_rc.lock().await;
                     // Re-check after acquiring the lock: if we were
                     // superseded while waiting for it, bail instead of
@@ -486,36 +504,8 @@ impl WasmOpakeHandle {
                         log::debug!("[sse] consumer superseded while awaiting tree_keeper lock");
                         break;
                     }
-                    let resync_uri = match &event {
-                        SseEvent::KeyringUpsert(envelope) => {
-                            let uri = envelope.workspace_id();
-                            match keeper.workspace_rotation(uri.as_str()) {
-                                Some(held) if envelope.record.rotation > held => {
-                                    Some(uri.to_string())
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    };
                     if let Err(e) = keeper.apply_event(&event) {
                         log::warn!("[sse] tree_keeper apply failed: {e}");
-                    }
-                    resync_uri
-                };
-
-                // A rotation landed on an installed tree: reload it so the
-                // new group key is unwrapped and names decrypt cleanly,
-                // then notify watchers to re-render with the fresh content.
-                if let Some(uri) = rotation_resync_uri {
-                    if resync_workspace_tree(&opake_rc, &tree_keeper_rc, &uri)
-                        .await
-                        .is_ok()
-                    {
-                        let mut keeper = tree_keeper_rc.lock().await;
-                        keeper.notify_workspace_watchers(&uri);
-                    } else {
-                        log::warn!("[sse] rotation tree resync failed for {uri}");
                     }
                 }
 
@@ -859,7 +849,7 @@ async fn resync_workspace_tree(
     tree_keeper_rc: &Rc<Mutex<TreeKeeper>>,
     keyring_uri: &str,
 ) -> Result<(), JsError> {
-    let (tree, key, rotation, historical) = {
+    let (tree, key, rotation, historical, x25519_private_key, ml_kem_private_key) = {
         let mut guard = opake_rc.lock().await;
         let ws = guard
             .resolve_workspace_by_uri(keyring_uri)
@@ -877,10 +867,21 @@ async fn resync_workspace_tree(
             // Unreachable — we just built a Workspace context above.
             opake_core::manager::FileContext::Cabinet(_) => unreachable!(),
         };
-        (tree, key, rotation, historical)
+        let identity = guard.identity();
+        let x25519 = *identity.x25519_private_key_bytes().map_err(wasm_err)?;
+        let ml_kem = *identity.ml_kem_private_key_bytes().map_err(wasm_err)?;
+        (tree, key, rotation, historical, x25519, ml_kem)
     };
     let mut keeper = tree_keeper_rc.lock().await;
-    keeper.install_workspace_tree(keyring_uri.to_string(), tree, key, rotation, historical);
+    keeper.install_workspace_tree(
+        keyring_uri.to_string(),
+        tree,
+        key,
+        rotation,
+        historical,
+        x25519_private_key,
+        ml_kem_private_key,
+    );
     Ok(())
 }
 

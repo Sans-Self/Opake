@@ -24,7 +24,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> WorkspaceAdmin<'_, T, R, 
     /// authoritatively at the indexer.
     pub async fn add_member(&mut self, member_did: &str, role: Role) -> Result<(), Error> {
         self.opake
-            .add_workspace_member(&self.workspace.id(), &self.workspace.key, member_did, role)
+            .add_workspace_member(
+                &self.workspace.id(),
+                &self.workspace.key,
+                &self.workspace.historical_keys,
+                member_did,
+                role,
+            )
             .await?;
         Ok(())
     }

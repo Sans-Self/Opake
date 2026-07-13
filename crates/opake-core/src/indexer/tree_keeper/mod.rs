@@ -47,16 +47,21 @@ pub type WatcherCallback = Box<dyn FnMut(Option<&DirectoryTree>)>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WatcherHandle(u64);
 
-/// Cabinet-only key material. Heap-allocated via `Box` inside the
-/// `Cabinet` variant of `HeldTree` so workspace trees don't pay 2432
-/// bytes per instance for inline storage they never use — Rust enum
-/// layout uses `max(variant size)`, so inline keys would bloat every
-/// workspace `HeldTree` to cabinet-size.
+/// The caller's hybrid private key pair. Heap-allocated via `Box` inside
+/// both `HeldTree` variants so the ~2432-byte ML-KEM half is stored once
+/// behind a pointer rather than inline — Rust enum layout uses
+/// `max(variant size)`, so inline keys would bloat every `HeldTree`.
+///
+/// Both contexts need the private keys: the cabinet unwraps direct-wrapped
+/// directory content keys, and a workspace unwraps the freshly-minted group
+/// key straight from a rotation event so the live projection adopts it
+/// without an indexer refetch.
+/// spec:key-rotation § Live projections adopt a rotation completely
 ///
 /// Mirrors the zeroization pattern from `cabinet::Cabinet` so dropping
 /// the `Box` cleanly wipes both halves.
 #[derive(zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
-struct CabinetKeys {
+struct HybridPrivateKeys {
     x25519: X25519PrivateKey,
     ml_kem: crate::crypto::MlKemPrivateKey,
 }
@@ -71,19 +76,23 @@ struct CabinetKeys {
 enum HeldTree {
     Cabinet {
         tree: DirectoryTree,
-        keys: Box<CabinetKeys>,
+        keys: Box<HybridPrivateKeys>,
     },
     Workspace {
         tree: DirectoryTree,
         /// Current rotation's group key.
         group_key: ContentKey,
-        /// Last-seen rotation counter from the keyring record. Bumps
-        /// invalidate the cached decrypted directory names on the tree.
+        /// Last-seen rotation counter from the keyring record. A forward
+        /// bump drives in-place adoption of the new group key.
         rotation: u64,
         /// Group keys for previous rotations the caller had access to.
         /// Lets SSE-driven directory deltas decrypt records that were
         /// encrypted before the latest rotation.
         historical_keys: Vec<crate::workspace::HistoricalKey>,
+        /// The caller's private keys, retained so a rotation event can be
+        /// adopted in place: the new group key is unwrapped straight from
+        /// the event's keyring record rather than triggering a reload.
+        keys: Box<HybridPrivateKeys>,
     },
 }
 
@@ -165,7 +174,7 @@ impl TreeKeeper {
     ) {
         self.cabinet = Some(HeldTree::Cabinet {
             tree,
-            keys: Box::new(CabinetKeys {
+            keys: Box::new(HybridPrivateKeys {
                 x25519: x25519_private_key,
                 ml_kem: ml_kem_private_key,
             }),
@@ -177,6 +186,13 @@ impl TreeKeeper {
     /// key at the current rotation; `historical_keys` covers any older
     /// rotations the caller had access to so SSE-driven directory
     /// deltas can decrypt records encrypted under previous keys.
+    ///
+    /// The caller's private keys are retained so a rotation event can be
+    /// adopted in place (unwrapping the new group key from the event's
+    /// keyring record) without a reload.
+    #[allow(clippy::too_many_arguments)] // Each arg is a distinct piece of
+                                         // workspace decryption state; bundling them into a struct
+                                         // just moves the arg list one call up.
     pub fn install_workspace_tree(
         &mut self,
         keyring_uri: String,
@@ -184,6 +200,8 @@ impl TreeKeeper {
         group_key: ContentKey,
         rotation: u64,
         historical_keys: Vec<crate::workspace::HistoricalKey>,
+        x25519_private_key: X25519PrivateKey,
+        ml_kem_private_key: crate::crypto::MlKemPrivateKey,
     ) {
         self.workspaces.insert(
             keyring_uri,
@@ -192,6 +210,10 @@ impl TreeKeeper {
                 group_key,
                 rotation,
                 historical_keys,
+                keys: Box::new(HybridPrivateKeys {
+                    x25519: x25519_private_key,
+                    ml_kem: ml_kem_private_key,
+                }),
             },
         );
     }
@@ -297,26 +319,6 @@ impl TreeKeeper {
         self.workspaces.keys().cloned().collect()
     }
 
-    /// Last-seen rotation for an installed workspace tree, or `None` if no
-    /// tree is installed for that keyring. A caller compares this against
-    /// an incoming keyring record's rotation to detect a bump it must
-    /// react to — the keeper can bump the counter in place but can't
-    /// re-derive the new group key (it holds no identity material), so a
-    /// rotation needs a driver-side tree reload.
-    pub fn workspace_rotation(&self, keyring_uri: &str) -> Option<u64> {
-        match self.workspaces.get(keyring_uri) {
-            Some(HeldTree::Workspace { rotation, .. }) => Some(*rotation),
-            _ => None,
-        }
-    }
-
-    /// Fire watchers for a workspace scope with its current tree. Used
-    /// after an out-of-band reinstall (e.g. a rotation-triggered reload)
-    /// so consumers re-render against the freshly-decrypted tree.
-    pub fn notify_workspace_watchers(&mut self, keyring_uri: &str) {
-        self.notify_scope(&TreeScope::Workspace(keyring_uri.to_string()));
-    }
-
     fn tree_for_scope(&self, scope: &TreeScope) -> Option<&DirectoryTree> {
         match scope {
             TreeScope::Cabinet => self.cabinet_tree(),
@@ -360,35 +362,15 @@ impl TreeKeeper {
                 self.notify_all_watchers();
             }
             SseEvent::KeyringUpsert(envelope) => {
-                let new_rotation = envelope.record.rotation;
+                let did = self.did.clone();
                 let keyring_uri = envelope
                     .record
                     .workspace_id
                     .as_deref()
-                    .unwrap_or(envelope.uri.as_str());
-                let Some(held) = self.workspaces.get_mut(keyring_uri) else {
-                    return Ok(());
-                };
-                let HeldTree::Workspace { rotation, tree, .. } = held else {
-                    return Ok(());
-                };
-                let should_notify = if new_rotation > *rotation {
-                    *rotation = new_rotation;
-                    tree.invalidate_decrypted_names();
-                    true
-                } else {
-                    if new_rotation < *rotation {
-                        log::debug!(
-                            "[tree_keeper] ignoring backward keyring rotation on {}: held={}, received={}",
-                            keyring_uri,
-                            *rotation,
-                            new_rotation
-                        );
-                    }
-                    false
-                };
-                if should_notify {
-                    let scope = TreeScope::Workspace(keyring_uri.to_string());
+                    .unwrap_or(envelope.uri.as_str())
+                    .to_string();
+                if self.adopt_keyring_rotation(&keyring_uri, &did, envelope) {
+                    let scope = TreeScope::Workspace(keyring_uri);
                     self.notify_scope(&scope);
                 }
             }
@@ -411,6 +393,104 @@ impl TreeKeeper {
             }
         }
         Ok(())
+    }
+
+    /// Adopt a keyring rotation into an installed workspace tree in place.
+    ///
+    /// On a forward rotation the new group key is unwrapped straight from
+    /// the event's keyring record, the caller's historical keys are
+    /// re-derived from the record's `keyHistory`, and every cached
+    /// directory name is re-decrypted against the adopted key material —
+    /// so the projection after the event equals what a fresh bootstrap
+    /// would produce, with no reload. Returns `true` when the rotation was
+    /// adopted (watchers should be notified), `false` for an uninstalled
+    /// workspace, a non-advancing rotation, or a caller who was rotated
+    /// out (unwrap fails).
+    ///
+    /// spec:key-rotation § Live projections adopt a rotation completely
+    fn adopt_keyring_rotation(
+        &mut self,
+        keyring_uri: &str,
+        did: &str,
+        envelope: &IndexerEnvelope<crate::records::Keyring>,
+    ) -> bool {
+        let new_rotation = envelope.record.rotation;
+        let Some(HeldTree::Workspace {
+            tree,
+            group_key,
+            rotation,
+            historical_keys,
+            keys,
+        }) = self.workspaces.get_mut(keyring_uri)
+        else {
+            return false;
+        };
+
+        if new_rotation <= *rotation {
+            if new_rotation < *rotation {
+                log::debug!(
+                    "[tree_keeper] ignoring backward keyring rotation on {keyring_uri}: held={}, received={new_rotation}",
+                    *rotation
+                );
+            }
+            // Equal rotation: a metadata-only supersede (rename, or an
+            // add/remove that didn't rotate). Nothing key-derived changes
+            // on the directory tree.
+            return false;
+        }
+
+        let record = &envelope.record;
+        let anchor = record.wrap_anchor(envelope.uri.as_str());
+        let bundle = crate::crypto::PrivateKeyBundle {
+            x25519: &keys.x25519,
+            ml_kem: &keys.ml_kem,
+        };
+
+        // Unwrap the freshly-minted group key for this caller from the
+        // event record itself. A caller rotated out of the workspace has
+        // no member entry — leave the projection untouched; the workspace
+        // keeper drops the workspace from the sidebar.
+        let Some(my_member) = record.members.iter().find(|m| m.did() == did) else {
+            log::debug!(
+                "[tree_keeper] rotation on {keyring_uri} no longer includes us; not adopting"
+            );
+            return false;
+        };
+        let new_group_key = match crate::crypto::unwrap_key(
+            &my_member.wrapped_key,
+            &bundle,
+            &crate::crypto::WrapContext::Keyring { uri: anchor },
+        ) {
+            Ok(key) => key,
+            Err(e) => {
+                log::warn!(
+                    "[tree_keeper] failed to unwrap rotated group key for {keyring_uri}: {e}"
+                );
+                return false;
+            }
+        };
+
+        // The prior rotation's key rides along in the event's `keyHistory`
+        // (the rotating manager snapshots it there), so re-deriving from
+        // the record archives it without threading in-memory state.
+        let new_historical =
+            crate::workspace::derive_historical_keys(record, did, envelope.uri.as_str(), &bundle);
+
+        *group_key = new_group_key;
+        *rotation = new_rotation;
+        *historical_keys = new_historical;
+
+        // Re-decrypt names in place against the adopted keys rather than
+        // leaving them invalidated at "?".
+        let view = crate::workspace::GroupKeys {
+            current_rotation: *rotation,
+            current: group_key,
+            historical: historical_keys,
+        };
+        let keys_map = HashMap::from([(keyring_uri.to_string(), view)]);
+        tree.decrypt_names_with_group_keys(did, &bundle, &keys_map);
+
+        true
     }
 
     fn apply_directory_upsert(
@@ -458,6 +538,7 @@ impl TreeKeeper {
                     group_key,
                     rotation,
                     historical_keys,
+                    keys: _,
                 } => {
                     let view = crate::workspace::GroupKeys {
                         current_rotation: *rotation,

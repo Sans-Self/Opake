@@ -585,4 +585,138 @@ mod keyring_supersede {
             "expected only-manager error, got: {err}"
         );
     }
+
+    const NEW_DID: &str = "did:plc:newjoiner";
+
+    /// A `publicKey/self` record carrying `identity`'s hybrid public keys, so
+    /// `resolve_identity` can hand the admitting manager real keys to wrap to.
+    fn public_key_response(uri: &str, identity: &Identity) -> HttpResponse {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let record = serde_json::json!({
+            "opakeVersion": SCHEMA_VERSION,
+            "x25519PublicKey": { "$bytes": b64.encode(identity.x25519_public_key_bytes().unwrap()) },
+            "x25519Algo": "x25519",
+            "mlKemPublicKey": { "$bytes": b64.encode(identity.ml_kem_public_key_bytes().unwrap()) },
+            "mlKemAlgo": "ml-kem-768",
+            "createdAt": "2026-03-01T00:00:00Z",
+        });
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": uri,
+                "cid": "bafypubkey",
+                "value": record,
+            }))
+            .unwrap(),
+        }
+    }
+
+    /// Admission grants the full history: for every retained rotation the
+    /// admitting manager still holds, the joiner's supersede gains a wrapped
+    /// copy of that historical key — so documents written under prior
+    /// rotations remain readable to a member who joined after them.
+    // spec:key-rotation § New members can read the full history they are admitted to
+    #[tokio::test]
+    async fn add_member_grants_wrapped_history_to_the_joiner() {
+        use crate::crypto::{self, generate_content_key, PrivateKeyBundle, WrapContext};
+        use crate::records::KeyHistoryEntry;
+        use crate::workspace::HistoricalKey;
+
+        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+
+        // Prior head at rotation 1 with one retained rotation-0 key in history.
+        let mut prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
+        prior.rotation = 1;
+        prior.key_history.push(KeyHistoryEntry {
+            rotation: 0,
+            members: prior.members.clone(),
+        });
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
+
+        // The keys the admitting manager holds and extends to the joiner.
+        let current_key = generate_content_key(&mut OsRng);
+        let historical_key = generate_content_key(&mut OsRng);
+
+        // The joiner's identity — its published keys are what the manager
+        // wraps to, and its private keys are what we unwrap with to verify.
+        let joiner = Identity::generate(NEW_DID, &mut OsRng);
+
+        let mock = MockTransport::new();
+        // fetch_keyring_chain_head
+        mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
+        mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
+        // resolve_identity(joiner)
+        mock.enqueue(did_doc_response(NEW_DID, "https://pds.newjoiner"));
+        mock.enqueue(public_key_response(
+            &format!("at://{NEW_DID}/app.opake.publicKey/self"),
+            &joiner,
+        ));
+        // supersede write
+        let new_uri = format!("at://{ALICE_DID}/app.opake.keyring/3addmember");
+        mock.enqueue(create_record_response(&new_uri, "bafynew"));
+
+        let mut opake = opake_for(ALICE_DID, mock.clone());
+        let historical_keys = vec![HistoricalKey {
+            rotation: 0,
+            key: historical_key.clone(),
+        }];
+        opake
+            .add_workspace_member(
+                &WorkspaceId::from_resolved(WORKSPACE_ID),
+                &current_key,
+                &historical_keys,
+                NEW_DID,
+                Role::Editor,
+            )
+            .await
+            .unwrap();
+
+        // Inspect the written supersede.
+        let reqs = mock.requests();
+        let create = reqs
+            .iter()
+            .find(|r| r.url.contains("createRecord"))
+            .expect("createRecord");
+        let written: Keyring = match &create.body {
+            Some(RequestBody::Json(v)) => serde_json::from_value(v["record"].clone()).unwrap(),
+            _ => panic!("expected JSON body"),
+        };
+
+        // Wraps for this workspace anchor to the genesis URI.
+        let ctx = WrapContext::Keyring { uri: WORKSPACE_ID };
+        let x25519_priv = joiner.x25519_private_key_bytes().unwrap();
+        let ml_kem_priv = joiner.ml_kem_private_key_bytes().unwrap();
+        let bundle = PrivateKeyBundle {
+            x25519: &x25519_priv,
+            ml_kem: &ml_kem_priv,
+        };
+
+        // The joiner is a current member and unwraps the current group key.
+        let member = written
+            .members
+            .iter()
+            .find(|m| m.did() == NEW_DID)
+            .expect("joiner in current members");
+        let unwrapped_current = crypto::unwrap_key(&member.wrapped_key, &bundle, &ctx).unwrap();
+        assert_eq!(unwrapped_current.0, current_key.0);
+
+        // And the joiner is in the rotation-0 history entry, unwrapping to the
+        // retained historical key — the crux of the new-member-history fix.
+        let hist_entry = written
+            .key_history
+            .iter()
+            .find(|h| h.rotation == 0)
+            .expect("rotation-0 history retained");
+        let hist_member = hist_entry
+            .members
+            .iter()
+            .find(|m| m.did() == NEW_DID)
+            .expect("joiner granted rotation-0 history wrap");
+        let unwrapped_hist = crypto::unwrap_key(&hist_member.wrapped_key, &bundle, &ctx).unwrap();
+        assert_eq!(unwrapped_hist.0, historical_key.0);
+    }
 }

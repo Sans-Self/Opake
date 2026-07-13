@@ -246,7 +246,7 @@ impl WasmOpakeHandle {
             .map_err(wasm_err)?;
         let role = parse_role(role)?;
         let _outcome = opake
-            .add_workspace_member(&ws.id(), &ws.key, member_did, role)
+            .add_workspace_member(&ws.id(), &ws.key, &ws.historical_keys, member_did, role)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
@@ -457,6 +457,23 @@ impl WasmOpakeHandle {
             "expired": result.expired,
             "still_pending": result.still_pending,
             "failed": result.failed,
+        }))
+    }
+
+    /// Re-wrap the caller's documents from historical group keys to the
+    /// current rotation. Opportunistic background hygiene — exposes the
+    /// operation only; no key material crosses to JS.
+    #[wasm_bindgen(js_name = sweepRotationRewrap)]
+    pub async fn sweep_rotation_rewrap(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let outcome = opake
+            .sweep_owned_documents_rewrap()
+            .await
+            .map_err(wasm_err)?;
+        to_js(&serde_json::json!({
+            "rewrapped": outcome.rewrapped,
+            "already_current": outcome.already_current,
+            "conflicts": outcome.conflicts,
         }))
     }
 

@@ -356,7 +356,6 @@ fn make_superseded_envelope_with_name(
         name: name.to_string(),
         description: None,
         icon: None,
-        enforce_revocation: None,
     };
     let encrypted_metadata = encrypt_metadata(&gk, &metadata, rng).unwrap();
 
