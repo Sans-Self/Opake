@@ -1,8 +1,7 @@
 // Fake PDS lifecycle for e2e tests.
 
 import { createFakePds, type FakePds, type Account } from "fake-pds";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { actorNamespace, actorsFor } from "../e2e/namespace.js";
 
 // Which backing network the CLI tier runs against. The default is the
 // in-process fake-pds (fast, hermetic, no docker). `OPAKE_TEST_ENV=devenv`
@@ -25,14 +24,14 @@ export interface DevenvActor {
   readonly password: string;
 }
 
-// Fixture actors are defined once in dev-env/fixtures/actors.json (the same
-// file the bootstrap script and the Playwright harness read) so there is no
-// second copy to drift. Only meaningful in devenv mode.
+// Fixture actors resolve through the same namespace helper the web harness uses
+// (tests/e2e/namespace.ts), which reads dev-env/fixtures/actors.json for the
+// default population and derives the six actors of E2E_ACTOR_NS otherwise — so
+// a federation run scoped to a namespace drives that namespace's actors, and
+// there is no second copy of the fixture set to drift. Only meaningful in
+// devenv mode.
 export function devenvActors(): readonly DevenvActor[] {
-  const path = fileURLToPath(
-    new URL("../../dev-env/fixtures/actors.json", import.meta.url),
-  );
-  return JSON.parse(readFileSync(path, "utf8")).actors;
+  return actorsFor(actorNamespace());
 }
 
 export const TEST_ACCOUNTS: readonly Account[] = [

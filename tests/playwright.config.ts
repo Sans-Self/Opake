@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { nsPaths } from "./e2e/namespace";
 
 // Web e2e harness for the hermetic dev-env (dev-env/). The dev-env stack must
 // be up + bootstrapped (`just dev-env-up`) before running.
@@ -28,8 +29,15 @@ const devenvEnv = Object.fromEntries(
     }),
 );
 
+// Artifacts are partitioned by actor namespace (E2E_ACTOR_NS): concurrent runs
+// in distinct namespaces must not write into each other's evidence. With no
+// namespace set these resolve to the bare paths Playwright would have defaulted
+// to anyway (tests/test-results, tests/playwright-report).
+const { outputDir, reportDir } = nsPaths();
+
 export default defineConfig({
   testDir: "./e2e",
+  outputDir,
   // Pipeline-liveness preflight (PDS → firehose → indexer) before any project,
   // including auth setup: a stalled pipeline fails the run in seconds,
   // attributed, instead of every SSE-echo spec burning its timeout.
@@ -39,7 +47,7 @@ export default defineConfig({
   workers: 4,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never", outputFolder: reportDir }]],
 
   use: {
     baseURL: "http://127.0.0.1:5199",
@@ -64,6 +72,16 @@ export default defineConfig({
       name: "e2e",
       testMatch: /specs\/.*\.spec\.ts/,
       dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    // Meta-tier: specs that test the HARNESS rather than the product — snapshot
+    // liveness, namespace isolation. They drive whole Playwright runs as child
+    // processes, so they are deliberately outside `--project=e2e` (a product run
+    // must never recursively spawn suites) and have no setup dependency: each
+    // one owns the setup it exercises. Run via `just e2e-harness`.
+    {
+      name: "harness",
+      testMatch: /harness\/.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

@@ -40,6 +40,12 @@ for i in $(seq 0 $((n - 1))); do
   # Per-actor password from fixtures; env ACTOR_PASSWORD is the fallback.
   password=$(jq -r ".actors[$i].password // empty" "$FIXTURES")
   [ -n "$password" ] || password="$PASSWORD"
+  # Namespaced actors (provisioned by the e2e harness against a live dev-env)
+  # keep the checked-in role names — the cabinet-seeding rules below key on
+  # them — but share a PDS with the default population, so they must carry
+  # their own email. Absent the field this is the historical derivation.
+  email=$(jq -r ".actors[$i].email // empty" "$FIXTURES")
+  [ -n "$email" ] || email="${name}@${pds}.test"
   base="http://${pds}:3000"
   echo "== ${name}  (${handle} @ ${pds}) =="
 
@@ -50,7 +56,7 @@ for i in $(seq 0 $((n - 1))); do
 
   resp=$(curl -fsS -X POST "$base/xrpc/com.atproto.server.createAccount" \
     -H 'content-type: application/json' \
-    -d "{\"handle\":\"${handle}\",\"email\":\"${name}@${pds}.test\",\"password\":\"${password}\",\"inviteCode\":\"${invite}\"}")
+    -d "{\"handle\":\"${handle}\",\"email\":\"${email}\",\"password\":\"${password}\",\"inviteCode\":\"${invite}\"}")
   did=$(echo "$resp" | jq -r .did)
   access=$(echo "$resp" | jq -r .accessJwt)
   refresh=$(echo "$resp" | jq -r .refreshJwt)

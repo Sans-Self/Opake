@@ -27,10 +27,18 @@ cmd="$1"; shift
 case "$cmd" in
   login)
     name="$1"; dir="/work/$name"; mkdir -p "$dir"
-    handle=$(jq -r ".actors[]|select(.name==\"$name\").handle" "$FIXTURES")
-    pds=$(jq -r ".actors[]|select(.name==\"$name\").pds" "$FIXTURES")
-    mnemonic=$(jq -r ".actors[]|select(.name==\"$name\").mnemonic" "$FIXTURES")
-    password=$(jq -r ".actors[]|select(.name==\"$name\").password" "$FIXTURES")
+    # A namespaced run passes the actor inline (ACTOR_JSON): its handle and
+    # mnemonic are derived from the namespace, so they are not in the checked-in
+    # fixtures file. Default runs read the fixtures file as before.
+    if [ -n "${ACTOR_JSON:-}" ]; then
+      spec="$ACTOR_JSON"
+    else
+      spec=$(jq -c ".actors[]|select(.name==\"$name\")" "$FIXTURES")
+    fi
+    handle=$(printf '%s' "$spec" | jq -r .handle)
+    pds=$(printf '%s' "$spec" | jq -r .pds)
+    mnemonic=$(printf '%s' "$spec" | jq -r .mnemonic)
+    password=$(printf '%s' "$spec" | jq -r .password)
     base="http://${pds}:3000"
     resp=$(curl -fsS -X POST "$base/xrpc/com.atproto.server.createSession" \
       -H 'content-type: application/json' \

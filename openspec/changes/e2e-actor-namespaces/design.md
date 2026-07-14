@@ -44,8 +44,10 @@ entirely harness-side.
 **Namespace knob: `E2E_ACTOR_NS`, default empty.** Read once in `fixtures.ts` and
 `auth.setup.ts`. Empty means the checked-in actor set and today's paths — the
 default path stays on the exact code it runs now, not a "default namespace"
-simulation of it. A non-empty value must match `[a-z0-9-]{1,16}` so it can embed in
-handles and directory names without escaping.
+simulation of it. A non-empty value must match `[a-z0-9-]{1,12}` so it can embed in
+handles and directory names without escaping: the PDS rejects handles longer than
+29 characters, and `alice-<ns>.pds-a.test` spends 17 before the namespace begins.
+A regression test pins every derived handle at ≤ 29.
 
 **Actor derivation: deterministic from (namespace, role).** Namespaced actors mirror
 the six checked-in roles and their PDS placement (`alice`→pds-a … `frank`→pds-c,
@@ -57,13 +59,23 @@ Alternative considered: random actors registered in a manifest file — rejected
 reintroduces shared mutable state (the manifest) and breaks the
 provision-twice-same-identity scenario.
 
-**Provisioning: idempotent, in `auth.setup.ts`, via `pds-admin.ts`.** Setup checks
-whether the actor's handle resolves; if not, it creates the account (admin
-invite-code path already used by dev-env bootstrap), imports the derived identity,
-and publishes the public-key record — the same three guarantees bootstrap gives
-checked-in actors. Provisioning lives in the harness, not dev-env bootstrap, so
-`just dev-env-up` and reset semantics are untouched: a reset simply garbage-collects
-all namespaces, and the next run re-provisions deterministically.
+**Provisioning: idempotent, driven from `pds-admin.ts`, executed by the bootstrap
+recipe.** The harness checks whether each actor's handle resolves and skips live
+ones; the missing ones are provisioned by running the dev-env's own
+`bootstrap.sh` inside the compose network with a generated fixture document passed
+over the environment (no file written, no manifest). Identity import and
+`publicKey/self` publication require opake's key derivation (PBKDF2 → HKDF →
+X25519 + ML-KEM); reimplementing that chain in the harness would be forked crypto
+that can drift, whereas running the same recipe makes "same guarantees as a
+bootstrapped actor" hold by construction. The recipe accepts an optional per-actor
+email (namespaced actors share a PDS with the default population and would collide
+on the role-derived address); absent the field it derives the historical value, so
+default bootstrap behavior is byte-identical. Provisioning hooks the tiers'
+globalSetup rather than `auth.setup.ts`: the pipeline preflight itself writes a
+record as a fixture actor, so namespaced actors must exist before the preflight
+runs — and globalSetup also removes the parallel-worker race on account creation.
+`just dev-env-up` and reset semantics are untouched: a reset simply
+garbage-collects all namespaces, and the next run re-provisions deterministically.
 
 **Liveness probe: app-level, in setup, per actor.** The snapshot includes the
 IndexedDB dump where the WASM session lives, so its tokens are opaque to the
@@ -106,9 +118,10 @@ is just reading the same env var where it resolves fixture actors.
 - [Liveness probe adds per-run latency] → Bounded at seconds per actor, and it
   deletes an entire class of false-product-bug investigations. The probe reuses the
   race the app's own boot performs; no new machinery.
-- [Handle-length or charset limits on `<role>-<ns>`] → Namespace grammar is capped
-  at 16 chars and validated at startup with a clear error, before anything touches
-  the network.
+- [Handle-length or charset limits on `<role>-<ns>`] → The PDS's 29-character
+  handle limit caps the namespace grammar at 12 chars; validated at startup with a
+  clear error, before anything touches the network, and pinned by a regression
+  test on every derived handle.
 - [Divergence between checked-in and derived actors' pubkey seeding] → Provisioning
   reuses the same identity-import + publish path bootstrap uses; the dev-env delta's
   provision-twice scenario pins equality of the published keys.

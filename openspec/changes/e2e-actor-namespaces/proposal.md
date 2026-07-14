@@ -56,7 +56,9 @@ _None — both affected areas are existing infra capabilities._
 - `tests/e2e/pds-admin.ts` — account-creation helper gains namespaced registration.
 - `tests/playwright.config.ts` — per-namespace output/report directories.
 - `justfile` — e2e recipes accept an optional namespace argument; defaults unchanged.
-- Dev-env bootstrap and CI are untouched: the default namespace is byte-identical to
-  today's behavior.
+- Dev-env bootstrap gains an optional per-actor email field (namespaced actors
+  share a PDS with the default population and would collide on the role-derived
+  address); absent the field the historical derivation applies, so default
+  bootstrap behavior and CI are byte-identical to today's.
 - The CLI federation tier reuses the same actor-resolution helpers and inherits
   namespacing where it reads fixture actors.

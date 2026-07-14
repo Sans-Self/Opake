@@ -147,6 +147,43 @@ vectors** — not secrets, never valid on a live PDS, deliberately kept outside
 git-crypt so nobody confuses them with real credentials (contrast
 `tests/accounts.secret`). They live in full in `actors.json`; not reproduced here.
 
+## Actor namespaces
+
+The six above are the *default population*: checked in, bootstrapped with the
+environment, and shared by everything that doesn't ask for otherwise. A test run
+can instead ask for a population of its own by setting `E2E_ACTOR_NS`
+(`just e2e-web alpha`, `just e2e-federation alpha`), which gets it six actors
+mirroring the same roles and the same PDS placement:
+
+| Namespace | Handle | PDS |
+|-----------|--------|-----|
+| `alpha` | `alice-alpha.pds-a.test` | pds-a |
+| `alpha` | `frank-alpha.pds-c.test` | pds-c |
+
+Nothing about a namespace is written down. Its handles are `<role>-<ns>.<pds>.test`
+and its mnemonics are BIP-39 words over 32 bytes of `SHA-256("opake-e2e:<ns>:<role>")`,
+so the namespace name is the entire registry — provision it twice, against a reset
+environment or a live one, and every actor comes back with the same handle, the
+same PDS, and the same published encryption key.
+
+Grammar is `[a-z0-9-]{1,12}`, validated before anything touches the network. The
+12 is the PDS's doing: it rejects handles over 29 characters, and
+`alice-<ns>.pds-a.test` spends 17 of them before the namespace starts.
+
+Provisioning happens on demand, from the test harness (`tests/e2e/pds-admin.ts`),
+the first time a namespace is used: it runs the same `bootstrap.sh` recipe below
+for the actors that don't resolve yet, so a namespaced actor gets exactly what a
+checked-in one gets — a live account, a published `publicKey/self` derived from
+its mnemonic, and a seeded cabinet (`frank` excepted, as ever). Actors that
+already exist are left alone, records and all.
+
+Namespaces are individually disposable: `just e2e-ns-clean alpha` deletes that
+namespace's accounts (and with them their records and blobs) and drops its local
+artifacts. It refuses the default population — those six are checked in, and
+`just dev-env-reset` remains the way to clear them. Deleting a namespace touches
+no other namespace and no default actor, which is what makes concurrent runs
+against one environment safe to clean up after independently.
+
 ## Bootstrap
 
 `bootstrap.sh` runs the opake CLI **inside** the internal network, reaching the

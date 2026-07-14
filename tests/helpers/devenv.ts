@@ -153,10 +153,24 @@ export async function stopCli(): Promise<void> {
   await docker(["rm", "-f", CLI_CONTAINER], 30_000);
 }
 
-/** Log a fixture actor in inside the container; returns their DID. */
+/**
+ * Log a fixture actor in inside the container; returns their DID. The actor's
+ * credentials travel with the call (ACTOR_JSON) rather than being looked up in
+ * the container's checked-in fixtures file: under an actor namespace the handle
+ * and mnemonic are derived, and only the host knows them.
+ */
 export async function login(actor: string): Promise<string> {
   const res = await docker(
-    ["exec", CLI_CONTAINER, "bash", "/work-helper.sh", "login", actor],
+    [
+      "exec",
+      "-e",
+      `ACTOR_JSON=${JSON.stringify(actorByName(actor))}`,
+      CLI_CONTAINER,
+      "bash",
+      "/work-helper.sh",
+      "login",
+      actor,
+    ],
     60_000,
   );
   if (res.code !== 0) throw new Error(`login ${actor} failed: ${res.stderr}`);

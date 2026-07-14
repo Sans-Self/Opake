@@ -166,9 +166,13 @@ _dev-env-check:
 e2e-cli:
     cd tests && bun test tests/cli/
 
-# Web e2e (Playwright) against the dev-env
-e2e-web: _dev-env-check
-    cd tests && bunx playwright test --project=e2e
+# Web e2e (Playwright) against the dev-env. The optional argument scopes the run
+# to an actor namespace (`just e2e-web alpha`): six derived actors provisioned on
+# demand, their own auth snapshots, their own test-results/ and report — so it can
+# run concurrently with any other namespace, and with a bare invocation, against
+# the one dev-env. Bare is the checked-in six and today's paths, unchanged.
+e2e-web ns="": _dev-env-check
+    cd tests && E2E_ACTOR_NS={{ ns }} bunx playwright test --project=e2e
 
 # Rebuild the dev-env CLI image iff the working-tree CLI sources changed since
 # it was baked. The federation tier runs the compiled binary baked into that
@@ -178,9 +182,24 @@ e2e-web: _dev-env-check
 _dev-env-cli-fresh:
     @dev-env/build/build-cli.sh ensure
 
-# CLI federation tier against the dev-env
-e2e-federation: _dev-env-check _dev-env-cli-fresh
-    cd tests && OPAKE_TEST_ENV=devenv bunx vitest run tests/federation/
+# CLI federation tier against the dev-env. Takes the same optional actor
+# namespace as `e2e-web` — the tier resolves its fixture actors through the same
+# helper, so a scoped run drives that namespace's actors and provisions them if
+# they are new.
+e2e-federation ns="": _dev-env-check _dev-env-cli-fresh
+    cd tests && OPAKE_TEST_ENV=devenv E2E_ACTOR_NS={{ ns }} bunx vitest run tests/federation/
+
+# Harness meta-tier: tests of the e2e harness itself (snapshot liveness,
+# namespace isolation). Each spec drives whole Playwright runs as child
+# processes, so it is deliberately outside the product suite. Slow by nature.
+e2e-harness: _dev-env-check
+    cd tests && bunx playwright test --project=harness
+
+# Delete a namespace's actors from the dev-env (accounts, records, blobs) and
+# its local artifacts. Refuses the default population: those six are checked in,
+# and `just dev-env-reset` is the only sanctioned way to clear them.
+e2e-ns-clean ns:
+    cd tests && bun run e2e/ns-clean.ts {{ ns }}
 
 # Gate run: both reactive tiers from a pristine baseline. Resets the dev-env
 # (wipes all fixture state) and forces fresh logins, so a red is attributable

@@ -1,26 +1,20 @@
 // Shared e2e fixtures: the browser-side blockade, per-worker actor assignment,
 // storageState wiring, and the spec-citation helper.
+//
+// Which six actors these are — and where their snapshots live — is decided by
+// the run's actor namespace (namespace.ts). Unset means the checked-in set and
+// the bare .auth/ directory; a namespace means six derived actors and a
+// snapshot directory of their own.
 import { test as base, expect, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { actorNamespace, actorsFor, nsPaths, type Actor } from "./namespace";
 
-export interface Actor {
-  readonly name: string;
-  readonly handle: string;
-  readonly pds: string;
-  readonly mnemonic: string;
-  readonly password: string;
-}
+export type { Actor };
 
-const fixturesPath = fileURLToPath(
-  new URL("../../dev-env/fixtures/actors.json", import.meta.url),
-);
-export const ACTORS: readonly Actor[] = JSON.parse(
-  readFileSync(fixturesPath, "utf8"),
-).actors;
+export const ACTORS: readonly Actor[] = actorsFor(actorNamespace());
 
 export const authFile = (actor: string): string =>
-  fileURLToPath(new URL(`./.auth/${actor}.json`, import.meta.url));
+  join(nsPaths().authDir, `${actor}.json`);
 
 // A request is allowed iff it stays on the host loopback or the dev-env's
 // *.test space (Caddy). Anything else is a hermeticity escape (e.g. the WASM
