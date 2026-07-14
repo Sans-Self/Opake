@@ -719,4 +719,66 @@ mod keyring_supersede {
         let unwrapped_hist = crypto::unwrap_key(&hist_member.wrapped_key, &bundle, &ctx).unwrap();
         assert_eq!(unwrapped_hist.0, historical_key.0);
     }
+
+    /// A member list for a workspace hosted on another PDS was fetched with
+    /// a session `getRecord` against the caller's own PDS, which pipethrough-
+    /// proxies to an appview that need not exist — so the member list came
+    /// back empty or errored for every cross-PDS workspace. The fetch must
+    /// resolve the keyring authority's DID document and read the record from
+    /// that PDS over the public endpoint, the same route
+    /// `resolve_foreign_workspace` takes.
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__member_list_resolves_foreign_authority_pds() {
+        const ALICE_PDS: &str = "https://pds.did-plc-alice";
+
+        let keyring_uri = format!("at://{ALICE_DID}/app.opake.keyring/3foreign");
+        let keyring =
+            keyring_with_members(vec![(ALICE_DID, Role::Manager), (BOB_DID, Role::Editor)]);
+
+        let mock = MockTransport::new();
+        mock.enqueue(did_doc_response(ALICE_DID, ALICE_PDS));
+        mock.enqueue(get_keyring_response(&keyring_uri, "bafyforeign", &keyring));
+
+        // Bob is the caller; his session PDS is `https://pds.did:plc:bob`.
+        let opake = opake_for(BOB_DID, mock.clone());
+        let members = opake.workspace_members(&keyring_uri).await;
+
+        // Route first: a session-PDS fetch may fail for its own reasons, and
+        // the point of this test is *where* the record was read from.
+        let record_request = mock
+            .requests()
+            .into_iter()
+            .find(|r| r.url.contains("getRecord"))
+            .expect("keyring record was fetched");
+
+        assert!(
+            record_request.url.starts_with(ALICE_PDS),
+            "record must be read from the authority's PDS, got {}",
+            record_request.url
+        );
+        assert!(
+            !record_request.url.contains(&format!("pds.{BOB_DID}")),
+            "record must not be routed through the caller's session PDS, got {}",
+            record_request.url
+        );
+        // The public endpoint is unauthenticated — an auth header would mean
+        // the session client, and with it the pipethrough dependency, is back.
+        assert!(
+            !record_request
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("authorization")),
+            "public getRecord must not carry session credentials"
+        );
+
+        assert_eq!(
+            members
+                .expect("member list resolves")
+                .iter()
+                .map(|m| m.did())
+                .collect::<Vec<_>>(),
+            vec![ALICE_DID, BOB_DID]
+        );
+    }
 }
