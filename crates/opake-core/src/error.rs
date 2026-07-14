@@ -20,6 +20,24 @@ pub enum Error {
     #[error("indexer error ({status}): {message}")]
     Indexer { status: u16, message: String },
 
+    /// A workspace-scoped indexer endpoint has no keyring chain head for the
+    /// requested workspace — the `workspace_not_indexed` answer. Deliberately
+    /// ambiguous between a genesis still travelling the pipeline and a chain
+    /// that was torn down: the indexer cannot tell the two apart, so neither
+    /// this error nor any copy derived from it may claim deletion or lag.
+    /// Retryable within the visibility window; a stale projection reconciles
+    /// on the next bootstrap or keyring event.
+    #[error("the indexer cannot answer for workspace {workspace_id}")]
+    WorkspaceNotIndexed { workspace_id: String },
+
+    /// A workspace-scoped indexer endpoint consulted an indexed keyring chain
+    /// head and the caller's DID was absent from its `members[]`. Because the
+    /// head was read, this is definitive — it is never a lag artifact, so it
+    /// is surfaced immediately and never absorbed by the visibility-gap retry
+    /// window (contrast [`Error::WorkspaceNotIndexed`]).
+    #[error("not a member of workspace {workspace_id}")]
+    NotWorkspaceMember { workspace_id: String },
+
     #[error("record not found: {0}")]
     NotFound(String),
 
@@ -120,10 +138,15 @@ pub enum Error {
     /// a prior own-write (resolving a just-written chain head, passing a
     /// membership check for a workspace just created) and the bounded retry
     /// window elapsed before the write became visible. Distinct from `Auth`
-    /// and `Indexer { status: 403 }` — those mean "you are not authorized";
-    /// this means "the pipeline had not caught up in time". Callers and UI
-    /// use the distinction to say "the indexer is behind" rather than falsely
-    /// telling a workspace's owner they are not a member of it.
+    /// and `NotWorkspaceMember` — those mean "you are not authorized"; this
+    /// means "the indexer never answered for the thing being awaited". Callers
+    /// and UI use the distinction to say "the indexer is behind" rather than
+    /// falsely telling a workspace's owner they are not a member of it.
+    ///
+    /// `operation` names the awaited subject — for a workspace-scoped wait,
+    /// the workspace id. A wrong-kind id (a head URI passed where a genesis
+    /// belongs) also burns the window, and naming the id is what keeps that
+    /// programming error visible in the failure instead of reading as lag.
     #[error("indexer visibility wait timed out after {waited_ms}ms while {operation}")]
     VisibilityTimeout { operation: String, waited_ms: u64 },
 

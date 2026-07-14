@@ -25,12 +25,47 @@ use crate::client::{Transport, XrpcClient};
 use crate::crypto::{ContentKey, CryptoRng, OwnedPrivateKeys, PublicKeyBundle, RngCore};
 use crate::directories::ChainHeadProvider;
 use crate::error::Error;
+use crate::indexer::retry::retry_visibility;
 use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::Role;
 use crate::storage::{Identity, Storage};
 use crate::workspace::{Workspace, WorkspaceId};
+
+/// Pick the head URI of the workspace whose decrypted name is `name`.
+///
+/// A miss is [`Error::NotFound`] — the visibility-gap class, because the
+/// indexer's listing may simply not carry a just-created workspace yet. An
+/// ambiguous name is not: two live workspaces answer to it and waiting cannot
+/// change that.
+fn match_workspace_name(
+    workspaces: &[crate::indexer::types::IndexerEnvelope<crate::records::Keyring>],
+    name: &str,
+    did: &str,
+    private_keys: &OwnedPrivateKeys,
+) -> Result<String, Error> {
+    let matches: Vec<String> = workspaces
+        .iter()
+        .filter(|ws| {
+            keyrings::decrypt_indexer_workspace_name(ws, did, &private_keys.bundle()).as_deref()
+                == Some(name)
+        })
+        // Resolve by head URI — the envelope's URI IS the current canonical
+        // keyring record (after any manager supersede).
+        .map(|env| env.uri.clone())
+        .collect();
+
+    match matches.as_slice() {
+        [] => Err(Error::NotFound(format!("no keyring named {name:?}"))),
+        [uri] => Ok(uri.clone()),
+        uris => Err(Error::AmbiguousName {
+            name: name.to_string(),
+            count: uris.len(),
+            uris: uris.to_vec(),
+        }),
+    }
+}
 
 pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     pub(crate) client: XrpcClient<T>,
@@ -306,36 +341,61 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// key there — so the indexer is only trusted for the name → URI map,
     /// not for the group key material.
     ///
-    /// Limitation: workspace creation writes to the caller's PDS, which
-    /// the indexer indexes with some lag (seconds) through the firehose.
-    /// A `workspace ls` immediately after `workspace create` may miss the
-    /// new entry until Jetstream delivers the commit.
+    /// Name resolution is a dependent operation: workspace creation writes the
+    /// genesis keyring to the caller's PDS, and the indexer only lists it once
+    /// the firehose delivers that commit. A create-then-mutate — the CLI's
+    /// `workspace create X` followed immediately by `workspace add-member X` —
+    /// would otherwise fail on the first listing that does not carry X yet. So
+    /// the listing runs inside the bounded visibility window (see
+    /// [`crate::indexer::retry`]): an unmatched name is absorbed on the backoff
+    /// schedule, and only the window's exhaustion surfaces an error naming the
+    /// workspace that was awaited.
+    ///
+    /// Trade-off: a genuinely mistyped name burns the full window before
+    /// erroring. Workspace names live in encrypted metadata the indexer never
+    /// sees, so "not listed yet" and "never existed" are the same answer at the
+    /// wire — no signal exists to tell them apart and fail the typo fast.
     pub async fn resolve_workspace(&mut self, name: &str) -> Result<Workspace, Error> {
-        let workspaces = self.discover_member_workspaces().await?;
-        let private_keys = self.private_keys_from_cache();
-        let matches: Vec<String> = workspaces
-            .iter()
-            .filter(|ws| {
-                keyrings::decrypt_indexer_workspace_name(ws, &self.did, &private_keys.bundle())
-                    .as_deref()
-                    == Some(name)
-            })
-            // Resolve by head URI — the envelope's URI IS the current
-            // canonical keyring record (after any manager supersede).
-            .map(|env| env.uri.clone())
-            .collect();
+        let uri = self.resolve_workspace_uri(name).await?;
+        self.resolve_workspace_by_uri(&uri).await
+    }
 
-        match matches.as_slice() {
-            [] => Err(Error::NotFound(format!("no keyring named {name:?}"))),
-            [uri] => {
-                let uri = uri.clone();
-                self.resolve_workspace_by_uri(&uri).await
+    /// The retried half of [`resolve_workspace`]: list the caller's workspaces
+    /// and pick the one whose decrypted name matches, absorbing the visibility
+    /// gap while the listing does not carry it yet.
+    ///
+    /// Borrows are split by field rather than routed through `&mut self`
+    /// methods, which is what lets the listing closure and the injected sleeper
+    /// coexist inside [`retry_visibility`].
+    async fn resolve_workspace_uri(&mut self, name: &str) -> Result<String, Error> {
+        let signing_key = self.require_signing_key()?;
+        let indexer_url = self.resolve_indexer_url();
+        let private_keys = self.private_keys_from_cache();
+        let now_micros = self.now_micros_fn;
+        let did = self.did.as_str();
+        let transport = self.client.transport();
+
+        let list_and_match = || async {
+            let workspaces =
+                crate::indexer::fetch_member_workspaces(transport, &indexer_url, did, &signing_key)
+                    .await?;
+            match_workspace_name(&workspaces, name, did, &private_keys)
+        };
+
+        // Without an injected sleeper (a bare test context) we cannot wait, so
+        // the single-shot answer stands — the same fallback
+        // `fetch_keyring_chain_head` makes.
+        match self.sleep_fn.as_mut() {
+            Some(sleep) => {
+                retry_visibility(
+                    &format!("resolving workspace {name:?}"),
+                    now_micros,
+                    sleep,
+                    list_and_match,
+                )
+                .await
             }
-            uris => Err(Error::AmbiguousName {
-                name: name.to_string(),
-                count: uris.len(),
-                uris: uris.to_vec(),
-            }),
+            None => list_and_match().await,
         }
     }
 
@@ -776,12 +836,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// input to a create-then-mutate operation depends on the indexer having
     /// consumed a prior own-write. A workspace creator's genesis keyring, for
     /// instance, is not queryable the instant the PDS accepts it — the
-    /// membership-gated chain-head endpoint 403s as "not a member" until the
-    /// firehose delivers the commit. So this wraps the single-shot resolution
-    /// in a bounded retry: visibility-gap responses (403/404/absent head) are
-    /// absorbed on a backoff schedule, and only the window's exhaustion
-    /// surfaces an error — a [`Error::VisibilityTimeout`] distinct from a real
-    /// authorization denial (see [`crate::indexer::retry`]).
+    /// chain-head endpoint answers `workspace_not_indexed` until the firehose
+    /// delivers the commit. So this wraps the single-shot resolution in a
+    /// bounded retry: that transient signal (and an absent head) is absorbed on
+    /// a backoff schedule, and only the window's exhaustion surfaces an error —
+    /// a [`Error::VisibilityTimeout`] naming the workspace, distinct from the
+    /// definitive [`Error::NotWorkspaceMember`] denial, which is never retried
+    /// (see [`crate::indexer::retry`]).
     async fn fetch_keyring_chain_head(
         &mut self,
         workspace_id: &WorkspaceId,

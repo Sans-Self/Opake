@@ -2,6 +2,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
   use OpakeIndexerWeb.ConnCase, async: false
   import Mox
 
+  alias OpakeIndexer.Firehose
   alias OpakeIndexer.Queries.{ChainHeadQueries, RecordQueries}
 
   setup :set_mox_global
@@ -20,8 +21,8 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     {:ok, conn: Plug.Conn.put_req_header(conn, "x-forwarded-for", ip)}
   end
 
-  # Seeds a genesis keyring (so `is_member?` has a head record to read) with
-  # the given members, and registers its chain head.
+  # Seeds a genesis keyring (so membership resolution has a head record to
+  # read) with the given members, and registers its chain head.
   defp put_keyring(uri, members_dids) do
     {:ok, record} =
       RecordQueries.upsert(%{
@@ -56,6 +57,24 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     })
   end
 
+  # Deletes the workspace's sole keyring record through the firehose pipeline,
+  # which resolves to the `torn_down` outcome and drops the chain-head row.
+  defp tear_down_keyring(uri) do
+    ["at:", "", did, collection, rkey] = String.split(uri, "/")
+
+    delete_json =
+      Jason.encode!(%{
+        "kind" => "commit",
+        "did" => did,
+        "time_us" => 0,
+        "commit" => %{"operation" => "delete", "collection" => collection, "rkey" => rkey}
+      })
+
+    Firehose.process_message(delete_json, 0)
+    nil = ChainHeadQueries.get(uri, "keyring")
+    :ok
+  end
+
   describe "GET /api/workspace/snapshot" do
     test "returns 400 without workspace_id", %{conn: conn} do
       did = "did:plc:me"
@@ -67,6 +86,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     end
 
     # spec:workspace-membership § Membership state is the keyring head's member list
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 403 for a did not on the keyring's member list", %{conn: conn} do
       genesis = "at://did:plc:owner/app.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
@@ -81,6 +101,35 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
       assert json_response(conn, 403)["error"] =~ "not a member"
     end
 
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
+    test "returns 404 workspace_not_indexed before the genesis keyring is consumed", %{conn: conn} do
+      did = "did:plc:me"
+      genesis = "at://#{did}/app.opake.keyring/genesis"
+
+      conn =
+        conn
+        |> authed_conn(did, "/api/workspace/snapshot")
+        |> get("/api/workspace/snapshot?workspace_id=#{genesis}")
+
+      assert json_response(conn, 404)["error"] == "workspace_not_indexed"
+    end
+
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
+    test "returns 404 workspace_not_indexed for a torn-down workspace", %{conn: conn} do
+      did = "did:plc:me"
+      genesis = "at://#{did}/app.opake.keyring/genesis"
+      put_keyring(genesis, [did])
+      :ok = tear_down_keyring(genesis)
+
+      conn =
+        conn
+        |> authed_conn(did, "/api/workspace/snapshot")
+        |> get("/api/workspace/snapshot?workspace_id=#{genesis}")
+
+      assert json_response(conn, 404)["error"] == "workspace_not_indexed"
+    end
+
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns the workspace tree for a member, scoped to that workspace", %{conn: conn} do
       did = "did:plc:me"
       genesis = "at://#{did}/app.opake.keyring/genesis"
@@ -136,6 +185,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     end
 
     # spec:workspace-membership § Membership state is the keyring head's member list
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "checks membership before parsing since", %{conn: conn} do
       genesis = "at://did:plc:owner/app.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
@@ -146,6 +196,20 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
         |> get("/api/workspace/sync?workspace_id=#{genesis}&since=garbage")
 
       assert json_response(conn, 403)
+    end
+
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
+    test "returns 404 workspace_not_indexed when no keyring head exists", %{conn: conn} do
+      did = "did:plc:me"
+      genesis = "at://#{did}/app.opake.keyring/genesis"
+      since = DateTime.to_iso8601(DateTime.utc_now())
+
+      conn =
+        conn
+        |> authed_conn(did, "/api/workspace/sync")
+        |> get("/api/workspace/sync?workspace_id=#{genesis}&since=#{since}")
+
+      assert json_response(conn, 404)["error"] == "workspace_not_indexed"
     end
 
     test "returns only records changed after since", %{conn: conn} do
@@ -173,6 +237,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
 
   describe "GET /api/workspace/chain-head" do
     # spec:workspace-membership § Membership state is the keyring head's member list
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 403 for a non-member", %{conn: conn} do
       genesis = "at://did:plc:owner/app.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
@@ -183,6 +248,19 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
         |> get("/api/workspace/chain-head?workspace_id=#{genesis}")
 
       assert json_response(conn, 403)
+    end
+
+    # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
+    test "returns 404 workspace_not_indexed when no keyring head exists", %{conn: conn} do
+      did = "did:plc:me"
+      genesis = "at://#{did}/app.opake.keyring/genesis"
+
+      conn =
+        conn
+        |> authed_conn(did, "/api/workspace/chain-head")
+        |> get("/api/workspace/chain-head?workspace_id=#{genesis}")
+
+      assert json_response(conn, 404)["error"] == "workspace_not_indexed"
     end
 
     test "returns the keyring head and nil root_directory when no root is tracked", %{

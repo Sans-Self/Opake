@@ -18,21 +18,39 @@ fn clock_and_sleep() -> (impl Fn() -> u64, SleepFn) {
     (read, sleep)
 }
 
+const WORKSPACE: &str = "at://did:plc:me/app.opake.keyring/genesis";
+
+fn not_indexed() -> Error {
+    Error::WorkspaceNotIndexed {
+        workspace_id: WORKSPACE.into(),
+    }
+}
+
+// spec:indexer-consistency § Dependent operations tolerate the visibility gap
 #[test]
 fn visibility_gap_covers_indexer_lag_only() {
+    assert!(is_visibility_gap(&not_indexed()));
     assert!(is_visibility_gap(&Error::NotFound(
         "no indexed keyring".into()
     )));
-    assert!(is_visibility_gap(&Error::Indexer {
-        status: 403,
-        message: "not a member".into()
-    }));
+    // An individual record the operation awaits is not in the index yet — the
+    // uncoded not-found keeps its lag semantics.
     assert!(is_visibility_gap(&Error::Indexer {
         status: 404,
         message: "absent".into()
     }));
 
+    // The definitive denial: a head was consulted and the caller is not in it.
+    // Absorbing it would trade a truthful error for a window of latency.
+    assert!(!is_visibility_gap(&Error::NotWorkspaceMember {
+        workspace_id: WORKSPACE.into()
+    }));
+
     // Genuine failures are surfaced, never absorbed as lag.
+    assert!(!is_visibility_gap(&Error::Indexer {
+        status: 403,
+        message: "forbidden".into()
+    }));
     assert!(!is_visibility_gap(&Error::Indexer {
         status: 500,
         message: "boom".into()
@@ -64,17 +82,12 @@ fn schedule_backs_off_then_exhausts_at_the_window() {
 
 // spec:indexer-consistency § Dependent operations tolerate the visibility gap
 #[tokio::test]
-async fn retries_visibility_gap_then_succeeds() {
-    // 403 → 403 → 200: absorbs the two lagging responses, returns the value.
+async fn retries_workspace_not_indexed_then_succeeds() {
+    // not-indexed → not-indexed → 200: the creator's genesis lands mid-window,
+    // the two transient answers are absorbed, the value comes back.
     let responses: Rc<RefCell<Vec<Result<u32, Error>>>> = Rc::new(RefCell::new(vec![
-        Err(Error::Indexer {
-            status: 403,
-            message: "not a member".into(),
-        }),
-        Err(Error::Indexer {
-            status: 403,
-            message: "not a member".into(),
-        }),
+        Err(not_indexed()),
+        Err(not_indexed()),
         Ok(42),
     ]));
     let calls = Rc::new(Cell::new(0u32));
@@ -93,35 +106,76 @@ async fn retries_visibility_gap_then_succeeds() {
         }
     };
 
-    let result = retry_visibility("resolving chain head", now, &mut sleep, op).await;
+    let result = retry_visibility(
+        &format!("resolving keyring chain head for {WORKSPACE}"),
+        now,
+        &mut sleep,
+        op,
+    )
+    .await;
     assert_eq!(result.unwrap(), 42);
     assert_eq!(calls.get(), 3);
 }
 
 // spec:indexer-consistency § Dependent operations tolerate the visibility gap
 #[tokio::test]
-async fn exhausted_window_yields_distinct_timeout_error() {
-    // Every attempt 403s: the window closes and the caller gets a
-    // VisibilityTimeout, not an authorization denial.
+async fn exhausted_window_yields_timeout_naming_the_workspace() {
+    // Every attempt answers not-indexed: the window closes and the caller gets
+    // a VisibilityTimeout naming the workspace it waited on — a wrong-kind id
+    // burns the window the same way, and the name is what makes that visible
+    // instead of it reading as a slow pipeline.
     let (now, mut sleep) = clock_and_sleep();
-    let op = || async {
-        Err::<u32, _>(Error::Indexer {
-            status: 403,
-            message: "not a member".into(),
-        })
-    };
+    let op = || async { Err::<u32, _>(not_indexed()) };
 
-    let result = retry_visibility("resolving chain head", now, &mut sleep, op).await;
+    let result = retry_visibility(
+        &format!("resolving keyring chain head for {WORKSPACE}"),
+        now,
+        &mut sleep,
+        op,
+    )
+    .await;
     match result {
-        Err(Error::VisibilityTimeout {
-            operation,
-            waited_ms,
-        }) => {
-            assert_eq!(operation, "resolving chain head");
+        Err(error @ Error::VisibilityTimeout { .. }) => {
+            assert!(
+                error.to_string().contains(WORKSPACE),
+                "the timeout must name the workspace it waited on: {error}"
+            );
+            let Error::VisibilityTimeout { waited_ms, .. } = error else {
+                unreachable!()
+            };
             assert!(waited_ms >= MAX_WINDOW_MS - MAX_DELAY_MS);
         }
         other => panic!("expected VisibilityTimeout, got {other:?}"),
     }
+}
+
+// spec:indexer-consistency § Dependent operations tolerate the visibility gap
+#[tokio::test]
+async fn authorization_denial_is_not_retried() {
+    // The indexer only denies after reading an indexed head, so the denial is
+    // definitive: one attempt, surfaced as-is, window untouched.
+    let calls = Rc::new(Cell::new(0u32));
+    let (now, mut sleep) = clock_and_sleep();
+    let op = {
+        let calls = Rc::clone(&calls);
+        move || {
+            let calls = Rc::clone(&calls);
+            async move {
+                calls.set(calls.get() + 1);
+                Err::<u32, _>(Error::NotWorkspaceMember {
+                    workspace_id: WORKSPACE.into(),
+                })
+            }
+        }
+    };
+
+    let result = retry_visibility("resolving chain head", &now, &mut sleep, op).await;
+    match result {
+        Err(Error::NotWorkspaceMember { workspace_id }) => assert_eq!(workspace_id, WORKSPACE),
+        other => panic!("expected NotWorkspaceMember, got {other:?}"),
+    }
+    assert_eq!(calls.get(), 1);
+    assert_eq!(now(), 0, "the denial must not consume the retry window");
 }
 
 #[tokio::test]

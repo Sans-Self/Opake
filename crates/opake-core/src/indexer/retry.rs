@@ -5,9 +5,9 @@
 // operation whose input depends on the indexer having consumed a prior
 // own-write — resolving a keyring chain head just written, passing a
 // membership check for a workspace just created — must tolerate the gap
-// instead of failing on the first "not a member" / "no indexed keyring"
-// response. This module is the one place that policy lives, so the window
-// and backoff schedule are set once and cited from the spec.
+// instead of failing on the first `workspace_not_indexed` response. This
+// module is the one place that policy lives, so the window and backoff
+// schedule are set once and cited from the spec.
 //
 // WASM-compatibility: this module never sleeps by itself. The delay is
 // applied by the caller through an injected async sleep (the same pattern
@@ -39,29 +39,31 @@ pub const MAX_WINDOW_MS: u64 = 15_000;
 /// opake-core stays runtime-agnostic and wasm-clean.
 pub type SleepFn = Box<dyn FnMut(Duration) -> Pin<Box<dyn Future<Output = ()>>>>;
 
-/// True when an error means "the indexer has not caught up with a prior
-/// own-write yet", as opposed to a genuine failure. These are the responses
-/// a dependent operation absorbs within the retry window:
+/// True when an error means "the indexer has nothing to answer with yet", as
+/// opposed to a genuine failure. These are the responses a dependent operation
+/// absorbs within the retry window:
 ///
-/// * `Indexer { status: 403 }` — the membership-gated chain-head endpoint
-///   answering "not a member" because the genesis keyring is not indexed yet
-///   (the canonical creator-first-mutation race).
-/// * `Indexer { status: 404 }` — the awaited record is not in the index yet.
+/// * `WorkspaceNotIndexed` — a workspace-scoped endpoint carried the
+///   machine-readable `workspace_not_indexed` code: no keyring chain head for
+///   the id. The canonical creator-first-mutation race lands here. Classified
+///   off the body code, never off the bare status integer — the status is for
+///   proxies and logs, the code is the contract.
+/// * `Indexer { status: 404 }` — an individual record the operation awaits is
+///   not in the index yet.
 /// * `NotFound` — the indexer answered but has no chain head for the
 ///   workspace yet (the keyring field is absent from an otherwise-valid
 ///   chain-head response).
 ///
-/// Everything else — chain-integrity failures, malformed records, the
-/// caller's own auth failing — is surfaced immediately; retrying it would
-/// only hide a real defect behind latency.
+/// A `NotWorkspaceMember` denial is *not* in this class: the indexer only
+/// answers it after consulting an indexed chain head, so it is definitive and
+/// retrying it would trade a truthful authorization error for a full window of
+/// latency. Chain-integrity failures, malformed records and the caller's own
+/// auth failing are surfaced immediately for the same reason — retrying them
+/// only hides a real defect behind a wait.
 pub fn is_visibility_gap(error: &Error) -> bool {
     matches!(
         error,
-        Error::NotFound(_)
-            | Error::Indexer {
-                status: 403 | 404,
-                ..
-            }
+        Error::WorkspaceNotIndexed { .. } | Error::NotFound(_) | Error::Indexer { status: 404, .. }
     )
 }
 
@@ -112,6 +114,10 @@ impl Default for VisibilityRetry {
 /// Run `op`, retrying visibility-gap failures on the [`VisibilityRetry`]
 /// schedule until it succeeds, fails for a non-gap reason, or the window is
 /// exhausted (yielding [`Error::VisibilityTimeout`] naming `operation`).
+///
+/// `operation` must name the subject being awaited — for a workspace-scoped
+/// wait, the workspace id — so a wrong-kind id burning the window is legible
+/// in the failure rather than laundered into "the pipeline is slow".
 ///
 /// `now_micros` supplies wall-clock microseconds; `sleep` applies the delay.
 /// `op` must return an owned future on each call.

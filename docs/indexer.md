@@ -165,7 +165,7 @@ Returns keyrings where `did` is a member.
 
 ### `GET /api/workspace?keyring=<uri>&limit=<n>&cursor=<cursor>`
 
-Returns documents encrypted under a keyring. **Requires the authenticated DID to be a member of the keyring** (returns 403 otherwise).
+Returns documents encrypted under a keyring. **Requires the authenticated DID to be a member of the keyring** — see [workspace-scoped responses](#workspace-scoped-response-contract).
 
 | Param | Required | Default | Max |
 |-------|----------|---------|-----|
@@ -219,6 +219,16 @@ Returns pending structural proposals for a workspace (add/move/rename/delete ent
 ### Tree snapshots and sync
 
 `/api/cabinet/snapshot` and `/api/workspace/snapshot?keyring=<uri>` return the full directory tree + document list for cold starts. `/api/cabinet/sync?since=<iso8601>` and `/api/workspace/sync?keyring=<uri>&since=<iso8601>` return only records whose `indexed_at` is newer than `since`, for incremental catch-up after a reconnect. Both sync endpoints reply with `{ directories, documents, serverTime }`; the caller uses `serverTime` as the next `since` value.
+
+### Workspace-scoped response contract
+
+Every workspace-scoped endpoint (`/api/workspace/*`) resolves the caller against the workspace's keyring chain head and answers one of three ways:
+
+| Response | Meaning |
+|----------|---------|
+| `404` + `{"error": "workspace_not_indexed"}` | No keyring chain head is indexed for the workspace. Covers both a genesis not yet consumed from the firehose and a torn-down chain (no live keyring record) — the indexer cannot tell these apart and does not pretend to. Clients treat this as retryable within a bounded window, branching on the body's error code, never the bare status. |
+| `403` | An indexed chain head was consulted and the caller's DID is not in its member list. Definitive authorization denial — never a lag artifact, never retried. |
+| `200` | Member; request served. |
 
 ### SSE event streaming
 

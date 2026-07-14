@@ -1,12 +1,15 @@
 // Workspace-identity regression net: every operation on a CHURNED workspace —
 // one whose keyring chain has superseded ≥2 records past genesis, so head ≠
 // genesis — still keys on the genesis URI. This is the property class that
-// shipped two real bugs: the membership-403 (a workspace-scoped indexer call
-// carrying a head URI resolves to no `chain_heads` row and is rejected as a
-// non-member, fix `e607210`) and the genesis-anchor AEAD binding (a group-key
-// unwrap reconstructing its context from the head fails to decrypt, fix
-// `2c9b32d`). Both are silent on a fresh workspace because head equals genesis
-// until the first supersede — so the whole point is to move the head first.
+// shipped two real bugs: the head-URI-as-workspace-id defect (a workspace-scoped
+// indexer call carrying a head URI resolves to no `chain_heads` row, fix
+// `e607210` — it was rejected as a non-member 403 then; the same call now
+// answers `workspace_not_indexed` and burns the client's visibility window to a
+// timeout, which is why the wire contract cannot catch it and this test must)
+// and the genesis-anchor AEAD binding (a group-key unwrap reconstructing its
+// context from the head fails to decrypt, fix `2c9b32d`). Both are silent on a
+// fresh workspace because head equals genesis until the first supersede — so
+// the whole point is to move the head first.
 //
 // Driven through the opake CLI against the dockerized dev-env and asserted
 // through the indexer's view, exactly as leave-smoke does. The CLI has no
@@ -83,9 +86,14 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       expect(created.code).toBe(0);
       const genesisUri = parseCreateUri(created.stdout);
 
-      // A just-created workspace 403s its own creator's mutations until the
-      // genesis keyring is indexed (membership resolution is indexer-backed,
-      // no client-side retry) — poll before mutating, as leave-smoke does.
+      // The client absorbs the chain-head visibility gap, but a CLI mutation
+      // names its workspace, and name→workspace resolution runs through the
+      // indexer's workspace list (`discover_member_workspaces`), which is NOT
+      // inside that retry — a fresh workspace is simply "no keyring named X"
+      // until it is listed. So the poll stays, and it is a workaround for that
+      // gap, not for the membership check the client now handles. Removing it
+      // once name resolution retries too is tracked with the finding; the
+      // no-poll contract itself is pinned in visibility-contract.test.ts.
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       // First supersede: the head record is now a different URI from genesis.
@@ -101,7 +109,8 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       // Second supersede on a workspace whose head ≠ genesis. THIS is the
       // shipped bug's exact shape: the add's chain-head lookup and membership
       // check must carry the genesis URI. A head-keyed call resolves to no
-      // `chain_heads` row and 403s; success here is the genesis-keyed path.
+      // `chain_heads` row, is answered `workspace_not_indexed`, and retries to
+      // a visibility timeout; success here is the genesis-keyed path.
       const added2 = await cli(OWNER, ["workspace", "add-member", ws, lateDid]);
       expect(added2.code).toBe(0);
       expect(

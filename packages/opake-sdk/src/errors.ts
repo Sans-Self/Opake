@@ -22,8 +22,18 @@ export type OpakeErrorKind =
   | "Serialization"
   | "Mnemonic"
   | "Sse"
+  // A workspace-scoped indexer call found no keyring chain head for the
+  // workspace. Ambiguous by construction between a genesis still in flight and
+  // a torn-down chain, so copy for it must claim neither deletion nor lag — the
+  // honest surface is "the indexer cannot answer for this workspace", and the
+  // next bootstrap or keyring event resolves which case it was. The client
+  // retries this within the visibility window before it ever reaches a caller.
+  | "WorkspaceNotIndexed"
+  // The indexer read an indexed chain head and the caller's DID is absent from
+  // its members. Definitive, never retried: the UI may say "not permitted".
+  | "NotWorkspaceMember"
   // The indexer had not caught up with a prior own-write within the bounded
-  // retry window — the pipeline is behind, distinct from a real authorization
+  // retry window — the pipeline is behind, distinct from an authorization
   // denial. Lets the UI say "still syncing" rather than "not permitted".
   | "VisibilityTimeout"
   // A conditional (compare-and-swap) write lost the race — the record's CID
@@ -73,6 +83,8 @@ const KNOWN_KINDS = new Set<string>([
   "Serialization",
   "Mnemonic",
   "Sse",
+  "WorkspaceNotIndexed",
+  "NotWorkspaceMember",
   "VisibilityTimeout",
   "CasConflict",
 ]);

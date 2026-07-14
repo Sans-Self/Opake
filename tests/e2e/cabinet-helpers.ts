@@ -1,7 +1,8 @@
 // Shared cabinet interactions for the F1 file-management specs. The cabinet
 // root is pre-seeded by the dev-env bootstrap (a CLI first-write), so unlike a
 // fresh workspace the tree is ready on load and mutations don't hit the
-// creator-mutates-fresh-workspace 403 race.
+// creator-mutates-fresh-workspace visibility gap (`workspace_not_indexed`
+// until the genesis keyring is consumed).
 //
 // What does bite is indexer lag: a mutation shows immediately as an optimistic
 // keeper insert, but a reload rebuilds the tree from the indexer snapshot, and

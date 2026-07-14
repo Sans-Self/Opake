@@ -18,6 +18,8 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Auth(_) => "Auth",
         Error::Xrpc { .. } => "Xrpc",
         Error::Indexer { .. } => "Indexer",
+        Error::WorkspaceNotIndexed { .. } => "WorkspaceNotIndexed",
+        Error::NotWorkspaceMember { .. } => "NotWorkspaceMember",
         Error::NotFound(_) => "NotFound",
         Error::IdentityMissing => "IdentityMissing",
         Error::RecipientNotReady(_) => "RecipientNotReady",

@@ -71,11 +71,13 @@ test(`renames a workspace without changing its genesis identity ${cite(
 
   // The first mutation of a just-created workspace races the indexer: the
   // keyring supersede resolves the chain head through the indexer
-  // (`fetch_keyring_chain_head`), which 403s "not a member" at the creator
-  // until the genesis keyring is indexed. The client now absorbs that window
-  // — `fetch_keyring_chain_head` retries the resolution on a bounded backoff
-  // — so a single save succeeds; only true exhaustion surfaces an error. No
-  // test-side retry loop: if this save 403s, the contract is broken.
+  // (`fetch_keyring_chain_head`), which answers `workspace_not_indexed` until
+  // the genesis keyring is consumed. The client absorbs that window — the
+  // resolution retries on a bounded backoff — so a single save succeeds; only
+  // exhaustion surfaces an error, and it names the visibility wait rather than
+  // claiming a denial. No test-side retry loop: a 403 here would now be a
+  // definitive authorization denial, and either that or an error toast means
+  // the contract is broken.
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Workspace updated").first()).toBeVisible({ timeout: 30_000 });
 

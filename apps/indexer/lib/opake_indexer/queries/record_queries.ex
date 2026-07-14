@@ -184,12 +184,34 @@ defmodule OpakeIndexer.Queries.RecordQueries do
     end
   end
 
-  @doc """
-  True iff `did` is a member of `workspace_id`.
+  @typedoc """
+  Membership resolution for a (workspace, did) pair. `:workspace_not_indexed`
+  means no keyring chain head exists — the genesis has not been consumed yet,
+  or the chain was torn down; the two are not distinguishable and the indexer
+  has nothing to answer for either way. `:not_a_member` means a head was
+  consulted and the DID is absent from its member list, which makes it a
+  definitive authorization answer rather than a lag artifact.
+
+  See spec:indexer-consistency § Unknown workspace is distinguishable from
+  non-membership.
   """
-  @spec is_member?(String.t(), String.t()) :: boolean()
-  def is_member?(workspace_id, did) do
-    not is_nil(member_role(workspace_id, did))
+  @type membership :: :workspace_not_indexed | :not_a_member | {:member, String.t()}
+
+  @doc """
+  Resolve `did`'s membership in `workspace_id` against the head keyring.
+  """
+  @spec resolve_membership(String.t(), String.t()) :: membership()
+  def resolve_membership(workspace_id, did) do
+    case workspace_keyring_head(workspace_id) do
+      nil ->
+        :workspace_not_indexed
+
+      %RecordSchema{record_jsonb: jsonb} ->
+        case extract_member_role(jsonb, did) do
+          nil -> :not_a_member
+          role -> {:member, role}
+        end
+    end
   end
 
   @doc """

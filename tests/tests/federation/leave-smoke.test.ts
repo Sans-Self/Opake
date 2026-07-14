@@ -68,8 +68,11 @@ describe.skipIf(testEnv() !== "devenv")("federation smoke", () => {
       const created = await cli(OWNER, ["workspace", "create", ws]);
       expect(created.code).toBe(0);
 
-      // The creator can only mutate once the genesis keyring is indexed
-      // (membership resolution is indexer-backed; no client-side retry).
+      // The client absorbs the chain-head visibility gap, but the CLI names its
+      // workspace and name→workspace resolution runs through the indexer's
+      // workspace list, which is not inside that retry — the workspace is "no
+      // keyring named X" until it is listed. Poll for the listing, not for the
+      // membership check (visibility-contract.test.ts pins the no-poll path).
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       const added = await cli(OWNER, ["workspace", "add-member", ws, memberDid]);

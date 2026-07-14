@@ -15,23 +15,67 @@ use crate::indexer::types::{
 use crate::records::{Grant, Keyring};
 use crate::workspace::WorkspaceId;
 
+/// The machine-readable code a workspace-scoped endpoint returns when it holds
+/// no keyring chain head for the requested workspace id. The status (404) is
+/// there for proxies and logs; this code is the contract, so classification
+/// branches on it rather than on the bare status integer.
+pub const WORKSPACE_NOT_INDEXED: &str = "workspace_not_indexed";
+
+/// The `error` field of an indexer error body, when it has one. Carries either
+/// a machine-readable code (workspace-scoped endpoints) or prose.
+fn indexer_error_field(body: &[u8]) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct ErrorBody {
+        error: Option<String>,
+    }
+
+    serde_json::from_slice::<ErrorBody>(body)
+        .ok()
+        .and_then(|e| e.error)
+}
+
 /// Check an indexer JSON response for errors.
 fn check_indexer_response(status: u16, body: &[u8]) -> Result<(), Error> {
     if (200..300).contains(&status) {
         return Ok(());
     }
 
-    #[derive(serde::Deserialize)]
-    struct ErrorBody {
-        error: Option<String>,
-    }
-
-    let message = serde_json::from_slice::<ErrorBody>(body)
-        .ok()
-        .and_then(|e| e.error)
-        .unwrap_or_else(|| format!("HTTP {status}"));
+    let message = indexer_error_field(body).unwrap_or_else(|| format!("HTTP {status}"));
 
     Err(Error::Indexer { status, message })
+}
+
+/// Check a response from a workspace-scoped endpoint (`/workspace/snapshot`,
+/// `/workspace/sync`, `/workspace/chain-head`), which answers the membership
+/// gate with a three-way split: `workspace_not_indexed` when no keyring chain
+/// head exists for the id, 403 once a head was consulted and the caller is
+/// absent from its `members[]`, and the payload otherwise.
+///
+/// Both failure classes get a named error so the retry boundary can absorb the
+/// first (transient) and surface the second (definitive) without either side
+/// re-deriving the wire contract.
+fn check_workspace_response(
+    status: u16,
+    body: &[u8],
+    workspace_id: &WorkspaceId,
+) -> Result<(), Error> {
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+
+    if indexer_error_field(body).as_deref() == Some(WORKSPACE_NOT_INDEXED) {
+        return Err(Error::WorkspaceNotIndexed {
+            workspace_id: workspace_id.as_str().to_owned(),
+        });
+    }
+
+    if status == 403 {
+        return Err(Error::NotWorkspaceMember {
+            workspace_id: workspace_id.as_str().to_owned(),
+        });
+    }
+
+    check_indexer_response(status, body)
 }
 
 /// Fetch a single page of inbox grants from the indexer.
@@ -149,6 +193,31 @@ pub async fn fetch_member_workspaces(
 // Tree sync — snapshot + delta endpoints
 // ---------------------------------------------------------------------------
 
+async fn indexer_get_raw(
+    transport: &impl Transport,
+    indexer_url: &str,
+    path: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+    query: &str,
+) -> Result<crate::client::HttpResponse, Error> {
+    let timestamp = crate::client::time::unix_now() as u64;
+    let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
+    let url = if query.is_empty() {
+        format!("{indexer_url}{path}")
+    } else {
+        format!("{indexer_url}{path}?{query}")
+    };
+    transport
+        .send(HttpRequest {
+            method: HttpMethod::Get,
+            url,
+            headers: vec![("Authorization".into(), auth)],
+            body: None,
+        })
+        .await
+}
+
 async fn indexer_get(
     transport: &impl Transport,
     indexer_url: &str,
@@ -157,22 +226,24 @@ async fn indexer_get(
     signing_key: &[u8; 32],
     query: &str,
 ) -> Result<Vec<u8>, Error> {
-    let timestamp = crate::client::time::unix_now() as u64;
-    let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
-    let url = if query.is_empty() {
-        format!("{indexer_url}{path}")
-    } else {
-        format!("{indexer_url}{path}?{query}")
-    };
-    let response = transport
-        .send(HttpRequest {
-            method: HttpMethod::Get,
-            url,
-            headers: vec![("Authorization".into(), auth)],
-            body: None,
-        })
-        .await?;
+    let response = indexer_get_raw(transport, indexer_url, path, did, signing_key, query).await?;
     check_indexer_response(response.status, &response.body)?;
+    Ok(response.body)
+}
+
+/// GET a workspace-scoped endpoint, classifying its membership-gate answers
+/// through [`check_workspace_response`].
+async fn workspace_get(
+    transport: &impl Transport,
+    indexer_url: &str,
+    path: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+    workspace_id: &WorkspaceId,
+    query: &str,
+) -> Result<Vec<u8>, Error> {
+    let response = indexer_get_raw(transport, indexer_url, path, did, signing_key, query).await?;
+    check_workspace_response(response.status, &response.body, workspace_id)?;
     Ok(response.body)
 }
 
@@ -228,12 +299,13 @@ pub async fn fetch_workspace_snapshot(
     workspace_id: &WorkspaceId,
 ) -> Result<TreeDelta, Error> {
     let query = format!("workspace_id={}", workspace_id.as_str());
-    let body = indexer_get(
+    let body = workspace_get(
         transport,
         indexer_url,
         "/api/workspace/snapshot",
         did,
         signing_key,
+        workspace_id,
         &query,
     )
     .await?;
@@ -252,12 +324,13 @@ pub async fn fetch_workspace_sync(
     since: &str,
 ) -> Result<TreeDelta, Error> {
     let query = format!("workspace_id={}&since={since}", workspace_id.as_str());
-    let body = indexer_get(
+    let body = workspace_get(
         transport,
         indexer_url,
         "/api/workspace/sync",
         did,
         signing_key,
+        workspace_id,
         &query,
     )
     .await?;
@@ -314,12 +387,13 @@ pub async fn fetch_workspace_chain_heads(
     workspace_id: &WorkspaceId,
 ) -> Result<WorkspaceChainHeadResponse, Error> {
     let query = format!("workspace_id={}", workspace_id.as_str());
-    let body = indexer_get(
+    let body = workspace_get(
         transport,
         indexer_url,
         "/api/workspace/chain-head",
         did,
         signing_key,
+        workspace_id,
         &query,
     )
     .await?;
@@ -546,5 +620,79 @@ mod tests {
             Error::Indexer { status, .. } => assert_eq!(status, 500),
             other => panic!("expected Indexer error, got: {other:?}"),
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Workspace-scoped membership gate — the 404-with-code / 403 split
+    // ---------------------------------------------------------------------
+
+    fn workspace() -> WorkspaceId {
+        WorkspaceId::from_resolved("at://did:plc:me/app.opake.keyring/genesis")
+    }
+
+    async fn chain_head_error(status: u16, body: &str) -> Error {
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status,
+            headers: vec![],
+            body: body.as_bytes().to_vec(),
+        });
+
+        fetch_workspace_chain_heads(
+            &mock,
+            "https://indexer.test",
+            "did:plc:me",
+            &dummy_key(),
+            &workspace(),
+        )
+        .await
+        .unwrap_err()
+    }
+
+    // spec:indexer-consistency § Dependent operations tolerate the visibility gap
+    #[tokio::test]
+    async fn workspace_not_indexed_code_is_the_transient_signal() {
+        let err = chain_head_error(404, r#"{"error":"workspace_not_indexed"}"#).await;
+        match err {
+            Error::WorkspaceNotIndexed { workspace_id } => {
+                assert_eq!(workspace_id, workspace().as_str());
+            }
+            other => panic!("expected WorkspaceNotIndexed, got: {other:?}"),
+        }
+        assert!(crate::indexer::retry::is_visibility_gap(
+            &chain_head_error(404, r#"{"error":"workspace_not_indexed"}"#).await
+        ));
+    }
+
+    // spec:indexer-consistency § Dependent operations tolerate the visibility gap
+    #[tokio::test]
+    async fn workspace_403_is_a_definitive_denial() {
+        let err = chain_head_error(403, r#"{"error":"not a member of this workspace"}"#).await;
+        match err {
+            Error::NotWorkspaceMember { ref workspace_id } => {
+                assert_eq!(workspace_id, workspace().as_str());
+            }
+            ref other => panic!("expected NotWorkspaceMember, got: {other:?}"),
+        }
+        assert!(!crate::indexer::retry::is_visibility_gap(&err));
+    }
+
+    // A 404 with no machine-readable code is not the workspace signal — it
+    // keeps the plain not-found semantics individual records rely on.
+    // spec:indexer-consistency § Dependent operations tolerate the visibility gap
+    #[tokio::test]
+    async fn plain_404_without_code_stays_a_plain_indexer_error() {
+        let err = chain_head_error(404, r#"{"error":"no such route"}"#).await;
+        match err {
+            Error::Indexer {
+                status,
+                ref message,
+            } => {
+                assert_eq!(status, 404);
+                assert_eq!(message, "no such route");
+            }
+            ref other => panic!("expected Indexer error, got: {other:?}"),
+        }
+        assert!(crate::indexer::retry::is_visibility_gap(&err));
     }
 }

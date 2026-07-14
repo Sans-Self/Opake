@@ -311,7 +311,8 @@ export async function memberCount(actor: string, name: string): Promise<number |
 // A supersede mints a new head record, so this value churns on every membership
 // change while the genesis URI (captured at `create`) stays fixed. The churn
 // tests read it to prove the head moved past genesis and kept moving, precisely
-// the condition under which a head-keyed call site would 403.
+// the condition under which a head-keyed call site would resolve to no
+// `chain_heads` row and be answered `workspace_not_indexed`.
 
 /** The chain-head URI the indexer reports for a workspace in `ls -l`, or null. */
 export async function headUri(actor: string, name: string): Promise<string | null> {

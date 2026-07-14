@@ -4,6 +4,11 @@ defmodule OpakeIndexerWeb.WorkspaceController do
   of the workspace identified by the `?workspace_id=` parameter (= the
   genesis keyring URI).
 
+  Membership is resolved against the keyring chain head, and the two ways a
+  caller can fail that check answer differently: with no head indexed the
+  response is 404 `{"error": "workspace_not_indexed"}`, and with a head that
+  does not list the caller it is 403.
+
   ## Endpoints
 
     * `GET /workspace/snapshot` — full tree (directories + documents)
@@ -108,12 +113,20 @@ defmodule OpakeIndexerWeb.WorkspaceController do
 
   defp require_workspace_id(_), do: {:error, "workspace_id parameter is required"}
 
+  # No keyring chain head means the indexer has nothing to answer for: the
+  # genesis is still in flight, or the chain was torn down. Answering 403
+  # there would dress pipeline lag up as an authorization denial, so the
+  # transient case gets its own machine-readable code and 403 is reserved
+  # for a head that was actually consulted.
+  #
+  # See spec:indexer-consistency § Unknown workspace is distinguishable from
+  # non-membership.
   @spec check_membership(String.t(), String.t()) :: :ok | {:error, non_neg_integer(), String.t()}
   defp check_membership(workspace_id, did) do
-    if RecordQueries.is_member?(workspace_id, did) do
-      :ok
-    else
-      {:error, 403, "not a member of this workspace"}
+    case RecordQueries.resolve_membership(workspace_id, did) do
+      {:member, _role} -> :ok
+      :not_a_member -> {:error, 403, "not a member of this workspace"}
+      :workspace_not_indexed -> {:error, 404, "workspace_not_indexed"}
     end
   end
 end

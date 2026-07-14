@@ -782,3 +782,171 @@ mod keyring_supersede {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Name resolution across the visibility gap
+// ---------------------------------------------------------------------------
+
+mod workspace_resolution {
+    use super::*;
+    use crate::client::HttpResponse;
+    use crate::crypto::{encrypt_metadata, wrap_key, KeyringMetadata, WrapContext};
+    use crate::indexer::retry::{MAX_DELAY_MS, MAX_WINDOW_MS};
+    use crate::records::{Keyring, KeyringMember, Role, SCHEMA_VERSION};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    const DID: &str = "did:plc:test";
+    const INDEXER_URL: &str = "https://indexer.test";
+    const WORKSPACE_URI: &str = "at://did:plc:test/app.opake.keyring/genesis";
+
+    /// The exhaustion test needs a clock that actually advances; `fn() -> u64`
+    /// carries no state, so the tick lives in a static that only that test's
+    /// sleeper writes.
+    static EXHAUSTION_CLOCK_MICROS: AtomicU64 = AtomicU64::new(0);
+
+    fn exhaustion_now_micros() -> u64 {
+        EXHAUSTION_CLOCK_MICROS.load(Ordering::SeqCst)
+    }
+
+    /// `/api/keyrings` answering with the given workspaces.
+    fn keyrings_response(workspaces: Vec<serde_json::Value>) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({ "workspaces": workspaces })).unwrap(),
+        }
+    }
+
+    /// A listing envelope for a workspace named `name`, wrapped to `identity`
+    /// so `resolve_workspace_uri`'s name match decrypts it for real.
+    fn named_workspace(identity: &Identity, name: &str) -> serde_json::Value {
+        let group_key = generate_content_key(&mut OsRng);
+        let public_keys = identity.owned_public_keys().unwrap();
+        let wrapped = wrap_key(
+            &group_key,
+            &public_keys.bundle(),
+            DID,
+            &WrapContext::Keyring { uri: WORKSPACE_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+        let encrypted_metadata = encrypt_metadata(
+            &group_key,
+            &KeyringMetadata {
+                name: name.into(),
+                description: None,
+                icon: None,
+            },
+            &mut OsRng,
+        )
+        .unwrap();
+
+        let keyring = Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: vec![KeyringMember {
+                wrapped_key: wrapped,
+                role: Role::Manager,
+            }],
+            rotation: 0,
+            key_history: Vec::new(),
+            encrypted_metadata,
+            supersedes: None,
+            workspace_id: None,
+            created_at: "2026-07-14T00:00:00Z".into(),
+            modified_at: None,
+        };
+
+        serde_json::json!({
+            "uri": WORKSPACE_URI,
+            "record": keyring,
+            "indexedAt": "2026-07-14T00:00:01Z",
+        })
+    }
+
+    fn opake_with(
+        mock: MockTransport,
+        now_micros: fn() -> u64,
+        sleep: crate::indexer::retry::SleepFn,
+    ) -> Opake<MockTransport, OsRng, NoopStorage> {
+        let client = crate::client::XrpcClient::new(mock, "https://pds.example.com".into());
+        let identity = Identity::generate(DID, &mut OsRng);
+        let mut opake =
+            Opake::new(client, DID.into(), identity, OsRng, NoopStorage, now_micros).unwrap();
+        opake.set_indexer_url(INDEXER_URL.into());
+        opake.set_sleep_fn(sleep);
+        opake
+    }
+
+    /// The CLI's create-then-mutate: `workspace create X` followed immediately
+    /// by a mutation of X, with the indexer's listing not yet carrying the
+    /// genesis keyring. The first listing must be absorbed, not surfaced.
+    // spec:indexer-consistency § Dependent operations tolerate the visibility gap
+    #[tokio::test]
+    async fn name_resolution_retries_until_the_workspace_is_listed() {
+        let mock = MockTransport::new();
+        // Genesis not consumed yet, then consumed.
+        mock.enqueue(keyrings_response(vec![]));
+
+        let mut opake = opake_with(
+            mock.clone(),
+            test_now_micros,
+            Box::new(|_| Box::pin(async {})),
+        );
+        mock.enqueue(keyrings_response(vec![named_workspace(
+            opake.identity(),
+            "fresh-name",
+        )]));
+
+        let uri = opake.resolve_workspace_uri("fresh-name").await.unwrap();
+
+        assert_eq!(uri, WORKSPACE_URI);
+        let listings = mock
+            .requests()
+            .iter()
+            .filter(|r| r.url.contains("/api/keyrings"))
+            .count();
+        assert_eq!(listings, 2, "the first listing must be retried, not failed");
+    }
+
+    /// Window exhaustion names the workspace that was awaited — the same
+    /// convention the chain-head wait follows, so a name that never lands is
+    /// legible in the failure instead of reading as an anonymous timeout.
+    // spec:indexer-consistency § Dependent operations tolerate the visibility gap
+    #[tokio::test]
+    async fn name_resolution_exhaustion_names_the_workspace() {
+        EXHAUSTION_CLOCK_MICROS.store(0, Ordering::SeqCst);
+
+        let mock = MockTransport::new();
+        // The schedule fits a handful of attempts in the window; queue well
+        // past that so exhaustion, not an empty mock queue, ends the loop.
+        for _ in 0..32 {
+            mock.enqueue(keyrings_response(vec![]));
+        }
+
+        let sleep: crate::indexer::retry::SleepFn = Box::new(|delay| {
+            EXHAUSTION_CLOCK_MICROS.fetch_add((delay.as_millis() as u64) * 1_000, Ordering::SeqCst);
+            Box::pin(async {})
+        });
+        let mut opake = opake_with(mock, exhaustion_now_micros, sleep);
+
+        let error = opake
+            .resolve_workspace_uri("never-lands")
+            .await
+            .unwrap_err();
+
+        match error {
+            Error::VisibilityTimeout {
+                ref operation,
+                waited_ms,
+            } => {
+                assert!(
+                    operation.contains("never-lands"),
+                    "the timeout must name the workspace it waited on: {operation}"
+                );
+                assert!(waited_ms >= MAX_WINDOW_MS - MAX_DELAY_MS);
+            }
+            other => panic!("expected VisibilityTimeout, got {other:?}"),
+        }
+    }
+}

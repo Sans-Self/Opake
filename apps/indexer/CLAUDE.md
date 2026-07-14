@@ -7,7 +7,7 @@ See **[docs/indexer.md](../../docs/indexer.md)** for tables, endpoints, deployme
 - Event parser returns tagged tuples or `:ignore`. Indexer dispatches via `dispatch/3` function clauses grouped by domain.
 - All public functions have `@spec`. Schemas use `.t()` types.
 - Query list functions return `{[results], cursor | nil}`. Cursor format: `"{iso8601}::{uri}"`.
-- Workspace-scoped endpoints must check `KeyringQueries.is_member?/2` — returns 403 for non-members.
+- Workspace-scoped endpoints resolve membership against the keyring chain head, three-valued: no head indexed → 404 `{"error": "workspace_not_indexed"}` (retryable for clients; covers pre-genesis and torn-down alike), head without caller → 403 (definitive), member → serve. Never collapse the first two into one response.
 - `Pagination.build_next_cursor/1` expects items with `:uri` and `:indexed_at` fields. If your schema uses a different PK name, map it.
 
 ## Adding a new collection
