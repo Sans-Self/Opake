@@ -160,7 +160,10 @@ impl WasmOpakeHandle {
     #[wasm_bindgen(js_name = listWorkspaceMembers)]
     pub async fn list_workspace_members(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
         let opake = self.opake().await?;
-        let members = opake.workspace_members(keyring_uri).await.map_err(wasm_err)?;
+        let members = opake
+            .workspace_members(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
         to_js(&members)
     }
 
