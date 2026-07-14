@@ -120,15 +120,17 @@ export async function openRowMenu(page: Page, row: Locator): Promise<void> {
 
 /** Upload one file into the current directory via the hidden file input. The
  *  change handler only reads the first selected file, so multi-file uploads
- *  call this once per file. */
+ *  call this once per file. The mime type drives the UI's FileType category
+ *  (text/plain = "document", text/markdown = editable "note"). */
 export async function uploadFile(
   page: Page,
   filename: string,
   contents: string,
+  mimeType = "text/plain",
 ): Promise<void> {
   await page.locator('input[type="file"]').setInputFiles({
     name: filename,
-    mimeType: "text/plain",
+    mimeType,
     buffer: Buffer.from(contents, "utf8"),
   });
 }
