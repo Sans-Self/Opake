@@ -552,12 +552,19 @@ impl DirectoryTree {
     }
 
     /// Count descendant documents and directories under a directory URI.
+    ///
+    /// A hostile or buggy writer can publish a cyclic listing; `expanded`
+    /// bounds the walk so each directory contributes its entries once.
     pub fn count_descendants(&self, uri: &str) -> (usize, usize) {
         let mut documents = 0usize;
         let mut directories = 0usize;
+        let mut expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut stack = vec![uri.to_owned()];
 
         while let Some(current) = stack.pop() {
+            if !expanded.insert(current.clone()) {
+                continue;
+            }
             if let Some(dir) = self.directories.get(&current) {
                 for entry_uri in &dir.entries {
                     match entry_kind_from_uri(entry_uri) {
@@ -599,8 +606,14 @@ impl DirectoryTree {
     ///
     /// Uses an explicit stack instead of recursion. Post-order ensures
     /// directories appear after their contents — correct for deletion.
+    ///
+    /// `expanded` bounds the walk on a cyclic listing: the domain API refuses
+    /// to write one, but a hostile or buggy writer can, and a consumer that
+    /// re-expands a cycle member never terminates. Each directory is expanded
+    /// once, so a cycle yields the reachable set and the walk ends.
     pub fn collect_descendants(&self, uri: &str) -> Vec<(String, EntryKind)> {
         let mut result = Vec::new();
+        let mut expanded: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut stack: Vec<(String, bool)> = vec![(uri.to_owned(), false)];
 
         while let Some((current, visited)) = stack.pop() {
@@ -613,6 +626,10 @@ impl DirectoryTree {
                 if current != uri {
                     result.push((current, EntryKind::Directory));
                 }
+                continue;
+            }
+
+            if !expanded.insert(current.clone()) {
                 continue;
             }
 

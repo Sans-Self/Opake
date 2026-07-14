@@ -847,13 +847,11 @@ fn tree_change_uri_and_is_effective() {
 /// tree, but a hostile or buggy writer can, and every tree consumer
 /// should terminate on it rather than hang.
 ///
-/// IGNORED: `collect_descendants` re-expands cycle members forever — its
-/// post-order marker is per-stack-entry, not a global visited set — so
-/// this test currently times out. Tracked as a follow-up (tree-topology's
-/// "cycle tolerance in tree consumers" open question); unignore once the
-/// walk is bounded.
+/// Matching the tree-walking guards elsewhere (`is_reachable_from_root`,
+/// `reject_cycle`), the walk is bounded rather than fallible: it yields the
+/// reachable set and returns. Erroring is reserved for supersede-chain
+/// walks, where a cycle means the record set itself is invalid.
 #[test]
-#[ignore = "collect_descendants does not terminate on a cyclic tree — hardening deferred (tree-topology open question)"]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 fn bug__collect_descendants_terminates_on_cyclic_tree() {
     use std::sync::mpsc;
@@ -873,12 +871,17 @@ fn bug__collect_descendants_terminates_on_cyclic_tree() {
     ]);
 
     let (tx, rx) = mpsc::channel();
+    let expected_b = dir_b.clone();
     std::thread::spawn(move || {
-        let count = tree.collect_descendants(&dir_a).len();
-        let _ = tx.send(count);
+        let _ = tx.send(tree.collect_descendants(&dir_a));
     });
 
-    if rx.recv_timeout(Duration::from_secs(2)).is_err() {
-        panic!("collect_descendants did not terminate on cyclic input within 2s");
+    match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(descendants) => assert_eq!(
+            descendants,
+            vec![(expected_b, EntryKind::Directory)],
+            "cycle member should be collected once, the cycle back-edge dropped"
+        ),
+        Err(_) => panic!("collect_descendants did not terminate on cyclic input within 2s"),
     }
 }
