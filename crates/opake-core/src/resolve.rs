@@ -511,6 +511,82 @@ mod tests {
         assert!(reqs[0].url.contains("putRecord"));
     }
 
+    /// The published record is what every other party wraps content keys to,
+    /// and what recovery and pairing verify an identity against — so its
+    /// shape is a contract, not an implementation detail. Assert the written
+    /// body: the `app.opake.publicKey` singleton at rkey `self`, carrying
+    /// both halves of the hybrid KEM under their algorithm tags. A record
+    /// missing the ML-KEM half, or written under any other rkey, still
+    /// returns a plausible URI — only the body catches it.
+    // spec:auth-identity § The encryption public keys are published as the publicKey self-record
+    #[tokio::test]
+    async fn publish_public_key_writes_the_self_singleton_with_both_kem_halves() {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+        let mock = MockTransport::new();
+        mock.enqueue(success(
+            &serde_json::json!({
+                "uri": "at://did:plc:test/app.opake.publicKey/self",
+                "cid": "bafypublished",
+            })
+            .to_string(),
+        ));
+
+        let session = crate::client::Session::Legacy(crate::client::LegacySession {
+            did: "did:plc:test".into(),
+            handle: "test.handle".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        });
+        let mut client = XrpcClient::with_session(mock.clone(), "https://pds.test".into(), session);
+
+        let x25519_pubkey = [55u8; 32];
+        let ml_kem_pubkey: MlKemPublicKey = [0xDDu8; 1184];
+        let signing_key = [88u8; 32];
+        publish_public_key(
+            &mut client,
+            &x25519_pubkey,
+            &ml_kem_pubkey,
+            Some(&signing_key),
+            "2026-03-01T12:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let reqs = mock.requests();
+        let body = match &reqs[0].body {
+            Some(crate::client::RequestBody::Json(v)) => v.clone(),
+            _ => panic!("expected JSON body on putRecord"),
+        };
+
+        assert_eq!(body["collection"], "app.opake.publicKey");
+        assert_eq!(body["rkey"], "self", "the record is a singleton at `self`");
+
+        let record = &body["record"];
+        assert_eq!(record["x25519Algo"], "x25519");
+        assert_eq!(record["mlKemAlgo"], "ml-kem-768");
+        assert_eq!(record["signingAlgo"], "ed25519");
+        assert_eq!(
+            BASE64
+                .decode(record["x25519PublicKey"]["$bytes"].as_str().unwrap())
+                .unwrap(),
+            x25519_pubkey.to_vec(),
+        );
+        assert_eq!(
+            BASE64
+                .decode(record["mlKemPublicKey"]["$bytes"].as_str().unwrap())
+                .unwrap(),
+            ml_kem_pubkey.to_vec(),
+            "the post-quantum half is published, not just X25519",
+        );
+        assert_eq!(
+            BASE64
+                .decode(record["signingKey"]["$bytes"].as_str().unwrap())
+                .unwrap(),
+            signing_key.to_vec(),
+        );
+    }
+
     #[tokio::test]
     async fn login_resolve_via_wellknown() {
         let mock = MockTransport::new();

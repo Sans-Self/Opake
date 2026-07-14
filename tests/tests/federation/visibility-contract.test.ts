@@ -1,4 +1,12 @@
-// The two halves of the workspace-scoped read contract, driven end-to-end.
+// The visibility contract, driven end-to-end: what a client may assume about
+// its own accepted writes, and how the indexer answers when it cannot yet
+// answer at all.
+//
+// The premise underneath both halves below is that acceptance is not
+// visibility — a PDS commit says nothing about whether the indexer can answer
+// for the record yet, and no bounded interval exists between the two. The
+// first test here pins that directly on a plain cabinet read. The rest pin
+// the workspace-scoped consequence.
 //
 // A workspace-scoped indexer call can fail for two reasons that used to look
 // identical on the wire (one 403, "not a member"): the indexer has not consumed
@@ -35,6 +43,7 @@ import {
   startCli,
   stackIsUp,
   stopCli,
+  uploadTextToCabinet,
   uploadTextToWorkspace,
   workspaceListed,
 } from "../../helpers/devenv.js";
@@ -83,6 +92,46 @@ describe.skipIf(testEnv() !== "devenv")("workspace visibility contract", () => {
   afterAll(async () => {
     await stopCli();
   });
+
+  it(
+    // spec:indexer-consistency § Acceptance does not imply visibility
+    "a snapshot taken straight after an accepted write is served, whether or not it carries the write",
+    async () => {
+      // Seed the cabinet first and wait it out: the gap under test is a record
+      // inside a tree the indexer already knows, not the bootstrap of the root
+      // itself. Without this the read below could fail for an unrelated reason
+      // and still look like a pass of the wrong thing.
+      await uploadTextToCabinet(OWNER, "seed.txt", "seed");
+      expect(
+        await pollUntil(async () => (await cli(OWNER, ["ls"])).stdout.includes("seed.txt")),
+      ).toBe(true);
+
+      // The PDS accepts the write — an AT-URI comes back, the commit is done.
+      const marker = `accept-${Date.now()}-${seq++}`;
+      const docUri = await uploadTextToCabinet(OWNER, `${marker}.txt`, "just committed");
+      expect(docUri).toMatch(/^at:\/\//);
+
+      // And the very next snapshot read is served normally. Note what is NOT
+      // asserted: whether the snapshot contains the document. Absence is a
+      // conforming response — asserting presence here would assert a bounded
+      // acceptance-to-visibility interval, which the contract explicitly
+      // refuses to promise, and the test would be pinning the dev-env's
+      // latency rather than the protocol. What must hold is that the client's
+      // read does not error over the absence.
+      const immediate = await cli(OWNER, ["ls"]);
+      expect(
+        immediate.code,
+        `a snapshot read issued after an accepted write must be served, not errored: ${immediate.stderr}`,
+      ).toBe(0);
+
+      // Visibility arrives on the pipeline's own schedule. The client waits for
+      // it; it never assumed it.
+      expect(
+        await pollUntil(async () => (await cli(OWNER, ["ls"])).stdout.includes(marker)),
+      ).toBe(true);
+    },
+    180_000,
+  );
 
   it(
     // spec:indexer-consistency § Dependent operations tolerate the visibility gap

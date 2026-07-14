@@ -425,6 +425,7 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
 /// URI, so it no-op'd — the removed member's sidebar kept a workspace they
 /// could no longer decrypt until the next full bootstrap. The apply must be
 /// keyed on `envelope.workspace_id()` (genesis) for the entry to drop.
+// spec:workspace-identity § SSE keyring dispatch keys on derived genesis
 #[test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
@@ -546,6 +547,44 @@ fn torn_down_delete_drops_the_entry_by_workspace_id() {
     });
 
     assert_eq!(keeper.entry_count(), 0, "torn down workspace must drop");
+}
+
+/// The teardown of a *superseded* chain: the last live record is a head, so
+/// the delete payload's `uri` is a head URI the keeper has never held — its
+/// entries are keyed on genesis. Only the payload's workspace identity finds
+/// the entry; a uri-keyed delete silently no-ops and leaves a workspace in
+/// the sidebar whose keys are gone. The sibling test above cannot catch that,
+/// because on an un-superseded chain the deleted URI *is* the genesis key.
+// spec:workspace-identity § SSE keyring dispatch keys on derived genesis
+// spec:keyring-tombstones § Clients act on the outcome, never on URI matching
+#[test]
+fn torn_down_delete_on_a_superseded_chain_drops_the_genesis_keyed_entry() {
+    use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
+
+    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let head = "at://did:plc:alice/app.opake.keyring/head3";
+
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(genesis, 2)]);
+
+    let payload = SseKeyringDeletePayload {
+        uri: head.into(),
+        workspace_id: Some(genesis.into()),
+        outcome: KeyringDeleteOutcome::TornDown,
+    };
+    assert_ne!(
+        payload.uri,
+        keeper.snapshot().entries[0].workspace_id,
+        "the deleted head must not match the tracked key, or the test proves nothing"
+    );
+
+    keeper.apply_keyring_delete(&payload);
+
+    assert_eq!(
+        keeper.entry_count(),
+        0,
+        "teardown must key on the payload's workspace identity, not the deleted URI"
+    );
 }
 
 /// DID absent from member list → None → keeper deletes the workspace.

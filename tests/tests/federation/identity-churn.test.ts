@@ -173,6 +173,62 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
   );
 
   it(
+    // spec:workspace-identity § Workspace-scoped indexer calls pass genesis
+    // spec:workspace-identity § Genesis URI is the workspace identity
+    // spec:workspace-membership § Removal rotates the group key; leave does not
+    "leave on a superseded chain resolves to genesis and the workspace outlives the leaver",
+    async () => {
+      const ws = uniqueName("leave");
+      const created = await cli(OWNER, ["workspace", "create", ws]);
+      expect(created.code).toBe(0);
+      const genesisUri = parseCreateUri(created.stdout);
+      expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
+
+      // Two supersedes. The leaver joins at the SECOND one, so they appear in
+      // neither the genesis member list nor the first head's — the record they
+      // supersede when leaving is one they never authored and never saw
+      // created. Their leave has to find the workspace by its genesis identity;
+      // nothing they hold locally points at it.
+      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
+      ).toBe(true);
+      expect((await cli(OWNER, ["workspace", "add-member", ws, lateDid])).code).toBe(0);
+      expect(
+        await pollUntil(async () => (await memberCount(OWNER, ws)) === 3),
+      ).toBe(true);
+      expect(await pollUntil(() => workspaceListed(LATE, ws))).toBe(true);
+
+      const headBeforeLeave = await headUri(OWNER, ws);
+      expect(headBeforeLeave).not.toBe(genesisUri);
+
+      // Pure self-removal, authored on the leaver's own PDS against a chain
+      // head hosted on the owner's. A head-keyed chain-head lookup here would
+      // resolve to no `chain_heads` row, be answered `workspace_not_indexed`,
+      // and burn the visibility window to a timeout rather than exit 0.
+      const left = await cli(LATE, ["workspace", "leave", ws, "-y"]);
+      expect(left.code, `leave on a churned chain failed: ${left.stderr}`).toBe(0);
+
+      // The leaver's own view drops it; the workspace itself is untouched —
+      // same identity, two remaining members, and no rotation (leave doesn't
+      // rotate the group key; only removal does).
+      expect(await pollUntil(async () => !(await workspaceListed(LATE, ws)))).toBe(true);
+      expect(
+        await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
+      ).toBe(true);
+      expect(await rotationCount(OWNER, ws)).toBe(0);
+      expect(await workspaceListed(OWNER, ws)).toBe(true);
+      expect(await workspaceListed(MEMBER, ws)).toBe(true);
+
+      // The leave minted yet another head. Genesis never moved.
+      const headAfterLeave = await headUri(OWNER, ws);
+      expect(headAfterLeave).not.toBe(headBeforeLeave);
+      expect(headAfterLeave).not.toBe(genesisUri);
+    },
+    180_000,
+  );
+
+  it(
     // spec:workspace-identity § Membership authority is the live chain head
     // spec:workspace-identity § Group-key wraps are AEAD-bound to genesis
     "a member added after the head moved past genesis downloads a document uploaded before they joined",

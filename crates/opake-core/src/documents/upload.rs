@@ -379,6 +379,60 @@ mod tests {
         assert_eq!(metadata.description.as_deref(), Some("Quarterly report"));
     }
 
+    /// Two documents, identical plaintext, same owner, same RNG source — and
+    /// still no shared key material. The content key is drawn fresh per
+    /// document, which is precisely what bounds an AES-GCM (key, nonce)
+    /// collision to one document instead of every file wrapped under the same
+    /// identity. A derived-or-reused key would leave both records unwrapping
+    /// to the same 32 bytes and pass every other test in this file.
+    // spec:document-crypto § Each document has its own random content key
+    #[tokio::test]
+    async fn each_upload_draws_a_fresh_content_key_and_nonce() {
+        let keys = TestKeys::generate(TEST_DID);
+        let mock = MockTransport::new();
+        mock.enqueue(upload_blob_response());
+        mock.enqueue(upload_blob_response());
+
+        let mut client = mock_client(mock);
+        let params = test_params(b"identical bytes, two documents", "same.txt", &keys);
+
+        // Distinct TIDs: each document wraps to its own URI, so the unwrap
+        // context differs even though the plaintext does not.
+        let (record_a, _) = prepare_upload(&mut client, &params, &mut OsRng, "tid-aaa")
+            .await
+            .unwrap();
+        let (record_b, _) = prepare_upload(&mut client, &params, &mut OsRng, "tid-bbb")
+            .await
+            .unwrap();
+
+        let opened = |record: serde_json::Value, tid: &str| -> (ContentKey, String) {
+            let doc: Document = serde_json::from_value(record).unwrap();
+            let envelope = match doc.encryption {
+                Encryption::Direct(d) => d.envelope,
+                _ => panic!("expected direct encryption"),
+            };
+            let uri =
+                crate::tid::uri_with_tid(TEST_DID, crate::documents::DOCUMENT_COLLECTION, tid);
+            let content_key = crypto::unwrap_key(
+                &envelope.keys[0],
+                &keys.private_keys(),
+                &crypto::WrapContext::Document { uri: &uri },
+            )
+            .unwrap();
+            (content_key, envelope.nonce.encoded)
+        };
+
+        let (key_a, nonce_a) = opened(record_a, "tid-aaa");
+        let (key_b, nonce_b) = opened(record_b, "tid-bbb");
+
+        assert_eq!(key_a.0.len(), 32, "content key is AES-256");
+        assert_ne!(
+            key_a.0, key_b.0,
+            "content keys must never be shared between documents"
+        );
+        assert_ne!(nonce_a, nonce_b, "each encryption draws a fresh nonce");
+    }
+
     #[tokio::test]
     async fn rejects_oversized_blob() {
         let keys = TestKeys::generate(TEST_DID);
