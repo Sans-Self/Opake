@@ -50,9 +50,10 @@ event families matter to your code:
 - **Inbox events.** Grant creation, grant deletion. Delivered to any `opake.watchInbox`
   subscribers. Fans out to both sides of a grant: sharer and recipient.
 
-Each event carries only the record's atproto URI and the decrypted fields the indexer can
-safely derive. Encrypted fields stay encrypted; the keepers unwrap them inside WASM using
-the caller's identity before snapshots go out to handlers.
+Each event carries the record's atproto URI and the record itself, byte-for-byte as the PDS
+signed it. The indexer decrypts nothing and derives nothing — it can't, it has no keys. Names,
+sizes, and MIME types arrive still encrypted; the keepers unwrap them inside WASM using the
+caller's identity before snapshots go out to handlers.
 
 ## Keepers, not caches
 
@@ -75,9 +76,9 @@ Full re-sync is the price of a subscription model that doesn't buffer for offlin
 subscribers: Phoenix PubSub on the indexer side discards events that had no connected
 listener, so the consumer can't just catch up from a cursor.
 
-In practice this is fine. The full re-sync is fast (tree snapshots are paginated, keyring
-listing hits one indexer endpoint, inbox the same) and the window where a device is offline
-is usually short. If you see stale state in the UI after network recovery, the issue is the
+In practice this is fine. The full re-sync is fast — one indexer round-trip per scope, and a
+tree snapshot is a single query against the workspace's records — and the window where a device
+is offline is usually short. If you see stale state in the UI after network recovery, the issue is the
 watchers, not the stream; try an explicit `listWorkspaces` / `listInbox` to kick the
 bootstrap.
 

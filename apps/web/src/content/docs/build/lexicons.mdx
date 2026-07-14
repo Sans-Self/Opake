@@ -129,13 +129,16 @@ that need forward-secret removal must re-upload documents after rotation.
 
 ## Indexing
 
-The indexer subscribes to the atproto firehose and consumes seven `app.opake.*`
-collections. For each event, it:
+The indexer subscribes to the atproto firehose and consumes five `app.opake.*`
+collections: `keyring`, `directory`, `document`, `grant`, and `accountConfig` — the
+last only as a proof-of-life heartbeat, never stored. For each event, it:
 
-1. Parses the record against the lexicon schema (rejects malformed records).
-2. Resolves the keyring membership if the record is workspace-scoped (rejects
-   records from non-members).
-3. Writes to its own Postgres index.
+1. Parses the commit and ignores anything outside those collections.
+2. Checks authority if the record supersedes another on a tracked chain — a keyring
+   supersede from a non-manager (bar self-removal), or a directory supersede that
+   isn't additive from an editor, is rejected and never indexed.
+3. Writes the record to its own Postgres index, advancing the chain head in the same
+   transaction.
 4. Fans out to SSE subscribers via Phoenix PubSub.
 
 The indexer never decrypts anything. All the filtering is over plaintext metadata

@@ -107,10 +107,15 @@ automatically.
 
 <CodeBlock language="typescript" title="leave.ts" code={leaveWorkspace} />
 
-Self-removal is currently manager-only — a viewer or editor writing a keyring supersede that
-drops their own entry would violate the editor-additivity invariant (entries can't shrink
-without manager authority). The semantics for non-manager self-removal are a pending design
-call; for now, ask a manager to remove you.
+Any member can leave, whatever their role. The keyring chain is otherwise manager-only, but the
+indexer's authority layer admits a non-manager supersede when the sole membership change is the
+author dropping themselves — every remaining member's role carried over unchanged. Smuggle
+anything else into that supersede and it's rejected.
+
+Two cases are refused client-side: leaving as the last member (workspace destruction isn't a
+supported operation) and leaving as the only manager (promote someone first). Leaving does not
+rotate the group key — the leaver would have to mint the new key themselves, so rotating buys
+no forward secrecy. Removal by a manager is the path that rotates.
 
 ## How federated writes work
 
@@ -131,16 +136,19 @@ A write to a path:
 
 Roles are enforced at the indexer's authority layer:
 
-- **Editor** supersedes must satisfy the editor-additivity invariant — the new entry set
-  is a superset of the prior canonical's by `target_uri`. Adding a new doc is fine;
-  removing or replacing entries from other members requires manager authority.
-- **Manager** supersedes are unconstrained on directory chains and are the only writes
-  accepted on the keyring chain.
-- **Viewer** supersedes are forked out unconditionally.
+- **Editor** supersedes must satisfy the editor-additivity invariant. Additivity is
+  supersede-aware: an editor may add entries, and may advance an existing entry by swapping in
+  a target that supersedes the one it replaces (a wiki-style edit). What an editor can't do is
+  drop an entry outright — a removal with nothing superseding it is a disguised delete, and is
+  rejected.
+- **Manager** supersedes are unconstrained on directory chains, and are the only keyring writes
+  accepted apart from a member's own self-removal.
+- **Viewer** supersedes are rejected — the record never reaches the index.
 
-Concurrent supersedes against the same head race. The loser's record lands on their PDS but
-the indexer marks it `forked-out` and emits a `chain:forked` SSE event to the loser. Clients
-refetch, replay, and retry with bounded exponential backoff.
+Concurrent supersedes against the same head race. The loser's record lands on their PDS and is
+still indexed, but the chain head doesn't advance to it, and the indexer emits a `chain:forked`
+event on the workspace topic naming the winner. Clients refetch, replay, and retry with bounded
+exponential backoff.
 
 ## Reading `MutationResult`
 
@@ -163,9 +171,10 @@ you, the `chain:forked` event triggers a refetch + replay; `useTreeMutation` in
 ## A note on the indexer
 
 Workspaces are discovered via the Opake [indexer](/docs/glossary#indexer), not the PDS firehose
-directly. `listWorkspaces` calls `/api/keyrings` with the caller's DID as a filter; the
-indexer returns every keyring where the caller appears in the member list (including
-keyrings the caller owns, since owners are always listed as the first member).
+directly. `listWorkspaces` calls `/api/keyrings`, which takes no parameters — the caller's DID
+comes from the signed request — and returns the current keyring head of every workspace where
+that DID appears in the member list (including workspaces the caller owns, since owners are
+always listed as a member).
 
 If you're running against a self-hosted indexer instead of the default, set the URL via the
 `OPAKE_INDEXER_URL` env var at build time, or call `opake.setIndexerUrl()` at runtime. See
