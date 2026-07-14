@@ -393,6 +393,32 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         }
     }
 
+    /// Fetch a keyring's member list by URI.
+    ///
+    /// Resolves the keyring authority's PDS and reads the record over the
+    /// public endpoint, so one path serves owners and cross-PDS members
+    /// alike — routing a foreign `getRecord` through the caller's own PDS
+    /// would depend on appview pipethrough, which Opake does not require.
+    pub async fn workspace_members(
+        &self,
+        keyring_uri: &str,
+    ) -> Result<Vec<crate::records::KeyringMember>, Error> {
+        let at_uri = crate::atproto::parse_at_uri(keyring_uri)?;
+        let did_doc =
+            crate::client::resolve_did_document(self.client.transport(), &at_uri.authority).await?;
+        let pds_url = crate::client::pds_from_did_document(&did_doc)?;
+        let entry = crate::client::get_record_public(
+            self.client.transport(),
+            &pds_url,
+            &at_uri.authority,
+            &at_uri.collection,
+            &at_uri.rkey,
+        )
+        .await?;
+        let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
+        Ok(keyring.members)
+    }
+
     /// Resolve a workspace from a foreign PDS by keyring URI.
     ///
     /// Cross-PDS — fetches the keyring record from the owner's PDS (public

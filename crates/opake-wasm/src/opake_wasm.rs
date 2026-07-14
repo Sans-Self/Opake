@@ -155,20 +155,13 @@ impl WasmOpakeHandle {
 
     // -- Workspace management (does NOT consume the context) --
 
-    /// List members of a workspace. Fetches the keyring record and returns
-    /// the member list with DIDs and roles.
+    /// List members of a workspace. Fetches the keyring record from the
+    /// authority's own PDS and returns the member list with DIDs and roles.
     #[wasm_bindgen(js_name = listWorkspaceMembers)]
     pub async fn list_workspace_members(&self, keyring_uri: &str) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let at_uri = opake_core::atproto::parse_at_uri(keyring_uri).map_err(wasm_err)?;
-        let entry = opake
-            .client_mut()
-            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-            .await
-            .map_err(wasm_err)?;
-        let keyring: opake_core::records::Keyring =
-            serde_json::from_value(entry.value).map_err(|e| JsError::new(&e.to_string()))?;
-        to_js(&keyring.members)
+        let opake = self.opake().await?;
+        let members = opake.workspace_members(keyring_uri).await.map_err(wasm_err)?;
+        to_js(&members)
     }
 
     #[wasm_bindgen(js_name = createWorkspace)]
