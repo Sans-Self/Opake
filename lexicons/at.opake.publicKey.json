@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.publicKey",
+  "id": "at.opake.publicKey",
   "description": "Public encryption keys for an Opake user. Singleton record (rkey: 'self') published on the user's PDS to enable key discovery for sharing. Carries both an X25519 key and an ML-KEM-768 key for the hybrid post-quantum KEM construction (BSI TR-02102 / ANSSI guidance for hybrid PQ key establishment).",
   "defs": {
     "main": {

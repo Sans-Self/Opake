@@ -185,7 +185,7 @@ async fn bug__pair_response_with_pds_unpadded_base64_decrypts() {
     let mut record_value = serde_json::to_value(&record).unwrap();
     strip_bytes_padding(&mut record_value);
     let entry = serde_json::json!({
-        "uri": format!("at://{TEST_DID}/app.opake.publicKey/self"),
+        "uri": format!("at://{TEST_DID}/at.opake.publicKey/self"),
         "cid": "bafyrecord",
         "value": record_value,
     });

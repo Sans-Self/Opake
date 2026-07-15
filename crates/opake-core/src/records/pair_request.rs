@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use super::{default_version, SCHEMA_VERSION};
 use crate::atproto::AtBytes;
 
-pub const PAIR_REQUEST_COLLECTION: &str = "app.opake.pairRequest";
+pub const PAIR_REQUEST_COLLECTION: &str = "at.opake.pairRequest";
 
 /// Algorithm identifier for the pair-request ephemeral key bundle. Mirrors
-/// the `knownValues` entry in `lexicons/app.opake.pairRequest.json`.
+/// the `knownValues` entry in `lexicons/at.opake.pairRequest.json`.
 pub const PAIR_REQUEST_ALGO: &str = "x25519-mlkem768";
 
 /// A device pairing request.

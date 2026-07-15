@@ -30,10 +30,10 @@ Relevant existing machinery:
 
 ### 1. Enriched payload type, keyring-only
 
-New wire payload for `app.opake.keyring:delete`:
+New wire payload for `at.opake.keyring:delete`:
 
 ```json
-{ "uri": "...", "workspace_id": "at://.../app.opake.keyring/genesis", "outcome": "unchanged" | "rolled_back" | "torn_down" }
+{ "uri": "...", "workspace_id": "at://.../at.opake.keyring/genesis", "outcome": "unchanged" | "rolled_back" | "torn_down" }
 ```
 
 On the Rust side this is a new `SseKeyringDeletePayload` in events.rs; the other three delete events keep the shared `SseDeletePayload`. Growing optional fields onto the shared type would force every consumer to reason about fields that only ever populate for keyrings.

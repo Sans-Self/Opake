@@ -1,7 +1,7 @@
 defmodule OpakeIndexer.Auth.KeyFetcher do
   @moduledoc """
   Resolves a DID to its Ed25519 signing public key by walking the chain:
-  DID → DID document → PDS service endpoint → `app.opake.publicKey/self` record
+  DID → DID document → PDS service endpoint → `at.opake.publicKey/self` record
   → `signingKey.$bytes` (32-byte Ed25519 key).
 
   Supports `did:plc:` (via the configured PLC directory) and `did:web:`
@@ -56,7 +56,7 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
   defp fetch_public_key_record(pds_url, did) do
     url =
       "#{pds_url}/xrpc/com.atproto.repo.getRecord?" <>
-        URI.encode_query(repo: did, collection: "app.opake.publicKey", rkey: "self")
+        URI.encode_query(repo: did, collection: "at.opake.publicKey", rkey: "self")
 
     with {:ok, response} <- fetch_json(url) do
       extract_signing_key(response)

@@ -20,10 +20,10 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
   describe "broadcast_record_upsert — keyring" do
     test "fans out to the workspace topic and every member's personal topic" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       attrs = %{
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         workspace_id: ws,
         author_did: @alice,
         record_jsonb: %{
@@ -42,16 +42,16 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_record_upsert(attrs, envelope)
 
-      assert_receive {:sse_event, "app.opake.keyring:upsert", ^envelope}
-      assert_receive {:sse_event, "app.opake.keyring:upsert", ^envelope}
-      assert_receive {:sse_event, "app.opake.keyring:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.keyring:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.keyring:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.keyring:upsert", ^envelope}
     end
 
     test "a member not on the head list never receives the event" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       attrs = %{
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         workspace_id: ws,
         author_did: @alice,
         record_jsonb: %{"members" => [%{"wrappedKey" => %{"did" => @alice}, "role" => "manager"}]}
@@ -67,7 +67,7 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
   describe "broadcast_record_upsert — grant" do
     test "fans out to both recipient and author personal topics, not the workspace topic" do
       attrs = %{
-        collection: "app.opake.grant",
+        collection: "at.opake.grant",
         workspace_id: nil,
         author_did: @alice,
         record_jsonb: %{"recipient" => @bob}
@@ -80,17 +80,17 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_record_upsert(attrs, envelope)
 
-      assert_receive {:sse_event, "app.opake.grant:upsert", ^envelope}
-      assert_receive {:sse_event, "app.opake.grant:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.grant:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.grant:upsert", ^envelope}
     end
   end
 
   describe "broadcast_record_upsert — directory / document" do
     test "workspace-scoped record fans out only to the workspace topic" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       attrs = %{
-        collection: "app.opake.directory",
+        collection: "at.opake.directory",
         workspace_id: ws,
         author_did: @alice,
         record_jsonb: %{}
@@ -103,13 +103,13 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_record_upsert(attrs, envelope)
 
-      assert_receive {:sse_event, "app.opake.directory:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.directory:upsert", ^envelope}
       refute_receive {:sse_event, _, _}
     end
 
     test "cabinet record (no workspace_id) fans out only to the author's personal topic" do
       attrs = %{
-        collection: "app.opake.document",
+        collection: "at.opake.document",
         workspace_id: nil,
         author_did: @alice,
         record_jsonb: %{}
@@ -121,7 +121,7 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_record_upsert(attrs, envelope)
 
-      assert_receive {:sse_event, "app.opake.document:upsert", ^envelope}
+      assert_receive {:sse_event, "at.opake.document:upsert", ^envelope}
     end
   end
 
@@ -132,8 +132,8 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
     # dropping the broadcast. This pins that a struct input still fans out.
     test "bug__struct_input_reaches_recipient_topic delivers a grant delete to the recipient" do
       grant = %RecordSchema{
-        uri: "at://#{@alice}/app.opake.grant/g1",
-        collection: "app.opake.grant",
+        uri: "at://#{@alice}/at.opake.grant/g1",
+        collection: "at.opake.grant",
         author_did: @alice,
         workspace_id: nil,
         record_jsonb: %{"recipient" => @bob}
@@ -143,16 +143,16 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_record_delete(grant)
 
-      assert_receive {:sse_event, "app.opake.grant:delete", %{uri: uri}}
+      assert_receive {:sse_event, "at.opake.grant:delete", %{uri: uri}}
       assert uri == grant.uri
     end
 
     test "workspace-scoped directory delete reaches the workspace topic" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       directory = %RecordSchema{
-        uri: "at://#{@alice}/app.opake.directory/d1",
-        collection: "app.opake.directory",
+        uri: "at://#{@alice}/at.opake.directory/d1",
+        collection: "at.opake.directory",
         author_did: @alice,
         workspace_id: ws,
         record_jsonb: %{}
@@ -161,18 +161,18 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
       subscribe(Topics.workspace(ws))
       Broadcaster.broadcast_record_delete(directory)
 
-      assert_receive {:sse_event, "app.opake.directory:delete", %{uri: uri}}
+      assert_receive {:sse_event, "at.opake.directory:delete", %{uri: uri}}
       assert uri == directory.uri
     end
   end
 
   describe "broadcast_keyring_delete" do
     test "fans out to the workspace topic and every deleted member's personal topic with the outcome" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       record = %RecordSchema{
         uri: ws,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         author_did: @alice,
         workspace_id: ws,
         record_jsonb: %{
@@ -188,19 +188,19 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
 
       Broadcaster.broadcast_keyring_delete(record, "torn_down")
 
-      assert_receive {:sse_event, "app.opake.keyring:delete",
+      assert_receive {:sse_event, "at.opake.keyring:delete",
                       %{uri: ^ws, workspace_id: ^ws, outcome: "torn_down"}}
 
-      assert_receive {:sse_event, "app.opake.keyring:delete",
+      assert_receive {:sse_event, "at.opake.keyring:delete",
                       %{uri: ^ws, workspace_id: ^ws, outcome: "torn_down"}}
     end
 
     test "an orphan row (nil workspace_id) uses its own uri as workspace identity" do
-      orphan = "at://#{@alice}/app.opake.keyring/orphan"
+      orphan = "at://#{@alice}/at.opake.keyring/orphan"
 
       record = %RecordSchema{
         uri: orphan,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         author_did: @alice,
         workspace_id: nil,
         record_jsonb: %{"members" => []}
@@ -209,13 +209,13 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
       subscribe(Topics.workspace(orphan))
       Broadcaster.broadcast_keyring_delete(record, "unchanged")
 
-      assert_receive {:sse_event, "app.opake.keyring:delete", %{workspace_id: ^orphan}}
+      assert_receive {:sse_event, "at.opake.keyring:delete", %{workspace_id: ^orphan}}
     end
   end
 
   describe "broadcast_chain_forked" do
     test "broadcasts to the workspace topic derived from the payload's workspace_id" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
       payload = %{workspace_id: ws, scope: "keyring", your_uri: "a", fork_point_uri: "b"}
 
       subscribe(Topics.workspace(ws))

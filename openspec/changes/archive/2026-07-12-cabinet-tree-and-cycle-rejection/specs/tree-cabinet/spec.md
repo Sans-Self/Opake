@@ -8,13 +8,13 @@ This spec owns cabinet-specific tree structure and write semantics only. What a 
 
 ### Requirement: The cabinet tree has a fixed root on the owner's PDS
 
-The cabinet root SHALL be the directory record at `at://<did>/app.opake.directory/self` (`ROOT_DIRECTORY_RKEY`), and every record in the tree — directories and documents — SHALL live in the owner's own repo. Root resolution is deterministic construction of that URI (crates/opake-core/src/directories/mod.rs::`root_directory_uri`); there is no flag-marked chain to forward-walk and no indexer head lookup. Content keys are wrapped directly to the owner (`spec:document-crypto § A document is encrypted in exactly one of two modes`); cabinet records carry no `workspaceId`.
+The cabinet root SHALL be the directory record at `at://<did>/at.opake.directory/self` (`ROOT_DIRECTORY_RKEY`), and every record in the tree — directories and documents — SHALL live in the owner's own repo. Root resolution is deterministic construction of that URI (crates/opake-core/src/directories/mod.rs::`root_directory_uri`); there is no flag-marked chain to forward-walk and no indexer head lookup. Content keys are wrapped directly to the owner (`spec:document-crypto § A document is encrypted in exactly one of two modes`); cabinet records carry no `workspaceId`.
 
 #### Scenario: root resolves without any lookup
 
 - **GIVEN** an authenticated owner with DID `did:plc:x`
 - **WHEN** a client builds the cabinet tree
-- **THEN** the root is `at://did:plc:x/app.opake.directory/self`, constructed rather than discovered
+- **THEN** the root is `at://did:plc:x/at.opake.directory/self`, constructed rather than discovered
 - Verified in `root_directory_uri` (crates/opake-core/src/directories/mod.rs)
 
 ### Requirement: Cabinet curatorial writes mutate directory records in place

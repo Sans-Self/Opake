@@ -7,7 +7,7 @@
 
 # Indexer: API & Deployment
 
-The Indexer ingests `app.opake.*` records from the AT Protocol firehose and serves them via a REST API plus a Server-Sent Events stream. It backs the `inbox` query ("what's been shared with me?"), workspace document / directory discovery, the chain-head lookup a client needs before it can write a supersede, and the live update pipeline that keeps web and CLI clients in sync without polling.
+The Indexer ingests `at.opake.*` records from the AT Protocol firehose and serves them via a REST API plus a Server-Sent Events stream. It backs the `inbox` query ("what's been shared with me?"), workspace document / directory discovery, the chain-head lookup a client needs before it can write a supersede, and the live update pipeline that keeps web and CLI clients in sync without polling.
 
 It also enforces write authority. Members write curatorial supersedes directly to their own PDS; the indexer decides whether a supersede is allowed to advance a chain (`Authority`), and clients mirror the same rules as defense in depth. There is no proposal system.
 
@@ -56,7 +56,7 @@ Three tables. Records are stored as one row per AT-URI regardless of collection,
 | Table | PK | Purpose |
 |-------|-----|---------|
 | `cursor` | `id` (singleton) | Jetstream cursor position |
-| `records` | `uri` | Every indexed `app.opake.*` record. Columns: `collection`, `author_did`, `workspace_id`, `supersedes_uri`, `is_workspace_root`, `cid`, `indexed_at`, `updated_at`, `deleted_at`, `record_jsonb` |
+| `records` | `uri` | Every indexed `at.opake.*` record. Columns: `collection`, `author_did`, `workspace_id`, `supersedes_uri`, `is_workspace_root`, `cid`, `indexed_at`, `updated_at`, `deleted_at`, `record_jsonb` |
 | `chain_heads` | `(workspace_id, kind)` | Current head of a tracked chain. `kind` is `keyring` or `workspace_root`; carries `head_uri` + `head_cid` |
 
 Deletes are soft: a tombstone sets `deleted_at` and the row stays, so a client syncing from a cursor still sees that the record went away. `TombstoneCleanup` purges tombstones older than 7 days, hourly.
@@ -108,7 +108,7 @@ GET:/api/inbox:1709330400:did:plc:abc123
 1. Parse header — extract DID, timestamp, signature (split from right, DIDs contain colons)
 2. Reject if timestamp is >60 seconds from now (replay protection)
 3. Reject if `?did=` parameter doesn't match authenticated DID (scope enforcement)
-4. Fetch `app.opake.publicKey/self` from the user's PDS
+4. Fetch `at.opake.publicKey/self` from the user's PDS
 5. Extract `signingKey` (Ed25519) from the record
 6. Verify signature with Erlang `:crypto` (Ed25519)
 7. Cache verified key in ETS for 5 minutes
@@ -121,7 +121,7 @@ Every endpoint that returns records returns them in one envelope shape. The `rec
 
 ```json
 {
-  "uri": "at://did:plc:owner/app.opake.document/3abc",
+  "uri": "at://did:plc:owner/at.opake.document/3abc",
   "record": { "…": "verbatim PDS record JSON" },
   "indexedAt": "2026-03-21T10:00:00.000000Z",
   "deletedAt": "2026-03-22T09:00:00.000000Z"
@@ -147,7 +147,7 @@ Always unauthenticated. Indexer state only — enough for an operator to tell "c
   },
   "per_collection": {
     "app.bsky.feed.post": 11200,
-    "app.opake.document": 4
+    "at.opake.document": 4
   }
 }
 ```
@@ -167,12 +167,12 @@ The cursor is opaque: `"{indexed_at}::{uri}"` of the last item on the page. It i
 {
   "grants": [
     {
-      "uri": "at://did:plc:owner/app.opake.grant/3abc",
+      "uri": "at://did:plc:owner/at.opake.grant/3abc",
       "record": { "…": "verbatim grant record" },
       "indexedAt": "2026-03-01T12:00:00.000000Z"
     }
   ],
-  "cursor": "2026-03-01T12:00:00.000000Z::at://did:plc:owner/app.opake.grant/3abc"
+  "cursor": "2026-03-01T12:00:00.000000Z::at://did:plc:owner/at.opake.grant/3abc"
 }
 ```
 
@@ -186,7 +186,7 @@ Note the response key is `workspaces`, not `keyrings`: the keyring is the wire f
 {
   "workspaces": [
     {
-      "uri": "at://did:plc:owner/app.opake.keyring/3def",
+      "uri": "at://did:plc:owner/at.opake.keyring/3def",
       "record": { "…": "verbatim keyring record, members array intact" },
       "indexedAt": "2026-03-01T12:00:00.000000Z"
     }
@@ -207,7 +207,7 @@ Both shapes are the same, with `workspace_id` echoed back on the workspace varia
   "directories": [{ "uri": "…", "record": {}, "indexedAt": "…" }],
   "documents": [{ "uri": "…", "record": {}, "indexedAt": "…" }],
   "server_time": "2026-03-21T10:00:00.000000Z",
-  "workspace_id": "at://did:plc:owner/app.opake.keyring/3def"
+  "workspace_id": "at://did:plc:owner/at.opake.keyring/3def"
 }
 ```
 
@@ -223,13 +223,13 @@ Two chains are tracked. Either pointer is `null` when that chain has no head —
 
 ```json
 {
-  "workspace_id": "at://did:plc:owner/app.opake.keyring/3def",
+  "workspace_id": "at://did:plc:owner/at.opake.keyring/3def",
   "keyring": {
-    "head_uri": "at://did:plc:owner/app.opake.keyring/3ghi",
+    "head_uri": "at://did:plc:owner/at.opake.keyring/3ghi",
     "head_cid": "bafy…"
   },
   "root_directory": {
-    "head_uri": "at://did:plc:alice/app.opake.directory/3jkl",
+    "head_uri": "at://did:plc:alice/at.opake.directory/3jkl",
     "head_cid": "bafy…"
   }
 }
@@ -257,7 +257,7 @@ Two endpoints work together to push indexed events to authenticated consumers in
 
 `GET /api/events?token=<opaque>` upgrades to a chunked text/event-stream response. The consumer subscribes to:
 - their personal topic — keyring upserts naming them as a member, grants on either side (sharer and recipient), and their own cabinet records
-- every workspace they are currently a member of, re-computed live: an incoming `app.opake.keyring:upsert` that adds them subscribes the open stream to that workspace's topic, and one that drops them unsubscribes it
+- every workspace they are currently a member of, re-computed live: an incoming `at.opake.keyring:upsert` that adds them subscribes the open stream to that workspace's topic, and one that drops them unsubscribes it
 
 Events are formatted as:
 
@@ -267,9 +267,9 @@ data: <json payload>
 
 ```
 
-The event type is the fully-qualified collection name plus an operation suffix: `app.opake.keyring:upsert` / `:delete`, and the same pair for `app.opake.grant`, `app.opake.directory`, and `app.opake.document`. Upsert payloads are the record envelope (`{uri, record, indexedAt}`); delete payloads are `{uri}`. One event type is not a record: `chain:forked`, described below. A keepalive comment is emitted every 15 seconds to survive proxy idle timeouts.
+The event type is the fully-qualified collection name plus an operation suffix: `at.opake.keyring:upsert` / `:delete`, and the same pair for `at.opake.grant`, `at.opake.directory`, and `at.opake.document`. Upsert payloads are the record envelope (`{uri, record, indexedAt}`); delete payloads are `{uri}`. One event type is not a record: `chain:forked`, described below. A keepalive comment is emitted every 15 seconds to survive proxy idle timeouts.
 
-`app.opake.keyring:delete` is the exception to the flat delete payload. It carries `{uri, workspace_id, outcome}` with the resolved chain outcome: `unchanged` (deleted record was not the head), `rolled_back` (head deleted; the chain rolled back to the newest live record, which is re-broadcast as an `app.opake.keyring:upsert` on the same topics), or `torn_down` (no live record remains; the workspace's tracked chains were removed). Clients dispatch on the outcome instead of matching the deleted URI against tracked state — see [flows/keyrings.md](flows/keyrings.md#keyring-record-deletion).
+`at.opake.keyring:delete` is the exception to the flat delete payload. It carries `{uri, workspace_id, outcome}` with the resolved chain outcome: `unchanged` (deleted record was not the head), `rolled_back` (head deleted; the chain rolled back to the newest live record, which is re-broadcast as an `at.opake.keyring:upsert` on the same topics), or `torn_down` (no live record remains; the workspace's tracked chains were removed). Clients dispatch on the outcome instead of matching the deleted URI against tracked state — see [flows/keyrings.md](flows/keyrings.md#keyring-record-deletion).
 
 `chain:forked` fires on the workspace topic when a supersede points at a URI that is no longer the head — two members wrote against the same head and one lost. The payload is flat, not a record envelope: `{workspace_id, scope, path, your_uri, fork_point_uri, winner_uri, winner_cid}`, where `scope` is `keyring` or `directory`. The loser's record is persisted but the chain does not advance; the client refetches the winner, replays its intent on top, and retries.
 
@@ -277,17 +277,17 @@ Each DID is capped at five concurrent SSE connections (tracked in ETS); further 
 
 ## Firehose Collections
 
-Five collections are subscribed; four are indexed. `firehose_mode: :full` (the default) takes every commit Jetstream emits and drops non-`app.opake.*` records at the parser, which keeps proof-of-life logs flowing on a quiet dev machine. `:opake_only` filters server-side to the five below, for low-bandwidth deployments and fast cold-start catch-up.
+Five collections are subscribed; four are indexed. `firehose_mode: :full` (the default) takes every commit Jetstream emits and drops non-`at.opake.*` records at the parser, which keeps proof-of-life logs flowing on a quiet dev machine. `:opake_only` filters server-side to the five below, for low-bandwidth deployments and fast cold-start catch-up.
 
 Every indexed record follows the same path: authority check (for chain-bearing supersedes), upsert into `records`, chain-head update in the same transaction if it participates in a chain, then an SSE broadcast. Deletes soft-delete the row and broadcast a tombstone.
 
 | Collection | Effect |
 |------------|--------|
-| `app.opake.keyring` | Upsert into `records`; drives the `keyring` chain. Supersedes are authority-checked (manager, or a non-manager writing a pure self-removal) before anything is persisted. Deletes resolve a chain outcome — see the SSE section above |
-| `app.opake.directory` | Upsert into `records`. A record flagged `isWorkspaceRoot` drives the `workspace_root` chain; supersedes are authority-checked (manager, or an editor whose supersede is additive). Directories with no `workspaceId` are cabinet records: no chain, no authority check |
-| `app.opake.document` | Upsert into `records`; broadcast. No chain |
-| `app.opake.grant` | Upsert into `records`; broadcast to both the sharer's and the recipient's personal topic. No chain |
-| `app.opake.accountConfig` | Proof-of-life heartbeat; logged, counted, never persisted |
+| `at.opake.keyring` | Upsert into `records`; drives the `keyring` chain. Supersedes are authority-checked (manager, or a non-manager writing a pure self-removal) before anything is persisted. Deletes resolve a chain outcome — see the SSE section above |
+| `at.opake.directory` | Upsert into `records`. A record flagged `isWorkspaceRoot` drives the `workspace_root` chain; supersedes are authority-checked (manager, or an editor whose supersede is additive). Directories with no `workspaceId` are cabinet records: no chain, no authority check |
+| `at.opake.document` | Upsert into `records`; broadcast. No chain |
+| `at.opake.grant` | Upsert into `records`; broadcast to both the sharer's and the recipient's personal topic. No chain |
+| `at.opake.accountConfig` | Proof-of-life heartbeat; logged, counted, never persisted |
 
 A supersede whose predecessor has not been indexed yet is an orphan: the record is persisted, no chain moves, and the chain heals when the predecessor arrives. A supersede rejected by the authority layer is not persisted at all.
 

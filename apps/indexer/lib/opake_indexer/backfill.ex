@@ -2,7 +2,7 @@ defmodule OpakeIndexer.Backfill do
   @moduledoc """
   Backfill records from a PDS when the firehose cursor is absent or stale.
 
-  Fetches all `app.opake.*` collections via `com.atproto.repo.listRecords`
+  Fetches all `at.opake.*` collections via `com.atproto.repo.listRecords`
   (public, unauthenticated endpoint) and feeds each record through the
   firehose dispatch as a synthetic create commit. Routing the backfill
   path through the same code as the live indexer guarantees parse logic,
@@ -11,10 +11,10 @@ defmodule OpakeIndexer.Backfill do
 
   ## Supported collections
 
-  - `app.opake.keyring` — workspace records (chain members + heads)
-  - `app.opake.directory` — directory tree records
-  - `app.opake.document` — document records (workspace + cabinet)
-  - `app.opake.grant` — sharing grants
+  - `at.opake.keyring` — workspace records (chain members + heads)
+  - `at.opake.directory` — directory tree records
+  - `at.opake.document` — document records (workspace + cabinet)
+  - `at.opake.grant` — sharing grants
 
   ## Usage
 
@@ -31,10 +31,10 @@ defmodule OpakeIndexer.Backfill do
   alias OpakeIndexer.Repo
   alias OpakeIndexer.Schemas.Record, as: RecordSchema
 
-  @keyring_collection "app.opake.keyring"
-  @directory_collection "app.opake.directory"
-  @document_collection "app.opake.document"
-  @grant_collection "app.opake.grant"
+  @keyring_collection "at.opake.keyring"
+  @directory_collection "at.opake.directory"
+  @document_collection "at.opake.document"
+  @grant_collection "at.opake.grant"
 
   # Ordering matters during a single-DID backfill: keyrings carry workspace
   # identity that directories and documents reference. Indexing keyrings

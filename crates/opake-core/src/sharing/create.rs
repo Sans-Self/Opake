@@ -125,7 +125,7 @@ mod tests {
     #[tokio::test]
     async fn create_grant_happy_path() {
         let mock = MockTransport::new();
-        let grant_uri = "at://did:plc:owner/app.opake.grant/tid123";
+        let grant_uri = "at://did:plc:owner/at.opake.grant/tid123";
         mock.enqueue(create_record_response(grant_uri));
 
         let mut client = mock_client(mock.clone());
@@ -134,7 +134,7 @@ mod tests {
         let recipient = TestKeys::generate("did:plc:recipient");
 
         let params = GrantParams {
-            document_uri: "at://did:plc:owner/app.opake.document/doc1",
+            document_uri: "at://did:plc:owner/at.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
             recipient_public_keys: recipient.public_keys(),
@@ -159,7 +159,7 @@ mod tests {
                 assert_eq!(record["recipient"], "did:plc:recipient");
                 assert_eq!(
                     record["document"],
-                    "at://did:plc:owner/app.opake.document/doc1"
+                    "at://did:plc:owner/at.opake.document/doc1"
                 );
                 // encrypted metadata envelope is present
                 assert!(record["encryptedMetadata"]["ciphertext"]["$bytes"].is_string());
@@ -174,7 +174,7 @@ mod tests {
     async fn created_grant_key_is_unwrappable() {
         let mock = MockTransport::new();
         mock.enqueue(create_record_response(
-            "at://did:plc:owner/app.opake.grant/tid",
+            "at://did:plc:owner/at.opake.grant/tid",
         ));
 
         let mut client = mock_client(mock.clone());
@@ -183,7 +183,7 @@ mod tests {
         let recipient = TestKeys::generate("did:plc:recipient");
 
         let params = GrantParams {
-            document_uri: "at://did:plc:owner/app.opake.document/doc1",
+            document_uri: "at://did:plc:owner/at.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
             recipient_public_keys: recipient.public_keys(),
@@ -223,7 +223,7 @@ mod tests {
     // spec:background-work § Duplicate execution is harmless
     #[tokio::test]
     async fn put_grant_at_upserts_at_the_given_rkey() {
-        let grant_uri = "at://did:plc:owner/app.opake.grant/tid001";
+        let grant_uri = "at://did:plc:owner/at.opake.grant/tid001";
         let mock = MockTransport::new();
         mock.enqueue(create_record_response(grant_uri));
 
@@ -232,7 +232,7 @@ mod tests {
         let recipient = TestKeys::generate("did:plc:recipient");
 
         let params = GrantParams {
-            document_uri: "at://did:plc:owner/app.opake.document/doc1",
+            document_uri: "at://did:plc:owner/at.opake.document/doc1",
             recipient_did: "did:plc:recipient",
             content_key: &content_key,
             recipient_public_keys: recipient.public_keys(),

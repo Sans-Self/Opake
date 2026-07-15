@@ -93,12 +93,12 @@ mod tests {
 
     fn sample_event() -> SseChainForked {
         SseChainForked {
-            workspace_id: "at://did:plc:alice/app.opake.keyring/kr1".into(),
+            workspace_id: "at://did:plc:alice/at.opake.keyring/kr1".into(),
             scope: "directory".into(),
             path: Some("/q1/".into()),
-            your_uri: "at://did:plc:bob/app.opake.directory/loser".into(),
-            fork_point_uri: "at://did:plc:alice/app.opake.directory/head".into(),
-            winner_uri: "at://did:plc:carol/app.opake.directory/winner".into(),
+            your_uri: "at://did:plc:bob/at.opake.directory/loser".into(),
+            fork_point_uri: "at://did:plc:alice/at.opake.directory/head".into(),
+            winner_uri: "at://did:plc:carol/at.opake.directory/winner".into(),
             winner_cid: "bafywinner".into(),
         }
     }

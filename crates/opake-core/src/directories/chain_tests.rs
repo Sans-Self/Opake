@@ -10,9 +10,9 @@ const DID_B: &str = "did:plc:bob";
 const PDS_A: &str = "https://pds.alice.example.com";
 const PDS_B: &str = "https://pds.bob.example.com";
 
-const URI_GENESIS: &str = "at://did:plc:alice/app.opake.directory/genesis";
-const URI_MIDDLE: &str = "at://did:plc:bob/app.opake.directory/middle";
-const URI_HEAD: &str = "at://did:plc:alice/app.opake.directory/head";
+const URI_GENESIS: &str = "at://did:plc:alice/at.opake.directory/genesis";
+const URI_MIDDLE: &str = "at://did:plc:bob/at.opake.directory/middle";
+const URI_HEAD: &str = "at://did:plc:alice/at.opake.directory/head";
 
 fn ok(body: serde_json::Value) -> HttpResponse {
     HttpResponse {
@@ -60,8 +60,7 @@ fn dir_superseding(name: &str, prior_uri: &str) -> Directory {
 #[tokio::test]
 async fn fetch_chain_node_resolves_pds_and_returns_record() {
     let mock = MockTransport::new();
-    let dir =
-        dummy_directory_with_entries("/", vec!["at://did:plc:x/app.opake.document/d1".into()]);
+    let dir = dummy_directory_with_entries("/", vec!["at://did:plc:x/at.opake.document/d1".into()]);
 
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &dir)));
@@ -268,7 +267,7 @@ async fn verify_and_walk_chain_rejects_wrong_genesis() {
     mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
     mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
 
-    let other_workspace = "at://did:plc:other/app.opake.directory/elsewhere";
+    let other_workspace = "at://did:plc:other/at.opake.directory/elsewhere";
     let err = verify_and_walk_chain::<Directory>(&mock, URI_HEAD, other_workspace)
         .await
         .unwrap_err();
@@ -331,9 +330,9 @@ mod keyring_authority {
     use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::dummy_encrypted_metadata;
 
-    const KEYRING_GENESIS: &str = "at://did:plc:alice/app.opake.keyring/genesis";
-    const KEYRING_HEAD: &str = "at://did:plc:alice/app.opake.keyring/head";
-    const KEYRING_HEAD_BOB: &str = "at://did:plc:bob/app.opake.keyring/head";
+    const KEYRING_GENESIS: &str = "at://did:plc:alice/at.opake.keyring/genesis";
+    const KEYRING_HEAD: &str = "at://did:plc:alice/at.opake.keyring/head";
+    const KEYRING_HEAD_BOB: &str = "at://did:plc:bob/at.opake.keyring/head";
 
     fn member(did: &str, role: Role) -> KeyringMember {
         KeyringMember {
@@ -469,7 +468,7 @@ mod keyring_authority {
         // Three-record chain: each supersede authored by a manager in
         // the immediately prior keyring. Walks the full chain to verify
         // the loop doesn't accidentally skip intermediate pairs.
-        let middle_uri = "at://did:plc:alice/app.opake.keyring/middle";
+        let middle_uri = "at://did:plc:alice/at.opake.keyring/middle";
         let chain = vec![
             node(
                 KEYRING_HEAD,
@@ -497,7 +496,7 @@ mod keyring_authority {
         // someone who became a manager only later. At supersede time
         // they weren't a manager → reject. The check must catch this
         // even though the head's author IS a manager.
-        let middle_uri = "at://did:plc:bob/app.opake.keyring/middle";
+        let middle_uri = "at://did:plc:bob/at.opake.keyring/middle";
         let chain = vec![
             node(
                 KEYRING_HEAD,
@@ -543,8 +542,8 @@ mod directory_additivity {
 
     const ALICE_DID: &str = "did:plc:alice";
     const BOB_DID: &str = "did:plc:bob";
-    const DIR_GENESIS: &str = "at://did:plc:alice/app.opake.directory/genesis";
-    const DIR_HEAD_BY_BOB: &str = "at://did:plc:bob/app.opake.directory/head";
+    const DIR_GENESIS: &str = "at://did:plc:alice/at.opake.directory/genesis";
+    const DIR_HEAD_BY_BOB: &str = "at://did:plc:bob/at.opake.directory/head";
 
     fn entry(target: &str) -> ListingEntry {
         // Minimal listing entry — only `target` matters for additivity.
@@ -640,7 +639,7 @@ mod directory_additivity {
         let records = vec![
             (DIR_GENESIS.into(), dir(vec!["doc1", "doc2"], None)),
             (
-                "at://did:plc:alice/app.opake.directory/head".into(),
+                "at://did:plc:alice/at.opake.directory/head".into(),
                 dir(vec!["doc1"], Some(DIR_GENESIS)),
             ),
         ];
@@ -656,7 +655,7 @@ mod directory_additivity {
             DIR_HEAD_BY_BOB.into(),
             dir(
                 vec!["doc1"],
-                Some("at://did:plc:other/app.opake.directory/gone"),
+                Some("at://did:plc:other/at.opake.directory/gone"),
             ),
         )];
         verify_directory_additivity(&records, no_managers, none_supersedes).unwrap();
@@ -667,7 +666,7 @@ mod directory_additivity {
     fn checks_every_supersede_in_chain() {
         // Three-record chain. Middle supersede is non-additive — must be
         // caught even though the head IS additive vs. the middle.
-        let middle_uri = "at://did:plc:bob/app.opake.directory/middle";
+        let middle_uri = "at://did:plc:bob/at.opake.directory/middle";
         let records = vec![
             (DIR_GENESIS.into(), dir(vec!["doc1", "doc2", "doc3"], None)),
             (

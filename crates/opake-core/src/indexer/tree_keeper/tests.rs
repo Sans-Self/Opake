@@ -7,11 +7,11 @@ use crate::directories::tests::{dummy_directory_with_entries, test_keypair, TEST
 use crate::indexer::sse::events::{SseDeletePayload, SseEvent};
 use crate::indexer::types::IndexerEnvelope;
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
-const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
-const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
-const DIR_PARENT_URI: &str = "at://did:plc:test/app.opake.directory/parent";
-const DIR_CHILD_URI: &str = "at://did:plc:test/app.opake.directory/child";
+const ROOT_URI: &str = "at://did:plc:test/at.opake.directory/self";
+const DIR_PHOTOS_URI: &str = "at://did:plc:test/at.opake.directory/photos";
+const DOC_BEACH_URI: &str = "at://did:plc:test/at.opake.document/beach";
+const DIR_PARENT_URI: &str = "at://did:plc:test/at.opake.directory/parent";
+const DIR_CHILD_URI: &str = "at://did:plc:test/at.opake.directory/child";
 
 // -- Test helpers --
 
@@ -169,8 +169,8 @@ fn watch_workspace_scoped_events_only() {
     // Workspace tree isn't installed — ws_sink shouldn't receive events
     // (including the eager first snapshot, since we never install).
     keeper.watch_workspace(
-        "at://did:plc:test/app.opake.keyring/ws1".into(),
-        "at://did:plc:test/app.opake.directory/ws-root".into(),
+        "at://did:plc:test/at.opake.keyring/ws1".into(),
+        "at://did:plc:test/at.opake.directory/ws-root".into(),
         ws_sink.callback(),
     );
     assert_eq!(ws_sink.count(), 0);
@@ -315,8 +315,8 @@ fn uninstall_all_drains_every_scope() {
     // semantics on `ContentKey` (ZeroizeOnDrop) are covered in the
     // `crypto` module's own tests — here we only verify state drain.
     let mut keeper = cabinet_keeper();
-    let ws_a = "at://did:plc:test/app.opake.keyring/a".to_string();
-    let ws_b = "at://did:plc:test/app.opake.keyring/b".to_string();
+    let ws_a = "at://did:plc:test/at.opake.keyring/a".to_string();
+    let ws_b = "at://did:plc:test/at.opake.keyring/b".to_string();
 
     let group_key_a = ContentKey([0u8; 32]);
     let group_key_b = ContentKey([1u8; 32]);
@@ -341,12 +341,12 @@ fn uninstall_all_drains_every_scope() {
     keeper.watch_cabinet(ROOT_URI.into(), cabinet_sink.callback());
     keeper.watch_workspace(
         ws_a.clone(),
-        "at://did:plc:test/app.opake.directory/a-root".into(),
+        "at://did:plc:test/at.opake.directory/a-root".into(),
         ws_a_sink.callback(),
     );
     keeper.watch_workspace(
         ws_b.clone(),
-        "at://did:plc:test/app.opake.directory/b-root".into(),
+        "at://did:plc:test/at.opake.directory/b-root".into(),
         ws_b_sink.callback(),
     );
 
@@ -449,8 +449,8 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
     // A workspace document upsert should fire watchers for that
     // specific workspace — not cabinet, not other workspaces.
     let mut keeper = cabinet_keeper();
-    let ws_a = "at://did:plc:test/app.opake.keyring/a".to_string();
-    let ws_b = "at://did:plc:test/app.opake.keyring/b".to_string();
+    let ws_a = "at://did:plc:test/at.opake.keyring/a".to_string();
+    let ws_b = "at://did:plc:test/at.opake.keyring/b".to_string();
     install_ws(
         &mut keeper,
         &ws_a,
@@ -472,12 +472,12 @@ fn document_upsert_with_keyring_fires_only_that_workspace_watcher() {
     keeper.watch_cabinet(ROOT_URI.into(), cabinet_sink.callback());
     keeper.watch_workspace(
         ws_a.clone(),
-        "at://did:plc:test/app.opake.directory/a-root".into(),
+        "at://did:plc:test/at.opake.directory/a-root".into(),
         ws_a_sink.callback(),
     );
     keeper.watch_workspace(
         ws_b.clone(),
-        "at://did:plc:test/app.opake.directory/b-root".into(),
+        "at://did:plc:test/at.opake.directory/b-root".into(),
         ws_b_sink.callback(),
     );
 
@@ -671,10 +671,10 @@ fn dir_upsert_of(record: crate::records::Directory, uri: &str) -> SseEvent {
 // spec:key-rotation § Live projections adopt a rotation completely
 #[test]
 fn rotation_event_keeps_names_readable_across_rotation() {
-    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/rot";
-    const ROOT_URI2: &str = "at://did:plc:test/app.opake.directory/rot-root";
-    const SUB_URI: &str = "at://did:plc:test/app.opake.directory/rot-sub";
-    const NEW_URI: &str = "at://did:plc:test/app.opake.directory/rot-new";
+    const WS_URI: &str = "at://did:plc:test/at.opake.keyring/rot";
+    const ROOT_URI2: &str = "at://did:plc:test/at.opake.directory/rot-root";
+    const SUB_URI: &str = "at://did:plc:test/at.opake.directory/rot-sub";
+    const NEW_URI: &str = "at://did:plc:test/at.opake.directory/rot-new";
     use crate::crypto::{self, OsRng};
 
     let kp = test_keypair();
@@ -753,7 +753,7 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
 #[test]
 fn keyring_upsert_without_rotation_bump_is_noop() {
-    const WS_URI: &str = "at://did:plc:test/app.opake.keyring/abc";
+    const WS_URI: &str = "at://did:plc:test/at.opake.keyring/abc";
     use crate::crypto::{self, OsRng};
 
     let key = crypto::generate_content_key(&mut OsRng);
@@ -769,7 +769,7 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
     let sink = RecordingSink::new();
     keeper.watch_workspace(
         WS_URI.into(),
-        "at://did:plc:test/app.opake.directory/ws-abc".into(),
+        "at://did:plc:test/at.opake.directory/ws-abc".into(),
         sink.callback(),
     );
     let before = sink.count();

@@ -238,7 +238,7 @@ mod tests {
     /// Fake createRecord response — the PDS returns a record ref.
     fn create_record_response() -> HttpResponse {
         let body = serde_json::json!({
-            "uri": format!("at://{}/app.opake.document/new123", TEST_DID),
+            "uri": format!("at://{}/at.opake.document/new123", TEST_DID),
             "cid": "bafynewrecord",
         });
         HttpResponse {
@@ -278,7 +278,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(uri.contains("app.opake.document"));
+        assert!(uri.contains("at.opake.document"));
         assert!(uri.contains(TEST_DID));
 
         let requests = mock.requests();
@@ -289,7 +289,7 @@ mod tests {
         // Verify the document record sent to createRecord
         match &requests[1].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.document");
+                assert_eq!(v["collection"], "at.opake.document");
                 let record = &v["record"];
 
                 // No plaintext metadata fields on the record
@@ -461,7 +461,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(uri.contains("app.opake.document"));
+        assert!(uri.contains("at.opake.document"));
     }
 
     #[tokio::test]
@@ -572,7 +572,7 @@ mod tests {
 
         let mut client = mock_client(mock.clone());
         let group_key = crypto::generate_content_key(&mut OsRng);
-        let prior = "at://did:plc:alice/app.opake.document/f1";
+        let prior = "at://did:plc:alice/at.opake.document/f1";
 
         let (record_value, _tid) = prepare_upload_keyring(
             &mut client,
@@ -580,8 +580,8 @@ mod tests {
                 plaintext: b"edited content",
                 filename: "note.txt",
                 mime_type: "text/plain",
-                keyring_uri: "at://did:plc:alice/app.opake.keyring/ws1",
-                workspace_id: "at://did:plc:alice/app.opake.keyring/ws1",
+                keyring_uri: "at://did:plc:alice/at.opake.keyring/ws1",
+                workspace_id: "at://did:plc:alice/at.opake.keyring/ws1",
                 group_key: &group_key,
                 rotation: 1,
                 description: None,
@@ -614,8 +614,8 @@ mod tests {
                 plaintext: b"fresh content",
                 filename: "note.txt",
                 mime_type: "text/plain",
-                keyring_uri: "at://did:plc:alice/app.opake.keyring/ws1",
-                workspace_id: "at://did:plc:alice/app.opake.keyring/ws1",
+                keyring_uri: "at://did:plc:alice/at.opake.keyring/ws1",
+                workspace_id: "at://did:plc:alice/at.opake.keyring/ws1",
                 group_key: &group_key,
                 rotation: 1,
                 description: None,

@@ -26,7 +26,7 @@ Hermeticity SHALL be structural, not aspirational: dev-env containers run on an 
 
 ### Requirement: Deterministic actor fixtures
 
-The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `app.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
+The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `at.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
 
 Beyond the checked-in set, test harnesses SHALL be able to provision namespace-scoped actors on demand against a running dev-env. A namespaced actor's handle SHALL embed its namespace, its mnemonic SHALL derive deterministically from the namespace and actor role (no randomness), and its provisioning SHALL yield the same guarantees as bootstrap: a live account on the role's designated PDS and a published public-key record derived from the mnemonic. The checked-in fixture set is the default namespace; provisioning a namespace SHALL NOT mutate the default actors or any other namespace's actors.
 
@@ -59,7 +59,7 @@ A namespace SHALL be individually disposable: a deprovision operation removes th
 
 ### Requirement: OAuth works hermetically
 
-Dev-env PDSes SHALL serve the full atproto OAuth authorization flow to loopback clients, including Opake's granular `repo:app.opake.*` scopes — which requires the `app.opake.authFullAccess` permission set to be resolvable inside the blockade (local NSID authority fixture or PDS configuration). The legacy app-password session flow SHALL work against dev-env PDSes as well; both authentication methods are first-class.
+Dev-env PDSes SHALL serve the full atproto OAuth authorization flow to loopback clients, including Opake's granular `repo:at.opake.*` scopes — which requires the `at.opake.authFullAccess` permission set to be resolvable inside the blockade (local NSID authority fixture or PDS configuration). The legacy app-password session flow SHALL work against dev-env PDSes as well; both authentication methods are first-class.
 
 #### Scenario: fixture actor completes an OAuth grant
 

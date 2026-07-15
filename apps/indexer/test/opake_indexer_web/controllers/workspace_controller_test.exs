@@ -27,7 +27,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     {:ok, record} =
       RecordQueries.upsert(%{
         uri: uri,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         author_did: List.first(members_dids),
         workspace_id: uri,
         cid: "bafytest#{uri}",
@@ -47,7 +47,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
   defp put_directory(uri, workspace_id, indexed_at, opts \\ []) do
     RecordQueries.upsert(%{
       uri: uri,
-      collection: "app.opake.directory",
+      collection: "at.opake.directory",
       author_did: Keyword.get(opts, :author_did, "did:plc:me"),
       workspace_id: workspace_id,
       is_workspace_root: Keyword.get(opts, :is_workspace_root, false),
@@ -88,7 +88,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:workspace-membership § Membership state is the keyring head's member list
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 403 for a did not on the keyring's member list", %{conn: conn} do
-      genesis = "at://did:plc:owner/app.opake.keyring/genesis"
+      genesis = "at://did:plc:owner/at.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
 
       outsider = "did:plc:outsider"
@@ -104,7 +104,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 404 workspace_not_indexed before the genesis keyring is consumed", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
 
       conn =
         conn
@@ -117,7 +117,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 404 workspace_not_indexed for a torn-down workspace", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       put_keyring(genesis, [did])
       :ok = tear_down_keyring(genesis)
 
@@ -132,19 +132,19 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns the workspace tree for a member, scoped to that workspace", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
-      other_genesis = "at://did:plc:other/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
+      other_genesis = "at://did:plc:other/at.opake.keyring/genesis"
       put_keyring(genesis, [did])
       put_keyring(other_genesis, ["did:plc:other"])
 
       now = DateTime.utc_now()
 
       {:ok, _} =
-        put_directory("at://#{did}/app.opake.directory/root", genesis, now,
+        put_directory("at://#{did}/at.opake.directory/root", genesis, now,
           is_workspace_root: true
         )
 
-      {:ok, _} = put_directory("at://did:plc:other/app.opake.directory/root", other_genesis, now)
+      {:ok, _} = put_directory("at://did:plc:other/at.opake.directory/root", other_genesis, now)
 
       conn =
         conn
@@ -158,7 +158,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
 
     test "accepts camelCase workspaceId as well as workspace_id", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       put_keyring(genesis, [did])
 
       conn =
@@ -173,7 +173,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
   describe "GET /api/workspace/sync" do
     test "returns 400 without since parameter", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       put_keyring(genesis, [did])
 
       conn =
@@ -187,7 +187,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:workspace-membership § Membership state is the keyring head's member list
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "checks membership before parsing since", %{conn: conn} do
-      genesis = "at://did:plc:owner/app.opake.keyring/genesis"
+      genesis = "at://did:plc:owner/at.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
 
       conn =
@@ -201,7 +201,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 404 workspace_not_indexed when no keyring head exists", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       since = DateTime.to_iso8601(DateTime.utc_now())
 
       conn =
@@ -214,15 +214,15 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
 
     test "returns only records changed after since", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       put_keyring(genesis, [did])
 
       cutoff = DateTime.utc_now()
       old = DateTime.add(cutoff, -100, :second)
       fresh = DateTime.add(cutoff, 100, :second)
 
-      {:ok, _} = put_directory("at://#{did}/app.opake.directory/old", genesis, old)
-      {:ok, _} = put_directory("at://#{did}/app.opake.directory/fresh", genesis, fresh)
+      {:ok, _} = put_directory("at://#{did}/at.opake.directory/old", genesis, old)
+      {:ok, _} = put_directory("at://#{did}/at.opake.directory/fresh", genesis, fresh)
 
       conn =
         conn
@@ -231,7 +231,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
 
       response = json_response(conn, 200)
       assert [%{"uri" => uri}] = response["directories"]
-      assert uri == "at://#{did}/app.opake.directory/fresh"
+      assert uri == "at://#{did}/at.opake.directory/fresh"
     end
   end
 
@@ -239,7 +239,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:workspace-membership § Membership state is the keyring head's member list
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 403 for a non-member", %{conn: conn} do
-      genesis = "at://did:plc:owner/app.opake.keyring/genesis"
+      genesis = "at://did:plc:owner/at.opake.keyring/genesis"
       put_keyring(genesis, ["did:plc:owner"])
 
       conn =
@@ -253,7 +253,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
     # spec:indexer-consistency § Unknown workspace is distinguishable from non-membership
     test "returns 404 workspace_not_indexed when no keyring head exists", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
 
       conn =
         conn
@@ -267,7 +267,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
       conn: conn
     } do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
       keyring = put_keyring(genesis, [did])
 
       conn =
@@ -284,8 +284,8 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
 
     test "returns both keyring and root_directory heads once the root is tracked", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://#{did}/app.opake.keyring/genesis"
-      root = "at://#{did}/app.opake.directory/root"
+      genesis = "at://#{did}/at.opake.keyring/genesis"
+      root = "at://#{did}/at.opake.directory/root"
       put_keyring(genesis, [did])
       {:ok, _} = ChainHeadQueries.create(genesis, "workspace_root", root, "bafytest-root")
 

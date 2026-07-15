@@ -109,8 +109,8 @@ pub struct KeyringKeyWrapping {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "$type")]
 pub enum KeyWrapping {
-    #[serde(rename = "app.opake.defs#directKeyWrapping")]
+    #[serde(rename = "at.opake.defs#directKeyWrapping")]
     Direct(DirectKeyWrapping),
-    #[serde(rename = "app.opake.defs#keyringKeyWrapping")]
+    #[serde(rename = "at.opake.defs#keyringKeyWrapping")]
     Keyring(KeyringKeyWrapping),
 }

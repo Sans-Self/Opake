@@ -19,7 +19,7 @@ afterEach(cleanup);
 function fileItem(overrides: Partial<FileItem> = {}): FileItem {
   return {
     id: "1",
-    uri: "at://did:example/app.opake.file/1",
+    uri: "at://did:example/at.opake.file/1",
     name: "Quarterly Report.pdf",
     kind: "file",
     encrypted: true,
@@ -81,7 +81,7 @@ describe("RenameDialog label association", () => {
   it("associates the name input with its visible label", () => {
     const ref = createRef<RenameDialogHandle>();
     render(<RenameDialog ref={ref} onSave={() => {}} />);
-    act(() => ref.current?.show("at://did:example/app.opake.directory/1", "Old name"));
+    act(() => ref.current?.show("at://did:example/at.opake.directory/1", "Old name"));
     // getByLabelText resolves through the label association — it fails if the
     // input is reachable only by implicit wrapping in some engines.
     expect(screen.getByLabelText("Name")).toBe(screen.getByRole("textbox", { name: "Name" }));

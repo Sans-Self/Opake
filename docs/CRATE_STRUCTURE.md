@@ -12,7 +12,7 @@ crates/
       atproto.rs       AT-URI parsing, shared AT Protocol primitives
       account_config.rs  Fetch/publish singleton account config from PDS
       resolve.rs       Handle/DID → PDS → public key resolution pipeline
-      scope.rs         OAuth scope registry — OPAKE_COLLECTIONS (single source of truth for all app.opake.* collections) + oauth_scope() builder
+      scope.rs         OAuth scope registry — OPAKE_COLLECTIONS (single source of truth for all at.opake.* collections) + oauth_scope() builder
       storage.rs       Config, Identity types + Storage trait (cross-platform contract)
       paths.rs         Data directory resolution (env, XDG, fallback)
       daemon.rs        Background task registry (shared definitions for CLI + web). Daemon builds Opake per account per task iteration, auto-persists via signoff
@@ -259,7 +259,7 @@ apps/indexer/         Elixir/Phoenix indexer + REST API + SSE broadcaster
       firehose/            Firehose runtime state + heartbeat
       release.ex           Release tasks (create_db, migrate, rollback, status)
       repo.ex              Ecto Repo
-      backfill.ex          Historical ingestion of a DID's app.opake.* records
+      backfill.ex          Historical ingestion of a DID's at.opake.* records
       tombstone_cleanup.ex Periodic cleanup of tombstoned records
       auth/
         plug.ex            Opake-Ed25519 header verification (Plug)

@@ -17,7 +17,7 @@ import { promisify } from "node:util";
 // (federation tier), where Node16 resolution requires it.
 import { actorsFor, assertNamespace, type Actor } from "./namespace.js";
 
-const PUBLIC_KEY_COLLECTION = "app.opake.publicKey";
+const PUBLIC_KEY_COLLECTION = "at.opake.publicKey";
 const PUBLIC_KEY_RKEY = "self";
 
 // The dev-env's PDS admin password (dev-env/docker-compose.yml). A public test
@@ -85,7 +85,7 @@ export async function getDid(actor: Actor): Promise<string> {
 }
 
 /**
- * Delete every `app.opake.grant` the sharer holds naming `recipient` — test
+ * Delete every `at.opake.grant` the sharer holds naming `recipient` — test
  * isolation for the sharing specs, whose sharer accumulates outgoing grants
  * across runs. Only touches grants between these two test actors.
  */
@@ -95,7 +95,7 @@ export async function clearGrantsTo(sharer: Actor, recipient: Actor): Promise<vo
   const recipientDid = await getDid(recipient);
   const list = await xrpc(
     host,
-    `/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=app.opake.grant&limit=100`,
+    `/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=at.opake.grant&limit=100`,
   );
   if (list.status !== 200) return;
   const records = (list.json as { records?: { uri: string; value: { recipient?: string } }[] }).records ?? [];
@@ -104,7 +104,7 @@ export async function clearGrantsTo(sharer: Actor, recipient: Actor): Promise<vo
     await xrpc(host, "/xrpc/com.atproto.repo.deleteRecord", {
       method: "POST",
       token,
-      body: { repo: did, collection: "app.opake.grant", rkey: rkeyOf(rec.uri) },
+      body: { repo: did, collection: "at.opake.grant", rkey: rkeyOf(rec.uri) },
     });
   }
 }

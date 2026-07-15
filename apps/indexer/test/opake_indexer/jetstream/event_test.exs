@@ -42,11 +42,11 @@ defmodule OpakeIndexer.Jetstream.EventTest do
     end
 
     test "create on an indexed collection with no record body ignores" do
-      json = commit_json(@alice, "create", "app.opake.document", "abc", record: nil)
-      assert {123, "app.opake.document", :ignore} = Event.parse(json)
+      json = commit_json(@alice, "create", "at.opake.document", "abc", record: nil)
+      assert {123, "at.opake.document", :ignore} = Event.parse(json)
     end
 
-    test "create on a collection outside app.opake.* ignores but preserves collection" do
+    test "create on a collection outside at.opake.* ignores but preserves collection" do
       json = commit_json(@alice, "create", "app.bsky.feed.post", "abc", record: %{"text" => "hi"})
       assert {123, "app.bsky.feed.post", :ignore} = Event.parse(json)
     end
@@ -54,37 +54,37 @@ defmodule OpakeIndexer.Jetstream.EventTest do
 
   describe "upsert_record — keyring workspace_id derivation" do
     test "genesis keyring (no workspaceId, no supersedes) uses its own uri" do
-      uri = "at://#{@alice}/app.opake.keyring/genesis"
+      uri = "at://#{@alice}/at.opake.keyring/genesis"
 
       json =
-        commit_json(@alice, "create", "app.opake.keyring", "genesis", record: %{"members" => []})
+        commit_json(@alice, "create", "at.opake.keyring", "genesis", record: %{"members" => []})
 
-      assert {123, "app.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.uri == uri
       assert attrs.workspace_id == uri
       assert attrs.supersedes_uri == nil
     end
 
     test "keyring with an explicit workspaceId uses it verbatim" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       json =
-        commit_json(@alice, "create", "app.opake.keyring", "head",
+        commit_json(@alice, "create", "at.opake.keyring", "head",
           record: %{"workspaceId" => ws, "supersedes" => ws}
         )
 
-      assert {123, "app.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == ws
       assert attrs.supersedes_uri == ws
     end
 
     test "keyring supersede with no workspaceId resolves via the indexed predecessor" do
-      genesis = "at://#{@alice}/app.opake.keyring/genesis"
+      genesis = "at://#{@alice}/at.opake.keyring/genesis"
 
       {:ok, _} =
         RecordQueries.upsert(%{
           uri: genesis,
-          collection: "app.opake.keyring",
+          collection: "at.opake.keyring",
           author_did: @alice,
           workspace_id: genesis,
           cid: "bafy-genesis",
@@ -93,93 +93,93 @@ defmodule OpakeIndexer.Jetstream.EventTest do
         })
 
       json =
-        commit_json(@alice, "create", "app.opake.keyring", "head",
+        commit_json(@alice, "create", "at.opake.keyring", "head",
           record: %{"supersedes" => genesis}
         )
 
-      assert {123, "app.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == genesis
     end
 
     test "keyring supersede whose predecessor isn't indexed yet resolves to nil (orphan)" do
       json =
-        commit_json(@alice, "create", "app.opake.keyring", "head",
+        commit_json(@alice, "create", "at.opake.keyring", "head",
           record: %{"supersedes" => "at://never/indexed/rec"}
         )
 
-      assert {123, "app.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == nil
     end
   end
 
   describe "upsert_record — directory / document / grant" do
     test "workspace-scoped directory carries its workspaceId and root flag" do
-      ws = "at://#{@alice}/app.opake.keyring/genesis"
+      ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       json =
-        commit_json(@alice, "create", "app.opake.directory", "root",
+        commit_json(@alice, "create", "at.opake.directory", "root",
           record: %{"workspaceId" => ws, "isWorkspaceRoot" => true}
         )
 
-      assert {123, "app.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == ws
       assert attrs.is_workspace_root == true
     end
 
     test "cabinet directory (no isWorkspaceRoot field) defaults to not-root" do
-      json = commit_json(@alice, "create", "app.opake.directory", "d1", record: %{})
+      json = commit_json(@alice, "create", "at.opake.directory", "d1", record: %{})
 
-      assert {123, "app.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == nil
       assert attrs.is_workspace_root == false
     end
 
     test "is_workspace_root is a pure function of the record's own field, independent of workspaceId" do
       json =
-        commit_json(@alice, "create", "app.opake.directory", "d1",
+        commit_json(@alice, "create", "at.opake.directory", "d1",
           record: %{"isWorkspaceRoot" => true}
         )
 
-      assert {123, "app.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.directory", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.is_workspace_root == true
     end
 
     test "document never sets is_workspace_root regardless of the field" do
       json =
-        commit_json(@alice, "create", "app.opake.document", "doc1",
+        commit_json(@alice, "create", "at.opake.document", "doc1",
           record: %{"isWorkspaceRoot" => true}
         )
 
-      assert {123, "app.opake.document", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.document", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.is_workspace_root == false
     end
 
     test "grant carries no workspaceId field and derives nil" do
       json =
-        commit_json(@alice, "create", "app.opake.grant", "g1",
-          record: %{"recipient" => "did:plc:bob", "document" => "at://x/app.opake.document/y"}
+        commit_json(@alice, "create", "at.opake.grant", "g1",
+          record: %{"recipient" => "did:plc:bob", "document" => "at://x/at.opake.document/y"}
         )
 
-      assert {123, "app.opake.grant", {:upsert_record, attrs}} = Event.parse(json)
+      assert {123, "at.opake.grant", {:upsert_record, attrs}} = Event.parse(json)
       assert attrs.workspace_id == nil
     end
 
     test "update operation follows the same upsert path as create" do
       json =
-        commit_json(@alice, "update", "app.opake.document", "doc1",
+        commit_json(@alice, "update", "at.opake.document", "doc1",
           record: %{"encryptedMetadata" => "x"}
         )
 
-      assert {123, "app.opake.document", {:upsert_record, _attrs}} = Event.parse(json)
+      assert {123, "at.opake.document", {:upsert_record, _attrs}} = Event.parse(json)
     end
   end
 
   describe "delete_record" do
     for collection <- [
-          "app.opake.grant",
-          "app.opake.keyring",
-          "app.opake.directory",
-          "app.opake.document"
+          "at.opake.grant",
+          "at.opake.keyring",
+          "at.opake.directory",
+          "at.opake.document"
         ] do
       test "delete on #{collection} yields a delete_record tuple with the full uri" do
         collection = unquote(collection)
@@ -193,24 +193,24 @@ defmodule OpakeIndexer.Jetstream.EventTest do
 
   describe "account_config_seen" do
     test "create is reported as a heartbeat with op create" do
-      json = commit_json(@alice, "create", "app.opake.accountConfig", "self", record: %{})
+      json = commit_json(@alice, "create", "at.opake.accountConfig", "self", record: %{})
 
-      assert {123, "app.opake.accountConfig",
+      assert {123, "at.opake.accountConfig",
               {:account_config_seen, %{did: @alice, op: "create"}}} =
                Event.parse(json)
     end
 
     test "update is reported with op update" do
-      json = commit_json(@alice, "update", "app.opake.accountConfig", "self", record: %{})
+      json = commit_json(@alice, "update", "at.opake.accountConfig", "self", record: %{})
 
-      assert {123, "app.opake.accountConfig", {:account_config_seen, %{op: "update"}}} =
+      assert {123, "at.opake.accountConfig", {:account_config_seen, %{op: "update"}}} =
                Event.parse(json)
     end
 
     test "delete is reported with op delete" do
-      json = commit_json(@alice, "delete", "app.opake.accountConfig", "self")
+      json = commit_json(@alice, "delete", "at.opake.accountConfig", "self")
 
-      assert {123, "app.opake.accountConfig", {:account_config_seen, %{op: "delete"}}} =
+      assert {123, "at.opake.accountConfig", {:account_config_seen, %{op: "delete"}}} =
                Event.parse(json)
     end
   end

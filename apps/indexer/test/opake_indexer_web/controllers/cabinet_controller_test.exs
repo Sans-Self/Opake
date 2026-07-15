@@ -23,7 +23,7 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
   defp put_directory(uri, author, indexed_at) do
     RecordQueries.upsert(%{
       uri: uri,
-      collection: "app.opake.directory",
+      collection: "at.opake.directory",
       author_did: author,
       workspace_id: nil,
       is_workspace_root: false,
@@ -36,7 +36,7 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
   defp put_document(uri, author, indexed_at) do
     RecordQueries.upsert(%{
       uri: uri,
-      collection: "app.opake.document",
+      collection: "at.opake.document",
       author_did: author,
       workspace_id: nil,
       cid: "bafytest#{uri}",
@@ -61,9 +61,9 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
       other = "did:plc:other"
       now = DateTime.utc_now()
 
-      {:ok, _} = put_directory("at://#{did}/app.opake.directory/d1", did, now)
-      {:ok, _} = put_document("at://#{did}/app.opake.document/doc1", did, now)
-      {:ok, _} = put_directory("at://#{other}/app.opake.directory/d2", other, now)
+      {:ok, _} = put_directory("at://#{did}/at.opake.directory/d1", did, now)
+      {:ok, _} = put_document("at://#{did}/at.opake.document/doc1", did, now)
+      {:ok, _} = put_directory("at://#{other}/at.opake.directory/d2", other, now)
 
       conn = conn |> authed_conn(did, "/api/cabinet/snapshot") |> get("/api/cabinet/snapshot")
 
@@ -79,10 +79,10 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
 
       {:ok, _} =
         RecordQueries.upsert(%{
-          uri: "at://#{did}/app.opake.directory/wsroot",
-          collection: "app.opake.directory",
+          uri: "at://#{did}/at.opake.directory/wsroot",
+          collection: "at.opake.directory",
           author_did: did,
-          workspace_id: "at://#{did}/app.opake.keyring/genesis",
+          workspace_id: "at://#{did}/at.opake.keyring/genesis",
           is_workspace_root: true,
           cid: "bafytest-wsroot",
           indexed_at: now,
@@ -120,8 +120,8 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
       old = DateTime.add(cutoff, -100, :second)
       fresh = DateTime.add(cutoff, 100, :second)
 
-      {:ok, _} = put_document("at://#{did}/app.opake.document/old", did, old)
-      {:ok, _} = put_document("at://#{did}/app.opake.document/fresh", did, fresh)
+      {:ok, _} = put_document("at://#{did}/at.opake.document/old", did, old)
+      {:ok, _} = put_document("at://#{did}/at.opake.document/fresh", did, fresh)
 
       conn =
         conn
@@ -130,7 +130,7 @@ defmodule OpakeIndexerWeb.CabinetControllerTest do
 
       response = json_response(conn, 200)
       assert [%{"uri" => uri}] = response["documents"]
-      assert uri == "at://#{did}/app.opake.document/fresh"
+      assert uri == "at://#{did}/at.opake.document/fresh"
     end
   end
 end

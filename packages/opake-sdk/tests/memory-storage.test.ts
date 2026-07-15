@@ -94,7 +94,7 @@ describe("MemoryStorage", () => {
       const storage = new MemoryStorage();
       await storage.saveIdentity(TEST_DID, testIdentity);
       await storage.saveSession(TEST_DID, testSession);
-      await storage.cachePutRecords(TEST_DID, "app.opake.document", [
+      await storage.cachePutRecords(TEST_DID, "at.opake.document", [
         { uri: "at://test/doc/1", cid: "cid1", value: {} },
       ]);
 
@@ -102,7 +102,7 @@ describe("MemoryStorage", () => {
 
       await expect(storage.loadIdentity(TEST_DID)).rejects.toThrow(StorageError);
       await expect(storage.loadSession(TEST_DID)).rejects.toThrow(StorageError);
-      expect(await storage.cacheGetRecord(TEST_DID, "app.opake.document", "at://test/doc/1")).toBeNull();
+      expect(await storage.cacheGetRecord(TEST_DID, "at.opake.document", "at://test/doc/1")).toBeNull();
     });
 
     it("removes the account from config.accounts", async () => {

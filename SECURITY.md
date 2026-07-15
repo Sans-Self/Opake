@@ -23,7 +23,7 @@ If you find a vulnerability, we want to know about it before anyone else does.
 - **packages/opake-sdk + @opake/react + @opake/daemon** — TypeScript layer (auth surfaces, storage adapters, SSE consumer wiring)
 - **apps/web** — the React SPA (auth flows, state management, UI rendering of sensitive data)
 - **apps/indexer** — the Elixir indexer (API auth, SSE token exchange, grant/keyring discovery, rate limiting)
-- **lexicons** — schema definitions under `app.opake.*`
+- **lexicons** — schema definitions under `at.opake.*`
 
 ### Out of scope
 

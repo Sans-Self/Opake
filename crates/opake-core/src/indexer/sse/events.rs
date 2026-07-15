@@ -50,7 +50,7 @@ pub enum KeyringDeleteOutcome {
     Unchanged,
 }
 
-/// Payload of `app.opake.keyring:delete`.
+/// Payload of `at.opake.keyring:delete`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SseKeyringDeletePayload {
     pub uri: String,
@@ -137,30 +137,30 @@ pub enum SseEvent {
 /// `Reconnect` is intentionally absent — it's a synthetic event emitted
 /// by the consumer, never by the server.
 pub const ALL_WIRE_EVENT_NAMES: &[&str] = &[
-    "app.opake.directory:upsert",
-    "app.opake.directory:delete",
-    "app.opake.document:upsert",
-    "app.opake.document:delete",
-    "app.opake.keyring:upsert",
-    "app.opake.keyring:delete",
-    "app.opake.grant:upsert",
-    "app.opake.grant:delete",
+    "at.opake.directory:upsert",
+    "at.opake.directory:delete",
+    "at.opake.document:upsert",
+    "at.opake.document:delete",
+    "at.opake.keyring:upsert",
+    "at.opake.keyring:delete",
+    "at.opake.grant:upsert",
+    "at.opake.grant:delete",
     "chain:forked",
 ];
 
 impl SseEvent {
     /// The event type string as emitted by the broadcaster (fully-qualified
-    /// collection identifiers — `app.opake.directory:upsert` etc.).
+    /// collection identifiers — `at.opake.directory:upsert` etc.).
     pub fn event_name(&self) -> &'static str {
         match self {
-            Self::DirectoryUpsert(_) => "app.opake.directory:upsert",
-            Self::DirectoryDelete(_) => "app.opake.directory:delete",
-            Self::DocumentUpsert(_) => "app.opake.document:upsert",
-            Self::DocumentDelete(_) => "app.opake.document:delete",
-            Self::KeyringUpsert(_) => "app.opake.keyring:upsert",
-            Self::KeyringDelete(_) => "app.opake.keyring:delete",
-            Self::GrantUpsert(_) => "app.opake.grant:upsert",
-            Self::GrantDelete(_) => "app.opake.grant:delete",
+            Self::DirectoryUpsert(_) => "at.opake.directory:upsert",
+            Self::DirectoryDelete(_) => "at.opake.directory:delete",
+            Self::DocumentUpsert(_) => "at.opake.document:upsert",
+            Self::DocumentDelete(_) => "at.opake.document:delete",
+            Self::KeyringUpsert(_) => "at.opake.keyring:upsert",
+            Self::KeyringDelete(_) => "at.opake.keyring:delete",
+            Self::GrantUpsert(_) => "at.opake.grant:upsert",
+            Self::GrantDelete(_) => "at.opake.grant:delete",
             Self::ChainForked(_) => "chain:forked",
             Self::Reconnect => "__reconnect__",
         }
@@ -178,26 +178,26 @@ impl SseEvent {
         }
 
         let event = match name {
-            "app.opake.directory:upsert" => {
-                Self::DirectoryUpsert(decode(data, "app.opake.directory:upsert")?)
+            "at.opake.directory:upsert" => {
+                Self::DirectoryUpsert(decode(data, "at.opake.directory:upsert")?)
             }
-            "app.opake.directory:delete" => {
-                Self::DirectoryDelete(decode(data, "app.opake.directory:delete")?)
+            "at.opake.directory:delete" => {
+                Self::DirectoryDelete(decode(data, "at.opake.directory:delete")?)
             }
-            "app.opake.document:upsert" => {
-                Self::DocumentUpsert(decode(data, "app.opake.document:upsert")?)
+            "at.opake.document:upsert" => {
+                Self::DocumentUpsert(decode(data, "at.opake.document:upsert")?)
             }
-            "app.opake.document:delete" => {
-                Self::DocumentDelete(decode(data, "app.opake.document:delete")?)
+            "at.opake.document:delete" => {
+                Self::DocumentDelete(decode(data, "at.opake.document:delete")?)
             }
-            "app.opake.keyring:upsert" => {
-                Self::KeyringUpsert(decode(data, "app.opake.keyring:upsert")?)
+            "at.opake.keyring:upsert" => {
+                Self::KeyringUpsert(decode(data, "at.opake.keyring:upsert")?)
             }
-            "app.opake.keyring:delete" => {
-                Self::KeyringDelete(decode(data, "app.opake.keyring:delete")?)
+            "at.opake.keyring:delete" => {
+                Self::KeyringDelete(decode(data, "at.opake.keyring:delete")?)
             }
-            "app.opake.grant:upsert" => Self::GrantUpsert(decode(data, "app.opake.grant:upsert")?),
-            "app.opake.grant:delete" => Self::GrantDelete(decode(data, "app.opake.grant:delete")?),
+            "at.opake.grant:upsert" => Self::GrantUpsert(decode(data, "at.opake.grant:upsert")?),
+            "at.opake.grant:delete" => Self::GrantDelete(decode(data, "at.opake.grant:delete")?),
             "chain:forked" => Self::ChainForked(decode(data, "chain:forked")?),
             other => {
                 log::debug!("[sse] ignoring unknown event type: {other}");
@@ -244,12 +244,12 @@ mod tests {
     #[test]
     fn decodes_chain_forked_with_directory_scope() {
         let json = br#"{
-            "workspace_id": "at://did:plc:alice/app.opake.keyring/kr1",
+            "workspace_id": "at://did:plc:alice/at.opake.keyring/kr1",
             "scope": "directory",
             "path": "/q1/",
-            "your_uri": "at://did:plc:bob/app.opake.directory/loserTID",
-            "fork_point_uri": "at://did:plc:alice/app.opake.directory/headTID",
-            "winner_uri": "at://did:plc:carol/app.opake.directory/winnerTID",
+            "your_uri": "at://did:plc:bob/at.opake.directory/loserTID",
+            "fork_point_uri": "at://did:plc:alice/at.opake.directory/headTID",
+            "winner_uri": "at://did:plc:carol/at.opake.directory/winnerTID",
             "winner_cid": "bafywinner"
         }"#;
         let event = SseEvent::from_name_and_data("chain:forked", json).unwrap();
@@ -268,11 +268,11 @@ mod tests {
     #[test]
     fn decodes_chain_forked_keyring_scope_without_path() {
         let json = br#"{
-            "workspace_id": "at://did:plc:alice/app.opake.keyring/kr1",
+            "workspace_id": "at://did:plc:alice/at.opake.keyring/kr1",
             "scope": "keyring",
-            "your_uri": "at://did:plc:bob/app.opake.keyring/loserTID",
-            "fork_point_uri": "at://did:plc:alice/app.opake.keyring/headTID",
-            "winner_uri": "at://did:plc:carol/app.opake.keyring/winnerTID",
+            "your_uri": "at://did:plc:bob/at.opake.keyring/loserTID",
+            "fork_point_uri": "at://did:plc:alice/at.opake.keyring/headTID",
+            "winner_uri": "at://did:plc:carol/at.opake.keyring/winnerTID",
             "winner_cid": "bafywinner"
         }"#;
         let event = SseEvent::from_name_and_data("chain:forked", json).unwrap();
@@ -287,11 +287,11 @@ mod tests {
 
     #[test]
     fn decodes_delete_envelope() {
-        let json = br#"{"uri": "at://did:plc:alice/app.opake.directory/abc"}"#;
-        let event = SseEvent::from_name_and_data("app.opake.directory:delete", json).unwrap();
+        let json = br#"{"uri": "at://did:plc:alice/at.opake.directory/abc"}"#;
+        let event = SseEvent::from_name_and_data("at.opake.directory:delete", json).unwrap();
         match event {
             SseEvent::DirectoryDelete(p) => {
-                assert_eq!(p.uri, "at://did:plc:alice/app.opake.directory/abc");
+                assert_eq!(p.uri, "at://did:plc:alice/at.opake.directory/abc");
             }
             _ => panic!("expected DirectoryDelete"),
         }
@@ -305,18 +305,18 @@ mod tests {
             ("torn_down", KeyringDeleteOutcome::TornDown),
         ] {
             let json = format!(
-                r#"{{"uri": "at://did:plc:alice/app.opake.keyring/head",
-                     "workspace_id": "at://did:plc:alice/app.opake.keyring/genesis",
+                r#"{{"uri": "at://did:plc:alice/at.opake.keyring/head",
+                     "workspace_id": "at://did:plc:alice/at.opake.keyring/genesis",
                      "outcome": "{wire}"}}"#
             );
             let event =
-                SseEvent::from_name_and_data("app.opake.keyring:delete", json.as_bytes()).unwrap();
+                SseEvent::from_name_and_data("at.opake.keyring:delete", json.as_bytes()).unwrap();
             match event {
                 SseEvent::KeyringDelete(p) => {
                     assert_eq!(p.outcome, expected);
                     assert_eq!(
                         p.workspace_id(),
-                        "at://did:plc:alice/app.opake.keyring/genesis"
+                        "at://did:plc:alice/at.opake.keyring/genesis"
                     );
                 }
                 _ => panic!("expected KeyringDelete"),
@@ -330,14 +330,14 @@ mod tests {
     /// URI as the workspace identity.
     #[test]
     fn keyring_delete_without_outcome_defaults_to_unchanged() {
-        let json = br#"{"uri": "at://did:plc:alice/app.opake.keyring/genesis"}"#;
-        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        let json = br#"{"uri": "at://did:plc:alice/at.opake.keyring/genesis"}"#;
+        let event = SseEvent::from_name_and_data("at.opake.keyring:delete", json).unwrap();
         match event {
             SseEvent::KeyringDelete(p) => {
                 assert_eq!(p.outcome, KeyringDeleteOutcome::Unchanged);
                 assert_eq!(
                     p.workspace_id(),
-                    "at://did:plc:alice/app.opake.keyring/genesis"
+                    "at://did:plc:alice/at.opake.keyring/genesis"
                 );
             }
             _ => panic!("expected KeyringDelete"),
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn keyring_delete_unknown_outcome_defaults_to_unchanged() {
         let json = br#"{"uri": "at://a", "workspace_id": "at://g", "outcome": "exploded"}"#;
-        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        let event = SseEvent::from_name_and_data("at.opake.keyring:delete", json).unwrap();
         match event {
             SseEvent::KeyringDelete(p) => {
                 assert_eq!(p.outcome, KeyringDeleteOutcome::Unchanged);
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn keyring_delete_workspace_id_surfaces_on_event() {
         let json = br#"{"uri": "at://a", "workspace_id": "at://g", "outcome": "torn_down"}"#;
-        let event = SseEvent::from_name_and_data("app.opake.keyring:delete", json).unwrap();
+        let event = SseEvent::from_name_and_data("at.opake.keyring:delete", json).unwrap();
         assert_eq!(event.workspace_id(), Some("at://g"));
     }
 

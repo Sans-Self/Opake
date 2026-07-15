@@ -36,7 +36,7 @@ Every modern shell gets tab-completion for commands, flags, and subcommands. Pic
 Three concepts orient the rest of this page.
 
 **Paths** look like file paths: `report.pdf`, `projects/Q4/notes.md`, `/`. Internally Opake
-identifies records by AT-URI (`at://did:plc:xxx/app.opake.document/yyy`), and most commands
+identifies records by AT-URI (`at://did:plc:xxx/at.opake.document/yyy`), and most commands
 accept either — the friendly path when you're at a prompt, the URI when you're piping URIs
 around between commands.
 
@@ -182,7 +182,7 @@ his client syncs.
 
 <CodeBlock language="sh">opake share inbox                     # grants issued to you</CodeBlock>
 
-<CodeBlock language="sh">opake share revoke at://did:plc:123/app.opake.grant/tid456</CodeBlock>
+<CodeBlock language="sh">opake share revoke at://did:plc:123/at.opake.grant/tid456</CodeBlock>
 
 Revoking deletes the grant record. It doesn't un-decrypt any copy Bob has already downloaded
 — that ship sailed the moment he opened the file. What revocation does buy you is: Bob can't
@@ -263,7 +263,7 @@ re-pairing or regenerating anything.
 
 <CodeBlock language="sh">opake purge --force</CodeBlock>
 
-The real nuke. Deletes every `app.opake.*` record from your PDS — files, grants, workspaces,
+The real nuke. Deletes every `at.opake.*` record from your PDS — files, grants, workspaces,
 published encryption key, the lot. Your atproto identity itself survives (that belongs to the
 PDS, not Opake), but every trace of Opake having been there is gone. `--dry-run` lists what
 would go without touching anything.

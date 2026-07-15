@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{default_version, WrappedKey};
 use crate::atproto::AtBytes;
 
-pub const PAIR_RESPONSE_COLLECTION: &str = "app.opake.pairResponse";
+pub const PAIR_RESPONSE_COLLECTION: &str = "at.opake.pairResponse";
 
 /// A device pairing response. The existing device encrypts its identity
 /// to the requesting device's ephemeral key and writes this record.

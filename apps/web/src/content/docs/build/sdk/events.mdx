@@ -23,7 +23,7 @@ a duplicate. A single `Opake` instance can only have one consumer in flight at a
 
 The call resolves the indexer URL from three sources, highest priority first: a runtime
 override you passed to an earlier `setIndexerUrl` or this function, the `indexerUrl` field in
-the user's `app.opake.accountConfig` record on the PDS, and the `OPAKE_INDEXER_URL` value
+the user's `at.opake.accountConfig` record on the PDS, and the `OPAKE_INDEXER_URL` value
 baked in at build time. Pass one explicitly when you need to override:
 
 <CodeBlock language="typescript" title="start-with-override.ts" code={startConsumerCustom} />
@@ -35,7 +35,7 @@ exchange returns `Auth` and never actually connects:
 
 ## What the stream delivers
 
-The indexer watches the atproto firehose for `app.opake.*` records and forwards them to any
+The indexer watches the atproto firehose for `at.opake.*` records and forwards them to any
 connected consumer whose DID appears as owner, recipient, or workspace member. Three
 event families matter to your code:
 
@@ -89,7 +89,7 @@ an Ed25519 signature on every connection. The flow:
 
 1. Consumer wakes up, needs to connect.
 2. `POST /api/events/token` with an Ed25519-signed `Opake-Ed25519` header (timestamp + DID +
-   signature). Indexer verifies against the caller's published `app.opake.publicKey/self`.
+   signature). Indexer verifies against the caller's published `at.opake.publicKey/self`.
 3. Indexer mints a random opaque token, stores it in ETS against the caller's DID with a
    60-second TTL, returns it in the body.
 4. Consumer opens `GET /api/events?token=…`. Indexer looks up the token in ETS, associates

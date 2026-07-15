@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Opake.Tail do
 
       mix opake.tail
       mix opake.tail --mode opake_only
-      mix opake.tail --collection app.opake.document --collection app.opake.grant
+      mix opake.tail --collection at.opake.document --collection at.opake.grant
       mix opake.tail --pretty
       mix opake.tail --max 50
       mix opake.tail --no-compression
@@ -34,13 +34,13 @@ defmodule Mix.Tasks.Opake.Tail do
   alias OpakeIndexer.Jetstream.{Compression, Event}
 
   @opake_collections [
-    "app.opake.grant",
-    "app.opake.keyring",
-    "app.opake.document",
-    "app.opake.documentUpdate",
-    "app.opake.keyringUpdate",
-    "app.opake.directory",
-    "app.opake.directoryUpdate"
+    "at.opake.grant",
+    "at.opake.keyring",
+    "at.opake.document",
+    "at.opake.documentUpdate",
+    "at.opake.keyringUpdate",
+    "at.opake.directory",
+    "at.opake.directoryUpdate"
   ]
 
   @impl Mix.Task

@@ -13,15 +13,15 @@ defmodule OpakeIndexer.AuthorityDbTest do
   alias OpakeIndexer.Authority
   alias OpakeIndexer.Queries.{ChainHeadQueries, RecordQueries}
 
-  @workspace_id "at://did:plc:alice/app.opake.keyring/genesis"
+  @workspace_id "at://did:plc:alice/at.opake.keyring/genesis"
   @editor_did "did:plc:bob"
   @viewer_did "did:plc:carol"
-  @keyring_uri "at://did:plc:alice/app.opake.keyring/head"
+  @keyring_uri "at://did:plc:alice/at.opake.keyring/head"
 
-  @f1 "at://did:plc:alice/app.opake.document/f1"
-  @keep "at://did:plc:alice/app.opake.document/keep"
-  @f2 "at://did:plc:bob/app.opake.document/f2"
-  @d1 "at://did:plc:alice/app.opake.directory/d1"
+  @f1 "at://did:plc:alice/at.opake.document/f1"
+  @keep "at://did:plc:alice/at.opake.document/keep"
+  @f2 "at://did:plc:bob/at.opake.document/f2"
+  @d1 "at://did:plc:alice/at.opake.directory/d1"
 
   defp now, do: DateTime.utc_now()
 
@@ -38,7 +38,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
     # A keyring head where Bob is an editor, Carol a viewer.
     put_record(%{
       uri: @keyring_uri,
-      collection: "app.opake.keyring",
+      collection: "at.opake.keyring",
       workspace_id: @workspace_id,
       record_jsonb: %{
         "members" => [
@@ -54,7 +54,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
     # Prior canonical directory: [f1, keep].
     put_record(%{
       uri: @d1,
-      collection: "app.opake.directory",
+      collection: "at.opake.directory",
       workspace_id: @workspace_id,
       record_jsonb: %{"entries" => [entry(@f1), entry(@keep)]}
     })
@@ -65,7 +65,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
   defp seed_f2(supersedes) do
     put_record(%{
       uri: @f2,
-      collection: "app.opake.document",
+      collection: "at.opake.document",
       author_did: @editor_did,
       workspace_id: @workspace_id,
       supersedes_uri: supersedes,
@@ -76,7 +76,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
   describe "check_directory_supersede/4 — editor" do
     # spec:tree-chains § Editor supersedes are additive; managers are unrestricted
     test "pure add passes (own contribution, nothing dropped)" do
-      own = "at://did:plc:bob/app.opake.document/own"
+      own = "at://did:plc:bob/at.opake.document/own"
 
       assert Authority.check_directory_supersede(
                @workspace_id,
@@ -139,7 +139,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
     test "manager faces no additivity constraint (bare delete allowed)" do
       put_record(%{
         uri: @keyring_uri,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         workspace_id: @workspace_id,
         record_jsonb: %{
           "members" => [%{"wrappedKey" => %{"did" => @editor_did}, "role" => "manager"}]

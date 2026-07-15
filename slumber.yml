@@ -173,7 +173,7 @@ requests:
         url: "{{pds}}/xrpc/com.atproto.repo.getRecord"
         query:
           repo: "{{did}}"
-          collection: "app.opake.publicKey"
+          collection: "at.opake.publicKey"
           rkey: "self"
         headers:
           Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.getRecord'])])}}"
@@ -185,7 +185,7 @@ requests:
         url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
         query:
           repo: "{{did}}"
-          collection: "app.opake.document"
+          collection: "at.opake.document"
           limit: "100"
         headers:
           Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
@@ -197,7 +197,7 @@ requests:
         url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
         query:
           repo: "{{did}}"
-          collection: "app.opake.grant"
+          collection: "at.opake.grant"
           limit: "100"
         headers:
           Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
@@ -209,7 +209,7 @@ requests:
         url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
         query:
           repo: "{{did}}"
-          collection: "app.opake.keyring"
+          collection: "at.opake.keyring"
           limit: "100"
         headers:
           Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
@@ -221,7 +221,7 @@ requests:
         url: "{{pds}}/xrpc/com.atproto.repo.listRecords"
         query:
           repo: "{{did}}"
-          collection: "app.opake.directory"
+          collection: "at.opake.directory"
           limit: "100"
         headers:
           Authorization: "{{command(['python3', 'tools/xrpc-auth.py', '--header=authorization', 'GET', concat([pds, '/xrpc/com.atproto.repo.listRecords'])])}}"
@@ -240,7 +240,7 @@ requests:
           type: json
           data:
             repo: "{{did}}"
-            collection: "app.opake.document"
+            collection: "at.opake.document"
             rkey: "CHANGEME"
 
       # ── Blobs ────────────────────────────────────────────────────────────

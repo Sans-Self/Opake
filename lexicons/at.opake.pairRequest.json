@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.pairRequest",
+  "id": "at.opake.pairRequest",
   "description": "A device pairing request. Created by a new device that needs the existing encryption identity transferred from another device. Carries an ephemeral hybrid (X25519 + ML-KEM-768) public-key bundle so the responding device can wrap the identity under the same post-quantum construction used everywhere else.",
   "defs": {
     "main": {

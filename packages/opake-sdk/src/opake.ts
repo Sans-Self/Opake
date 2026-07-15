@@ -759,7 +759,7 @@ export class Opake {
   // ---------------------------------------------------------------------------
 
   /**
-   * Fetch the account config record (`app.opake.accountConfig/self`), if
+   * Fetch the account config record (`at.opake.accountConfig/self`), if
    * one exists on the PDS. Returns null when the account has never
    * written a config.
    */

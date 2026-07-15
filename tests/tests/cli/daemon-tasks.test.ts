@@ -72,20 +72,20 @@ describe("pair request cleanup", () => {
 
     // Seed an expired pair request directly on the fake PDS (20 min old)
     const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-    pds.putRecord("did:plc:alice", "app.opake.pairRequest", "expired1", {
-      $type: "app.opake.pairRequest",
+    pds.putRecord("did:plc:alice", "at.opake.pairRequest", "expired1", {
+      $type: "at.opake.pairRequest",
       opakeVersion: 1,
       ephemeralKey: { $bytes: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
       algo: "x25519",
       createdAt: twentyMinutesAgo,
     });
 
-    const before = pds.listRecords("did:plc:alice", "app.opake.pairRequest");
+    const before = pds.listRecords("did:plc:alice", "at.opake.pairRequest");
     expect(before.length).toBeGreaterThanOrEqual(1);
 
     await runDaemonOnce(ctx.configDir);
 
-    const after = pds.listRecords("did:plc:alice", "app.opake.pairRequest");
+    const after = pds.listRecords("did:plc:alice", "at.opake.pairRequest");
     const expired = after.filter(
       (r: { uri: string }) => r.uri.includes("expired1"),
     );
@@ -98,20 +98,20 @@ describe("pair request cleanup", () => {
     tempDirs.push(ctx.configDir);
 
     // Seed a fresh pair request (just now)
-    pds.putRecord("did:plc:alice", "app.opake.pairRequest", "fresh1", {
-      $type: "app.opake.pairRequest",
+    pds.putRecord("did:plc:alice", "at.opake.pairRequest", "fresh1", {
+      $type: "at.opake.pairRequest",
       opakeVersion: 1,
       ephemeralKey: { $bytes: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" },
       algo: "x25519",
       createdAt: new Date().toISOString(),
     });
 
-    const before = pds.listRecords("did:plc:alice", "app.opake.pairRequest");
+    const before = pds.listRecords("did:plc:alice", "at.opake.pairRequest");
     expect(before.length).toBeGreaterThanOrEqual(1);
 
     await runDaemonOnce(ctx.configDir);
 
-    const after = pds.listRecords("did:plc:alice", "app.opake.pairRequest");
+    const after = pds.listRecords("did:plc:alice", "at.opake.pairRequest");
     const fresh = after.filter(
       (r: { uri: string }) => r.uri.includes("fresh1"),
     );
@@ -124,10 +124,10 @@ describe("pair request cleanup", () => {
     tempDirs.push(ctx.configDir);
 
     // Seed an orphaned pair response (no matching request)
-    pds.putRecord("did:plc:alice", "app.opake.pairResponse", "orphan1", {
-      $type: "app.opake.pairResponse",
+    pds.putRecord("did:plc:alice", "at.opake.pairResponse", "orphan1", {
+      $type: "at.opake.pairResponse",
       opakeVersion: 1,
-      request: "at://did:plc:alice/app.opake.pairRequest/doesnotexist",
+      request: "at://did:plc:alice/at.opake.pairRequest/doesnotexist",
       wrappedKey: {
         did: "did:plc:alice",
         ciphertext: { $bytes: "AAAA" },
@@ -139,12 +139,12 @@ describe("pair request cleanup", () => {
       createdAt: new Date().toISOString(),
     });
 
-    const before = pds.listRecords("did:plc:alice", "app.opake.pairResponse");
+    const before = pds.listRecords("did:plc:alice", "at.opake.pairResponse");
     expect(before.length).toBeGreaterThanOrEqual(1);
 
     await runDaemonOnce(ctx.configDir);
 
-    const after = pds.listRecords("did:plc:alice", "app.opake.pairResponse");
+    const after = pds.listRecords("did:plc:alice", "at.opake.pairResponse");
     const orphans = after.filter(
       (r: { uri: string }) => r.uri.includes("orphan1"),
     );
@@ -160,10 +160,10 @@ describe("stale grant healing", () => {
 
     // Seed a grant with a recipient DID that exists in the fake-pds
     // but has NO publicKey/self record (simulates deactivated account)
-    pds.putRecord("did:plc:alice", "app.opake.grant", "stale1", {
-      $type: "app.opake.grant",
+    pds.putRecord("did:plc:alice", "at.opake.grant", "stale1", {
+      $type: "at.opake.grant",
       opakeVersion: 1,
-      document: "at://did:plc:alice/app.opake.document/fakedoc",
+      document: "at://did:plc:alice/at.opake.document/fakedoc",
       recipient: "did:plc:bob",
       wrappedKey: {
         did: "did:plc:bob",
@@ -181,7 +181,7 @@ describe("stale grant healing", () => {
     // The fake-pds already has bob registered but setupAccount wasn't called
     // for bob, so no publicKey/self record exists.
 
-    const before = pds.listRecords("did:plc:alice", "app.opake.grant");
+    const before = pds.listRecords("did:plc:alice", "at.opake.grant");
     expect(before.length).toBeGreaterThanOrEqual(1);
 
     // Point DID resolution at the fake-pds so did:plc:bob resolves locally
@@ -189,7 +189,7 @@ describe("stale grant healing", () => {
       OPAKE_PLC_DIRECTORY: ctx.pdsUrl,
     });
 
-    const after = pds.listRecords("did:plc:alice", "app.opake.grant");
+    const after = pds.listRecords("did:plc:alice", "at.opake.grant");
     const staleGrants = after.filter((r: { uri: string }) =>
       r.uri.includes("stale1"),
     );
@@ -206,10 +206,10 @@ describe("stale grant healing", () => {
     tempDirs.push(bob.configDir);
 
     // Seed a grant to bob (who has a valid publicKey/self)
-    pds.putRecord("did:plc:alice", "app.opake.grant", "valid1", {
-      $type: "app.opake.grant",
+    pds.putRecord("did:plc:alice", "at.opake.grant", "valid1", {
+      $type: "at.opake.grant",
       opakeVersion: 1,
-      document: "at://did:plc:alice/app.opake.document/fakedoc",
+      document: "at://did:plc:alice/at.opake.document/fakedoc",
       recipient: "did:plc:bob",
       wrappedKey: {
         did: "did:plc:bob",
@@ -223,7 +223,7 @@ describe("stale grant healing", () => {
       createdAt: new Date().toISOString(),
     });
 
-    const before = pds.listRecords("did:plc:alice", "app.opake.grant");
+    const before = pds.listRecords("did:plc:alice", "at.opake.grant");
     const validBefore = before.filter((r: { uri: string }) =>
       r.uri.includes("valid1"),
     );
@@ -233,7 +233,7 @@ describe("stale grant healing", () => {
       OPAKE_PLC_DIRECTORY: alice.pdsUrl,
     });
 
-    const after = pds.listRecords("did:plc:alice", "app.opake.grant");
+    const after = pds.listRecords("did:plc:alice", "at.opake.grant");
     const validAfter = after.filter((r: { uri: string }) =>
       r.uri.includes("valid1"),
     );

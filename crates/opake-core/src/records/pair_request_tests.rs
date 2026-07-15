@@ -40,7 +40,7 @@ fn pair_request_uses_atbytes_wire_format() {
 /// one without the other would let the constant drift silently.
 #[test]
 fn pair_request_algo_matches_lexicon_known_values() {
-    const LEXICON: &str = include_str!("../../../../lexicons/app.opake.pairRequest.json");
+    const LEXICON: &str = include_str!("../../../../lexicons/at.opake.pairRequest.json");
     let parsed: serde_json::Value = serde_json::from_str(LEXICON).expect("lexicon is valid JSON");
     let known_values = parsed["defs"]["main"]["record"]["properties"]["algo"]["knownValues"]
         .as_array()

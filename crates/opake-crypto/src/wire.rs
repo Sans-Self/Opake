@@ -1,7 +1,7 @@
 // Wire-format outputs of the wrap and metadata-encryption primitives.
 //
 // Each struct mirrors the JSON shape of the corresponding atproto record
-// field (`#wrappedKey`, `#encryptedMetadata` in `app.opake.defs`) and is
+// field (`#wrappedKey`, `#encryptedMetadata` in `at.opake.defs`) and is
 // literally what a `wrap_key()` or `encrypt_metadata()` call returns.
 
 use serde::{Deserialize, Serialize};

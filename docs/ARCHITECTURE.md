@@ -94,7 +94,7 @@ The construction follows BSI TR-02102 (Germany) and ANSSI (France) guidance for 
 
 Member contributions register with the workspace via proposal records: `documentUpdate` proposals propose changes to existing documents (`updateContent` / `updateMetadata`); `directoryUpdate` proposals propose structural changes (`addEntry`, `removeEntry`, `moveEntry`, `createDirectory`, `deleteDirectory`, `renameDirectory`); `keyringUpdate` proposals propose membership changes (`addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`, `leave`). Each proposal lives on the proposer's PDS. The owner's daemon applies them by mutating the canonical record on the owner's PDS. After apply, editor-side cleanup deletes the proposal once the target record's `modifiedAt` advances past the proposal's `createdAt` — caught by SSE for online editors, by sync-time bootstrap reconciliation otherwise.
 
-**Workspace directories** — workspace folder hierarchies reuse `app.opake.directory` with `keyringKeyWrapping` (content key wrapped under the group key). Directories live on the owner's PDS only — members read them via public fetches. The workspace root uses a deterministic rkey (`ws-{keyring_rkey}`). Directories use `KeyWrapping` instead of the document `Encryption` type — no `algo`/`nonce` since directories have no blob.
+**Workspace directories** — workspace folder hierarchies reuse `at.opake.directory` with `keyringKeyWrapping` (content key wrapped under the group key). Directories live on the owner's PDS only — members read them via public fetches. The workspace root uses a deterministic rkey (`ws-{keyring_rkey}`). Directories use `KeyWrapping` instead of the document `Encryption` type — no `algo`/`nonce` since directories have no blob.
 
 ### Revocation
 
@@ -102,13 +102,13 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 
 ### Public Key Discovery
 
-AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `app.opake.publicKey/self` singleton records on each user's PDS containing:
+AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `at.opake.publicKey/self` singleton records on each user's PDS containing:
 
 - **X25519 encryption public key** — classical half of the hybrid wrap
 - **ML-KEM-768 encapsulation public key** — post-quantum half of the hybrid wrap
 - **Ed25519 signing public key** — used for Indexer authentication
 
-Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. All three keys are published automatically on every `opake login` via an idempotent `putRecord`. The `app.opake.publicKey` lexicon requires both encryption halves; a record missing either fails validation and the consumer rejects it.
+Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. All three keys are published automatically on every `opake login` via an idempotent `putRecord`. The `at.opake.publicKey` lexicon requires both encryption halves; a record missing either fails validation and the consumer rejects it.
 
 ## Identity Derivation
 
@@ -132,7 +132,7 @@ The mnemonic is shown once at first login and never stored. Recovery is via `opa
 
 ## Data Model
 
-All records live under the `app.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
+All records live under the `at.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.
 
 ### Identity and Key Material
 

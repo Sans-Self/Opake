@@ -3,23 +3,23 @@ import type { DirectoryTreeSnapshot } from "@opake/sdk";
 import { OptimisticOverlay, scopeKey } from "../optimistic-overlay";
 
 const emptySnapshot: DirectoryTreeSnapshot = {
-  rootUri: "at://did:plc:test/app.opake.directory/self",
+  rootUri: "at://did:plc:test/at.opake.directory/self",
   directories: {
-    "at://did:plc:test/app.opake.directory/self": {
+    "at://did:plc:test/at.opake.directory/self": {
       name: "Cabinet",
       entries: [
-        { uri: "at://did:plc:test/app.opake.document/a", type: "document" },
-        { uri: "at://did:plc:test/app.opake.document/b", type: "document" },
+        { uri: "at://did:plc:test/at.opake.document/a", type: "document" },
+        { uri: "at://did:plc:test/at.opake.document/b", type: "document" },
       ],
       parentUri: null,
     },
   },
 };
 
-const ROOT_URI = "at://did:plc:test/app.opake.directory/self";
-const DOC_A = "at://did:plc:test/app.opake.document/a";
-const DOC_B = "at://did:plc:test/app.opake.document/b";
-const DOC_C = "at://did:plc:test/app.opake.document/c";
+const ROOT_URI = "at://did:plc:test/at.opake.directory/self";
+const DOC_A = "at://did:plc:test/at.opake.document/a";
+const DOC_B = "at://did:plc:test/at.opake.document/b";
+const DOC_C = "at://did:plc:test/at.opake.document/c";
 
 function removeDoc(uri: string) {
   return (snap: DirectoryTreeSnapshot): DirectoryTreeSnapshot => {
@@ -68,8 +68,8 @@ describe("scopeKey", () => {
   });
 
   it("returns the keyring URI for a workspace", () => {
-    expect(scopeKey("at://did:plc:test/app.opake.keyring/xyz")).toBe(
-      "at://did:plc:test/app.opake.keyring/xyz",
+    expect(scopeKey("at://did:plc:test/at.opake.keyring/xyz")).toBe(
+      "at://did:plc:test/at.opake.keyring/xyz",
     );
   });
 });

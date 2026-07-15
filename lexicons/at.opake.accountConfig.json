@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.accountConfig",
+  "id": "at.opake.accountConfig",
   "description": "Per-account configuration stored on the user's PDS. Syncs across devices. Contains user preferences that are not security-sensitive.",
   "defs": {
     "main": {

@@ -174,20 +174,20 @@ mod tests {
     #[test]
     fn deserializes_modern_listing_entry() {
         let value = json!({
-            "target": "at://did:plc:abc/app.opake.document/3kkk",
+            "target": "at://did:plc:abc/at.opake.document/3kkk",
             "targetCid": { "$link": "bafyabc" },
         });
         let entry: ListingEntry = serde_json::from_value(value).unwrap();
-        assert_eq!(entry.target, "at://did:plc:abc/app.opake.document/3kkk");
+        assert_eq!(entry.target, "at://did:plc:abc/at.opake.document/3kkk");
         assert_eq!(entry.target_cid.cid, "bafyabc");
         assert!(!entry.has_legacy_empty_cid());
     }
 
     #[test]
     fn deserializes_legacy_string_listing_entry() {
-        let value = json!("at://did:plc:abc/app.opake.document/3kkk");
+        let value = json!("at://did:plc:abc/at.opake.document/3kkk");
         let entry: ListingEntry = serde_json::from_value(value).unwrap();
-        assert_eq!(entry.target, "at://did:plc:abc/app.opake.document/3kkk");
+        assert_eq!(entry.target, "at://did:plc:abc/at.opake.document/3kkk");
         assert!(entry.has_legacy_empty_cid());
     }
 
@@ -197,9 +197,9 @@ mod tests {
         // entry appended through the modern code path and re-uploaded —
         // future reads see a mixed listing. Both rows must survive.
         let value = json!([
-            "at://did:plc:abc/app.opake.document/legacy1",
+            "at://did:plc:abc/at.opake.document/legacy1",
             {
-                "target": "at://did:plc:abc/app.opake.document/modern1",
+                "target": "at://did:plc:abc/at.opake.document/modern1",
                 "targetCid": { "$link": "bafymodern" }
             }
         ]);
@@ -208,7 +208,7 @@ mod tests {
         assert!(entries[0].has_legacy_empty_cid());
         assert_eq!(
             entries[0].target,
-            "at://did:plc:abc/app.opake.document/legacy1"
+            "at://did:plc:abc/at.opake.document/legacy1"
         );
         assert!(!entries[1].has_legacy_empty_cid());
         assert_eq!(entries[1].target_cid.cid, "bafymodern");

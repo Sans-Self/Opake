@@ -5,9 +5,9 @@ use crate::test_utils::MockTransport;
 
 use super::super::tests::{dummy_directory, dummy_directory_with_entries, mock_client, TEST_DID};
 
-const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
 const DOC_CID: &str = "bafydoc1";
-const TEST_WORKSPACE_ID: &str = "at://did:plc:test/app.opake.keyring/genesis";
+const TEST_WORKSPACE_ID: &str = "at://did:plc:test/at.opake.keyring/genesis";
 
 fn ok_create(uri: &str, cid: &str) -> HttpResponse {
     HttpResponse {
@@ -22,7 +22,7 @@ fn ok_create(uri: &str, cid: &str) -> HttpResponse {
 }
 
 fn dir_uri(rkey: &str) -> String {
-    format!("at://{TEST_DID}/app.opake.directory/{rkey}")
+    format!("at://{TEST_DID}/at.opake.directory/{rkey}")
 }
 
 fn supersede_mode(prior_uri: &str, seed: &Directory) -> LevelMode {
@@ -357,7 +357,7 @@ mod deep_cascade_levels {
     #[tokio::test]
     async fn single_element_chain_produces_only_leaf() {
         let mock = MockTransport::new();
-        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
+        let root_uri = format!("at://{TEST_DID}/at.opake.directory/self");
         let root_dir = dummy_directory_with_entries("/", vec![]);
 
         mock.enqueue(ok(did_doc(TEST_DID, "https://pds.test")));
@@ -383,8 +383,8 @@ mod deep_cascade_levels {
     #[tokio::test]
     async fn two_element_chain_produces_root_ancestor_and_subdir_leaf() {
         let mock = MockTransport::new();
-        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
-        let subdir_uri = format!("at://{TEST_DID}/app.opake.directory/q1");
+        let root_uri = format!("at://{TEST_DID}/at.opake.directory/self");
+        let subdir_uri = format!("at://{TEST_DID}/at.opake.directory/q1");
 
         let root_dir = dummy_directory_with_entries("/", vec![subdir_uri.clone()]);
         let subdir = dummy_directory_with_entries("q1", vec![]);
@@ -437,9 +437,9 @@ mod deep_cascade_levels {
     #[tokio::test]
     async fn three_element_chain_threads_child_uris_correctly() {
         let mock = MockTransport::new();
-        let root_uri = format!("at://{TEST_DID}/app.opake.directory/self");
-        let q1_uri = format!("at://{TEST_DID}/app.opake.directory/q1");
-        let foo_uri = format!("at://{TEST_DID}/app.opake.directory/foo");
+        let root_uri = format!("at://{TEST_DID}/at.opake.directory/self");
+        let q1_uri = format!("at://{TEST_DID}/at.opake.directory/q1");
+        let foo_uri = format!("at://{TEST_DID}/at.opake.directory/foo");
 
         let root_dir = dummy_directory_with_entries("/", vec![q1_uri.clone()]);
         let q1 = dummy_directory_with_entries("q1", vec![foo_uri.clone()]);

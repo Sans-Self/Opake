@@ -201,7 +201,7 @@ async fn refresh_on_expired_token_then_retry() {
 
     let mut client = mock_client(mock.clone());
     let page = client
-        .list_records("app.opake.document", Some(100), None)
+        .list_records("at.opake.document", Some(100), None)
         .await
         .unwrap();
 
@@ -246,7 +246,7 @@ async fn refresh_failure_propagates_error() {
 
     let mut client = mock_client(mock);
     let err = client
-        .list_records("app.opake.document", Some(100), None)
+        .list_records("at.opake.document", Some(100), None)
         .await
         .unwrap_err();
 
@@ -265,7 +265,7 @@ async fn non_expired_error_passes_through() {
 
     let mut client = mock_client(mock);
     let err = client
-        .list_records("app.opake.document", Some(100), None)
+        .list_records("at.opake.document", Some(100), None)
         .await
         .unwrap_err();
 
@@ -312,7 +312,7 @@ fn is_expired_token_rejects_no_json() {
 async fn put_record_sends_rkey_and_returns_ref() {
     let mock = MockTransport::new();
     let body = serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.publicKey/self",
+        "uri": "at://did:plc:test/at.opake.publicKey/self",
         "cid": "bafyputrecord",
     });
     mock.enqueue(success_response(&body.to_string()));
@@ -321,11 +321,11 @@ async fn put_record_sends_rkey_and_returns_ref() {
 
     let record = serde_json::json!({ "hello": "world" });
     let result = client
-        .put_record("app.opake.publicKey", "self", &record)
+        .put_record("at.opake.publicKey", "self", &record)
         .await
         .unwrap();
 
-    assert_eq!(result.uri, "at://did:plc:test/app.opake.publicKey/self");
+    assert_eq!(result.uri, "at://did:plc:test/at.opake.publicKey/self");
     assert_eq!(result.cid, "bafyputrecord");
 
     let reqs = mock.requests();
@@ -338,7 +338,7 @@ async fn put_record_sends_rkey_and_returns_ref() {
         _ => panic!("expected JSON body"),
     };
     assert_eq!(sent_body["rkey"], "self");
-    assert_eq!(sent_body["collection"], "app.opake.publicKey");
+    assert_eq!(sent_body["collection"], "at.opake.publicKey");
     assert_eq!(sent_body["repo"], "did:plc:test");
 }
 
@@ -355,7 +355,7 @@ async fn put_record_conditional_sends_swap_record() {
     let mut client = mock_client(mock.clone());
     let record = serde_json::json!({ "hello": "world" });
     client
-        .put_record_conditional("app.opake.grant", "r", &record, Some("bafyPRIOR"))
+        .put_record_conditional("at.opake.grant", "r", &record, Some("bafyPRIOR"))
         .await
         .unwrap();
 
@@ -375,7 +375,7 @@ async fn delete_record_conditional_sends_swap_record() {
 
     let mut client = mock_client(mock.clone());
     client
-        .delete_record_conditional("app.opake.grant", "r", Some("bafyPRIOR"))
+        .delete_record_conditional("at.opake.grant", "r", Some("bafyPRIOR"))
         .await
         .unwrap();
 
@@ -402,7 +402,7 @@ async fn conditional_write_conflict_surfaces_cas_conflict() {
     let mut client = mock_client(mock.clone());
     let record = serde_json::json!({ "hello": "world" });
     let err = client
-        .put_record_conditional("app.opake.grant", "r", &record, Some("bafySTALE"))
+        .put_record_conditional("at.opake.grant", "r", &record, Some("bafySTALE"))
         .await
         .unwrap_err();
 
@@ -431,7 +431,7 @@ async fn cas_conflict_drives_re_derive_and_skip_not_error() {
     // Re-derivation's read: the record is already at the desired state.
     mock.enqueue(success_response(
         &serde_json::json!({
-            "uri": "at://did:plc:test/app.opake.grant/r",
+            "uri": "at://did:plc:test/at.opake.grant/r",
             "cid": "bafyWINNER",
             "value": { "done": true },
         })
@@ -445,14 +445,14 @@ async fn cas_conflict_drives_re_derive_and_skip_not_error() {
     // CAS conflict, re-derive and skip if the work is already done.
     let outcome: Result<&str, Error> = async {
         match client
-            .put_record_conditional("app.opake.grant", "r", &record, Some("bafySTALE"))
+            .put_record_conditional("at.opake.grant", "r", &record, Some("bafySTALE"))
             .await
         {
             Ok(_) => Ok("wrote"),
             Err(Error::CasConflict(_)) => {
                 // Re-derive: read the current record; it is already done.
                 let current = client
-                    .get_record("did:plc:test", "app.opake.grant", "r")
+                    .get_record("did:plc:test", "at.opake.grant", "r")
                     .await?;
                 if current.value.get("done") == Some(&serde_json::Value::Bool(true)) {
                     Ok("skipped: already done")

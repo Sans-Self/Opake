@@ -12,8 +12,8 @@ Terms:
 
 - Content key: a random 256-bit AES key, one per document, sealing both the blob and its metadata.
 - Group key: a workspace's shared symmetric key, one per rotation, wrapped per-member in the keyring record.
-- Direct encryption: the content key wrapped asymmetrically to one or more DIDs' public-key bundles (`app.opake.document#directEncryption`).
-- Keyring encryption: the content key wrapped symmetrically under a group key, referenced by `keyringRef` (`app.opake.document#keyringEncryption`).
+- Direct encryption: the content key wrapped asymmetrically to one or more DIDs' public-key bundles (`at.opake.document#directEncryption`).
+- Keyring encryption: the content key wrapped symmetrically under a group key, referenced by `keyringRef` (`at.opake.document#keyringEncryption`).
 
 ## Requirements
 
@@ -39,7 +39,7 @@ Randomness SHALL be injected, never drawn from an ambient global. Crypto functio
 
 ### Requirement: A document is encrypted in exactly one of two modes
 
-The `encryption` field SHALL be a discriminated union of `directEncryption` and `keyringEncryption` (lexicons/app.opake.document.json), and a document SHALL carry exactly one.
+The `encryption` field SHALL be a discriminated union of `directEncryption` and `keyringEncryption` (lexicons/at.opake.document.json), and a document SHALL carry exactly one.
 
 Direct mode SHALL carry an envelope holding the cipher `algo` (`aes-256-gcm`), the blob `nonce`, and a non-empty `keys` array of `WrappedKey`s — the content key wrapped once per authorized DID. It is used for cabinet documents and ad-hoc sharing.
 

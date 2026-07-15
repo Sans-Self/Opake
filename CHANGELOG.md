@@ -183,7 +183,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Encrypt directory metadata (add encryption envelope to directory records) [#189](https://issues.opake.app/issues/189.html)
 - Encrypt keyring and grant metadata [#188](https://issues.opake.app/issues/188.html)
 - Encrypt document metadata (name, mimeType, tags, description) [#187](https://issues.opake.app/issues/187.html)
-- Rename collection NSIDs from app.opake.cloud.* to app.opake.* and version to opakeVersion [#186](https://issues.opake.app/issues/186.html)
+- Rename collection NSIDs from at.opake.cloud.* to at.opake.* and version to opakeVersion [#186](https://issues.opake.app/issues/186.html)
 - Add browser key storage with IndexedDB and Web Crypto API [#160](https://issues.opake.app/issues/160.html)
 - Add inbox command for grant discovery via AppView [#162](https://issues.opake.app/issues/162.html)
 - Port Figma Make cabinet design into web frontend [#165](https://issues.opake.app/issues/165.html)

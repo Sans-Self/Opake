@@ -18,7 +18,7 @@ export const encryptionEnvelopeShape = `{
 }`;
 
 export const keyringRefShape = `{
-  "keyring": "at://did:plc:owner/app.opake.keyring/abc123",
+  "keyring": "at://did:plc:owner/at.opake.keyring/abc123",
   "wrappedContentKey": "<bytes>",     // content key encrypted under group key
   "rotation": 3                       // which generation of the group key
 }`;
@@ -39,7 +39,7 @@ export const encryptedMetadataShape = `{
 }`;
 
 export const documentRecordShape = `{
-  "$type": "app.opake.document",
+  "$type": "at.opake.document",
   "opakeVersion": 1,
   "blob": {
     "$type": "blob",
@@ -49,11 +49,11 @@ export const documentRecordShape = `{
   },
   "encryption": {
     // Cabinet / direct-share case:
-    "$type": "app.opake.document#directEncryption",
+    "$type": "at.opake.document#directEncryption",
     "envelope": { /* encryptionEnvelope, see above */ }
 
     // ...or workspace case:
-    // "$type": "app.opake.document#keyringEncryption",
+    // "$type": "at.opake.document#keyringEncryption",
     // "keyringRef": { /* keyringRef, see above */ },
     // "algo": "aes-256-gcm",
     // "nonce": "<bytes>"
@@ -63,9 +63,9 @@ export const documentRecordShape = `{
 }`;
 
 export const grantRecordShape = `{
-  "$type": "app.opake.grant",
+  "$type": "at.opake.grant",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice/app.opake.document/xyz789",
+  "document": "at://did:plc:alice/at.opake.document/xyz789",
   "recipient": "did:plc:bob",
   "wrappedKey": {
     "did": "did:plc:bob",
@@ -76,7 +76,7 @@ export const grantRecordShape = `{
 }`;
 
 export const keyringRecordShape = `{
-  "$type": "app.opake.keyring",
+  "$type": "at.opake.keyring",
   "opakeVersion": 1,
   "members": {
     "did:plc:alice": { "wrappedKey": {...}, "role": "manager" },

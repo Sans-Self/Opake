@@ -28,14 +28,14 @@ const PDS_B: &str = "https://pds.bob.example.com";
 
 // Keyring chain: bob's head supersedes alice's genesis. Alice is a
 // manager only in the genesis — a *former* manager from the head's view.
-const KEYRING_HEAD: &str = "at://did:plc:bob/app.opake.keyring/head";
-const KEYRING_GENESIS: &str = "at://did:plc:alice/app.opake.keyring/genesis";
+const KEYRING_HEAD: &str = "at://did:plc:bob/at.opake.keyring/head";
+const KEYRING_GENESIS: &str = "at://did:plc:alice/at.opake.keyring/genesis";
 
-const DIR_GENESIS: &str = "at://did:plc:bob/app.opake.directory/dgen";
-const DIR_DEL_BY_ALICE: &str = "at://did:plc:alice/app.opake.directory/ddel";
-const DIR_DEL_BY_CHARLIE: &str = "at://did:plc:charlie/app.opake.directory/ddel";
-const DOC1: &str = "at://did:plc:bob/app.opake.document/doc1";
-const DOC2: &str = "at://did:plc:bob/app.opake.document/doc2";
+const DIR_GENESIS: &str = "at://did:plc:bob/at.opake.directory/dgen";
+const DIR_DEL_BY_ALICE: &str = "at://did:plc:alice/at.opake.directory/ddel";
+const DIR_DEL_BY_CHARLIE: &str = "at://did:plc:charlie/at.opake.directory/ddel";
+const DOC1: &str = "at://did:plc:bob/at.opake.document/doc1";
+const DOC2: &str = "at://did:plc:bob/at.opake.document/doc2";
 
 fn ok(body: serde_json::Value) -> HttpResponse {
     HttpResponse {
@@ -284,9 +284,9 @@ async fn additivity_fails_open_when_keyring_chain_unreachable() {
 #[tokio::test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 async fn bug__additivity_allows_editor_doc_edit_via_document_supersede() {
-    const F1: &str = "at://did:plc:alice/app.opake.document/f1";
-    const F2: &str = "at://did:plc:charlie/app.opake.document/f2";
-    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/app.opake.directory/dedit";
+    const F1: &str = "at://did:plc:alice/at.opake.document/f1";
+    const F2: &str = "at://did:plc:charlie/at.opake.document/f2";
+    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/at.opake.directory/dedit";
 
     // Fast path: F1 is dropped but covered by F2's supersede, so the check
     // passes without walking the keyring chain — no mocked responses needed.
@@ -317,9 +317,9 @@ async fn bug__additivity_allows_editor_doc_edit_via_document_supersede() {
 #[tokio::test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 async fn bug__additivity_rejects_editor_drop_without_document_supersede() {
-    const F1: &str = "at://did:plc:alice/app.opake.document/f1";
-    const F2: &str = "at://did:plc:charlie/app.opake.document/f2";
-    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/app.opake.directory/dedit";
+    const F1: &str = "at://did:plc:alice/at.opake.document/f1";
+    const F2: &str = "at://did:plc:charlie/at.opake.document/f2";
+    const DIR_EDIT_BY_CHARLIE: &str = "at://did:plc:charlie/at.opake.directory/dedit";
 
     let mock = MockTransport::new();
     enqueue_keyring_chain(&mock);

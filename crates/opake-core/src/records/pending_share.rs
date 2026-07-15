@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{default_version, EncryptedMetadata, SCHEMA_VERSION};
 
-pub const PENDING_SHARE_COLLECTION: &str = "app.opake.pendingShare";
+pub const PENDING_SHARE_COLLECTION: &str = "at.opake.pendingShare";
 
 /// A queued share intent. Created when the recipient hasn't set up Opake yet.
 /// The daemon retries periodically until the recipient publishes their public

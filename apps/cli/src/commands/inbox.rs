@@ -92,10 +92,10 @@ mod tests {
 
     fn grant(author: &str, doc_suffix: &str) -> IndexerEnvelope<Grant> {
         IndexerEnvelope {
-            uri: format!("at://{author}/app.opake.grant/g1"),
+            uri: format!("at://{author}/at.opake.grant/g1"),
             record: Grant {
                 opake_version: SCHEMA_VERSION,
-                document: format!("at://{author}/app.opake.document/{doc_suffix}"),
+                document: format!("at://{author}/at.opake.document/{doc_suffix}"),
                 recipient: "did:plc:me".into(),
                 wrapped_key: WrappedKey {
                     did: "did:plc:me".into(),

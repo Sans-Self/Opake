@@ -24,7 +24,7 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
     {:ok, record} =
       RecordQueries.upsert(%{
         uri: uri,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         author_did: List.first(members_dids),
         workspace_id: uri,
         cid: "bafytest#{uri}",
@@ -57,8 +57,8 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
     } do
       did = "did:plc:me"
       other_workspace_member = "did:plc:other"
-      genesis = "at://did:plc:me/app.opake.keyring/genesis"
-      other_genesis = "at://#{other_workspace_member}/app.opake.keyring/genesis"
+      genesis = "at://did:plc:me/at.opake.keyring/genesis"
+      other_genesis = "at://#{other_workspace_member}/at.opake.keyring/genesis"
 
       put_keyring(genesis, [did], DateTime.utc_now())
       put_keyring(other_genesis, [other_workspace_member], DateTime.utc_now())
@@ -76,15 +76,15 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
 
     test "reflects the current chain head, not a superseded record", %{conn: conn} do
       did = "did:plc:me"
-      genesis = "at://did:plc:me/app.opake.keyring/genesis"
-      head = "at://did:plc:me/app.opake.keyring/head"
+      genesis = "at://did:plc:me/at.opake.keyring/genesis"
+      head = "at://did:plc:me/at.opake.keyring/head"
 
       put_keyring(genesis, [did], DateTime.add(DateTime.utc_now(), -100, :second))
 
       {:ok, head_record} =
         RecordQueries.upsert(%{
           uri: head,
-          collection: "app.opake.keyring",
+          collection: "at.opake.keyring",
           author_did: did,
           workspace_id: genesis,
           supersedes_uri: genesis,

@@ -8,12 +8,12 @@ use super::super::tests::{
     dummy_directory_with_entries, list_records_response, mock_client, test_keypair, TEST_DID,
 };
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
-const DIR_PHOTOS_URI: &str = "at://did:plc:test/app.opake.directory/photos";
-const DIR_VACATION_URI: &str = "at://did:plc:test/app.opake.directory/vacation";
-const DOC_BEACH_URI: &str = "at://did:plc:test/app.opake.document/beach";
-const DOC_NOTES_URI: &str = "at://did:plc:test/app.opake.document/notes";
-const DOC_SUNSET_URI: &str = "at://did:plc:test/app.opake.document/sunset";
+const ROOT_URI: &str = "at://did:plc:test/at.opake.directory/self";
+const DIR_PHOTOS_URI: &str = "at://did:plc:test/at.opake.directory/photos";
+const DIR_VACATION_URI: &str = "at://did:plc:test/at.opake.directory/vacation";
+const DOC_BEACH_URI: &str = "at://did:plc:test/at.opake.document/beach";
+const DOC_NOTES_URI: &str = "at://did:plc:test/at.opake.document/notes";
+const DOC_SUNSET_URI: &str = "at://did:plc:test/at.opake.document/sunset";
 
 /// Test resolver that returns names from a pre-built map.
 struct MockNameResolver {
@@ -167,7 +167,7 @@ async fn resolve_at_uri_unknown_collection() {
     let mut resolver = MockNameResolver::new(&[]);
 
     let err = tree
-        .resolve(&mut resolver, "at://did:plc:test/app.opake.grant/nope")
+        .resolve(&mut resolver, "at://did:plc:test/at.opake.grant/nope")
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
@@ -314,7 +314,7 @@ async fn resolve_bare_name_no_root_searches_directories() {
     let mut resolver = MockNameResolver::new(&[]);
 
     let resolved = tree.resolve(&mut resolver, "Photos").await.unwrap();
-    assert_eq!(resolved.uri, "at://did:plc:test/app.opake.directory/photos");
+    assert_eq!(resolved.uri, "at://did:plc:test/at.opake.directory/photos");
     assert_eq!(resolved.kind, EntryKind::Directory);
 }
 
@@ -374,7 +374,7 @@ async fn collect_descendants_empty() {
                 "self",
                 dummy_directory_with_entries(
                     "/",
-                    vec!["at://did:plc:test/app.opake.directory/empty".into()],
+                    vec!["at://did:plc:test/at.opake.directory/empty".into()],
                 ),
             ),
             ("empty", dummy_directory_with_entries("Empty", vec![])),
@@ -385,7 +385,7 @@ async fn collect_descendants_empty() {
     let mut client = mock_client(mock);
     let tree = DirectoryTree::load(&mut client).await.unwrap();
 
-    let descendants = tree.collect_descendants("at://did:plc:test/app.opake.directory/empty");
+    let descendants = tree.collect_descendants("at://did:plc:test/at.opake.directory/empty");
     assert!(descendants.is_empty());
 }
 
@@ -430,9 +430,9 @@ fn from_records_empty() {
 #[test]
 #[allow(non_snake_case)] // bug__ regression-naming convention
 fn bug__find_parent_skips_superseded_parent() {
-    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
-    const PARENT_OLD: &str = "at://did:plc:test/app.opake.directory/parent_old";
-    const PARENT_NEW: &str = "at://did:plc:test/app.opake.directory/parent_new";
+    const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
+    const PARENT_OLD: &str = "at://did:plc:test/at.opake.directory/parent_old";
+    const PARENT_NEW: &str = "at://did:plc:test/at.opake.directory/parent_new";
 
     // Both versions of the parent list the doc; PARENT_NEW supersedes
     // PARENT_OLD.
@@ -546,19 +546,19 @@ fn keyring_directory(
 #[test]
 fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
     let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
-    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+    let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
     let root = keyring_directory(
         "/",
         keyring_uri,
         &group_key,
-        vec!["at://did:plc:test/app.opake.directory/sub1".into()],
+        vec!["at://did:plc:test/at.opake.directory/sub1".into()],
     );
     let sub = keyring_directory("Projects", keyring_uri, &group_key, vec![]);
 
     let records = vec![
-        ("at://did:plc:test/app.opake.directory/wsroot".into(), root),
-        ("at://did:plc:test/app.opake.directory/sub1".into(), sub),
+        ("at://did:plc:test/at.opake.directory/wsroot".into(), root),
+        ("at://did:plc:test/at.opake.directory/sub1".into(), sub),
     ];
 
     let mut tree = DirectoryTree::from_records(records);
@@ -576,7 +576,7 @@ fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
     tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
 
     assert_eq!(
-        tree.directory_name("at://did:plc:test/app.opake.directory/sub1"),
+        tree.directory_name("at://did:plc:test/at.opake.directory/sub1"),
         Some("Projects")
     );
 }
@@ -584,7 +584,7 @@ fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
 #[test]
 fn decrypt_names_with_group_keys_handles_mixed_encryption() {
     let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
-    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+    let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
     // One keyring-encrypted directory
     let keyring_dir = keyring_directory("Workspace", keyring_uri, &group_key, vec![]);
@@ -594,11 +594,11 @@ fn decrypt_names_with_group_keys_handles_mixed_encryption() {
 
     let records = vec![
         (
-            "at://did:plc:test/app.opake.directory/ws".into(),
+            "at://did:plc:test/at.opake.directory/ws".into(),
             keyring_dir,
         ),
         (
-            "at://did:plc:test/app.opake.directory/personal".into(),
+            "at://did:plc:test/at.opake.directory/personal".into(),
             direct_dir,
         ),
     ];
@@ -618,11 +618,11 @@ fn decrypt_names_with_group_keys_handles_mixed_encryption() {
     tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
 
     assert_eq!(
-        tree.directory_name("at://did:plc:test/app.opake.directory/ws"),
+        tree.directory_name("at://did:plc:test/at.opake.directory/ws"),
         Some("Workspace")
     );
     assert_eq!(
-        tree.directory_name("at://did:plc:test/app.opake.directory/personal"),
+        tree.directory_name("at://did:plc:test/at.opake.directory/personal"),
         Some("Personal")
     );
 }
@@ -630,11 +630,11 @@ fn decrypt_names_with_group_keys_handles_mixed_encryption() {
 #[test]
 fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
     let group_key = crypto_mod::generate_content_key(&mut crypto_mod::OsRng);
-    let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+    let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
     let dir = keyring_directory("Secret", keyring_uri, &group_key, vec![]);
 
-    let records = vec![("at://did:plc:test/app.opake.directory/secret".into(), dir)];
+    let records = vec![("at://did:plc:test/at.opake.directory/secret".into(), dir)];
 
     let mut tree = DirectoryTree::from_records(records);
     let kp = test_keypair();
@@ -644,7 +644,7 @@ fn decrypt_names_with_group_keys_falls_back_for_unknown_keyring() {
     tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
 
     assert_eq!(
-        tree.directory_name("at://did:plc:test/app.opake.directory/secret"),
+        tree.directory_name("at://did:plc:test/at.opake.directory/secret"),
         Some("?")
     );
 }
@@ -857,8 +857,8 @@ fn bug__collect_descendants_terminates_on_cyclic_tree() {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    let dir_a = "at://did:plc:test/app.opake.directory/cycleA".to_string();
-    let dir_b = "at://did:plc:test/app.opake.directory/cycleB".to_string();
+    let dir_a = "at://did:plc:test/at.opake.directory/cycleA".to_string();
+    let dir_b = "at://did:plc:test/at.opake.directory/cycleB".to_string();
     let tree = DirectoryTree::from_records(vec![
         (
             dir_a.clone(),

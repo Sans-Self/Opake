@@ -17,7 +17,7 @@ pub use remove_member::remove_member;
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
 
-pub const KEYRING_COLLECTION: &str = "app.opake.keyring";
+pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
 
 /// Decrypt a keyring name from a raw Keyring record using an already-unwrapped group key.
 pub fn decrypt_keyring_name_from_record(
@@ -158,7 +158,7 @@ mod indexer_workspace_tests {
             "family-photos",
             &member,
             member_did,
-            "at://did:plc:owner/app.opake.keyring/abc",
+            "at://did:plc:owner/at.opake.keyring/abc",
         );
 
         let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
@@ -173,7 +173,7 @@ mod indexer_workspace_tests {
             "family-photos",
             &member,
             member_did,
-            "at://did:plc:owner/app.opake.keyring/abc",
+            "at://did:plc:owner/at.opake.keyring/abc",
         );
 
         // A DID not present in the members list — we use unrelated keys
@@ -192,7 +192,7 @@ mod indexer_workspace_tests {
             "family-photos",
             &member,
             member_did,
-            "at://did:plc:owner/app.opake.keyring/abc",
+            "at://did:plc:owner/at.opake.keyring/abc",
         );
 
         // DID matches a member entry, but we unwrap with the wrong private key

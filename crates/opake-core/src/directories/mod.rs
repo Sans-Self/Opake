@@ -34,11 +34,11 @@ pub use tree::{
     DecryptionCtx, DirectoryTree, DocumentNameResolver, EntryKind, ResolvedPath, TreeChange,
 };
 
-pub const DIRECTORY_COLLECTION: &str = "app.opake.directory";
+pub const DIRECTORY_COLLECTION: &str = "at.opake.directory";
 pub const ROOT_DIRECTORY_RKEY: &str = "self";
 pub const ROOT_DIRECTORY_NAME: &str = "/";
 
-/// AT-URI for a DID's cabinet root directory (`at://{did}/app.opake.directory/self`).
+/// AT-URI for a DID's cabinet root directory (`at://{did}/at.opake.directory/self`).
 ///
 /// Cabinet roots use the atproto singleton-rkey convention because the cabinet
 /// is single-writer and has no chain. Workspace roots are TID-rkeyed and
@@ -316,7 +316,7 @@ pub(crate) mod tests {
     #[test]
     fn keyring_envelope_produces_keyring_wrapping() {
         let group_key = crypto::generate_content_key(&mut OsRng);
-        let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+        let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
         let (key_wrapping, _metadata) = encrypt_keyring_directory_envelope(
             "Projects",
@@ -340,7 +340,7 @@ pub(crate) mod tests {
     #[test]
     fn keyring_envelope_metadata_roundtrips_with_group_key() {
         let group_key = crypto::generate_content_key(&mut OsRng);
-        let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+        let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
         let (key_wrapping, encrypted_metadata) = encrypt_keyring_directory_envelope(
             "Docs",
@@ -371,7 +371,7 @@ pub(crate) mod tests {
     fn keyring_envelope_wrong_group_key_fails() {
         let group_key = crypto::generate_content_key(&mut OsRng);
         let wrong_key = crypto::generate_content_key(&mut OsRng);
-        let keyring_uri = "at://did:plc:test/app.opake.keyring/kr1";
+        let keyring_uri = "at://did:plc:test/at.opake.keyring/kr1";
 
         let (key_wrapping, _) = encrypt_keyring_directory_envelope(
             "Secret",

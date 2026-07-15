@@ -142,7 +142,7 @@ defmodule OpakeIndexer.Firehose.Heartbeat do
   end
 
   # Compress collection names for log readability:
-  #   "app.opake.document"     -> "opake.document"
+  #   "at.opake.document"     -> "opake.document"
   #   "app.bsky.feed.post"     -> "bsky.feed.post"
   #   "chat.bsky.convo.message" -> "chat.bsky.convo.message"
   defp short("app." <> rest), do: rest

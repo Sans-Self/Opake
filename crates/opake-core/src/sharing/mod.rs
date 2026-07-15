@@ -2,7 +2,7 @@
 //
 // A grant gives another user access to a document by wrapping the document's
 // content key to the recipient's public key and storing the result as an
-// app.opake.grant record on the owner's PDS.
+// at.opake.grant record on the owner's PDS.
 
 mod create;
 mod heal;
@@ -19,4 +19,4 @@ pub use pending::{
 };
 pub use revoke::revoke_grant;
 
-pub const GRANT_COLLECTION: &str = "app.opake.grant";
+pub const GRANT_COLLECTION: &str = "at.opake.grant";

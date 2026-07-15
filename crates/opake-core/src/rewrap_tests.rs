@@ -12,8 +12,8 @@ use crate::test_utils::MockTransport;
 use crate::workspace::{GroupKeys, HistoricalKey};
 
 const TEST_DID: &str = "did:plc:test";
-const WS_URI: &str = "at://did:plc:test/app.opake.keyring/ws";
-const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+const WS_URI: &str = "at://did:plc:test/at.opake.keyring/ws";
+const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
 
 fn key(seed: u8) -> ContentKey {
     ContentKey([seed; 32])
@@ -151,7 +151,7 @@ fn plan_rewrap_leaves_head_and_foreign_docs_alone() {
     ));
 
     // A document for a different workspace is not this sweep's concern.
-    let foreign = keyring_document("at://did:plc:other/app.opake.keyring/x", &k0, 0, &ck);
+    let foreign = keyring_document("at://did:plc:other/at.opake.keyring/x", &k0, 0, &ck);
     assert!(matches!(
         plan_rewrap(&foreign, WS_URI, head).unwrap(),
         RewrapPlan::NotApplicable

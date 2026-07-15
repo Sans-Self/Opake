@@ -64,7 +64,7 @@ A record that "grants" a specific person access to a file by wrapping the file's
 
 A named group of users sharing a common group key. Lets you share folders with teams or families
 without wrapping every file to every member individually. The underlying atproto record is named
-`app.opake.keyring` for legacy reasons; the app calls it a workspace everywhere it's user-facing.
+`at.opake.keyring` for legacy reasons; the app calls it a workspace everywhere it's user-facing.
 
 ### PDS (Personal Data Server)
 
@@ -77,7 +77,7 @@ The part of your cryptographic identity that you share with the world. Others us
 ### Publish
 
 Writing a record to your PDS. In Opake, uploading a file, creating a workspace, sharing with
-someone, and pairing a device all involve publishing records under the `app.opake.*`
+someone, and pairing a device all involve publishing records under the `at.opake.*`
 namespace. The PDS holds them and makes them available to anyone your lexicons say can read
 them.
 

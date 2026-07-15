@@ -15,7 +15,7 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
   defp insert_grant(uri, author, recipient, document, indexed_at) do
     RecordQueries.upsert(%{
       uri: uri,
-      collection: "app.opake.grant",
+      collection: "at.opake.grant",
       author_did: author,
       workspace_id: nil,
       supersedes_uri: nil,
@@ -46,10 +46,10 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
 
     {:ok, _} =
       insert_grant(
-        "at://did:plc:owner/app.opake.grant/3abc",
+        "at://did:plc:owner/at.opake.grant/3abc",
         "did:plc:owner",
         did,
-        "at://did:plc:owner/app.opake.document/3xyz",
+        "at://did:plc:owner/at.opake.document/3xyz",
         DateTime.utc_now()
       )
 
@@ -59,7 +59,7 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
     assert length(response["grants"]) == 1
 
     [envelope] = response["grants"]
-    assert envelope["record"]["document"] == "at://did:plc:owner/app.opake.document/3xyz"
+    assert envelope["record"]["document"] == "at://did:plc:owner/at.opake.document/3xyz"
     assert envelope["record"]["recipient"] == did
     assert is_binary(envelope["indexedAt"])
   end
@@ -74,10 +74,10 @@ defmodule OpakeIndexerWeb.InboxControllerTest do
 
       {:ok, _} =
         insert_grant(
-          "at://did:plc:owner/app.opake.grant/#{i}",
+          "at://did:plc:owner/at.opake.grant/#{i}",
           "did:plc:owner",
           did,
-          "at://did:plc:owner/app.opake.document/#{i}",
+          "at://did:plc:owner/at.opake.document/#{i}",
           indexed_at
         )
     end

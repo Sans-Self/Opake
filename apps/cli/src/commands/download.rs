@@ -20,8 +20,8 @@ Examples:
   opake download secret.pdf
   opake download secret.pdf -o ~/Downloads/
   opake cat secret.pdf
-  opake download --grant at://did:plc:abc/app.opake.grant/xyz
-  opake download --workspace-member at://did:plc:abc/app.opake.document/xyz")]
+  opake download --grant at://did:plc:abc/at.opake.grant/xyz
+  opake download --workspace-member at://did:plc:abc/at.opake.document/xyz")]
 pub struct DownloadCommand {
     /// AT URI or filename of the document (not needed with --grant)
     pub reference: Option<String>,

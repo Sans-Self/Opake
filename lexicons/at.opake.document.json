@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.document",
+  "id": "at.opake.document",
   "defs": {
     "main": {
       "type": "record",
@@ -12,7 +12,7 @@
         "properties": {
           "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
+            "description": "Schema version for the at.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
           },
           "blob": {
@@ -31,7 +31,7 @@
           },
           "encryptedMetadata": {
             "type": "ref",
-            "ref": "app.opake.defs#encryptedMetadata"
+            "ref": "at.opake.defs#encryptedMetadata"
           },
           "supersedes": {
             "type": "string",
@@ -62,7 +62,7 @@
       "properties": {
         "envelope": {
           "type": "ref",
-          "ref": "app.opake.defs#encryptionEnvelope"
+          "ref": "at.opake.defs#encryptionEnvelope"
         }
       }
     },
@@ -74,7 +74,7 @@
       "properties": {
         "keyringRef": {
           "type": "ref",
-          "ref": "app.opake.defs#keyringRef"
+          "ref": "at.opake.defs#keyringRef"
         },
         "algo": {
           "type": "string",

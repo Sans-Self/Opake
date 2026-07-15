@@ -5,10 +5,10 @@
 #   login <name>        seed a legacy session + import the fixed mnemonic for a
 #                       fixture actor (accounts already exist via bootstrap.sh),
 #                       matching bootstrap's non-interactive shape; prints DID
-#   delkr <name> <rkey> delete one app.opake.keyring record over XRPC, authored
+#   delkr <name> <rkey> delete one at.opake.keyring record over XRPC, authored
 #                       by the actor's own session — drives genesis / sole-record
 #                       deletes without a dedicated CLI verb
-#   delpubkey <name>    stash then delete an actor's app.opake.publicKey/self
+#   delpubkey <name>    stash then delete an actor's at.opake.publicKey/self
 #                       record — makes a fully-seeded fixture actor "not ready"
 #                       so a share to them hits RecipientNotReady (the condition
 #                       is otherwise unreachable: bootstrap seeds every actor)
@@ -62,7 +62,7 @@ case "$cmd" in
     jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
     curl -fsS -X POST "$base/xrpc/com.atproto.repo.deleteRecord" \
       -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
-      -d "{\"repo\":\"$did\",\"collection\":\"app.opake.keyring\",\"rkey\":\"$rkey\"}" >/dev/null
+      -d "{\"repo\":\"$did\",\"collection\":\"at.opake.keyring\",\"rkey\":\"$rkey\"}" >/dev/null
     echo ok
     ;;
   delpubkey)
@@ -70,11 +70,11 @@ case "$cmd" in
     did=$(cat "$dir/.did"); base=$(cat "$dir/.pds"); san=${did//:/_}
     jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
     # Stash the current record value so putpubkey can restore it verbatim.
-    curl -fsS "$base/xrpc/com.atproto.repo.getRecord?repo=$did&collection=app.opake.publicKey&rkey=self" \
+    curl -fsS "$base/xrpc/com.atproto.repo.getRecord?repo=$did&collection=at.opake.publicKey&rkey=self" \
       | jq -c '.value' > "$dir/.pubkey.json"
     curl -fsS -X POST "$base/xrpc/com.atproto.repo.deleteRecord" \
       -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
-      -d "{\"repo\":\"$did\",\"collection\":\"app.opake.publicKey\",\"rkey\":\"self\"}" >/dev/null
+      -d "{\"repo\":\"$did\",\"collection\":\"at.opake.publicKey\",\"rkey\":\"self\"}" >/dev/null
     echo ok
     ;;
   putpubkey)
@@ -83,7 +83,7 @@ case "$cmd" in
     jwt=$(jq -r .access_jwt "$dir/accounts/$san/session.json")
     record=$(cat "$dir/.pubkey.json")
     jq -n --arg repo "$did" --argjson record "$record" \
-      '{repo:$repo,collection:"app.opake.publicKey",rkey:"self",record:$record}' \
+      '{repo:$repo,collection:"at.opake.publicKey",rkey:"self",record:$record}' \
       | curl -fsS -X POST "$base/xrpc/com.atproto.repo.putRecord" \
         -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
         -d @- >/dev/null

@@ -33,10 +33,10 @@ defmodule OpakeIndexer.SSE.Broadcaster do
 
   @pubsub OpakeIndexer.PubSub
 
-  @directory_collection "app.opake.directory"
-  @document_collection "app.opake.document"
-  @keyring_collection "app.opake.keyring"
-  @grant_collection "app.opake.grant"
+  @directory_collection "at.opake.directory"
+  @document_collection "at.opake.document"
+  @keyring_collection "at.opake.keyring"
+  @grant_collection "at.opake.grant"
 
   # -- Record upsert / delete -----------------------------------------
 

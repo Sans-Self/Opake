@@ -267,7 +267,7 @@ Personal directories use `directKeyWrapping`. Workspace directories use `keyring
 
 ## Device Pairing
 
-Pairing a fresh device to an existing identity uses the same hybrid construction as everywhere else. The new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768), publishes both public halves in `app.opake.pairRequest`, and the responding device wraps the existing identity to that bundle via `wrap_key`. The `pairResponse` record carries a single 1160-byte `WrappedKey` and an AES-256-GCM ciphertext of the serialized `Identity`.
+Pairing a fresh device to an existing identity uses the same hybrid construction as everywhere else. The new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768), publishes both public halves in `at.opake.pairRequest`, and the responding device wraps the existing identity to that bundle via `wrap_key`. The `pairResponse` record carries a single 1160-byte `WrappedKey` and an AES-256-GCM ciphertext of the serialized `Identity`.
 
 The new device's ephemeral private bundle is persisted to local Storage (32 + 2400 = 2432 bytes, X25519 ‖ ML-KEM-768) under `(did, request_rkey)` so it survives between request and response — the response can take minutes to days to arrive.
 

@@ -255,7 +255,7 @@ async function resolveIdentityState(
  * Resolve identity state when no Opake instance is available — i.e. when
  * `Opake.init` threw `IdentityMissing` because there's no local identity on
  * this device yet. We can't call `opake.resolveIdentity(...)` without an
- * instance, so probe the PDS directly for `app.opake.publicKey/self` to
+ * instance, so probe the PDS directly for `at.opake.publicKey/self` to
  * distinguish `remote_only` (user has an Opake identity elsewhere, needs
  * recovery) from `none` (genuinely fresh account, needs identity creation).
  *
@@ -289,7 +289,7 @@ async function resolveIdentityStateWithoutOpake(
 async function probeRemotePublicKey(pdsUrl: string, did: string): Promise<boolean> {
   const url = new URL("/xrpc/com.atproto.repo.getRecord", pdsUrl);
   url.searchParams.set("repo", did);
-  url.searchParams.set("collection", "app.opake.publicKey");
+  url.searchParams.set("collection", "at.opake.publicKey");
   url.searchParams.set("rkey", "self");
   try {
     const res = await fetch(url);

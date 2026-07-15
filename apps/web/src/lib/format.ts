@@ -109,8 +109,8 @@ export function formatShortDate(iso: string, fallback = "unknown date"): string 
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-const DOCUMENT_COLLECTION = "app.opake.document";
-const DIRECTORY_COLLECTION = "app.opake.directory";
+const DOCUMENT_COLLECTION = "at.opake.document";
+const DIRECTORY_COLLECTION = "at.opake.directory";
 
 /** Determine item kind from an AT-URI's collection segment. */
 export function entryKindFromUri(uri: string): "file" | "folder" {

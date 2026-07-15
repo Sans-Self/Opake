@@ -6,7 +6,7 @@ Every Opake user publishes their hybrid encryption public key as a singleton rec
 
 ```json
 {
-  "$type": "app.opake.publicKey",
+  "$type": "at.opake.publicKey",
   "opakeVersion": 1,
   "x25519PublicKey": { "$bytes": "base64-encoded-32-byte-x25519-public-key" },
   "x25519Algo": "x25519",
@@ -24,10 +24,10 @@ The root directory is a singleton at rkey `self`. Directory names are always enc
 
 ```json
 {
-  "$type": "app.opake.directory",
+  "$type": "at.opake.directory",
   "opakeVersion": 1,
   "keyWrapping": {
-    "$type": "app.opake.defs#directKeyWrapping",
+    "$type": "at.opake.defs#directKeyWrapping",
     "keys": [{
       "did": "did:plc:alice123",
       "ciphertext": { "$bytes": "kv7N...1160 bytes...Q==" },
@@ -39,7 +39,7 @@ The root directory is a singleton at rkey `self`. Directory names are always enc
     "nonce": { "$bytes": "rNpK...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/app.opake.directory/3k..."
+    "at://did:plc:alice123/at.opake.directory/3k..."
   ],
   "createdAt": "2026-03-01T10:00:00.000Z",
   "modifiedAt": "2026-03-01T10:00:00.000Z"
@@ -52,10 +52,10 @@ The `entries` array is an ordered list of AT-URIs pointing to documents or other
 
 ```json
 {
-  "$type": "app.opake.directory",
+  "$type": "at.opake.directory",
   "opakeVersion": 1,
   "keyWrapping": {
-    "$type": "app.opake.defs#directKeyWrapping",
+    "$type": "at.opake.defs#directKeyWrapping",
     "keys": [{
       "did": "did:plc:alice123",
       "ciphertext": { "$bytes": "Xm4p...1160 bytes...==" },
@@ -67,9 +67,9 @@ The `entries` array is an ordered list of AT-URIs pointing to documents or other
     "nonce": { "$bytes": "T7kR...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/app.opake.document/3kabcd",
-    "at://did:plc:alice123/app.opake.document/3kefgh",
-    "at://did:plc:alice123/app.opake.directory/3kijkl"
+    "at://did:plc:alice123/at.opake.document/3kabcd",
+    "at://did:plc:alice123/at.opake.document/3kefgh",
+    "at://did:plc:alice123/at.opake.directory/3kijkl"
   ],
   "createdAt": "2026-03-01T10:05:00.000Z",
   "modifiedAt": "2026-03-01T11:30:00.000Z"
@@ -84,12 +84,12 @@ A workspace directory uses `keyringKeyWrapping` — the content key is wrapped u
 
 ```json
 {
-  "$type": "app.opake.directory",
+  "$type": "at.opake.directory",
   "opakeVersion": 1,
   "keyWrapping": {
-    "$type": "app.opake.defs#keyringKeyWrapping",
+    "$type": "at.opake.defs#keyringKeyWrapping",
     "keyringRef": {
-      "keyring": "at://did:plc:alice123/app.opake.keyring/3kabc",
+      "keyring": "at://did:plc:alice123/at.opake.keyring/3kabc",
       "wrappedContentKey": { "$bytes": "Qw9f...40 bytes (AES-KW)..." },
       "rotation": 0
     }
@@ -99,8 +99,8 @@ A workspace directory uses `keyringKeyWrapping` — the content key is wrapped u
     "nonce": { "$bytes": "Hk7a...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/app.opake.document/3kdoc1",
-    "at://did:plc:bob456/app.opake.document/3kdoc2"
+    "at://did:plc:alice123/at.opake.document/3kdoc1",
+    "at://did:plc:bob456/at.opake.document/3kdoc2"
   ],
   "createdAt": "2026-03-21T10:00:00.000Z"
 }
@@ -114,12 +114,12 @@ Non-owner workspace members can't directly modify the owner's directory records.
 
 ```json
 {
-  "$type": "app.opake.directoryUpdate",
+  "$type": "at.opake.directoryUpdate",
   "opakeVersion": 1,
-  "keyring": "at://did:plc:alice123/app.opake.keyring/3kabc",
+  "keyring": "at://did:plc:alice123/at.opake.keyring/3kabc",
   "actionType": "addEntry",
-  "directory": "at://did:plc:alice123/app.opake.directory/ws-3kabc",
-  "entry": "at://did:plc:bob456/app.opake.document/3knewdoc",
+  "directory": "at://did:plc:alice123/at.opake.directory/ws-3kabc",
+  "entry": "at://did:plc:bob456/at.opake.document/3knewdoc",
   "createdAt": "2026-03-21T12:00:00.000Z"
 }
 ```
@@ -130,7 +130,7 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
 
 ```json
 {
-  "$type": "app.opake.document",
+  "$type": "at.opake.document",
   "opakeVersion": 1,
   "blob": {
     "$type": "blob",
@@ -139,7 +139,7 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
     "size": 284640
   },
   "encryption": {
-    "$type": "app.opake.document#directEncryption",
+    "$type": "at.opake.document#directEncryption",
     "envelope": {
       "algo": "aes-256-gcm",
       "nonce": { "$bytes": "base64-encoded-12-byte-nonce" },
@@ -170,9 +170,9 @@ array only contains Alice's wrapped key — only she can decrypt.
 
 ```json
 {
-  "$type": "app.opake.grant",
+  "$type": "at.opake.grant",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/app.opake.document/3k...",
+  "document": "at://did:plc:alice123/at.opake.document/3k...",
   "recipient": "did:plc:bob456",
   "wrappedKey": {
     "did": "did:plc:bob456",
@@ -205,7 +205,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 
 ```json
 {
-  "$type": "app.opake.keyring",
+  "$type": "at.opake.keyring",
   "opakeVersion": 1,
   "algo": "aes-256-gcm",
   "owner": "did:plc:alice123",
@@ -248,7 +248,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 
 ```json
 {
-  "$type": "app.opake.document",
+  "$type": "at.opake.document",
   "opakeVersion": 1,
   "blob": {
     "$type": "blob",
@@ -257,9 +257,9 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
     "size": 3841056
   },
   "encryption": {
-    "$type": "app.opake.document#keyringEncryption",
+    "$type": "at.opake.document#keyringEncryption",
     "keyringRef": {
-      "keyring": "at://did:plc:alice123/app.opake.keyring/3k...",
+      "keyring": "at://did:plc:alice123/at.opake.keyring/3k...",
       "wrappedContentKey": { "$bytes": "base64-content-key-encrypted-with-group-key" },
       "rotation": 0
     },
@@ -301,7 +301,7 @@ A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and pub
 
 ```json
 {
-  "$type": "app.opake.pairRequest",
+  "$type": "at.opake.pairRequest",
   "opakeVersion": 1,
   "x25519EphemeralKey": { "$bytes": "base64-encoded-32-byte-x25519-ephemeral-public-key" },
   "mlKemEphemeralKey": { "$bytes": "base64-encoded-1184-byte-ml-kem-768-ephemeral-public-key" },
@@ -318,9 +318,9 @@ The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 ke
 
 ```json
 {
-  "$type": "app.opake.pairResponse",
+  "$type": "at.opake.pairResponse",
   "opakeVersion": 1,
-  "request": "at://did:plc:alice123/app.opake.pairRequest/3kabcd",
+  "request": "at://did:plc:alice123/at.opake.pairRequest/3kabcd",
   "wrappedKey": {
     "did": "did:plc:alice123",
     "ciphertext": { "$bytes": "base64-1160-byte-hybrid-wrap-envelope" },
@@ -349,9 +349,9 @@ When sharing with someone who hasn't logged into Opake, a `pendingShare` record 
 
 ```json
 {
-  "$type": "app.opake.pendingShare",
+  "$type": "at.opake.pendingShare",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/app.opake.document/3mhborqwpxn22",
+  "document": "at://did:plc:alice123/at.opake.document/3mhborqwpxn22",
   "recipient": "bob.bsky.social",
   "encryptedMetadata": {
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-grant-metadata" },
@@ -375,9 +375,9 @@ An editor proposes an update to a document owned by another workspace member. Th
 
 ```json
 {
-  "$type": "app.opake.documentUpdate",
+  "$type": "at.opake.documentUpdate",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/app.opake.document/3kabcd",
+  "document": "at://did:plc:alice123/at.opake.document/3kabcd",
   "blob": {
     "$type": "blob",
     "ref": { "$link": "bafkrei..." },
@@ -402,9 +402,9 @@ For document adoption (when a member is removed), the `supersedes` field points 
 
 ```json
 {
-  "$type": "app.opake.documentUpdate",
+  "$type": "at.opake.documentUpdate",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/app.opake.document/3kabcd",
+  "document": "at://did:plc:alice123/at.opake.document/3kabcd",
   "blob": {
     "$type": "blob",
     "ref": { "$link": "bafkrei..." },
@@ -415,7 +415,7 @@ For document adoption (when a member is removed), the `supersedes` field points 
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "supersedes": "at://did:plc:removed-member/app.opake.document/3koriginal",
+  "supersedes": "at://did:plc:removed-member/at.opake.document/3koriginal",
   "createdAt": "2026-03-21T10:30:00.000Z"
 }
 ```
@@ -426,9 +426,9 @@ A member opts out of a workspace by writing a `keyringUpdate` record with action
 
 ```json
 {
-  "$type": "app.opake.keyringUpdate",
+  "$type": "at.opake.keyringUpdate",
   "opakeVersion": 1,
-  "keyring": "at://did:plc:alice123/app.opake.keyring/3k...",
+  "keyring": "at://did:plc:alice123/at.opake.keyring/3k...",
   "actionType": "leave",
   "createdAt": "2026-03-21T11:00:00.000Z"
 }

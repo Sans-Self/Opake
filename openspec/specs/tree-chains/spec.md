@@ -22,7 +22,7 @@ Terms:
 
 ### Requirement: A directory is an organizational record with no crypto envelope over its listing
 
-A directory record (`app.opake.directory`) SHALL be a distinct record type whose listing carries only structure, not content. Each entry SHALL pin a target AT-URI and the target record's CID at write time (`#listingEntry`: `target` + `targetCid`); it SHALL NOT carry the target's name, type, or any other metadata. The directory's own name lives in its `encryptedMetadata`, decrypted under the directory's content key; entry names live in each target record's `encryptedMetadata` and are resolved by fetching the target. Entry kind (document vs directory) SHALL be derived from the target URI's collection segment, not stored.
+A directory record (`at.opake.directory`) SHALL be a distinct record type whose listing carries only structure, not content. Each entry SHALL pin a target AT-URI and the target record's CID at write time (`#listingEntry`: `target` + `targetCid`); it SHALL NOT carry the target's name, type, or any other metadata. The directory's own name lives in its `encryptedMetadata`, decrypted under the directory's content key; entry names live in each target record's `encryptedMetadata` and are resolved by fetching the target. Entry kind (document vs directory) SHALL be derived from the target URI's collection segment, not stored.
 
 The `targetCid` pin exists so a consumer can content-address a subtree and so the indexer can detect a conflicting concurrent supersede on a child path without refetching every target.
 
@@ -31,7 +31,7 @@ The `targetCid` pin exists so a consumer can content-address a subtree and so th
 - **GIVEN** a directory record stored on a member's PDS
 - **WHEN** the PDS or any unauthorized reader inspects the record
 - **THEN** it sees a list of `(target, targetCid)` pairs and an encrypted metadata blob, and no entry name or type
-- Verified in `lexicons/app.opake.directory.json` (`entries` → `#listingEntry`) and `DirectoryTree::from_records`, which projects entries to bare target URIs
+- Verified in `lexicons/at.opake.directory.json` (`entries` → `#listingEntry`) and `DirectoryTree::from_records`, which projects entries to bare target URIs
 
 ### Requirement: A path's canonical state is the head of a supersede chain
 

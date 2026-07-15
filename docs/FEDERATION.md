@@ -46,7 +46,7 @@ There is no "owner" role. The DID that authored the genesis keyring is the works
 Single-canonical chain. The genesis keyring is written by the workspace creator on their own PDS. Subsequent versions live on whichever manager's PDS last wrote (via supersede).
 
 ```
-at://{author-did}/app.opake.keyring/{rkey}
+at://{author-did}/at.opake.keyring/{rkey}
 ```
 
 Carries member set, wrapped group keys, rotation counter, key history, and (for non-genesis keyrings) a `supersedes` field referencing the prior keyring URI. No discriminator — every supersede is the same operation conceptually ("the keyring got updated"), even when the update is a rotation, a member change, or a workspace rename. **Workspace identity is the genesis keyring's at-uri** — an opaque string the indexer treats as immortal. The string remains valid even after the genesis keyring record itself is deleted from the originating PDS; it identifies the workspace, not a live record.
@@ -56,7 +56,7 @@ Carries member set, wrapped group keys, rotation counter, key history, and (for 
 Single-canonical chain per path. Each curatorial write produces a new directory record on the writer's PDS, with `supersedes: <prior canonical URI>` and updated `entries`.
 
 ```
-at://{author-did}/app.opake.directory/{rkey}
+at://{author-did}/at.opake.directory/{rkey}
 ```
 
 Every directory record uses a PDS-assigned `tid` rkey, including the workspace-root chain. There are no deterministic URIs anywhere in the model. Records in the workspace-root chain are marked by an explicit `isWorkspaceRoot: true` flag (see [The workspace root](#the-workspace-root)).
@@ -76,14 +76,14 @@ The directory record carries:
 }
 ```
 
-Listings carry only the at-uri and CID of each entry. No name, no type. Names live in the target record's `encryptedMetadata`. File-vs-folder distinction is inherent in the target's collection (`app.opake.document` vs `app.opake.directory`).
+Listings carry only the at-uri and CID of each entry. No name, no type. Names live in the target record's `encryptedMetadata`. File-vs-folder distinction is inherent in the target's collection (`at.opake.document` vs `at.opake.directory`).
 
 ### Document
 
 Per-member, on the writing member's PDS. The doc record carries the encrypted blob reference, key wrapping under the keyring's group key (`keyringRef`), and the doc's `encryptedMetadata` (which contains its name, mime type, etc).
 
 ```
-at://{member-did}/app.opake.document/{rkey}
+at://{member-did}/at.opake.document/{rkey}
 ```
 
 Documents may carry an optional `supersedes` field for history annotation (e.g., "this was renamed from X by manager Y"). The field is non-load-bearing — directory curatorial supersedes do the actual rename mechanics.

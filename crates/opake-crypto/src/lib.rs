@@ -61,7 +61,7 @@ pub use mnemonic::{
 pub use secrets::DerivedSecrets;
 pub use wire::{EncryptedMetadata, WrappedKey};
 
-/// The current app.opake.* schema version this crate implements. Records
+/// The current at.opake.* schema version this crate implements. Records
 /// with version <= this are compatible; higher versions must be rejected by
 /// the caller. Also folded into the HKDF info string for domain separation
 /// so wraps from one schema version cannot be replayed under a later one.

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.pendingShare",
+  "id": "at.opake.pendingShare",
   "defs": {
     "main": {
       "type": "record",
@@ -12,7 +12,7 @@
         "properties": {
           "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.* namespace.",
+            "description": "Schema version for the at.opake.* namespace.",
             "minimum": 1
           },
           "document": {
@@ -26,7 +26,7 @@
           },
           "encryptedMetadata": {
             "type": "ref",
-            "ref": "app.opake.defs#encryptedMetadata",
+            "ref": "at.opake.defs#encryptedMetadata",
             "description": "Encrypted share metadata (permissions, note). Encrypted with the document's content key so it can be decrypted at retry time."
           },
           "createdAt": {

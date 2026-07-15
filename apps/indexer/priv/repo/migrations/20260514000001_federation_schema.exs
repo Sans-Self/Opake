@@ -8,7 +8,7 @@ defmodule OpakeIndexer.Repo.Migrations.FederationSchema do
   Tables:
 
     * `cursor` — singleton firehose cursor row.
-    * `records` — every indexed `app.opake.*` record, one row per (uri).
+    * `records` — every indexed `at.opake.*` record, one row per (uri).
     * `chain_heads` — current head URI per workspace chain (keyring chain
       and workspace-root chain).
 

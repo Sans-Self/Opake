@@ -96,7 +96,7 @@ describe("device pairing", () => {
     // Wait for the pair request record to appear on the PDS
     await waitFor(
       async () => {
-        const records = pds.listRecords("did:plc:alice", "app.opake.pairRequest");
+        const records = pds.listRecords("did:plc:alice", "at.opake.pairRequest");
         return records.length > 0;
       },
       200,

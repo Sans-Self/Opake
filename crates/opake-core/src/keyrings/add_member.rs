@@ -93,7 +93,7 @@ mod tests {
     use crate::test_utils::{dummy_encrypted_metadata, MockTransport, TestKeys};
 
     const TEST_DID: &str = "did:plc:owner";
-    const KEYRING_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
+    const KEYRING_URI: &str = "at://did:plc:owner/at.opake.keyring/kr1";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         let session = Session::Legacy(LegacySession {
@@ -238,7 +238,7 @@ mod tests {
         let mut client = mock_client(mock);
 
         let params = AddMemberParams {
-            keyring_uri: "at://did:plc:someone-else/app.opake.keyring/kr1",
+            keyring_uri: "at://did:plc:someone-else/at.opake.keyring/kr1",
             group_key: &group_key,
             new_member_did: "did:plc:newmember",
             new_member_public_keys: new_member.public_keys(),

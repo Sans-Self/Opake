@@ -11,7 +11,7 @@ import {
 <ChapterHeader title="Lexicon reference" />
 
 <Lead>
-  Opake publishes `app.opake.*` records to the caller's PDS. This page is a working
+  Opake publishes `at.opake.*` records to the caller's PDS. This page is a working
   reference for the schemas — what a document record looks like on the wire, how the
   encryption envelope is shaped, what fields the indexer relies on. The authoritative
   schemas live in [`/lexicons`](https://tangled.org/opake.app/opake/tree/main/lexicons)
@@ -22,26 +22,26 @@ import {
 
 | NSID | Type | Purpose |
 |---|---|---|
-| `app.opake.accountConfig` | record (singleton) | Per-account preferences, indexer URL pin |
-| `app.opake.publicKey` | record (singleton) | X25519 encryption public key for key discovery |
-| `app.opake.document` | record | An encrypted file |
-| `app.opake.directory` | record | Organisational grouping of documents + sub-directories |
-| `app.opake.grant` | record | One-to-one share grant |
-| `app.opake.keyring` | record | Workspace (named group with a shared symmetric key) |
-| `app.opake.pendingShare` | record | Queued share waiting for recipient to publish their key |
-| `app.opake.pairRequest` | record | New-device identity-transfer request |
-| `app.opake.pairResponse` | record | Existing-device encrypted identity payload |
-| `app.opake.defs` | defs | Shared types (wrappedKey, encryptionEnvelope, keyringRef, encryptedMetadata) |
-| `app.opake.authFullAccess` | permission-set | OAuth scope bundle covering every `app.opake.*` collection |
+| `at.opake.accountConfig` | record (singleton) | Per-account preferences, indexer URL pin |
+| `at.opake.publicKey` | record (singleton) | X25519 encryption public key for key discovery |
+| `at.opake.document` | record | An encrypted file |
+| `at.opake.directory` | record | Organisational grouping of documents + sub-directories |
+| `at.opake.grant` | record | One-to-one share grant |
+| `at.opake.keyring` | record | Workspace (named group with a shared symmetric key) |
+| `at.opake.pendingShare` | record | Queued share waiting for recipient to publish their key |
+| `at.opake.pairRequest` | record | New-device identity-transfer request |
+| `at.opake.pairResponse` | record | Existing-device encrypted identity payload |
+| `at.opake.defs` | defs | Shared types (wrappedKey, encryptionEnvelope, keyringRef, encryptedMetadata) |
+| `at.opake.authFullAccess` | permission-set | OAuth scope bundle covering every `at.opake.*` collection |
 
 Everything record-typed lives in the PDS's repo. The only blobs are the encrypted file
-contents referenced from `app.opake.document.blob` — up to 50 MB per the default PDS
+contents referenced from `at.opake.document.blob` — up to 50 MB per the default PDS
 config.
 
 ## Encryption primitives
 
 Three small shapes underpin every opaque field on every record. They live in
-[`app.opake.defs`](https://tangled.org/opake.app/opake/blob/main/lexicons/app.opake.defs.json)
+[`at.opake.defs`](https://tangled.org/opake.app/opake/blob/main/lexicons/at.opake.defs.json)
 as shared refs.
 
 ### `wrappedKey`
@@ -84,7 +84,7 @@ are always dummy values.
 
 ## Record shapes
 
-### `app.opake.document`
+### `at.opake.document`
 
 <CodeBlock language="json" title="document" code={documentRecordShape} />
 
@@ -97,7 +97,7 @@ keyring's group key.
 `opakeVersion` lets clients reject records they don't understand. Bumping it on a
 schema change means old clients see a decryption failure, not a silent mis-parse.
 
-### `app.opake.grant`
+### `at.opake.grant`
 
 <CodeBlock language="json" title="grant" code={grantRecordShape} />
 
@@ -107,7 +107,7 @@ Grants reference the document by AT-URI; there's no keyring involved. Revoking a
 grant is a `deleteRecord` call; there's no key rotation because the document was
 already decryptable by the sharer's content key.
 
-### `app.opake.keyring`
+### `at.opake.keyring`
 
 <CodeBlock language="json" title="keyring" code={keyringRecordShape} />
 
@@ -129,7 +129,7 @@ that need forward-secret removal must re-upload documents after rotation.
 
 ## Indexing
 
-The indexer subscribes to the atproto firehose and consumes five `app.opake.*`
+The indexer subscribes to the atproto firehose and consumes five `at.opake.*`
 collections: `keyring`, `directory`, `document`, `grant`, and `accountConfig` — the
 last only as a proof-of-life heartbeat, never stored. For each event, it:
 

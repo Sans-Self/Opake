@@ -180,8 +180,8 @@ mod tests {
 
     const OWNER_DID: &str = "did:plc:owner";
     const OWNER_PDS: &str = "https://pds.owner.example.com";
-    const GRANT_URI: &str = "at://did:plc:owner/app.opake.grant/grant1";
-    const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
+    const GRANT_URI: &str = "at://did:plc:owner/at.opake.grant/grant1";
+    const DOC_URI: &str = "at://did:plc:owner/at.opake.document/doc1";
 
     fn did_document_response() -> HttpResponse {
         let body = serde_json::json!({
@@ -373,7 +373,7 @@ mod tests {
         let err = download_from_grant(
             &mock,
             &keys.private_keys(),
-            "at://did:plc:x/app.opake.document/abc",
+            "at://did:plc:x/at.opake.document/abc",
         )
         .await
         .unwrap_err();

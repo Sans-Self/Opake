@@ -9,11 +9,11 @@ defmodule OpakeIndexer.Jetstream.Consumer do
 
     * `:full` (default in dev/prod) — no `wantedCollections` filter,
       receive every commit Jetstream emits. The parser ignores anything
-      that isn't `app.opake.*`. This gives you proof-of-life logs even
+      that isn't `at.opake.*`. This gives you proof-of-life logs even
       when no opake events are happening, which is the dev experience
       we actually want.
 
-    * `:opake_only` — only the five `app.opake.*` collections, server-
+    * `:opake_only` — only the five `at.opake.*` collections, server-
       side filtered. Use this for low-bandwidth deployments or when you
       need a fast cold-start catch-up after extended downtime.
 
@@ -51,11 +51,11 @@ defmodule OpakeIndexer.Jetstream.Consumer do
   @max_backoff_ms 60_000
 
   @opake_collections [
-    "app.opake.grant",
-    "app.opake.keyring",
-    "app.opake.document",
-    "app.opake.directory",
-    "app.opake.accountConfig"
+    "at.opake.grant",
+    "at.opake.keyring",
+    "at.opake.document",
+    "at.opake.directory",
+    "at.opake.accountConfig"
   ]
 
   defstruct [

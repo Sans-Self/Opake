@@ -60,7 +60,7 @@ defmodule OpakeIndexer.Authority do
 
   @type result :: :ok | {:rejected, atom()}
 
-  # Canonical role strings as they appear in `app.opake.keyring` records
+  # Canonical role strings as they appear in `at.opake.keyring` records
   # (lexicon-defined; the Rust enum uses `serde(rename_all = "lowercase")`
   # → `Role::Manager → "manager"`, etc.). Any role outside this set is an
   # anomaly: lexicon drift, schema migration that didn't reach the indexer,

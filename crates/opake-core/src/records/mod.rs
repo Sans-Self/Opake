@@ -1,4 +1,4 @@
-// Typed representations of the app.opake.* lexicon records.
+// Typed representations of the at.opake.* lexicon records.
 //
 // These mirror the lexicon JSON schemas and handle atproto's serialization
 // conventions ($type discriminators, $bytes for binary data, $link for CIDs).
@@ -40,7 +40,7 @@ pub use pair_response::{PairResponse, PAIR_RESPONSE_COLLECTION};
 pub use pending_share::{PendingShare, PENDING_SHARE_COLLECTION};
 pub use public_key::{PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
-/// The current app.opake.* schema version this client understands. Records
+/// The current at.opake.* schema version this client understands. Records
 /// with version <= this are compatible; higher versions must be rejected.
 /// Owned by opake-crypto because the HKDF info string folds it in for domain
 /// separation.
@@ -207,8 +207,8 @@ mod tests {
     fn directory_with_entries_roundtrips() {
         let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
         directory.entries = vec![
-            ListingEntry::new("at://did:plc:test/app.opake.document/abc", "bafydoc"),
-            ListingEntry::new("at://did:plc:test/app.opake.directory/def", "bafydir"),
+            ListingEntry::new("at://did:plc:test/at.opake.document/abc", "bafydoc"),
+            ListingEntry::new("at://did:plc:test/at.opake.directory/def", "bafydir"),
         ];
         directory.modified_at = Some("2026-03-01T12:00:00Z".into());
 
@@ -235,13 +235,13 @@ mod tests {
     #[test]
     fn directory_supersedes_roundtrips() {
         let mut directory = dummy_encrypted_directory("2026-03-01T00:00:00Z");
-        directory.supersedes = Some("at://did:plc:test/app.opake.directory/prior".into());
+        directory.supersedes = Some("at://did:plc:test/at.opake.directory/prior".into());
 
         let json = serde_json::to_string(&directory).unwrap();
         let parsed: Directory = serde_json::from_str(&json).unwrap();
         assert_eq!(
             parsed.supersedes.as_deref(),
-            Some("at://did:plc:test/app.opake.directory/prior")
+            Some("at://did:plc:test/at.opake.directory/prior")
         );
     }
 
@@ -326,13 +326,13 @@ mod tests {
             },
             "2026-03-01T00:00:00Z".into(),
         );
-        keyring.supersedes = Some("at://did:plc:test/app.opake.keyring/prior".into());
+        keyring.supersedes = Some("at://did:plc:test/at.opake.keyring/prior".into());
 
         let json = serde_json::to_string(&keyring).unwrap();
         let parsed: Keyring = serde_json::from_str(&json).unwrap();
         assert_eq!(
             parsed.supersedes.as_deref(),
-            Some("at://did:plc:test/app.opake.keyring/prior")
+            Some("at://did:plc:test/at.opake.keyring/prior")
         );
     }
 }

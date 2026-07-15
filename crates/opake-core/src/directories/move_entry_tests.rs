@@ -8,10 +8,10 @@ use super::super::tests::{
     mock_client, put_record_response,
 };
 
-const ROOT_URI: &str = "at://did:plc:test/app.opake.directory/self";
-const DIR_A_URI: &str = "at://did:plc:test/app.opake.directory/dirA";
-const DIR_B_URI: &str = "at://did:plc:test/app.opake.directory/dirB";
-const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
+const ROOT_URI: &str = "at://did:plc:test/at.opake.directory/self";
+const DIR_A_URI: &str = "at://did:plc:test/at.opake.directory/dirA";
+const DIR_B_URI: &str = "at://did:plc:test/at.opake.directory/dirB";
+const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
 const DOC_CID: &str = "bafytestdoccid";
 
 fn doc_record_response() -> HttpResponse {

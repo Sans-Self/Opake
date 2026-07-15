@@ -77,7 +77,7 @@ mod tests {
 
     fn entry(recipient: &str, doc: &str) -> GrantEntry {
         GrantEntry {
-            uri: "at://did:plc:owner/app.opake.grant/g1".to_string(),
+            uri: "at://did:plc:owner/at.opake.grant/g1".to_string(),
             document: doc.into(),
             recipient: recipient.into(),
             encrypted_metadata: dummy_encrypted_metadata(),
@@ -89,7 +89,7 @@ mod tests {
     fn short_format() {
         let entries = vec![entry(
             "did:plc:bob",
-            "at://did:plc:owner/app.opake.document/doc1",
+            "at://did:plc:owner/at.opake.document/doc1",
         )];
         let output = format_short(&entries);
         assert!(output.contains("did:plc:bob"));
@@ -100,7 +100,7 @@ mod tests {
     fn long_format() {
         let entries = vec![entry(
             "did:plc:bob",
-            "at://did:plc:owner/app.opake.document/doc1",
+            "at://did:plc:owner/at.opake.document/doc1",
         )];
         let output = format_long(&entries);
         assert!(output.contains("did:plc:bob"));

@@ -1,10 +1,10 @@
 // OAuth scope registry — canonical list of collections and scope construction.
 //
-// Adding a new app.opake.* collection? Add it to OPAKE_COLLECTIONS below.
+// Adding a new at.opake.* collection? Add it to OPAKE_COLLECTIONS below.
 // The OAuth scope string and the permission set lexicon are both derived
 // from this list.
 
-/// All `app.opake.*` collections that Opake needs repo access to.
+/// All `at.opake.*` collections that Opake needs repo access to.
 ///
 /// This is the single source of truth for the OAuth scope string.
 /// The compile-time test at the bottom of this file ensures every
@@ -23,7 +23,7 @@ pub const OPAKE_COLLECTIONS: &[&str] = &[
 
 /// Build the OAuth scope string for Opake.
 ///
-/// Requests granular per-collection repo access for all `app.opake.*` record
+/// Requests granular per-collection repo access for all `at.opake.*` record
 /// types, blob upload/download access, and the base `atproto` scope.
 pub fn oauth_scope() -> String {
     let mut parts: Vec<String> = Vec::with_capacity(OPAKE_COLLECTIONS.len() + 2);

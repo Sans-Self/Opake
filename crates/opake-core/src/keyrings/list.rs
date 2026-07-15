@@ -84,7 +84,7 @@ mod tests {
             .iter()
             .map(|(rkey, kr)| {
                 serde_json::json!({
-                    "uri": format!("at://{TEST_DID}/app.opake.keyring/{rkey}"),
+                    "uri": format!("at://{TEST_DID}/at.opake.keyring/{rkey}"),
                     "cid": "bafykeyring",
                     "value": kr,
                 })
@@ -117,7 +117,7 @@ mod tests {
         assert!(entries[0].uri.contains("kr1"));
 
         let reqs = mock.requests();
-        assert!(reqs[0].url.contains("app.opake.keyring"));
+        assert!(reqs[0].url.contains("at.opake.keyring"));
     }
 
     #[tokio::test]

@@ -266,7 +266,7 @@ fn create_group_key_wraps_to_all_members() {
         },
     ];
 
-    let test_keyring = "at://did:plc:owner/app.opake.keyring/test1";
+    let test_keyring = "at://did:plc:owner/at.opake.keyring/test1";
     let context = WrapContext::Keyring { uri: test_keyring };
     let (group_key, wrapped_keys) = create_group_key(&members, test_keyring, &mut OsRng).unwrap();
     assert_eq!(wrapped_keys.len(), 2);
@@ -313,8 +313,8 @@ fn cross_context_splice_rejected() {
     let alice = LocalKeys::generate();
     let content_key = generate_content_key(&mut OsRng);
 
-    let keyring_uri = "at://did:plc:owner/app.opake.keyring/k1";
-    let document_uri = "at://did:plc:owner/app.opake.document/d1";
+    let keyring_uri = "at://did:plc:owner/at.opake.keyring/k1";
+    let document_uri = "at://did:plc:owner/at.opake.document/d1";
 
     let wrapped_in_keyring = wrap_key(
         &content_key,
@@ -343,7 +343,7 @@ fn cross_context_splice_rejected() {
         &wrapped_in_keyring,
         &alice.private_keys(),
         &WrapContext::Keyring {
-            uri: "at://did:plc:owner/app.opake.keyring/k2",
+            uri: "at://did:plc:owner/at.opake.keyring/k2",
         },
     );
     assert!(

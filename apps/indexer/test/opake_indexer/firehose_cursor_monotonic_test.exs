@@ -26,7 +26,7 @@ defmodule OpakeIndexer.FirehoseCursorMonotonicTest do
       "time_us" => time_us,
       "commit" => %{
         "operation" => "delete",
-        "collection" => "app.opake.document",
+        "collection" => "at.opake.document",
         "rkey" => "doc-#{time_us}"
       }
     })

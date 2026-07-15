@@ -3,8 +3,8 @@ import { findParentUri, ancestorsOf, findDocumentUriByRkey } from "../../src/lib
 import type { DirectoryEntry, DirectoryTreeSnapshot } from "../../src/lib/pdsTypes";
 
 const DID = "did:plc:test";
-const dir = (rkey: string) => `at://${DID}/app.opake.directory/${rkey}`;
-const doc = (rkey: string) => `at://${DID}/app.opake.document/${rkey}`;
+const dir = (rkey: string) => `at://${DID}/at.opake.directory/${rkey}`;
+const doc = (rkey: string) => `at://${DID}/at.opake.document/${rkey}`;
 
 // Fixture shape mirrors the SDK's DirectoryInfo: entries are typed
 // (`{uri, type}`), and every non-root directory carries a `parentUri`.
@@ -183,15 +183,15 @@ describe("findDocumentUriByRkey", () => {
       const owner = "did:plc:owner";
       const alice = "did:plc:alice";
       const bob = "did:plc:bob";
-      const ownerDir = `at://${owner}/app.opake.directory/root`;
+      const ownerDir = `at://${owner}/at.opake.directory/root`;
       return {
         rootUri: ownerDir,
         directories: {
           [ownerDir]: {
             name: "/",
             entries: [
-              { uri: `at://${alice}/app.opake.document/collide`, type: "document" },
-              { uri: `at://${bob}/app.opake.document/collide`, type: "document" },
+              { uri: `at://${alice}/at.opake.document/collide`, type: "document" },
+              { uri: `at://${bob}/at.opake.document/collide`, type: "document" },
             ],
             parentUri: null,
           },

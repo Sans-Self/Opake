@@ -107,7 +107,7 @@ defmodule OpakeIndexerWeb.EventsController do
 
   defp sse_loop(conn, state) do
     receive do
-      {:sse_event, "app.opake.keyring:upsert" = event_type, payload} ->
+      {:sse_event, "at.opake.keyring:upsert" = event_type, payload} ->
         state = handle_keyring_membership(payload, state)
 
         case send_sse_event(conn, event_type, payload) do
@@ -115,12 +115,12 @@ defmodule OpakeIndexerWeb.EventsController do
           {:error, _} -> conn
         end
 
-      {:sse_event, "app.opake.keyring:delete", payload} ->
+      {:sse_event, "at.opake.keyring:delete", payload} ->
         # Delete payload is `%{uri}` — we can't tell from it which workspace
         # this keyring belonged to (the record is already gone). Leave the
         # subscription in place; it'll silently no-op once the workspace
         # topic stops receiving events.
-        case send_sse_event(conn, "app.opake.keyring:delete", payload) do
+        case send_sse_event(conn, "at.opake.keyring:delete", payload) do
           {:ok, conn} -> sse_loop(conn, state)
           {:error, _} -> conn
         end

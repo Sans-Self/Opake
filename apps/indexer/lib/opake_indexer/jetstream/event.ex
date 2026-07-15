@@ -5,7 +5,7 @@ defmodule OpakeIndexer.Jetstream.Event do
   Returns `{time_us, collection, payload}` where `payload` is one of:
 
     * `{:upsert_record, attrs}` — a create/update of a known
-      `app.opake.*` collection. `attrs.record_jsonb` is the verbatim
+      `at.opake.*` collection. `attrs.record_jsonb` is the verbatim
       on-PDS record JSON (camelCase, no field reshaping); structural
       columns (workspace_id, supersedes_uri, is_workspace_root) are
       extracted from `record_jsonb` for index speed but every projection
@@ -19,11 +19,11 @@ defmodule OpakeIndexer.Jetstream.Event do
   the JSONB payload.
   """
 
-  @grant_collection "app.opake.grant"
-  @keyring_collection "app.opake.keyring"
-  @directory_collection "app.opake.directory"
-  @document_collection "app.opake.document"
-  @account_config_collection "app.opake.accountConfig"
+  @grant_collection "at.opake.grant"
+  @keyring_collection "at.opake.keyring"
+  @directory_collection "at.opake.directory"
+  @document_collection "at.opake.document"
+  @account_config_collection "at.opake.accountConfig"
 
   @indexed_collections [
     @grant_collection,

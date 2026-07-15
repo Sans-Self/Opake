@@ -79,8 +79,8 @@ mod tests {
     #[test]
     fn uri_with_tid_formats_correctly() {
         let tid = tid_from_micros(1_700_000_000_000_000);
-        let uri = uri_with_tid("did:plc:test", "app.opake.document", &tid);
-        assert!(uri.starts_with("at://did:plc:test/app.opake.document/"));
+        let uri = uri_with_tid("did:plc:test", "at.opake.document", &tid);
+        assert!(uri.starts_with("at://did:plc:test/at.opake.document/"));
         assert!(uri.ends_with(&tid));
     }
 
