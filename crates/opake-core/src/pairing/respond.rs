@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use zeroize::Zeroizing;
 
 use crate::atproto::AtBytes;
 use crate::client::{Transport, XrpcClient};
@@ -8,6 +9,14 @@ use crate::crypto::{
 use crate::error::Error;
 use crate::records::{PairResponse, PAIR_RESPONSE_COLLECTION, SCHEMA_VERSION};
 use crate::storage::Identity;
+
+/// Upper bound on a serialized identity's JSON, dominated by the base64
+/// ML-KEM-768 private (~3.2 KiB) and encapsulation (~1.6 KiB) keys plus JSON
+/// framing. Serializing into a buffer pre-sized above this keeps `serde_json`
+/// from reallocating and stranding un-wiped plaintext copies of the identity in
+/// freed WASM memory; an identity that outgrows it degrades to the minimal
+/// guarantee (final buffer wiped, one realloc copy left behind).
+const IDENTITY_JSON_CAPACITY: usize = 8 * 1024;
 
 /// Respond to a pairing request by encrypting the local identity to the
 /// requester's ephemeral hybrid public-key bundle and writing a pairResponse
@@ -22,7 +31,9 @@ pub async fn respond_to_pair_request(
 ) -> Result<(), Error> {
     let content_key = generate_content_key(rng);
 
-    let identity_json = serde_json::to_vec(identity)?;
+    // spec:document-crypto § Key-carrying types zeroize on drop
+    let mut identity_json = Zeroizing::new(Vec::with_capacity(IDENTITY_JSON_CAPACITY));
+    serde_json::to_writer(&mut *identity_json, identity)?;
     let payload = encrypt_blob(&content_key, &identity_json, rng)?;
 
     // Wrap the content key to the ephemeral hybrid keypair. The `did` field
