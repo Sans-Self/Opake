@@ -9,6 +9,7 @@
 // write the way the CLI does — that's a tracked product gap; here bootstrap
 // guarantees the root so this spec exercises the encryption round trip.
 import { test, expect, cite } from "../fixtures";
+import { fileRow } from "../cabinet-helpers";
 
 const uniq = () => `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 
@@ -43,7 +44,7 @@ test(`uploads a file and downloads it with metadata decrypted client-side ${cite
 
   // Upload via the hidden (aria-hidden) file input — set files directly.
   const input = page.locator('input[type="file"]');
-  const row = page.getByRole("button", { name: filename });
+  const row = fileRow(page, filename);
   await input.setInputFiles({
     name: filename,
     mimeType: "text/plain",

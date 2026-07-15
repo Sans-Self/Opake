@@ -43,9 +43,15 @@ export function folderRow(page: Page, name: string): Locator {
   return page.getByRole("button", { name: `${name}, folder` });
 }
 
-/** The list row for a document. Its accessible name embeds the filename. */
+/**
+ * The list row for a document. Its accessible name is "<filename>, <kind>",
+ * so the match anchors on the filename prefix — a bare substring match also
+ * catches the row's "Actions for <filename>" menu trigger and trips strict
+ * mode.
+ */
 export function fileRow(page: Page, filename: string): Locator {
-  return page.getByRole("button", { name: filename });
+  const escaped = filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return page.getByRole("button", { name: new RegExp(`^${escaped}(,|$)`) });
 }
 
 /**
