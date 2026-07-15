@@ -21,8 +21,8 @@ use opake_wasm::bindings::{
     DirectorySnapshotEntry, DirectoryTreeSnapshot, DocumentMetadataDto, DownloadResult,
     EncryptedPayloadDto, GrantEntryDto, InboxGrantDto, InboxSnapshotDto, ListWorkspacesResultDto,
     MutationResultDto, PairRequestResultDto, PendingShareEntryDto, ResolvedGrantMetadataDto,
-    ResolvedIdentityDto, TreeWithMetadataDto, TypedEntry, WorkspaceEntryDto, WorkspaceSnapshotDto,
-    WorkspaceSyncResultDto,
+    ResolvedIdentityDto, TreeWithMetadataDto, TypedEntry, UnreadableRefDto, WorkspaceEntryDto,
+    WorkspaceSnapshotDto, WorkspaceSyncResultDto,
 };
 
 // ---------------------------------------------------------------------------
@@ -153,6 +153,12 @@ fn emit_grant_entry() {
 fn emit_inbox_grant() {
     InboxGrantDto::export().expect("InboxGrantDto");
     assert!(generated("InboxGrant.ts").exists());
+}
+
+#[test]
+fn emit_unreadable_ref() {
+    UnreadableRefDto::export().expect("UnreadableRefDto");
+    assert!(generated("UnreadableRef.ts").exists());
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, EncryptedMetadata, KeyringMember, SCHEMA_VERSION};
+use super::{EncryptedMetadata, KeyringMember, SCHEMA_VERSION};
 
 /// A snapshot of a keyring's members at a given rotation, preserved so that
 /// remaining members can still decrypt documents uploaded under older group keys.
@@ -13,7 +13,6 @@ pub struct KeyHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Keyring {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub algo: String,
     pub members: Vec<KeyringMember>,

@@ -1,8 +1,14 @@
 # Opake indexer — hermetic dev-env image.
 #
-# Build context is apps/indexer (this Dockerfile lives in dev-env/build/):
+# Build context is the repo root (this Dockerfile lives in dev-env/build/):
 #   docker build -f dev-env/build/indexer.Dockerfile \
-#     -t opake-devenv-indexer:pinned apps/indexer
+#     -t opake-devenv-indexer:pinned .
+#
+# The context is the repo root, not apps/indexer, because the indexer embeds
+# `lexicons/vocabulary.json` and the `at.opake.*` lexicon schemas at compile
+# time (`@external_resource`, the shared single source of truth with the Rust
+# core). Those live at the repo root, outside apps/indexer, so the build stage
+# copies both the app (from apps/indexer/) and the lexicons.
 #
 # Produces a prod `mix release` (release name: opake_indexer). Runtime config
 # is read at RUN time from the environment (see config/runtime.exs): the build
@@ -32,20 +38,27 @@ ENV MIX_ENV=prod
 RUN mix local.hex --force && mix local.rebar --force
 
 # Dependency layer — cached until mix.exs / mix.lock change.
-COPY mix.exs mix.lock ./
+COPY apps/indexer/mix.exs apps/indexer/mix.lock ./
 RUN mix deps.get --only prod
 RUN mix deps.compile
 
+# Shared lexicon artifacts (single source of truth with the Rust core). The
+# indexer's Lexicon.{Vocabulary,Schema} modules read these at compile time via
+# `@external_resource`, resolving `../../../../../lexicons` from lib/ to the
+# container root, so they must sit at /lexicons before `mix compile`. Only the
+# build stage needs them: the bytes are baked into the compiled BEAM.
+COPY lexicons /lexicons
+
 # Compile-time config (config.exs, prod.exs) feeds the release; copy before
 # compiling the app so config changes invalidate at the right layer.
-COPY config config
-COPY priv priv
-COPY lib lib
+COPY apps/indexer/config config
+COPY apps/indexer/priv priv
+COPY apps/indexer/lib lib
 
 RUN mix compile
 
 # Runtime config + release entrypoint.
-COPY rel rel
+COPY apps/indexer/rel rel
 
 RUN mix release
 

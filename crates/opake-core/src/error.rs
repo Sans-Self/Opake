@@ -114,6 +114,32 @@ pub enum Error {
         missing: Vec<String>,
     },
 
+    /// A supersede-chain link cannot be understood: under a schema version
+    /// this client knows, its bytes fail to parse or it lacks a valid
+    /// `opakeVersion`. Distinct from `InvalidRecord` so callers can tell "the
+    /// record I fetched is malformed" from "a link somewhere in the chain I
+    /// walked is malformed". An authority walk that crosses this link cannot
+    /// verify the proposed head, so the client rejects the head and falls back
+    /// to the last verifiable state; a mutation whose target chain contains it
+    /// is refused before any write (see `record-validity` § writes refuse
+    /// state they do not fully understand, `tree-chains` § unverifiable heads).
+    #[error("chain link {uri} is corrupt and cannot be verified")]
+    ChainLinkCorrupt { uri: String },
+
+    /// A supersede-chain link declares a schema version newer than this client
+    /// supports. The link is well-formed and visible on read paths, but a
+    /// mutation whose target chain contains it is refused: writing against a
+    /// link whose semantics this client cannot see would clobber or fork them.
+    /// The message is actionable by construction — the block resolves the
+    /// moment the user updates their client (see `record-validity` §
+    /// future-version records are visible, locked, and actionable).
+    #[error("chain link {uri} requires a newer client: it declares schema version {version}, but this client supports up to {supported}. Update your client to write to this workspace.")]
+    ChainLinkNeedsNewerClient {
+        uri: String,
+        version: u32,
+        supported: u32,
+    },
+
     /// A code path is recognised but not yet wired through. Distinct from
     /// `InvalidRecord` (which means "wire bytes are malformed") so callers
     /// can distinguish "this op makes no sense" from "this op makes sense

@@ -427,6 +427,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 &self.did,
                 &workspace_id,
                 &private_keys.bundle(),
+                keyring.opake_version,
             )?;
             let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
                 .unwrap_or_default();
@@ -513,6 +514,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &self.did,
             &workspace_id,
             &private_keys.bundle(),
+            keyring.opake_version,
         )?;
 
         // Decrypt metadata for the workspace name
@@ -763,6 +765,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &self.did,
             &workspace_id,
             private_keys,
+            envelope.record.opake_version,
         ) {
             Ok(k) => k,
             Err(e) => {
@@ -1025,7 +1028,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let mut new_record = prior;
         new_record.members.push(crate::records::KeyringMember {
             wrapped_key: wrapped,
-            role,
+            role: role.clone(),
         });
 
         // Admission grants the full history, not just the current key: for
@@ -1053,7 +1056,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             )?;
             entry.members.push(crate::records::KeyringMember {
                 wrapped_key: wrapped_historical,
-                role,
+                role: role.clone(),
             });
         }
 
@@ -1201,7 +1204,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 .members
                 .iter()
                 .find(|m| m.did() == *did)
-                .map(|m| m.role)
+                .map(|m| m.role.clone())
                 .unwrap_or(Role::Editor);
             new_members.push(KeyringMember {
                 wrapped_key: wrapped,
@@ -1366,6 +1369,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         did: &str,
         wrap_anchor: &str,
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
+        declared_version: u32,
     ) -> Result<ContentKey, Error> {
         let member = members
             .iter()
@@ -1375,6 +1379,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &member.wrapped_key,
             private_keys,
             &crate::crypto::WrapContext::Keyring { uri: wrap_anchor },
+            // Transcript derives from the keyring's own declared version.
+            declared_version,
         )?)
     }
 
@@ -1436,6 +1442,20 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .await
     }
 
+    /// Fetch all incoming grants plus the references skipped as unreadable, so
+    /// the inbox keeper can signal poison grants distinctly.
+    pub async fn list_inbox_detailed(&mut self) -> Result<crate::indexer::InboxFetch, Error> {
+        let signing_key = self.require_signing_key()?;
+        let url = self.resolve_indexer_url();
+        crate::indexer::fetch_inbox_all_detailed(
+            self.client.transport(),
+            &url,
+            &self.did,
+            &signing_key,
+        )
+        .await
+    }
+
     /// Fetch all workspaces the user is a member of. Each envelope's
     /// `record` is the current keyring chain head, including the full
     /// member list.
@@ -1445,6 +1465,25 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let signing_key = self.require_signing_key()?;
         let url = self.resolve_indexer_url();
         crate::indexer::fetch_member_workspaces(
+            self.client.transport(),
+            &url,
+            &self.did,
+            &signing_key,
+        )
+        .await
+    }
+
+    /// Like [`discover_member_workspaces`] but keeps the keyring references
+    /// skipped as unreadable, so the workspace keeper can carry a distinct
+    /// exists-but-unreadable signal.
+    ///
+    /// [`discover_member_workspaces`]: Self::discover_member_workspaces
+    pub async fn discover_member_workspaces_detailed(
+        &mut self,
+    ) -> Result<crate::indexer::MemberWorkspacesFetch, Error> {
+        let signing_key = self.require_signing_key()?;
+        let url = self.resolve_indexer_url();
+        crate::indexer::fetch_member_workspaces_detailed(
             self.client.transport(),
             &url,
             &self.did,

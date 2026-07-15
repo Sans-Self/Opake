@@ -71,6 +71,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     wrapped,
                     &cabinet.private_keys(),
                     &crypto::WrapContext::Cabinet,
+                    directory.opake_version,
                 )?
             }
             KeyWrapping::Keyring(kr) => {

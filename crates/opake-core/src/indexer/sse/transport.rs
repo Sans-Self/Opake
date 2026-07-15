@@ -38,11 +38,16 @@ pub trait SseConnection {
     /// Await the next parsed event.
     ///
     /// Returns:
-    /// - `Ok(Some(event))` on a parsed frame
+    /// - `Ok(Some(event))` on a parsed frame — including
+    ///   [`SseEvent::CorruptRecord`](super::events::SseEvent::CorruptRecord)
+    ///   for a poison record body, which is a delivered event, not a fault
     /// - `Ok(None)` on clean connection close (rare — the broadcaster
     ///   keeps streams open indefinitely)
-    /// - `Err(_)` on transport failure, parse error, or closed browser tab
+    /// - `Err(_)` on genuine transport failure or a closed browser tab ONLY
     ///
-    /// The consumer treats any error or clean-close as "reconnect now."
+    /// Per-frame parse errors (a malformed control payload, a corrupt record
+    /// body) are logged and skipped by the connection, never surfaced as `Err`:
+    /// the consumer treats every error and clean-close as "reconnect now," so
+    /// only true transport failures may trigger a reconnect.
     fn next_event(&mut self) -> impl Future<Output = Result<Option<SseEvent>, Error>>;
 }

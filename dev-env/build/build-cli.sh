@@ -26,7 +26,7 @@ src_hash() {
   cd "$REPO"
   {
     shasum Cargo.toml Cargo.lock
-    find crates apps/cli -type f -not -path '*/target/*' -print0 \
+    find crates apps/cli lexicons -type f -not -path '*/target/*' -print0 \
       | sort -z | xargs -0 shasum
   } | shasum | cut -d' ' -f1
 }
@@ -43,6 +43,7 @@ build() {
   cp "$REPO/Cargo.toml" "$REPO/Cargo.lock" "$ctx/"
   cp -R "$REPO/crates" "$ctx/crates"
   mkdir -p "$ctx/apps" && cp -R "$REPO/apps/cli" "$ctx/apps/cli"
+  cp -R "$REPO/lexicons" "$ctx/lexicons"
   find "$ctx" -type d -name target -prune -exec rm -rf {} + 2>/dev/null || true
   docker build -t "$IMAGE" --label "$LABEL_KEY=$hash" -f "$HERE/cli.Dockerfile" "$ctx"
   rm -rf "$ctx"

@@ -61,6 +61,7 @@ pub async fn download_from_grant(
         &crypto::WrapContext::Document {
             uri: &grant.document,
         },
+        grant.opake_version,
     )?;
 
     // Fetch the document record
@@ -148,6 +149,7 @@ pub(crate) async fn resolve_grant_metadata(
         &crypto::WrapContext::Document {
             uri: &grant.document,
         },
+        grant.opake_version,
     )?;
 
     let doc_at = atproto::parse_at_uri(&grant.document)?;

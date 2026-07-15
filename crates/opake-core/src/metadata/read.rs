@@ -74,6 +74,7 @@ fn unwrap_content_key(
                 wrapped,
                 private_keys,
                 &crypto::WrapContext::Document { uri: document_uri },
+                doc.opake_version,
             )?)
         }
         Encryption::Keyring(kr_enc) => {

@@ -119,6 +119,12 @@ pub struct ResolvedPath {
 struct DirectoryInfo {
     /// Decrypted name. Empty until `decrypt_names()` is called.
     name: String,
+    /// The directory record's own declared `opakeVersion`. Threaded into the
+    /// content-key unwrap so the KDF transcript derives from the record's
+    /// declaration rather than this client's compile-time constant (see
+    /// `record-validity` § cryptographic parameters derive from the record's
+    /// declaration).
+    opake_version: u32,
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     entries: Vec<String>,
@@ -131,10 +137,52 @@ struct DirectoryInfo {
     is_workspace_root: bool,
 }
 
+/// Client-assigned display name for a placeholder standing in for a corrupt or
+/// future-version directory record. NEVER derived from record content — the
+/// record is exactly the thing we could not read (see `record-validity`
+/// § corrupt containers render as placeholders).
+pub const PLACEHOLDER_DISPLAY_NAME: &str = "Unreadable item";
+
+/// An opaque stand-in for a directory record the client could not fully
+/// understand, rendered at the position surviving references establish for it.
+///
+/// A placeholder is derived state, held apart from `directories` so it can never
+/// be confused with a readable record: it carries no crypto envelope and no
+/// attacker-controllable text. Its `entries` are whatever children a prior
+/// readable version of the record listed — preserved across a degrade so the
+/// subtree stays attached, empty when the record was corrupt from first sight.
+#[derive(Debug, Clone)]
+pub struct PlaceholderNode {
+    /// Why the underlying record is unreadable.
+    pub reason: crate::records::UnreadableReason,
+    /// Child URIs preserved from a prior readable version, if any.
+    pub entries: Vec<String>,
+}
+
+/// Outcome of folding unreadable references into the tree: how many surfaced as
+/// visible placeholders vs how many were count-only (no URI, a non-directory,
+/// or an element the authorized snapshot does not reference).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnreadableTally {
+    pub placeholders: usize,
+    pub count_only: usize,
+}
+
+impl UnreadableTally {
+    /// Total unreadable references folded in.
+    pub fn total(&self) -> usize {
+        self.placeholders + self.count_only
+    }
+}
+
 #[derive(Debug)]
 pub struct DirectoryTree {
     /// URI → (name, entries) for every directory record.
     directories: HashMap<String, DirectoryInfo>,
+    /// URI → placeholder for every corrupt / future-version directory record
+    /// the authorized snapshot references. Disjoint from `directories`: a
+    /// readable record always wins, so a URI is never in both.
+    placeholders: HashMap<String, PlaceholderNode>,
     /// The root directory URI, if it exists.
     root_uri: Option<String>,
 }
@@ -162,6 +210,7 @@ impl DirectoryTree {
                     uri,
                     DirectoryInfo {
                         name: String::new(),
+                        opake_version: dir.opake_version,
                         key_wrapping: dir.key_wrapping,
                         encrypted_metadata: dir.encrypted_metadata,
                         entries: dir.entries.into_iter().map(|e| e.target).collect(),
@@ -207,6 +256,7 @@ impl DirectoryTree {
 
         Self {
             directories,
+            placeholders: HashMap::new(),
             root_uri,
         }
     }
@@ -256,11 +306,15 @@ impl DirectoryTree {
     pub(crate) async fn load(
         client: &mut crate::client::XrpcClient<impl crate::client::Transport>,
     ) -> Result<Self, Error> {
-        let dir_entries: Vec<(String, Directory)> =
-            crate::client::list_collection(client, DIRECTORY_COLLECTION, |uri, dir: Directory| {
-                (uri.to_owned(), dir)
-            })
-            .await?;
+        let dir_entries: Vec<(String, Directory)> = crate::client::list_collection(
+            client,
+            DIRECTORY_COLLECTION,
+            crate::records::vocabulary::RecordKind::Directory,
+            crate::client::DegradationPolicy::Counted,
+            |uri, dir: Directory, _needs_newer| (uri.to_owned(), dir),
+        )
+        .await?
+        .entries;
 
         Ok(Self::from_records(dir_entries))
     }
@@ -295,9 +349,13 @@ impl DirectoryTree {
                     // wrap was scoped with `WrapContext::Cabinet`.
                     let wrapped = direct.keys.iter().find(|k| k.did == did);
                     match wrapped {
-                        Some(w) => {
-                            crypto::unwrap_key(w, private_keys, &crypto::WrapContext::Cabinet).ok()
-                        }
+                        Some(w) => crypto::unwrap_key(
+                            w,
+                            private_keys,
+                            &crypto::WrapContext::Cabinet,
+                            info.opake_version,
+                        )
+                        .ok(),
                         None => None,
                     }
                 }
@@ -428,9 +486,8 @@ impl DirectoryTree {
             match entry_kind_from_uri(uri) {
                 Some(EntryKind::Directory) => {
                     let name = self
-                        .directories
-                        .get(uri.as_str())
-                        .map(|d| d.name.clone())
+                        .directory_name(uri.as_str())
+                        .map(str::to_owned)
                         .unwrap_or_else(|| "?".into());
                     dirs.push((uri.clone(), EntryKind::Directory, name));
                 }
@@ -475,13 +532,13 @@ impl DirectoryTree {
             output.push_str(suffix);
 
             if *kind == EntryKind::Directory {
-                if let Some(dir) = self.directories.get(uri.as_str()) {
+                if let Some(entries) = self.entries_for(uri.as_str()) {
                     let child_prefix = if is_last {
                         format!("{prefix}    ")
                     } else {
                         format!("{prefix}│   ")
                     };
-                    let sorted = self.sort_entries(&dir.entries, documents);
+                    let sorted = self.sort_entries(entries, documents);
                     self.render_entries(&sorted, documents, output, &child_prefix);
                 }
             }
@@ -497,21 +554,43 @@ impl DirectoryTree {
     }
 
     /// Returns the child entry URIs for a directory, or None if the URI
-    /// is not a known directory.
+    /// is not a known directory. A placeholder yields its preserved children
+    /// (empty when it was corrupt from first sight).
     pub fn entries_for(&self, uri: &str) -> Option<&[String]> {
         self.directories
             .get(uri)
             .map(|info| info.entries.as_slice())
+            .or_else(|| self.placeholders.get(uri).map(|p| p.entries.as_slice()))
     }
 
-    /// Returns the decrypted name for a directory URI.
+    /// Returns the decrypted name for a directory URI. A placeholder returns
+    /// the client-assigned [`PLACEHOLDER_DISPLAY_NAME`], never record content.
     pub fn directory_name(&self, uri: &str) -> Option<&str> {
-        self.directories.get(uri).map(|info| info.name.as_str())
+        if let Some(info) = self.directories.get(uri) {
+            return Some(info.name.as_str());
+        }
+        self.placeholders.get(uri).map(|_| PLACEHOLDER_DISPLAY_NAME)
     }
 
-    /// Whether the given URI is a known directory in this tree.
+    /// Whether the given URI is a known directory in this tree — a readable
+    /// record or a placeholder standing in for an unreadable one.
     pub fn is_directory(&self, uri: &str) -> bool {
-        self.directories.contains_key(uri)
+        self.directories.contains_key(uri) || self.placeholders.contains_key(uri)
+    }
+
+    /// Whether the given URI is a placeholder for an unreadable record.
+    pub fn is_placeholder(&self, uri: &str) -> bool {
+        self.placeholders.contains_key(uri)
+    }
+
+    /// The unreadable reason for a placeholder URI, if it is one.
+    pub fn placeholder_reason(&self, uri: &str) -> Option<crate::records::UnreadableReason> {
+        self.placeholders.get(uri).map(|p| p.reason)
+    }
+
+    /// URIs of every placeholder node currently in the tree.
+    pub fn placeholder_uris(&self) -> impl Iterator<Item = &str> {
+        self.placeholders.keys().map(String::as_str)
     }
 
     /// Whether the given URI looks like a document URI (by collection segment).
@@ -967,9 +1046,12 @@ impl DirectoryTree {
     // -----------------------------------------------------------------------
 
     /// Remove a directory record by URI. If the deleted URI was the root,
-    /// clear `root_uri`. Returns the resulting tree change.
+    /// clear `root_uri`. Also clears any placeholder standing in for the URI.
+    /// Returns the resulting tree change.
     pub fn apply_directory_delete(&mut self, uri: &str) -> TreeChange {
-        if self.directories.remove(uri).is_none() {
+        let removed_record = self.directories.remove(uri).is_some();
+        let removed_placeholder = self.placeholders.remove(uri).is_some();
+        if !removed_record && !removed_placeholder {
             return TreeChange::NoOp;
         }
         if self.root_uri.as_deref() == Some(uri) {
@@ -978,6 +1060,88 @@ impl DirectoryTree {
         TreeChange::Removed {
             uri: uri.to_string(),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Degradation — placeholders for corrupt / future-version records
+    // -----------------------------------------------------------------------
+
+    /// Fold a batch of unreadable references (from lenient snapshot/delta
+    /// classification) into the tree. Returns a tally of how many became
+    /// visible placeholders vs how many were count-only.
+    ///
+    /// Idempotent and position-stable: re-applying the same refs across a
+    /// snapshot refresh preserves each placeholder at the position its
+    /// surviving references establish (see `record-validity` § corrupt
+    /// containers render as placeholders).
+    pub fn apply_unreadable_refs(
+        &mut self,
+        refs: &[crate::records::UnreadableRef],
+    ) -> UnreadableTally {
+        let mut tally = UnreadableTally::default();
+        for reference in refs {
+            if self.apply_unreadable_ref(reference) {
+                tally.placeholders += 1;
+            } else {
+                tally.count_only += 1;
+            }
+        }
+        tally
+    }
+
+    /// Fold one unreadable reference in. Returns `true` iff it became a visible
+    /// placeholder — the reference must carry a URI, name a directory record,
+    /// and be referenced by the authorized snapshot. Everything else is
+    /// count-only: a missing URI, a corrupt document (no node shape), or an
+    /// element nothing in scope references (no out-of-scope disclosure).
+    ///
+    /// When the URI currently renders as a readable directory, it is degraded
+    /// in place — its children move onto the placeholder so the subtree stays
+    /// attached and visible beneath it.
+    pub fn apply_unreadable_ref(&mut self, reference: &crate::records::UnreadableRef) -> bool {
+        let Some(uri) = reference.uri.as_deref() else {
+            return false; // count-only: no URI to hang a node on
+        };
+        // Only directory records are placeholder containers; a corrupt document
+        // has no children and no node to stand in for.
+        if entry_kind_from_uri(uri) != Some(EntryKind::Directory) {
+            return false;
+        }
+        // Authorized-snapshot invariant: only elements the snapshot already
+        // references may surface. Degradation never invents or moves a position.
+        if !self.is_referenced(uri) {
+            return false;
+        }
+
+        // Preserve children: from a readable record being degraded, or from a
+        // prior placeholder at this URI. Empty when the record was corrupt from
+        // first sight.
+        let entries = self
+            .directories
+            .remove(uri)
+            .map(|info| info.entries)
+            .or_else(|| self.placeholders.get(uri).map(|p| p.entries.clone()))
+            .unwrap_or_default();
+
+        self.placeholders.insert(
+            uri.to_string(),
+            PlaceholderNode {
+                reason: reference.reason,
+                entries,
+            },
+        );
+        true
+    }
+
+    /// Whether any readable directory or placeholder lists `uri` as a child.
+    fn is_referenced(&self, uri: &str) -> bool {
+        self.directories
+            .values()
+            .any(|d| d.entries.iter().any(|e| e == uri))
+            || self
+                .placeholders
+                .values()
+                .any(|p| p.entries.iter().any(|e| e == uri))
     }
 
     /// Apply a single indexed directory record to the in-memory tree.
@@ -1004,6 +1168,7 @@ impl DirectoryTree {
 
         let mut info = DirectoryInfo {
             name: String::new(),
+            opake_version: dir.opake_version,
             key_wrapping: dir.key_wrapping.clone(),
             encrypted_metadata: dir.encrypted_metadata.clone(),
             entries,
@@ -1013,6 +1178,9 @@ impl DirectoryTree {
 
         info.name = decrypt_directory_name(&info, ctx).unwrap_or_else(|| "?".into());
 
+        // A readable record supersedes any placeholder that stood in for this
+        // URI — the record is understood now, so the stand-in is gone.
+        self.placeholders.remove(uri);
         self.directories.insert(uri.to_string(), info);
 
         // Advance `root_uri` when this record supersedes the current root,
@@ -1123,7 +1291,13 @@ fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Opti
         KeyWrapping::Direct(direct) => {
             let wrapped = direct.keys.iter().find(|k| k.did == ctx.did)?;
             let private_keys = ctx.private_keys?;
-            crypto::unwrap_key(wrapped, private_keys, &crypto::WrapContext::Cabinet).ok()?
+            crypto::unwrap_key(
+                wrapped,
+                private_keys,
+                &crypto::WrapContext::Cabinet,
+                info.opake_version,
+            )
+            .ok()?
         }
         KeyWrapping::Keyring(kr) => {
             let keyring_uri = &kr.keyring_ref.keyring;

@@ -16,8 +16,34 @@ pub use list::{list_keyrings, KeyringEntry};
 pub use remove_member::remove_member;
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
+use crate::error::Error;
+use crate::records::{Keyring, SCHEMA_VERSION};
 
 pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
+
+/// Guard a keyring re-wrap (add/remove member, rotate) against writing to a
+/// keyring this client cannot fully understand.
+///
+/// A keyring declaring a schema version newer than this client supports is
+/// visible on read paths but locked for writes: re-wrapping under it would
+/// clobber or fork semantics the client cannot see. The refusal names the
+/// keyring and states that a newer client is required, so the block is
+/// self-explanatory and resolves the moment the user updates (see
+/// `record-validity` § future-version records are visible, locked, and
+/// actionable, and § writes refuse state they do not fully understand).
+///
+/// A structurally corrupt keyring never reaches this guard — it fails the
+/// typed parse at fetch and the write is refused there, before any re-wrap.
+pub(crate) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(), Error> {
+    if keyring.opake_version > SCHEMA_VERSION {
+        return Err(Error::ChainLinkNeedsNewerClient {
+            uri: uri.to_owned(),
+            version: keyring.opake_version,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    Ok(())
+}
 
 /// Decrypt a keyring name from a raw Keyring record using an already-unwrapped group key.
 pub fn decrypt_keyring_name_from_record(
@@ -76,6 +102,7 @@ pub fn decrypt_indexer_workspace_name(
         &crypto::WrapContext::Keyring {
             uri: keyring.wrap_anchor(&envelope.uri),
         },
+        keyring.opake_version,
     )
     .ok()?;
     let metadata: KeyringMetadata =

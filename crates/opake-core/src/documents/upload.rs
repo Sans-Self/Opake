@@ -365,6 +365,7 @@ mod tests {
             &envelope.keys[0],
             &keys.private_keys(),
             &crypto::WrapContext::Document { uri: &test_uri },
+            doc.opake_version,
         )
         .unwrap();
 
@@ -417,6 +418,7 @@ mod tests {
                 &envelope.keys[0],
                 &keys.private_keys(),
                 &crypto::WrapContext::Document { uri: &uri },
+                doc.opake_version,
             )
             .unwrap();
             (content_key, envelope.nonce.encoded)
@@ -546,6 +548,7 @@ mod tests {
             wrapped,
             &keys.private_keys(),
             &crypto::WrapContext::Document { uri: &test_uri },
+            doc.opake_version,
         )
         .unwrap();
 

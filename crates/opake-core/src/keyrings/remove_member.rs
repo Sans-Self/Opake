@@ -6,7 +6,7 @@ use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore};
 use crate::error::Error;
-use crate::records::{self, KeyHistoryEntry, Keyring, KeyringMember, Role};
+use crate::records::{KeyHistoryEntry, Keyring, KeyringMember, Role};
 
 use super::KEYRING_COLLECTION;
 
@@ -52,13 +52,15 @@ pub async fn remove_member(
         .await?;
 
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
-    records::check_version(keyring.opake_version)?;
+    // Write-strict: refuse to re-wrap a keyring newer than this client
+    // understands, naming the keyring and the required remedy.
+    super::guard_keyring_writable(keyring_uri, &keyring)?;
 
     // Build a role map from existing members before mutation.
     let role_map: HashMap<String, Role> = keyring
         .members
         .iter()
-        .map(|m| (m.did().to_owned(), m.role))
+        .map(|m| (m.did().to_owned(), m.role.clone()))
         .collect();
 
     let original_count = keyring.members.len();
@@ -88,7 +90,7 @@ pub async fn remove_member(
     let new_members: Result<Vec<KeyringMember>, Error> = new_wrapped
         .into_iter()
         .map(|wk| {
-            let role = role_map.get(&wk.did).copied().ok_or_else(|| {
+            let role = role_map.get(&wk.did).cloned().ok_or_else(|| {
                 Error::InvalidRecord(format!(
                     "{} is not a member of this keyring (cannot re-wrap)",
                     wk.did

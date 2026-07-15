@@ -12,7 +12,7 @@ use crate::indexer::auth::sign_indexer_request;
 use crate::indexer::types::{
     InboxResponse, IndexerEnvelope, TreeDelta, WorkspaceChainHeadResponse, WorkspacesResponse,
 };
-use crate::records::{Grant, Keyring};
+use crate::records::{Grant, Keyring, UnreadableRef};
 use crate::workspace::WorkspaceId;
 
 /// The machine-readable code a workspace-scoped endpoint returns when it holds
@@ -121,14 +121,23 @@ pub async fn fetch_inbox(
     })
 }
 
-/// Fetch all inbox grants, paginating automatically until exhausted.
-pub async fn fetch_inbox_all(
+/// All inbox grants plus the unreadable references skipped while parsing every
+/// page — so a poison grant surfaces to the inbox keeper rather than vanishing.
+pub struct InboxFetch {
+    pub grants: Vec<IndexerEnvelope<Grant>>,
+    pub unreadable: Vec<UnreadableRef>,
+}
+
+/// Fetch all inbox grants (with unreadable references), paginating until
+/// exhausted. Unreadable references accumulate across pages.
+pub async fn fetch_inbox_all_detailed(
     transport: &impl Transport,
     indexer_url: &str,
     did: &str,
     signing_key: &[u8; 32],
-) -> Result<Vec<IndexerEnvelope<Grant>>, Error> {
-    let mut all_grants = Vec::new();
+) -> Result<InboxFetch, Error> {
+    let mut grants = Vec::new();
+    let mut unreadable = Vec::new();
     let mut cursor: Option<String> = None;
 
     loop {
@@ -144,14 +153,31 @@ pub async fn fetch_inbox_all(
 
         let has_more = page.cursor.is_some();
         cursor = page.cursor;
-        all_grants.extend(page.grants);
+        grants.extend(page.grants);
+        unreadable.extend(page.unreadable);
 
         if !has_more {
             break;
         }
     }
 
-    Ok(all_grants)
+    Ok(InboxFetch { grants, unreadable })
+}
+
+/// Fetch all inbox grants, paginating automatically until exhausted. Convenience
+/// wrapper that drops the unreadable references — callers that surface poison
+/// grants use [`fetch_inbox_all_detailed`].
+pub async fn fetch_inbox_all(
+    transport: &impl Transport,
+    indexer_url: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+) -> Result<Vec<IndexerEnvelope<Grant>>, Error> {
+    Ok(
+        fetch_inbox_all_detailed(transport, indexer_url, did, signing_key)
+            .await?
+            .grants,
+    )
 }
 
 /// Fetch every keyring head for which the caller is a current member.
@@ -165,6 +191,28 @@ pub async fn fetch_member_workspaces(
     did: &str,
     signing_key: &[u8; 32],
 ) -> Result<Vec<IndexerEnvelope<Keyring>>, Error> {
+    Ok(
+        fetch_member_workspaces_detailed(transport, indexer_url, did, signing_key)
+            .await?
+            .workspaces,
+    )
+}
+
+/// Member workspaces plus the keyring references skipped as unreadable — a
+/// corrupt keyring is dropped from the list but surfaces here so the workspace
+/// keeper can signal it distinctly.
+pub struct MemberWorkspacesFetch {
+    pub workspaces: Vec<IndexerEnvelope<Keyring>>,
+    pub unreadable: Vec<UnreadableRef>,
+}
+
+/// Like [`fetch_member_workspaces`] but keeps the unreadable references.
+pub async fn fetch_member_workspaces_detailed(
+    transport: &impl Transport,
+    indexer_url: &str,
+    did: &str,
+    signing_key: &[u8; 32],
+) -> Result<MemberWorkspacesFetch, Error> {
     let path = "/api/keyrings";
     let timestamp = crate::client::time::unix_now() as u64;
     let auth = sign_indexer_request("GET", path, did, signing_key, timestamp);
@@ -186,7 +234,10 @@ pub async fn fetch_member_workspaces(
             message: format!("failed to parse workspaces response: {e}"),
         })?;
 
-    Ok(parsed.workspaces)
+    Ok(MemberWorkspacesFetch {
+        workspaces: parsed.workspaces,
+        unreadable: parsed.unreadable,
+    })
 }
 
 // ---------------------------------------------------------------------------

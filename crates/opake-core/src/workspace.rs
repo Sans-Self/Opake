@@ -247,6 +247,7 @@ pub(crate) fn derive_historical_keys(
                 &member.wrapped_key,
                 private_keys,
                 &crypto::WrapContext::Keyring { uri: anchor },
+                keyring.opake_version,
             )
             .ok()?;
             Some(HistoricalKey {

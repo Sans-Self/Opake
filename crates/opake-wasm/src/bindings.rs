@@ -189,6 +189,13 @@ pub struct DirectorySnapshotEntry {
     pub name: String,
     pub entries: Vec<TypedEntry>,
     pub parent_uri: Option<String>,
+    /// Set when this node is a placeholder for a record the client could not
+    /// read — `"corrupt"` or `"needs-newer-client"`. `None` for readable
+    /// directories. Drives the tree-view "unreadable" badge; the `name` is the
+    /// client-assigned placeholder label, never record content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-bindings", ts(optional))]
+    pub unreadable: Option<String>,
 }
 
 /// The full workspace tree as a map of directory URI → directory view.
@@ -374,6 +381,9 @@ impl From<&WorkspaceEntry> for WorkspaceEntryDto {
 )]
 pub struct WorkspaceSnapshotDto {
     pub entries: Vec<WorkspaceEntryDto>,
+    /// Workspaces skipped because their keyring was unreadable (corrupt or
+    /// future-version). Distinct from a workspace that does not exist.
+    pub unreadable: Vec<UnreadableRefDto>,
     pub loaded: bool,
 }
 
@@ -381,6 +391,14 @@ impl From<&WorkspaceSnapshot> for WorkspaceSnapshotDto {
     fn from(s: &WorkspaceSnapshot) -> Self {
         Self {
             entries: s.entries.iter().map(WorkspaceEntryDto::from).collect(),
+            unreadable: s
+                .unreadable
+                .iter()
+                .map(|u| UnreadableRefDto {
+                    uri: u.uri.clone(),
+                    reason: unreadable_reason_str(u.reason),
+                })
+                .collect(),
             loaded: s.loaded,
         }
     }
@@ -526,6 +544,9 @@ impl From<&InboxEntry> for InboxGrantDto {
 )]
 pub struct InboxSnapshotDto {
     pub entries: Vec<InboxGrantDto>,
+    /// Grants skipped because their record was unreadable (corrupt or
+    /// future-version). Distinct from a grant that simply isn't there.
+    pub unreadable: Vec<UnreadableRefDto>,
     pub loaded: bool,
 }
 
@@ -533,9 +554,53 @@ impl From<&InboxSnapshot> for InboxSnapshotDto {
     fn from(s: &InboxSnapshot) -> Self {
         Self {
             entries: s.entries.iter().map(InboxGrantDto::from).collect(),
+            unreadable: s
+                .unreadable
+                .iter()
+                .map(|u| UnreadableRefDto {
+                    uri: u.uri.clone(),
+                    reason: unreadable_reason_str(u.reason),
+                })
+                .collect(),
             loaded: s.loaded,
         }
     }
+}
+
+/// Wire string for an unreadable reason, matching the kebab-case serialization
+/// of `opake_core::records::UnreadableReason`. Lives here (always compiled)
+/// rather than in the wasm-only `wasm_util` so the host-side ts-bindings build
+/// can use it too.
+pub(crate) fn unreadable_reason_str(reason: opake_core::records::UnreadableReason) -> String {
+    use opake_core::records::UnreadableReason;
+    match reason {
+        UnreadableReason::Corrupt => "corrupt",
+        UnreadableReason::NeedsNewerClient => "needs-newer-client",
+    }
+    .to_owned()
+}
+
+/// A record skipped as unreadable — corrupt or future-version — surfaced to JS
+/// so the UI can signal "exists but can't be read" without inventing content.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(TS))]
+#[cfg_attr(
+    feature = "ts-bindings",
+    ts(
+        rename_all = "camelCase",
+        export,
+        export_to = "../../../packages/opake-sdk/src/generated/UnreadableRef.ts"
+    )
+)]
+pub struct UnreadableRefDto {
+    pub uri: String,
+    /// `"corrupt"` or `"needs-newer-client"`.
+    #[cfg_attr(
+        feature = "ts-bindings",
+        ts(type = "\"corrupt\" | \"needs-newer-client\"")
+    )]
+    pub reason: String,
 }
 
 /// Decrypted grant metadata — the SDK calls `resolveGrantMetadata` to

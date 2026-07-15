@@ -25,6 +25,14 @@ pub struct HealResult {
     pub grants_checked: usize,
     pub grants_deleted: usize,
     pub grants_failed: usize,
+    /// Grants left untouched because this client cannot fully understand them
+    /// (they declare a schema version newer than it supports). Healing is a
+    /// write, and a write must never revoke state it cannot read — so these
+    /// are reported, never deleted (see `record-validity` § writes refuse
+    /// state they do not fully understand, scenario "healing never revokes
+    /// what it cannot read"). Structurally corrupt grants never reach this
+    /// pass: the lenient `list_grants` skips them before healing sees them.
+    pub grants_skipped_locked: usize,
 }
 
 /// Check all grants for the authenticated account and clean up stale ones.
@@ -53,6 +61,20 @@ pub async fn heal_stale_grants(
     for grant in &grants {
         let recipient_did = &grant.recipient;
         let grant_uri = &grant.uri;
+
+        // Write-strict: a grant this client cannot fully understand
+        // (future-version, kept by the lenient list path and flagged
+        // `needs_newer`) is never revoked. Healing revokes on a *confirmed*
+        // read — "the recipient has no key" — and a locked grant is precisely
+        // the state we cannot confirm. Leave it, report it, move on.
+        if grant.needs_newer {
+            warn!(
+                "grant {grant_uri}: declares a newer schema version — left untouched \
+                 (healing never revokes what it cannot read)"
+            );
+            result.grants_skipped_locked += 1;
+            continue;
+        }
 
         // Check cache first, resolve on miss
         let key_status = match key_cache.get(recipient_did) {

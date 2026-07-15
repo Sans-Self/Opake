@@ -606,3 +606,75 @@ fn try_build_entry_non_member_returns_none() {
 
     assert!(result.is_none(), "non-member DID must return None");
 }
+
+// ---------------------------------------------------------------------------
+// Distinct unreadable-workspace signal (poison-record-resilience 3.2, 3.5)
+// ---------------------------------------------------------------------------
+
+use crate::records::{UnreadableReason, UnreadableRef};
+
+const CORRUPT_KR: &str = "at://did:plc:test/at.opake.keyring/corrupt";
+
+#[test]
+fn signal_unreadable_is_distinct_from_absent_and_present() {
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry("at://ws/readable", 0)]);
+
+    keeper.signal_unreadable(CORRUPT_KR, UnreadableReason::Corrupt);
+
+    let snap = keeper.snapshot();
+    // Readable workspace present in entries; corrupt one only in `unreadable`.
+    assert_eq!(snap.entries.len(), 1);
+    assert_eq!(snap.unreadable.len(), 1);
+    assert_eq!(snap.unreadable[0].uri, CORRUPT_KR);
+    assert_eq!(snap.unreadable[0].reason, UnreadableReason::Corrupt);
+    assert!(!snap.entries.iter().any(|e| e.workspace_id == CORRUPT_KR));
+}
+
+#[test]
+fn bootstrap_with_signals_carries_unreadable() {
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap_with_signals(
+        vec![sample_entry("at://ws/a", 0)],
+        &[UnreadableRef::needs_newer_client(Some(CORRUPT_KR.into()))],
+    );
+    let snap = keeper.snapshot();
+    assert_eq!(snap.entries.len(), 1);
+    assert_eq!(snap.unreadable.len(), 1);
+    assert_eq!(
+        snap.unreadable[0].reason,
+        UnreadableReason::NeedsNewerClient
+    );
+}
+
+// A corrupt keyring met via SSE upsert signals identically to bootstrap, and a
+// later readable record for the same workspace clears the signal.
+// spec:record-validity § SSE delivery matches snapshot delivery
+#[test]
+fn readable_upsert_clears_unreadable_signal() {
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.signal_unreadable(CORRUPT_KR, UnreadableReason::Corrupt);
+    assert_eq!(keeper.unreadable_count(), 1);
+
+    // A readable entry keyed by the same URI (genesis-shaped) supersedes it.
+    keeper.upsert(sample_entry(CORRUPT_KR, 1));
+
+    assert_eq!(keeper.unreadable_count(), 0);
+    let snap = keeper.snapshot();
+    assert!(snap.unreadable.is_empty());
+    assert!(snap.entries.iter().any(|e| e.workspace_id == CORRUPT_KR));
+}
+
+#[test]
+fn signal_unreadable_is_idempotent() {
+    let (captured, callback) = capture_snapshots();
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.install_watcher(callback);
+    let before = captured.borrow().len();
+
+    keeper.signal_unreadable(CORRUPT_KR, UnreadableReason::Corrupt);
+    keeper.signal_unreadable(CORRUPT_KR, UnreadableReason::Corrupt);
+
+    // First signal fires; the identical repeat does not.
+    assert_eq!(captured.borrow().len(), before + 1);
+}

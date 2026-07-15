@@ -381,9 +381,20 @@ impl WrapContext<'_> {
 /// `WrappedKey` lifted between record contexts (keyring → document, or
 /// keyring A → keyring B) produces a different derived key on unwrap
 /// and AES-KW integrity rejects the replay.
-fn hkdf_info(algo: &str, context: &WrapContext<'_>, recipient_did: &str) -> Vec<u8> {
+///
+/// `version` and `algo` come from the record's own declaration, never from
+/// this crate's compile-time constants — a record written by a newer client
+/// declaring an older, still-supported version must derive under the version
+/// it declares (see `record-validity` § cryptographic parameters derive from
+/// the record's declaration). The binding is domain separation and
+/// self-consistency only: a writer chooses its declaration and computes the
+/// matching transcript, so the declared version is NOT an attested fact and
+/// implementations must not treat it as one. No downgrade exploit follows —
+/// forging a transcript over content you do not hold fails the AES-KW
+/// integrity check.
+fn hkdf_info(version: u32, algo: &str, context: &WrapContext<'_>, recipient_did: &str) -> Vec<u8> {
     format!(
-        "opake-v{SCHEMA_VERSION}-{algo}-{tag}-{uri}-{recipient_did}",
+        "opake-v{version}-{algo}-{tag}-{uri}-{recipient_did}",
         tag = context.tag(),
         uri = context.uri(),
     )

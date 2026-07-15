@@ -156,6 +156,7 @@ mod tests {
                     &record.members[0].wrapped_key,
                     &owner.private_keys(),
                     &crypto::WrapContext::Keyring { uri: &uri },
+                    record.opake_version,
                 )
                 .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);

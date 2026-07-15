@@ -31,7 +31,8 @@ pub(crate) use get_or_create_root::get_or_create_root;
 pub use move_entry::{check_cycle, move_entry, MoveResult};
 pub use remove::{remove, RemoveResult};
 pub use tree::{
-    DecryptionCtx, DirectoryTree, DocumentNameResolver, EntryKind, ResolvedPath, TreeChange,
+    DecryptionCtx, DirectoryTree, DocumentNameResolver, EntryKind, PlaceholderNode, ResolvedPath,
+    TreeChange, UnreadableTally, PLACEHOLDER_DISPLAY_NAME,
 };
 
 pub const DIRECTORY_COLLECTION: &str = "at.opake.directory";

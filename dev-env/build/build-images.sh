@@ -19,7 +19,7 @@ echo "== jetstream (from source) =="
 docker build -t opake-devenv-jetstream:pinned -f "$HERE/jetstream.Dockerfile" "$HERE"
 
 echo "== indexer (mix release) =="
-docker build -t opake-devenv-indexer:pinned -f "$HERE/indexer.Dockerfile" "$REPO/apps/indexer"
+docker build -t opake-devenv-indexer:pinned -f "$HERE/indexer.Dockerfile" "$REPO"
 
 echo "== cli (opake, for bootstrap) =="
 # Single source of truth for the CLI image (bakes the src-hash freshness label).

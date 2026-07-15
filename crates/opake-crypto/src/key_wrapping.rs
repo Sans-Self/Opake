@@ -54,12 +54,15 @@ fn hybrid_salt(
 ///
 /// IKM is `Zeroizing` so the concatenated raw shared secrets do not linger in
 /// the heap after the wrapping key has been derived.
+#[allow(clippy::too_many_arguments)]
 fn derive_hybrid_wrapping_key(
     x25519_shared: &[u8; X25519_KEY_LEN],
     ml_kem_shared: &[u8; ML_KEM_SS_LEN],
     salt: &[u8],
     context: &WrapContext<'_>,
     recipient_did: &str,
+    version: u32,
+    algo: &str,
 ) -> Result<Zeroizing<[u8; 32]>, Error> {
     use hkdf::Hkdf;
     use sha2::Sha256;
@@ -71,7 +74,7 @@ fn derive_hybrid_wrapping_key(
     let hkdf = Hkdf::<Sha256>::new(Some(salt), &ikm[..]);
     let mut wrapping_key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
     hkdf.expand(
-        &hkdf_info(HYBRID_WRAP_ALGO, context, recipient_did),
+        &hkdf_info(version, algo, context, recipient_did),
         &mut *wrapping_key,
     )
     .map_err(|_| Error::KeyWrap("HKDF expand failed".into()))?;
@@ -124,12 +127,17 @@ pub fn wrap_key(
         recipient.ml_kem,
         &mlkem_ct_bytes,
     );
+    // The writer stamps its own current schema version and algorithm into
+    // the transcript — that is exactly what a reader must reconstruct from the
+    // record's declaration on unwrap.
     let wrapping_key = derive_hybrid_wrapping_key(
         x25519_shared.as_bytes(),
         &mlkem_shared_bytes,
         &salt,
         context,
         recipient_did,
+        crate::SCHEMA_VERSION,
+        HYBRID_WRAP_ALGO,
     )?;
 
     // ── AES-KW around the content key ──
@@ -158,18 +166,34 @@ pub fn wrap_key(
 /// the wrong one (or none) produces a different derived wrapping key and
 /// AES-KW integrity rejects the unwrap. This is the splice protection
 /// across record contexts.
+///
+/// `declared_version` is the enclosing record's own `opakeVersion`, threaded
+/// in by the caller — never this crate's compile-time `SCHEMA_VERSION`. It and
+/// the record's declared `algo` (`wrapped.algo`) are folded into the KDF
+/// transcript so a record written by a newer client but declaring an older,
+/// still-supported version derives under the version it declares (see
+/// `record-validity` § cryptographic parameters derive from the record's
+/// declaration). The declared values are self-consistency binding, not an
+/// attested fact: the caller is responsible for having already classified the
+/// record's version as supported (`check_version`) and its vocabulary as
+/// valid. This function refuses only a mechanism it cannot execute.
 pub fn unwrap_key(
     wrapped: &WrappedKey,
     keys: &PrivateKeyBundle<'_>,
     context: &WrapContext<'_>,
+    declared_version: u32,
 ) -> Result<ContentKey, Error> {
+    // Mechanism gate: this build only implements the hybrid construction, so a
+    // `WrappedKey` naming any other algorithm cannot be unwrapped here. This is
+    // a "can I execute this?" check, distinct from the transcript binding —
+    // the algo that goes into the transcript is the record's *declared* algo.
     if wrapped.algo != HYBRID_WRAP_ALGO {
         return Err(Error::Decryption(format!(
             "expected algo {HYBRID_WRAP_ALGO}, got {}",
             wrapped.algo
         )));
     }
-    unwrap_key_hybrid(wrapped, keys, context)
+    unwrap_key_hybrid(wrapped, keys, context, declared_version)
 }
 
 /// FIPS-203 ML-KEM-768 decapsulation key layout:
@@ -186,6 +210,7 @@ fn unwrap_key_hybrid(
     wrapped: &WrappedKey,
     keys: &PrivateKeyBundle<'_>,
     context: &WrapContext<'_>,
+    declared_version: u32,
 ) -> Result<ContentKey, Error> {
     let envelope = wrapped
         .ciphertext
@@ -241,12 +266,16 @@ fn unwrap_key_hybrid(
         &recipient_ml_kem_pub,
         &mlkem_ct_arr,
     );
+    // Transcript parameters come from the record's own declaration: the
+    // caller-supplied `declared_version` and the `WrappedKey`'s declared algo.
     let wrapping_key = derive_hybrid_wrapping_key(
         x25519_shared.as_bytes(),
         &mlkem_shared_bytes,
         &salt,
         context,
         &wrapped.did,
+        declared_version,
+        &wrapped.algo,
     )?;
 
     let kek = KekAes256::new((&*wrapping_key).into());

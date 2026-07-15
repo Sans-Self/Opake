@@ -14,19 +14,10 @@ use crate::client::{
 /// Public Bluesky API — used for handle resolution when no PDS is known yet.
 const BSKY_PUBLIC_API: &str = "https://public.api.bsky.app";
 
-/// The only X25519 algorithm we understand on a published public-key record.
-/// Any other string is rejected at resolve time.
-const EXPECTED_X25519_ALGO: &str = "x25519";
-
-/// The only ML-KEM algorithm we understand. Bogus values like
-/// `"ml-kem-512"` slip past byte-length validation but fail
-/// `mlkem768::validate_public_key` later — better to reject upfront with a
-/// clear "wrong algorithm" error than turn this into a DoS at wrap time.
-const EXPECTED_ML_KEM_ALGO: &str = "ml-kem-768";
-
 use crate::crypto::{MlKemPublicKey, X25519PublicKey, ML_KEM_PK_LEN};
 use crate::error::Error;
-use crate::records::{self, PublicKeyRecord, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
+use crate::records::vocabulary::{self, RecordKind};
+use crate::records::{PublicKeyRecord, UnreadableReason, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY};
 
 /// Ed25519 signing public key: 32 raw bytes.
 pub type Ed25519PublicKeyBytes = [u8; 32];
@@ -172,25 +163,26 @@ pub async fn resolve_identity(
         other => other,
     })?;
 
-    let record: PublicKeyRecord = serde_json::from_value(entry.value)?;
-    records::check_version(record.opake_version)?;
-
-    // Step 5b: Enforce algo strings before decoding bytes. A bogus
-    // algo + matching length would otherwise sneak through here and
-    // fail later at `wrap_key`'s `validate_public_key`, surfacing as
-    // a generic crypto error instead of a clear "wrong algorithm" one.
-    if record.x25519_algo != EXPECTED_X25519_ALGO {
-        return Err(Error::InvalidRecord(format!(
-            "unsupported X25519 algo: expected {EXPECTED_X25519_ALGO}, got {}",
-            record.x25519_algo
-        )));
-    }
-    if record.ml_kem_algo != EXPECTED_ML_KEM_ALGO {
-        return Err(Error::InvalidRecord(format!(
-            "unsupported ML-KEM algo: expected {EXPECTED_ML_KEM_ALGO}, got {}",
-            record.ml_kem_algo
-        )));
-    }
+    // Classify the fetched key through the shared record-validity contract:
+    // version is peeked first, then a structural parse and a vocabulary check
+    // against the `PublicKeyAlgo` table — which replaces the old compile-time
+    // EXPECTED_*_ALGO constants (a bogus `x25519Algo`/`mlKemAlgo` is now a
+    // vocabulary violation ⇒ corrupt, caught here rather than surfacing as a
+    // generic crypto error at wrap time). A corrupt or future-version key
+    // refuses the share with its own reason — distinct from a recipient who has
+    // no key at all (RecipientNotReady above), which keeps its pending-share
+    // queue semantics (see `record-validity` § "unreadable public key blocks
+    // sharing with a reason").
+    let record: PublicKeyRecord = vocabulary::classify_record(RecordKind::PublicKey, &entry.value)
+        .map_err(|reason| match reason {
+            UnreadableReason::Corrupt => Error::InvalidRecord(format!(
+                "{did}'s published public key is corrupt or unreadable; cannot share with them"
+            )),
+            UnreadableReason::NeedsNewerClient => Error::InvalidRecord(format!(
+                "{did}'s public key was written by a newer Opake version than this client \
+                 supports; update your client to share with them"
+            )),
+        })?;
 
     // Step 6: Decode and validate the X25519 public key.
     let key_bytes = record
@@ -470,7 +462,12 @@ mod tests {
         let err = resolve_identity(&mock, "https://pds.caller", "did:plc:future")
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("schema version"), "got: {err}");
+        // A future-version public key refuses the share with a newer-client
+        // reason (distinct from corrupt and from not-ready).
+        assert!(
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("newer")),
+            "expected a newer-client refusal, got: {err:?}",
+        );
     }
 
     #[tokio::test]
@@ -785,9 +782,11 @@ mod tests {
         let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
             .await
             .unwrap_err();
+        // A bogus `mlKemAlgo` is now a vocabulary violation ⇒ corrupt; the
+        // share is refused with the corrupt-key reason.
         assert!(
-            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("ml-kem-512") && msg.contains("ml-kem-768")),
-            "expected InvalidRecord with both algo strings, got: {err:?}",
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("corrupt")),
+            "expected a corrupt-key refusal, got: {err:?}",
         );
     }
 
@@ -816,9 +815,10 @@ mod tests {
         let err = resolve_identity(&mock, "https://pds.caller", "did:plc:target")
             .await
             .unwrap_err();
+        // A bogus `x25519Algo` is a vocabulary violation ⇒ corrupt.
         assert!(
-            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("x448") && msg.contains("x25519")),
-            "expected InvalidRecord with both algo strings, got: {err:?}",
+            matches!(err, Error::InvalidRecord(ref msg) if msg.contains("corrupt")),
+            "expected a corrupt-key refusal, got: {err:?}",
         );
     }
 }

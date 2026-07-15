@@ -110,6 +110,99 @@ async fn fetch_chain_node_propagates_not_found() {
     assert!(matches!(err, Error::NotFound(_)));
 }
 
+/// A `record_entry` whose `value` is a raw JSON object — for building links
+/// the typed constructors can't express (missing `opakeVersion`, a future
+/// version, structurally malformed).
+fn raw_record_entry(uri: &str, cid: &str, value: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "uri": uri, "cid": cid, "value": value })
+}
+
+// record-validity § writes refuse state they do not fully understand
+// tree-chains § unverifiable heads degrade to the last verifiable state
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__corrupt_chain_link_rejects_head_naming_the_link() {
+    // A chain link whose bytes don't parse (here: missing the required
+    // `keyWrapping`/`encryptedMetadata`, and no `opakeVersion`) must fail the
+    // walk with `ChainLinkCorrupt` naming the link — never a silent adoption.
+    let mock = MockTransport::new();
+    let malformed = serde_json::json!({ "createdAt": "2026-03-01T00:00:00Z" });
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(raw_record_entry(URI_HEAD, "bafyhead", malformed)));
+
+    let err = walk_back_to_genesis::<Directory>(&mock, URI_HEAD)
+        .await
+        .unwrap_err();
+
+    match err {
+        Error::ChainLinkCorrupt { uri } => assert_eq!(uri, URI_HEAD),
+        other => panic!("expected ChainLinkCorrupt, got {other:?}"),
+    }
+}
+
+// record-validity § future-version records are visible, locked, and actionable
+#[tokio::test]
+async fn future_version_chain_link_requires_newer_client() {
+    // A well-formed link declaring a version newer than this client supports
+    // must halt the walk with an actionable "newer client required" error that
+    // names the link — writes against it are refused, the block is self-explanatory.
+    let mock = MockTransport::new();
+    let mut value = serde_json::to_value(dummy_directory("/")).unwrap();
+    value["opakeVersion"] = serde_json::json!(crate::records::SCHEMA_VERSION + 1);
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(raw_record_entry(URI_HEAD, "bafyhead", value)));
+
+    let err = walk_back_to_genesis::<Directory>(&mock, URI_HEAD)
+        .await
+        .unwrap_err();
+
+    match &err {
+        Error::ChainLinkNeedsNewerClient {
+            uri,
+            version,
+            supported,
+        } => {
+            assert_eq!(uri, URI_HEAD);
+            assert_eq!(*version, crate::records::SCHEMA_VERSION + 1);
+            assert_eq!(*supported, crate::records::SCHEMA_VERSION);
+        }
+        other => panic!("expected ChainLinkNeedsNewerClient, got {other:?}"),
+    }
+    // Message is actionable: it tells the user to update.
+    assert!(err.to_string().to_lowercase().contains("update"));
+}
+
+// record-validity § writes refuse state they do not fully understand
+#[tokio::test]
+async fn corrupt_intermediate_link_rejects_the_whole_chain() {
+    // The head parses, but an intermediate link it supersedes is corrupt. The
+    // walk crosses the corrupt link and refuses — the proposed head is never
+    // adopted (integrity over liveness), and the corrupt intermediate is named.
+    let mock = MockTransport::new();
+    let head = dir_superseding("/", URI_MIDDLE);
+    let malformed_middle = serde_json::json!({ "createdAt": "2026-03-01T00:00:00Z" });
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(did_doc(DID_B, PDS_B)));
+    mock.enqueue(ok(raw_record_entry(
+        URI_MIDDLE,
+        "bafymiddle",
+        malformed_middle,
+    )));
+
+    let err = walk_back_to_genesis::<Directory>(&mock, URI_HEAD)
+        .await
+        .unwrap_err();
+
+    match err {
+        Error::ChainLinkCorrupt { uri } => assert_eq!(uri, URI_MIDDLE),
+        other => panic!("expected ChainLinkCorrupt at the intermediate, got {other:?}"),
+    }
+}
+
 // -- walk_back_to_genesis --
 
 // spec:tree-chains § A path's canonical state is the head of a supersede chain

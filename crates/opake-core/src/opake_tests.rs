@@ -701,7 +701,8 @@ mod keyring_supersede {
             .iter()
             .find(|m| m.did() == NEW_DID)
             .expect("joiner in current members");
-        let unwrapped_current = crypto::unwrap_key(&member.wrapped_key, &bundle, &ctx).unwrap();
+        let unwrapped_current =
+            crypto::unwrap_key(&member.wrapped_key, &bundle, &ctx, written.opake_version).unwrap();
         assert_eq!(unwrapped_current.0, current_key.0);
 
         // And the joiner is in the rotation-0 history entry, unwrapping to the
@@ -716,7 +717,13 @@ mod keyring_supersede {
             .iter()
             .find(|m| m.did() == NEW_DID)
             .expect("joiner granted rotation-0 history wrap");
-        let unwrapped_hist = crypto::unwrap_key(&hist_member.wrapped_key, &bundle, &ctx).unwrap();
+        let unwrapped_hist = crypto::unwrap_key(
+            &hist_member.wrapped_key,
+            &bundle,
+            &ctx,
+            written.opake_version,
+        )
+        .unwrap();
         assert_eq!(unwrapped_hist.0, historical_key.0);
     }
 

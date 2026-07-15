@@ -667,8 +667,8 @@ pub(crate) async fn bootstrap_workspace_keeper(
 ) -> Result<Vec<wk::WorkspaceEntry>, JsError> {
     gate.borrow_mut().begin();
 
-    let entries = match fetch_workspace_entries(opake_rc).await {
-        Ok(entries) => entries,
+    let (entries, unreadable) = match fetch_workspace_entries(opake_rc).await {
+        Ok(fetched) => fetched,
         Err(e) => {
             replay_workspace_gate(opake_rc, keeper_rc, gate, generation).await;
             return Err(e);
@@ -677,7 +677,7 @@ pub(crate) async fn bootstrap_workspace_keeper(
 
     {
         let mut keeper = keeper_rc.lock().await;
-        keeper.bootstrap(entries.clone());
+        keeper.bootstrap_with_signals(entries.clone(), &unreadable);
     }
     replay_workspace_gate(opake_rc, keeper_rc, gate, generation).await;
     Ok(entries)
@@ -689,18 +689,29 @@ pub(crate) async fn bootstrap_workspace_keeper(
 /// divergence would cause spurious watcher re-fires after SSE echoes.
 async fn fetch_workspace_entries(
     opake_rc: &Rc<Mutex<WasmOpake>>,
-) -> Result<Vec<wk::WorkspaceEntry>, JsError> {
+) -> Result<
+    (
+        Vec<wk::WorkspaceEntry>,
+        Vec<opake_core::records::UnreadableRef>,
+    ),
+    JsError,
+> {
     let mut opake = opake_rc.lock().await;
     let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
     let did = opake.did().to_string();
-    let workspaces = opake.discover_member_workspaces().await.map_err(wasm_err)?;
+    let fetched = opake
+        .discover_member_workspaces_detailed()
+        .await
+        .map_err(wasm_err)?;
     drop(opake);
 
     let bundle = private_keys.bundle();
-    Ok(workspaces
+    let entries = fetched
+        .workspaces
         .iter()
         .filter_map(|envelope| wk::try_build_entry(envelope, &did, &bundle))
-        .collect())
+        .collect();
+    Ok((entries, fetched.unreadable))
 }
 
 /// Close the workspace gate and replay buffered keyring events onto the
@@ -740,8 +751,8 @@ pub(crate) async fn bootstrap_inbox_keeper(
 
     let mut opake = opake_rc.lock().await;
     let my_did = opake.did().to_string();
-    let grants = match opake.list_inbox().await {
-        Ok(grants) => grants,
+    let fetched = match opake.list_inbox_detailed().await {
+        Ok(fetched) => fetched,
         Err(e) => {
             drop(opake);
             replay_inbox_gate(opake_rc, keeper_rc, gate, generation).await;
@@ -750,16 +761,17 @@ pub(crate) async fn bootstrap_inbox_keeper(
     };
     drop(opake);
 
-    let entries: Vec<ik::InboxEntry> = grants
+    let entries: Vec<ik::InboxEntry> = fetched
+        .grants
         .iter()
         .filter_map(|envelope| ik::try_build_entry_from_envelope(envelope, &my_did))
         .collect();
     {
         let mut keeper = keeper_rc.lock().await;
-        keeper.bootstrap(entries);
+        keeper.bootstrap_with_signals(entries, &fetched.unreadable);
     }
     replay_inbox_gate(opake_rc, keeper_rc, gate, generation).await;
-    Ok(grants)
+    Ok(fetched.grants)
 }
 
 /// Close the inbox gate and replay buffered grant events
@@ -996,6 +1008,23 @@ async fn apply_keyring_to_workspace_keeper(
             }
             keeper.apply_keyring_delete(payload);
         }
+        // A corrupt / future-version keyring: signal the workspace as
+        // exists-but-unreadable, matching the bootstrap path (SSE parity).
+        SseEvent::CorruptRecord(corrupt)
+            if corrupt.scope == opake_core::indexer::sse::CorruptScope::Keyring =>
+        {
+            let Some(uri) = corrupt.uri.as_deref() else {
+                return; // count-only
+            };
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
+            let mut keeper = workspace_keeper_rc.lock().await;
+            if generation.get() != my_generation {
+                return;
+            }
+            keeper.signal_unreadable(uri, corrupt.reason);
+        }
         _ => {}
     }
 }
@@ -1037,6 +1066,23 @@ async fn apply_grant_to_inbox_keeper(
                 return;
             }
             keeper.delete(&payload.uri);
+        }
+        // A corrupt / future-version grant: signal it distinctly so the
+        // "Shared with me" view can surface an unreadable share (SSE parity).
+        SseEvent::CorruptRecord(corrupt)
+            if corrupt.scope == opake_core::indexer::sse::CorruptScope::Grant =>
+        {
+            let Some(uri) = corrupt.uri.as_deref() else {
+                return; // count-only
+            };
+            if gate.borrow_mut().capture_if_active(event) {
+                return;
+            }
+            let mut keeper = inbox_keeper_rc.lock().await;
+            if generation.get() != my_generation {
+                return;
+            }
+            keeper.signal_unreadable(uri, corrupt.reason);
         }
         _ => {}
     }

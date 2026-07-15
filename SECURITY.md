@@ -31,6 +31,12 @@ If you find a vulnerability, we want to know about it before anyone else does.
 - **AT Protocol core.** DID resolution, federation, sync protocol — report those upstream at [atproto.com](https://atproto.com).
 - **Dependencies.** If the issue is in a third-party crate or npm package, report it to the upstream maintainer. If it's exploitable _through_ Opake specifically, that's in scope.
 
+> **Note for developers and researchers:** the e2e suite persists OAuth
+> storage states under `tests/e2e/.auth/`. These snapshots contain live
+> bearer credentials for the dev-stack test accounts. The directory is
+> gitignored on purpose — never commit it, and strip its contents from
+> logs, reproduction archives, or vulnerability reports.
+
 ## What counts as a vulnerability
 
 - Plaintext leakage — encrypted content, metadata, or key material exposed in cleartext where it shouldn't be
