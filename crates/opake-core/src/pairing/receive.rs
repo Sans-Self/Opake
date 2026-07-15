@@ -173,7 +173,8 @@ async fn decrypt_pair_response(
     })?;
 
     let payload = EncryptedPayload { ciphertext, nonce };
-    let plaintext = decrypt_blob(&content_key, &payload)?;
+    // spec:document-crypto § Key-carrying types zeroize on drop
+    let plaintext = Zeroizing::new(decrypt_blob(&content_key, &payload)?);
 
     let identity: Identity = serde_json::from_slice(&plaintext).map_err(|e| {
         Error::InvalidRecord(format!(
