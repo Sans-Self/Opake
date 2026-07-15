@@ -10,6 +10,10 @@ async function getMermaid() {
       startOnLoad: false,
       theme: "neutral",
       fontFamily: "Inter, sans-serif",
+      // Diagram source is decrypted user content — untrusted. Strict mode runs
+      // mermaid's output through DOMPurify and disables click bindings and raw
+      // HTML labels, so the SVG assigned via innerHTML below can't carry script.
+      securityLevel: "strict",
     });
 
     mermaidInitialized = true;
@@ -74,10 +78,6 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   // in SequenceDiagram; if MermaidBlock is used standalone (MarkdownPreview),
   // the surrounding context is expected to carry that meaning.
   return (
-    <div
-      ref={containerRef}
-      role="img"
-      className="my-4 flex justify-center [&>svg]:max-w-full"
-    />
+    <div ref={containerRef} role="img" className="my-4 flex justify-center [&>svg]:max-w-full" />
   );
 }

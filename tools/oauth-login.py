@@ -59,20 +59,29 @@ def b64url_json(obj: dict) -> str:
     return b64url(json.dumps(obj, separators=(",", ":")).encode())
 
 
+def require_https(url: str) -> str:
+    # atproto services are always TLS — reject file://, ftp://, etc. before the
+    # URL (derived from handle → DID doc → serviceEndpoint) reaches urlopen.
+    if urllib.parse.urlparse(url).scheme != "https":
+        print(f"error: refusing non-https URL {url!r}", file=sys.stderr)
+        sys.exit(1)
+    return url
+
+
 def http_get_json(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    req = urllib.request.Request(require_https(url), headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — scheme checked
         return json.loads(resp.read())
 
 
 def http_post_form(url: str, data: dict, headers: Optional[dict] = None) -> dict:
     body = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(url, data=body, method="POST")
+    req = urllib.request.Request(require_https(url), data=body, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 — scheme checked
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
@@ -241,6 +250,12 @@ def opake_data_dir() -> Path:
 
 
 def sanitize_did(did: str) -> str:
+    # `did` reaching the write path comes from the token endpoint's `sub`, so a
+    # hostile auth server must not be able to escape the accounts directory via
+    # path separators or traversal segments.
+    if "/" in did or "\\" in did or ".." in did or "\x00" in did:
+        print(f"error: refusing unsafe DID {did!r}", file=sys.stderr)
+        sys.exit(1)
     return did.replace(":", "_")
 
 

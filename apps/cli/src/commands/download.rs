@@ -117,7 +117,12 @@ fn emit_output(
         return Ok(());
     }
 
-    let path = output_override.unwrap_or_else(|| PathBuf::from(filename));
+    // A user-supplied `-o` path is trusted; a filename derived from decrypted
+    // record metadata is not — confine it to a bare name in the current dir.
+    let path = match output_override {
+        Some(path) => path,
+        None => crate::path_safety::record_filename(filename)?,
+    };
     write_file(&path, plaintext)?;
     eprintln!(
         "{} → {} ({} bytes)",
@@ -160,6 +165,21 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("already exists"), "got: {msg}");
         assert_eq!(fs::read(&path).unwrap(), b"original");
+    }
+
+    #[test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    fn bug__download_rejects_traversal_in_decrypted_filename() {
+        // The filename comes from decrypted metadata a malicious workspace
+        // member controls; without confinement it escapes the output directory.
+        assert_eq!(
+            crate::path_safety::record_filename("../../../etc/passwd").unwrap(),
+            PathBuf::from("passwd")
+        );
+        assert!(crate::path_safety::record_filename("/etc/cron.d/evil")
+            .unwrap()
+            .is_relative());
+        assert!(crate::path_safety::record_filename("..").is_err());
     }
 
     #[test]

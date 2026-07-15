@@ -310,11 +310,20 @@ async fn wait_for_callback(
 /// Open a URL in the system browser. Best-effort — doesn't fail if the
 /// browser can't be opened (the URL is printed to stdout as a fallback).
 fn open_browser(url: &str) {
+    if let Err(e) = validate_web_url(url) {
+        debug!("refusing to open browser: {e}");
+        return;
+    }
+
     let result = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(url).spawn()
     } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", url])
+        // Hand the URL to the protocol handler directly rather than routing
+        // through `cmd /C start`, whose shell parsing treats an `&` in the query
+        // string as a command separator — the authorization endpoint is
+        // discovered from the (untrusted) PDS.
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
             .spawn()
     } else {
         std::process::Command::new("xdg-open").arg(url).spawn()
@@ -325,5 +334,38 @@ fn open_browser(url: &str) {
     }
 }
 
+/// Reject anything that isn't a plain http(s) URL before it reaches a process
+/// spawn. The authorization endpoint comes from AS discovery on a possibly
+/// hostile PDS, so a crafted scheme (`javascript:`, `file:`) or embedded
+/// control character must never be handed to the system browser opener.
+fn validate_web_url(url: &str) -> Result<()> {
+    anyhow::ensure!(
+        url.starts_with("http://") || url.starts_with("https://"),
+        "authorization URL is not http(s): {url:?}"
+    );
+    anyhow::ensure!(
+        !url.chars().any(|c| c.is_ascii_control()),
+        "authorization URL contains control characters"
+    );
+    Ok(())
+}
+
 use base64::Engine;
 use opake_core::crypto::RngCore;
+
+#[cfg(test)]
+mod tests {
+    use super::validate_web_url;
+
+    #[test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    fn bug__open_browser_rejects_shell_and_scheme_injection() {
+        // A hostile PDS controls the discovered authorization endpoint; only a
+        // clean http(s) URL may reach the system browser opener.
+        assert!(validate_web_url("https://pds.example/authorize?a=1&b=2").is_ok());
+        assert!(validate_web_url("http://127.0.0.1:8080/cb").is_ok());
+        assert!(validate_web_url("javascript:alert(1)").is_err());
+        assert!(validate_web_url("file:///etc/passwd").is_err());
+        assert!(validate_web_url("https://ok/\r\nmalicious").is_err());
+    }
+}

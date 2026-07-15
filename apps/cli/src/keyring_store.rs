@@ -46,7 +46,8 @@ fn keyrings_dir(storage: &FileStorage, did: &str) -> std::path::PathBuf {
 }
 
 fn key_path(storage: &FileStorage, did: &str, rkey: &str) -> std::path::PathBuf {
-    keyrings_dir(storage, did).join(format!("{rkey}.json"))
+    let safe = crate::path_safety::safe_identifier(rkey);
+    keyrings_dir(storage, did).join(format!("{safe}.json"))
 }
 
 fn load_stored(storage: &FileStorage, did: &str, rkey: &str) -> anyhow::Result<StoredKeys> {
@@ -297,6 +298,18 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(file_mode, 0o600, "expected file 0600, got {file_mode:#o}");
+    }
+
+    #[test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    fn bug__keyring_path_rejects_traversal_in_rkey() {
+        // rkey is extracted from a keyring AT-URI that may originate on another
+        // member's PDS; a crafted value must not escape the keyrings directory.
+        let (_dir, storage) = test_storage();
+        let did = "did:plc:test";
+        let path = key_path(&storage, did, "../../../etc/evil");
+        assert_eq!(path.parent().unwrap(), keyrings_dir(&storage, did));
+        assert!(!path.to_string_lossy().contains(".."));
     }
 
     #[test]
