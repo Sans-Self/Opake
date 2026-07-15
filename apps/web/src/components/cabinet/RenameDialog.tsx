@@ -1,6 +1,6 @@
 // Dialog for renaming a directory.
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useId, useImperativeHandle, useRef, useState } from "react";
 import { PencilSimpleIcon } from "@phosphor-icons/react";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
 
@@ -25,6 +25,7 @@ export const RenameDialog = forwardRef<RenameDialogHandle, RenameDialogProps>(fu
   ref,
 ) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const nameInputId = useId();
   const [uri, setUri] = useState<string | null>(null);
   const [name, setName] = useState("");
 
@@ -60,9 +61,10 @@ export const RenameDialog = forwardRef<RenameDialogHandle, RenameDialogProps>(fu
         </div>
 
         <div className="mt-4">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1" htmlFor={nameInputId}>
             <span className="text-caption text-text-muted font-medium">Name</span>
             <input
+              id={nameInputId}
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}

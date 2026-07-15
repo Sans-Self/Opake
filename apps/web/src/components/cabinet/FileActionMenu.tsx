@@ -101,6 +101,7 @@ export function FileActionMenu(props: FileActionMenuProps) {
       <DropdownMenu
         triggerClassName="btn btn-ghost btn-xs btn-square rounded-md"
         trigger={<DotsThreeVerticalIcon size={24} weight="bold" className="text-base-content" />}
+        triggerLabel={`Actions for ${item.name}`}
         align="right"
         items={items}
       />

@@ -20,6 +20,10 @@ interface DropdownMenuProps {
   readonly triggerClassName?: string;
   readonly align?: "left" | "right";
   readonly emptyLabel?: string;
+  // Accessible name for the trigger. Required whenever `trigger` is an icon
+  // with no text child — an icon-only button has no accessible name otherwise
+  // and screen readers announce it as an anonymous "button".
+  readonly triggerLabel?: string;
 }
 
 export function DropdownMenu({
@@ -28,6 +32,7 @@ export function DropdownMenu({
   triggerClassName = "btn btn-neutral btn-sm gap-1.5 rounded-lg text-xs",
   align = "left",
   emptyLabel,
+  triggerLabel,
 }: DropdownMenuProps) {
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const [open, setOpen] = useState(false);
@@ -70,6 +75,7 @@ export function DropdownMenu({
         ref={triggerRef}
         className={triggerClassName}
         onClick={toggle}
+        aria-label={triggerLabel}
         aria-expanded={open}
         aria-haspopup="true"
       >
