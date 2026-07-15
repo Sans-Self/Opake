@@ -1,0 +1,145 @@
+# QA gate — the CI face of `just validate`.
+#
+# Toolchain versions come from exactly one place: flake.nix. Every job that
+# builds or tests enters the devshell via `nix develop`, so CI and a
+# developer's shell can't drift apart.
+#
+# The justfile routes recipes through `direnv exec` so interactive bare
+# shells pick up the devshell env. CI is already inside `nix develop`, and
+# direnv isn't part of the devshell — so each invocation overrides the
+# recipe shell (`just --shell bash --shell-arg -cu`). Recipes stay the
+# single definition of what each QA step means; only the env loading
+# differs here.
+#
+# Out of scope for this workflow (deliberately): the hermetic dev-env
+# stack and Playwright e2e tiers — they need the full PDS/relay/jetstream
+# compose and live in the `just e2e-*` recipes, gated locally for now.
+
+name: QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JUST: just --shell bash --shell-arg -cu
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-rust-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-rust-${{ runner.os }}-
+      - name: rustfmt
+        run: nix develop --command $JUST fmt
+      - name: clippy
+        run: nix develop --command $JUST clippy
+      - name: cargo test
+        run: nix develop --command $JUST rust-test
+
+  web:
+    name: WASM, SDK, web
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-wasm-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-wasm-${{ runner.os }}-
+      - name: Cache bun
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - name: Install workspace dependencies
+        run: nix develop --command bun install --frozen-lockfile
+      - name: Install web dependencies
+        run: nix develop --command bash -c 'cd apps/web && bun install --frozen-lockfile'
+      - name: Build and test SDK packages, typecheck and build web
+        run: nix develop --command $JUST sdk web-typecheck web-build
+      - name: Web unit tests
+        run: nix develop --command $JUST web-test
+      # Known lint debt in apps/web (tracked in the issue tracker as
+      # "web-lint debt"). Non-blocking until the debt is cleared, so the
+      # gate doesn't start life permanently red — flip to blocking by
+      # deleting continue-on-error once the count reaches zero.
+      - name: Web lint (non-blocking, known debt)
+        continue-on-error: true
+        run: nix develop --command $JUST web-lint
+
+  indexer:
+    name: Indexer (Elixir)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Cache mix deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/indexer/deps
+            apps/indexer/_build
+          key: mix-${{ runner.os }}-${{ hashFiles('apps/indexer/mix.lock', 'flake.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+      - name: Fetch dependencies
+        run: |
+          nix develop --command bash -c '
+            mix local.hex --force --if-missing
+            mix local.rebar --force --if-missing
+            cd apps/indexer && mix deps.get
+          '
+      - name: mix test
+        run: nix develop --command $JUST indexer-test
+
+  spec-lint:
+    name: Spec citations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Citations include commit hashes; resolving them needs history.
+          fetch-depth: 0
+      - name: spec-lint
+        run: python3 scripts/spec_lint.py
