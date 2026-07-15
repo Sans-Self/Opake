@@ -3,7 +3,6 @@
 apps/indexer/_build/
 apps/indexer/deps/
 node_modules/
-bun.lock
 apps/web/dist/
 apps/web/src/wasm/
 apps/web/src/routeTree.gen.ts
