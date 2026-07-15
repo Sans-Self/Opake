@@ -26,6 +26,25 @@ const DEAD_SESSION_SIGNALS = ["401", "AuthenticationFailed", "invalid_grant"];
 const PUBLIC_API =
   (import.meta.env.VITE_BSKY_APPVIEW_URL as string | undefined) ?? "https://public.api.bsky.app";
 
+/**
+ * Accept only HTTPS origins — plus loopback HTTP for the hermetic dev-env —
+ * before a URL reaches `fetch` or `window.location`. Blocks `javascript:`,
+ * `data:`, and `file:` targets a hostile PDS/auth-server could otherwise
+ * smuggle into a redirect (script-URL XSS) or a probe request.
+ */
+function isSafeHttpUrl(url: URL): boolean {
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+}
+
+/** Validate an external navigation target before handing it to the browser. */
+function assertSafeRedirect(target: string): string {
+  if (!isSafeHttpUrl(new URL(target))) {
+    throw new Error("Unsafe redirect target rejected");
+  }
+  return target;
+}
+
 /** Only accept avatar/banner URLs from known Bluesky CDN origins. */
 function isSafeCdnUrl(url: string): boolean {
   try {
@@ -291,6 +310,7 @@ async function probeRemotePublicKey(pdsUrl: string, did: string): Promise<boolea
   url.searchParams.set("repo", did);
   url.searchParams.set("collection", "at.opake.publicKey");
   url.searchParams.set("rkey", "self");
+  if (!isSafeHttpUrl(url)) return false;
   try {
     const res = await fetch(url);
     return res.ok;
@@ -498,7 +518,7 @@ export const useAuthStore = create<AuthStore>()(
         });
 
         Opake.savePendingLogin(pending);
-        window.location.href = authUrl;
+        window.location.href = assertSafeRedirect(authUrl);
       } catch (err) {
         set((draft) => {
           draft.session = {

@@ -3,6 +3,7 @@ mod config;
 mod identity;
 mod keyring_store;
 mod oauth;
+mod path_safety;
 mod prompt;
 mod session;
 pub mod utils;

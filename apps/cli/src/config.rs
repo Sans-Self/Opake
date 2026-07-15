@@ -406,10 +406,7 @@ fn pair_state_dir(account_dir: &Path) -> PathBuf {
 }
 
 fn pair_state_filename(rkey: &str) -> String {
-    // Rkeys are ATProto TIDs (base32, no dots/slashes) so passthrough is safe.
-    // Belt-and-braces: strip any separators defensively.
-    let safe = rkey.replace(['/', '\\', '.', ':'], "_");
-    format!("{safe}.bin")
+    format!("{}.bin", crate::path_safety::safe_identifier(rkey))
 }
 
 #[cfg(test)]
