@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn record_filename_keeps_plain_name() {
-        assert_eq!(record_filename("report.pdf").unwrap(), PathBuf::from("report.pdf"));
+        assert_eq!(
+            record_filename("report.pdf").unwrap(),
+            PathBuf::from("report.pdf")
+        );
     }
 
     #[test]
