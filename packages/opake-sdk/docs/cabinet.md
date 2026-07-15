@@ -13,7 +13,7 @@ const cabinet = opake.cabinet();
 const data = new Uint8Array(await file.arrayBuffer());
 const result = await cabinet.upload(data, "report.pdf", "application/pdf", "Q3 financials");
 
-console.log(result.uri);  // at://did:plc:.../app.opake.document/...
+console.log(result.uri);  // at://did:plc:.../at.opake.document/...
 ```
 
 The `description` parameter is optional — it's stored in the encrypted metadata

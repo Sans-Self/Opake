@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{default_version, SCHEMA_VERSION};
 
-pub const ACCOUNT_CONFIG_COLLECTION: &str = "app.opake.accountConfig";
+pub const ACCOUNT_CONFIG_COLLECTION: &str = "at.opake.accountConfig";
 pub const ACCOUNT_CONFIG_RKEY: &str = "self";
 
 /// Per-account configuration stored on the user's PDS as a singleton record.

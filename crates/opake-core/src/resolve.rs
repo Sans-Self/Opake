@@ -35,7 +35,7 @@ pub type Ed25519PublicKeyBytes = [u8; 32];
 ///
 /// Carries both halves of the hybrid KEM public key. The X25519 half is in
 /// `x25519_public_key`; the ML-KEM-768 half is in `ml_kem_public_key`. Both
-/// are required — every published `app.opake.publicKey` record includes them.
+/// are required — every published `at.opake.publicKey` record includes them.
 #[derive(Debug, Clone)]
 pub struct ResolvedIdentity {
     pub did: String,
@@ -312,7 +312,7 @@ mod tests {
             "2026-03-01T00:00:00Z",
         );
         let entry = serde_json::json!({
-            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "uri": "at://did:plc:target/at.opake.publicKey/self",
             "cid": "bafyrecord",
             "value": record,
         });
@@ -461,7 +461,7 @@ mod tests {
         );
         record.opake_version = SCHEMA_VERSION + 1;
         let entry = serde_json::json!({
-            "uri": "at://did:plc:future/app.opake.publicKey/self",
+            "uri": "at://did:plc:future/at.opake.publicKey/self",
             "cid": "bafy",
             "value": record,
         });
@@ -479,7 +479,7 @@ mod tests {
         let pubkey = [55u8; 32];
 
         let put_response = serde_json::json!({
-            "uri": "at://did:plc:test/app.opake.publicKey/self",
+            "uri": "at://did:plc:test/at.opake.publicKey/self",
             "cid": "bafypublished",
         });
         mock.enqueue(success(&put_response.to_string()));
@@ -504,7 +504,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(uri, "at://did:plc:test/app.opake.publicKey/self");
+        assert_eq!(uri, "at://did:plc:test/at.opake.publicKey/self");
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);
@@ -514,7 +514,7 @@ mod tests {
     /// The published record is what every other party wraps content keys to,
     /// and what recovery and pairing verify an identity against — so its
     /// shape is a contract, not an implementation detail. Assert the written
-    /// body: the `app.opake.publicKey` singleton at rkey `self`, carrying
+    /// body: the `at.opake.publicKey` singleton at rkey `self`, carrying
     /// both halves of the hybrid KEM under their algorithm tags. A record
     /// missing the ML-KEM half, or written under any other rkey, still
     /// returns a plausible URI — only the body catches it.
@@ -526,7 +526,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(success(
             &serde_json::json!({
-                "uri": "at://did:plc:test/app.opake.publicKey/self",
+                "uri": "at://did:plc:test/at.opake.publicKey/self",
                 "cid": "bafypublished",
             })
             .to_string(),
@@ -559,7 +559,7 @@ mod tests {
             _ => panic!("expected JSON body on putRecord"),
         };
 
-        assert_eq!(body["collection"], "app.opake.publicKey");
+        assert_eq!(body["collection"], "at.opake.publicKey");
         assert_eq!(body["rkey"], "self", "the record is a singleton at `self`");
 
         let record = &body["record"];
@@ -776,7 +776,7 @@ mod tests {
             PublicKeyRecord::new(&pubkey, &dummy_ml_kem_pubkey(0xAA), "2026-03-01T00:00:00Z");
         record.ml_kem_algo = "ml-kem-512".to_string();
         let entry = serde_json::json!({
-            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "uri": "at://did:plc:target/at.opake.publicKey/self",
             "cid": "bafyrecord",
             "value": record,
         });
@@ -807,7 +807,7 @@ mod tests {
             PublicKeyRecord::new(&pubkey, &dummy_ml_kem_pubkey(0xAA), "2026-03-01T00:00:00Z");
         record.x25519_algo = "x448".to_string();
         let entry = serde_json::json!({
-            "uri": "at://did:plc:target/app.opake.publicKey/self",
+            "uri": "at://did:plc:target/at.opake.publicKey/self",
             "cid": "bafyrecord",
             "value": record,
         });

@@ -51,7 +51,7 @@ mod tests {
 
     fn dummy_grant(recipient: &str, doc_rkey: &str) -> Grant {
         Grant::new(
-            format!("at://{TEST_DID}/app.opake.document/{doc_rkey}"),
+            format!("at://{TEST_DID}/at.opake.document/{doc_rkey}"),
             recipient.into(),
             WrappedKey {
                 did: recipient.into(),
@@ -70,7 +70,7 @@ mod tests {
             .iter()
             .map(|(rkey, grant)| {
                 serde_json::json!({
-                    "uri": format!("at://{TEST_DID}/app.opake.grant/{rkey}"),
+                    "uri": format!("at://{TEST_DID}/at.opake.grant/{rkey}"),
                     "cid": "bafygrant",
                     "value": grant,
                 })
@@ -106,7 +106,7 @@ mod tests {
         let requests = mock.requests();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].url.contains("listRecords"));
-        assert!(requests[0].url.contains("app.opake.grant"));
+        assert!(requests[0].url.contains("at.opake.grant"));
     }
 
     #[tokio::test]
@@ -165,12 +165,12 @@ mod tests {
         let body = serde_json::json!({
             "records": [
                 {
-                    "uri": "at://did:plc:owner/app.opake.grant/bad",
+                    "uri": "at://did:plc:owner/at.opake.grant/bad",
                     "cid": "bafybad",
                     "value": { "not": "a grant" },
                 },
                 {
-                    "uri": "at://did:plc:owner/app.opake.grant/good",
+                    "uri": "at://did:plc:owner/at.opake.grant/good",
                     "cid": "bafygood",
                     "value": dummy_grant("did:plc:bob", "doc1"),
                 },

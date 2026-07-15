@@ -6,7 +6,7 @@ use crate::records::SCHEMA_VERSION;
 fn pair_response_roundtrips_through_json() {
     let record = PairResponse {
         opake_version: SCHEMA_VERSION,
-        request: "at://did:plc:test/app.opake.pairRequest/abc123".into(),
+        request: "at://did:plc:test/at.opake.pairRequest/abc123".into(),
         wrapped_key: WrappedKey {
             did: "did:plc:test".into(),
             ciphertext: AtBytes {
@@ -39,7 +39,7 @@ fn pair_response_roundtrips_through_json() {
 fn pair_response_uses_atbytes_wire_format() {
     let record = PairResponse {
         opake_version: SCHEMA_VERSION,
-        request: "at://did:plc:test/app.opake.pairRequest/abc123".into(),
+        request: "at://did:plc:test/at.opake.pairRequest/abc123".into(),
         wrapped_key: WrappedKey {
             did: "did:plc:test".into(),
             ciphertext: AtBytes {

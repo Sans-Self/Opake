@@ -33,6 +33,6 @@ fn root_directory_uri_uses_self_rkey() {
 
     assert_eq!(
         cabinet.root_directory_uri(),
-        "at://did:plc:test/app.opake.directory/self"
+        "at://did:plc:test/at.opake.directory/self"
     );
 }

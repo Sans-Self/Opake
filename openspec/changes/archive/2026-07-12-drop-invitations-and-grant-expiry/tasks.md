@@ -6,9 +6,9 @@
 
 ## 2. Lexicons
 
-- [x] 2.1 Delete `lexicons/app.opake.invitation.json` and `lexicons/app.opake.invitationAcceptance.json`
-- [x] 2.2 `lexicons/app.opake.grant.json` — remove the `expiresAt` property
-- [x] 2.3 `lexicons/app.opake.authFullAccess.json` — drop the invitation collections from the permission set
+- [x] 2.1 Delete `lexicons/at.opake.invitation.json` and `lexicons/at.opake.invitationAcceptance.json`
+- [x] 2.2 `lexicons/at.opake.grant.json` — remove the `expiresAt` property
+- [x] 2.3 `lexicons/at.opake.authFullAccess.json` — drop the invitation collections from the permission set
 - [x] 2.4 `lexicons/README.md` — remove invitation schema docs; verify EXAMPLES.md has no invitation examples
 
 ## 3. Rust surface

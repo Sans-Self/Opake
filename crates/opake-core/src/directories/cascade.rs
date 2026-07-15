@@ -2,7 +2,7 @@
 //
 // A cascade is the sequence of directory record writes that propagate
 // a child mutation up to the workspace root (or cabinet root). Each
-// level writes a new `app.opake.directory` record whose listing entry
+// level writes a new `at.opake.directory` record whose listing entry
 // for the level below points at the URI + CID just produced.
 //
 // Because atproto doesn't expose record CIDs without first writing the

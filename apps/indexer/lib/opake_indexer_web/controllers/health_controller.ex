@@ -19,7 +19,7 @@ defmodule OpakeIndexerWeb.HealthController do
         },
         "per_collection": {
           "app.bsky.feed.post": 11200,
-          "app.opake.document": 4
+          "at.opake.document": 4
         }
       }
   """

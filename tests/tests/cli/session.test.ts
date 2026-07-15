@@ -61,7 +61,7 @@ describe("opake daemon install", () => {
       fakeHome,
       "Library",
       "LaunchAgents",
-      "app.opake.daemon.plist",
+      "at.opake.daemon.plist",
     );
 
     const result = await fx.opake(["daemon", "install"], { HOME: fakeHome });
@@ -71,7 +71,7 @@ describe("opake daemon install", () => {
     expect(existsSync(plistPath)).toBe(true);
 
     const plist = readFileSync(plistPath, "utf-8");
-    expect(plist).toContain("app.opake.daemon");
+    expect(plist).toContain("at.opake.daemon");
     expect(plist).toContain("daemon");
     expect(plist).toContain("run");
   });

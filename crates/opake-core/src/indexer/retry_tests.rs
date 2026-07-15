@@ -18,7 +18,7 @@ fn clock_and_sleep() -> (impl Fn() -> u64, SleepFn) {
     (read, sleep)
 }
 
-const WORKSPACE: &str = "at://did:plc:me/app.opake.keyring/genesis";
+const WORKSPACE: &str = "at://did:plc:me/at.opake.keyring/genesis";
 
 fn not_indexed() -> Error {
     Error::WorkspaceNotIndexed {

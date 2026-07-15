@@ -477,7 +477,7 @@ mod tests {
         let mut doc = document_from_fixture(&fixture);
         doc.encryption = Encryption::Keyring(KeyringEncryption {
             keyring_ref: KeyringRef {
-                keyring: "at://did:plc:owner/app.opake.keyring/genesis".into(),
+                keyring: "at://did:plc:owner/at.opake.keyring/genesis".into(),
                 wrapped_content_key: AtBytes {
                     encoded: BASE64.encode([0u8; 40]),
                 },

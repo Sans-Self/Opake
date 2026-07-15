@@ -23,8 +23,8 @@ defmodule OpakeIndexerWeb.HealthControllerTest do
   test "health omits row counts (those are internal metrics)", %{conn: conn} do
     {:ok, _} =
       RecordQueries.upsert(%{
-        uri: "at://did:plc:owner/app.opake.grant/3abc",
-        collection: "app.opake.grant",
+        uri: "at://did:plc:owner/at.opake.grant/3abc",
+        collection: "at.opake.grant",
         author_did: "did:plc:owner",
         workspace_id: nil,
         supersedes_uri: nil,
@@ -34,7 +34,7 @@ defmodule OpakeIndexerWeb.HealthControllerTest do
         deleted_at: nil,
         record_jsonb: %{
           "opakeVersion" => 1,
-          "document" => "at://did:plc:owner/app.opake.document/3xyz",
+          "document" => "at://did:plc:owner/at.opake.document/3xyz",
           "recipient" => "did:plc:me",
           "createdAt" => "2026-03-01T12:00:00Z"
         }

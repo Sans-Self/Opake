@@ -5,7 +5,7 @@
   corresponding MDX content in `apps/web/src/content/` to prevent documentation drift. 
 -->
 
-# app.opake.* Lexicon Schemas
+# at.opake.* Lexicon Schemas
 
 An encrypted personal cloud built on AT Protocol.
 
@@ -21,20 +21,20 @@ The encryption model follows the same hybrid pattern as git-crypt:
 
 | NSID | Type | Purpose |
 |------|------|---------|
-| `app.opake.accountConfig` | record | Singleton per-account config/preferences (rkey: `self`), synced across devices |
-| `app.opake.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
-| `app.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
-| `app.opake.document` | record | An encrypted file/document with metadata |
-| `app.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
-| `app.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
-| `app.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
-| `app.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
-| `app.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
-| `app.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
-| `app.opake.keyringUpdate` | record | A proposed update to a workspace keyring (member add/remove, metadata, role change) |
-| `app.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
-| `app.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
-| `app.opake.authFullAccess` | permission-set | OAuth permission set bundling all `app.opake.*` collections — for `include:` scopes |
+| `at.opake.accountConfig` | record | Singleton per-account config/preferences (rkey: `self`), synced across devices |
+| `at.opake.defs` | defs | Shared type definitions (encryption envelope, wrapped key, etc.) |
+| `at.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
+| `at.opake.document` | record | An encrypted file/document with metadata |
+| `at.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
+| `at.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
+| `at.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
+| `at.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
+| `at.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
+| `at.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
+| `at.opake.keyringUpdate` | record | A proposed update to a workspace keyring (member add/remove, metadata, role change) |
+| `at.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
+| `at.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
+| `at.opake.authFullAccess` | permission-set | OAuth permission set bundling all `at.opake.*` collections — for `include:` scopes |
 
 ## Flow: Sharing a file with another DID
 

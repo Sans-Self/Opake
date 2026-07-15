@@ -1,6 +1,6 @@
 # Document Updates (Collaborative Editing)
 
-Workspace mutations from non-owners (editors and managers) flow through `app.opake.documentUpdate` proposal records on the proposer's PDS. The owner's daemon applies them — re-hosting the proposed blob (`updateContent`) or replacing the encrypted metadata field (`updateMetadata`) on the existing document record. Same federated pattern as Bluesky replies: your contribution lives on your PDS; the indexer surfaces pending updates to the document owner.
+Workspace mutations from non-owners (editors and managers) flow through `at.opake.documentUpdate` proposal records on the proposer's PDS. The owner's daemon applies them — re-hosting the proposed blob (`updateContent`) or replacing the encrypted metadata field (`updateMetadata`) on the existing document record. Same federated pattern as Bluesky replies: your contribution lives on your PDS; the indexer surfaces pending updates to the document owner.
 
 Two action types:
 
@@ -114,4 +114,4 @@ sequenceDiagram
     Indexer-->>OwnerPDS: [{ update_uri, author_did, document_uri, created_at }, ...]
 ```
 
-Without the Indexer, discovery falls back to polling each workspace member's PDS for `app.opake.documentUpdate` records whose `document` field matches. Slow but functional.
+Without the Indexer, discovery falls back to polling each workspace member's PDS for `at.opake.documentUpdate` records whose `document` field matches. Slow but functional.

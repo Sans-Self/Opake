@@ -26,7 +26,7 @@ Hermeticity SHALL be structural, not aspirational: dev-env containers run on an 
 
 ### Requirement: Deterministic actor fixtures
 
-The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `app.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
+The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `at.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
 
 #### Scenario: stable encryption identity across resets
 
@@ -40,7 +40,7 @@ The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 m
 
 ### Requirement: OAuth works hermetically
 
-Dev-env PDSes SHALL serve the full atproto OAuth authorization flow to loopback clients, including Opake's granular `repo:app.opake.*` scopes — which requires the `app.opake.authFullAccess` permission set to be resolvable inside the blockade (local NSID authority fixture or PDS configuration). The legacy app-password session flow SHALL work against dev-env PDSes as well; both authentication methods are first-class.
+Dev-env PDSes SHALL serve the full atproto OAuth authorization flow to loopback clients, including Opake's granular `repo:at.opake.*` scopes — which requires the `at.opake.authFullAccess` permission set to be resolvable inside the blockade (local NSID authority fixture or PDS configuration). The legacy app-password session flow SHALL work against dev-env PDSes as well; both authentication methods are first-class.
 
 #### Scenario: fixture actor completes an OAuth grant
 

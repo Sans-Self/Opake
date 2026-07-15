@@ -54,7 +54,7 @@ fn cabinet_file_manager_is_owner() {
 fn workspace_file_manager_non_owner() {
     let gk = generate_content_key(&mut OsRng);
     let ws = Workspace::from_keyring(
-        "at://did:plc:owner/app.opake.keyring/abc".into(),
+        "at://did:plc:owner/at.opake.keyring/abc".into(),
         "Test WS".into(),
         None,
         "did:plc:owner".into(),
@@ -77,7 +77,7 @@ fn workspace_file_manager_non_owner() {
 fn workspace_owner_is_detected() {
     let gk = generate_content_key(&mut OsRng);
     let ws = Workspace::from_keyring(
-        "at://did:plc:test/app.opake.keyring/abc".into(),
+        "at://did:plc:test/at.opake.keyring/abc".into(),
         "My WS".into(),
         None,
         "did:plc:test".into(), // Same as the identity DID
@@ -98,7 +98,7 @@ fn workspace_owner_is_detected() {
 fn workspace_admin_preserves_workspace() {
     let gk = generate_content_key(&mut OsRng);
     let ws = Workspace::from_keyring(
-        "at://did:plc:owner/app.opake.keyring/abc".into(),
+        "at://did:plc:owner/at.opake.keyring/abc".into(),
         "Admin WS".into(),
         None,
         "did:plc:owner".into(),
@@ -114,7 +114,7 @@ fn workspace_admin_preserves_workspace() {
     assert_eq!(admin.workspace().name, "Admin WS");
     assert_eq!(
         admin.workspace().keyring_uri(),
-        "at://did:plc:owner/app.opake.keyring/abc"
+        "at://did:plc:owner/at.opake.keyring/abc"
     );
 }
 
@@ -130,7 +130,7 @@ mod keyring_supersede {
 
     const ALICE_DID: &str = "did:plc:alice";
     const BOB_DID: &str = "did:plc:bob";
-    const WORKSPACE_ID: &str = "at://did:plc:alice/app.opake.keyring/genesis";
+    const WORKSPACE_ID: &str = "at://did:plc:alice/at.opake.keyring/genesis";
     const INDEXER_URL: &str = "https://indexer.test";
 
     fn chain_head_response(head_uri: &str, head_cid: &str) -> HttpResponse {
@@ -261,7 +261,7 @@ mod keyring_supersede {
     // spec:workspace-membership § Role changes are manager-authored supersedes
     #[tokio::test]
     async fn update_member_role_writes_supersede_with_updated_role() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
@@ -282,7 +282,7 @@ mod keyring_supersede {
         //    WORKSPACE_ID before any authority logic runs.
         mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
         // 5. createRecord for the supersede write on alice's PDS
-        let new_uri = format!("at://{ALICE_DID}/app.opake.keyring/3newsupersede");
+        let new_uri = format!("at://{ALICE_DID}/at.opake.keyring/3newsupersede");
         mock.enqueue(create_record_response(&new_uri, "bafynew"));
 
         let mut opake = opake_for(ALICE_DID, mock.clone());
@@ -303,7 +303,7 @@ mod keyring_supersede {
             .expect("createRecord");
         match &create.body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.keyring");
+                assert_eq!(v["collection"], "at.opake.keyring");
                 let written: Keyring =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert_eq!(written.supersedes.as_deref(), Some(prior_head_uri.as_str()));
@@ -330,7 +330,7 @@ mod keyring_supersede {
     // spec:workspace-membership § Role changes are manager-authored supersedes
     #[tokio::test]
     async fn update_member_role_rejects_non_manager_caller() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
@@ -364,7 +364,7 @@ mod keyring_supersede {
     /// rather than silently producing a no-op supersede.
     #[tokio::test]
     async fn update_member_role_errors_when_member_absent() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
         let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
@@ -406,7 +406,7 @@ mod keyring_supersede {
     #[tokio::test]
     #[allow(non_snake_case)] // bug__ regression-naming convention
     async fn bug__sync_workspace_by_uri_matches_envelope_by_derived_genesis() {
-        let head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3head");
+        let head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3head");
         let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
 
         let workspaces_response = serde_json::json!({
@@ -447,7 +447,7 @@ mod keyring_supersede {
     // spec:workspace-membership § Removal rotates the group key; leave does not
     #[tokio::test]
     async fn leave_workspace_writes_self_removal_supersede() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
@@ -461,7 +461,7 @@ mod keyring_supersede {
         mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
         mock.enqueue(get_keyring_response(&prior_head_uri, "bafyhead", &prior));
         mock.enqueue(get_keyring_response(WORKSPACE_ID, "bafygenesis", &genesis));
-        let new_uri = format!("at://{BOB_DID}/app.opake.keyring/3leave");
+        let new_uri = format!("at://{BOB_DID}/at.opake.keyring/3leave");
         mock.enqueue(create_record_response(&new_uri, "bafyleave"));
 
         let mut opake = opake_for(BOB_DID, mock.clone());
@@ -478,7 +478,7 @@ mod keyring_supersede {
             .expect("createRecord");
         match &create.body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.keyring");
+                assert_eq!(v["collection"], "at.opake.keyring");
                 let written: Keyring =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert_eq!(written.supersedes.as_deref(), Some(prior_head_uri.as_str()));
@@ -508,7 +508,7 @@ mod keyring_supersede {
 
     #[tokio::test]
     async fn leave_workspace_rejects_non_member() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
@@ -536,7 +536,7 @@ mod keyring_supersede {
     // spec:workspace-membership § Leave guards — no orphaned workspaces
     #[tokio::test]
     async fn leave_workspace_rejects_last_member() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
         let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
@@ -561,7 +561,7 @@ mod keyring_supersede {
     // spec:workspace-membership § Leave guards — no orphaned workspaces
     #[tokio::test]
     async fn leave_workspace_rejects_only_manager() {
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         let prior = as_supersede(keyring_with_members(vec![
             (ALICE_DID, Role::Manager),
@@ -624,7 +624,7 @@ mod keyring_supersede {
         use crate::records::KeyHistoryEntry;
         use crate::workspace::HistoricalKey;
 
-        let prior_head_uri = format!("at://{ALICE_DID}/app.opake.keyring/3abc");
+        let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
         // Prior head at rotation 1 with one retained rotation-0 key in history.
         let mut prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
@@ -652,11 +652,11 @@ mod keyring_supersede {
         // resolve_identity(joiner)
         mock.enqueue(did_doc_response(NEW_DID, "https://pds.newjoiner"));
         mock.enqueue(public_key_response(
-            &format!("at://{NEW_DID}/app.opake.publicKey/self"),
+            &format!("at://{NEW_DID}/at.opake.publicKey/self"),
             &joiner,
         ));
         // supersede write
-        let new_uri = format!("at://{ALICE_DID}/app.opake.keyring/3addmember");
+        let new_uri = format!("at://{ALICE_DID}/at.opake.keyring/3addmember");
         mock.enqueue(create_record_response(&new_uri, "bafynew"));
 
         let mut opake = opake_for(ALICE_DID, mock.clone());
@@ -732,7 +732,7 @@ mod keyring_supersede {
     async fn bug__member_list_resolves_foreign_authority_pds() {
         const ALICE_PDS: &str = "https://pds.did-plc-alice";
 
-        let keyring_uri = format!("at://{ALICE_DID}/app.opake.keyring/3foreign");
+        let keyring_uri = format!("at://{ALICE_DID}/at.opake.keyring/3foreign");
         let keyring =
             keyring_with_members(vec![(ALICE_DID, Role::Manager), (BOB_DID, Role::Editor)]);
 
@@ -797,7 +797,7 @@ mod workspace_resolution {
 
     const DID: &str = "did:plc:test";
     const INDEXER_URL: &str = "https://indexer.test";
-    const WORKSPACE_URI: &str = "at://did:plc:test/app.opake.keyring/genesis";
+    const WORKSPACE_URI: &str = "at://did:plc:test/at.opake.keyring/genesis";
 
     /// The exhaustion test needs a clock that actually advances; `fn() -> u64`
     /// carries no state, so the tick lives in a static that only that test's

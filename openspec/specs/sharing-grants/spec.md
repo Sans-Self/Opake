@@ -8,17 +8,17 @@ Sharing is deliberately separate from workspace membership. A workspace shares a
 
 Terms:
 
-- Grant: an `app.opake.grant` record on the sharer's PDS granting one recipient DID access to one document.
+- Grant: an `at.opake.grant` record on the sharer's PDS granting one recipient DID access to one document.
 - Owner / sharer: the DID that holds the document and writes the grant.
 - Recipient: the DID named in `grant.recipient`.
-- Public-key record: the recipient's `app.opake.publicKey/self` singleton, holding their hybrid X25519 + ML-KEM-768 encryption keys.
+- Public-key record: the recipient's `at.opake.publicKey/self` singleton, holding their hybrid X25519 + ML-KEM-768 encryption keys.
 - Inbox: the recipient's view of incoming grants, served by the indexer.
 
 ## Requirements
 
 ### Requirement: A grant is a standalone record, not inline document state
 
-A share SHALL be expressed as an `app.opake.grant` record independent of the document it grants access to (design decision 2). The grant SHALL carry the document's content key wrapped to the recipient, plus encrypted grant metadata; it SHALL NOT be a field on the document record. Creating, listing, and deleting grants operate on grant records alone and never rewrite the document.
+A share SHALL be expressed as an `at.opake.grant` record independent of the document it grants access to (design decision 2). The grant SHALL carry the document's content key wrapped to the recipient, plus encrypted grant metadata; it SHALL NOT be a field on the document record. Creating, listing, and deleting grants operate on grant records alone and never rewrite the document.
 
 The wrapped content key SHALL bind its AEAD context to the shared document's URI (`WrapContext::Document`; the binding contract is `spec:document-crypto § Wraps are AEAD-bound to their record context`), so a grant's wrapped key is meaningful only for that document. The grant metadata (permissions, note) SHALL be encrypted under the document's content key, so both sharer and recipient — the two parties who hold that key — can read it, and the PDS cannot.
 
@@ -26,7 +26,7 @@ The wrapped content key SHALL bind its AEAD context to the shared document's URI
 
 - **GIVEN** a cabinet document and a resolved recipient public-key bundle
 - **WHEN** the owner shares the document
-- **THEN** a single `app.opake.grant` record is created on the owner's PDS with the content key wrapped to the recipient and the document unchanged
+- **THEN** a single `at.opake.grant` record is created on the owner's PDS with the content key wrapped to the recipient and the document unchanged
 - Regression: `create_grant_happy_path`, `created_grant_key_is_unwrappable` (crates/opake-core/src/sharing/create.rs)
 
 #### Scenario: a grant's wrapped key opens only its document
@@ -38,7 +38,7 @@ The wrapped content key SHALL bind its AEAD context to the shared document's URI
 
 ### Requirement: The recipient's keys are discovered from their published public-key record
 
-Before wrapping, the sharer SHALL resolve the recipient to their `app.opake.publicKey/self` singleton record (design decision 6 — DID documents carry only signing keys, so Opake publishes encryption keys as a PDS record). Resolution SHALL follow handle/DID → DID document → PDS → public-key record (`resolve_identity`, crates/opake-core/src/resolve.rs). The user publishes their own record on every login via `publish_public_key` (idempotent `putRecord`).
+Before wrapping, the sharer SHALL resolve the recipient to their `at.opake.publicKey/self` singleton record (design decision 6 — DID documents carry only signing keys, so Opake publishes encryption keys as a PDS record). Resolution SHALL follow handle/DID → DID document → PDS → public-key record (`resolve_identity`, crates/opake-core/src/resolve.rs). The user publishes their own record on every login via `publish_public_key` (idempotent `putRecord`).
 
 A resolver SHALL distinguish a recipient who does not exist from one who exists but has not published an Opake key: a missing public-key record SHALL surface as `RecipientNotReady`, not `NotFound`, so the caller can offer the pending-share queue rather than reject a valid DID. A resolver SHALL reject a public-key record whose declared algorithm is not `x25519` / `ml-kem-768` before decoding key bytes, rather than deferring the failure to wrap time.
 
@@ -78,7 +78,7 @@ The recipient's inbox SHALL be bootstrapped by a full fetch from the indexer's `
 
 ### Requirement: A share to a not-yet-ready recipient is queued, not dropped
 
-When resolution returns `RecipientNotReady`, the client SHALL warn the user that the recipient exists but has not set up Opake — the recipient cannot receive the share until they publish an encryption key — before offering to queue. The owner MAY then enqueue an `app.opake.pendingShare` record on their own PDS instead of failing. The pending record SHALL carry the target document, the recipient as the user entered it, and the grant metadata encrypted under the document's content key, so the queue holds no plaintext and the grant can be reconstructed later. Pending shares SHALL expire after `DEFAULT_PENDING_SHARE_TTL_SECONDS` (7 days).
+When resolution returns `RecipientNotReady`, the client SHALL warn the user that the recipient exists but has not set up Opake — the recipient cannot receive the share until they publish an encryption key — before offering to queue. The owner MAY then enqueue an `at.opake.pendingShare` record on their own PDS instead of failing. The pending record SHALL carry the target document, the recipient as the user entered it, and the grant metadata encrypted under the document's content key, so the queue holds no plaintext and the grant can be reconstructed later. Pending shares SHALL expire after `DEFAULT_PENDING_SHARE_TTL_SECONDS` (7 days).
 
 Pending shares are the owner's own outgoing queue and are not indexed: retry SHALL be driven by the daemon listing the owner's `pendingShare` records, re-resolving each recipient, and — once a recipient publishes a key — fetching the content key, creating the grant with the original metadata, and deleting the pending record. A recipient still without a key SHALL leave the record queued; a document that fails permanently (deleted, corrupt, undecryptable) SHALL be skipped for its siblings in the same pass.
 
@@ -139,7 +139,7 @@ Owned by other specs and intentionally not legislated here:
 
 Deferred, not owned by another spec:
 
-- Invitations. No invitation channel exists — the `app.opake.invitation` / `app.opake.invitationAcceptance` machinery was removed wholesale because no working loop was ever built. A future feature must design creation, redemption, and owner-side acceptance discovery from scratch.
+- Invitations. No invitation channel exists — the `at.opake.invitation` / `at.opake.invitationAcceptance` machinery was removed wholesale because no working loop was ever built. A future feature must design creation, redemption, and owner-side acceptance discovery from scratch.
 - Grant expiry. Grants are open-ended until revoked; time-boxed sharing would be a designed feature with a writer and an enforcer, not a record field.
 - Re-wrap on recipient key rotation. Grant healing prunes recipients with no key but does not re-wrap to a rotated key; deferred behind the identity-rotation design pass (not daemon availability — healing already runs as a daemon task on CLI and web). Issue #7.
 - Person-to-person sharing of workspace documents. A workspace document lives on a member's PDS and is reached through group keys, not grants; a cross-workspace share needs its own key handoff, deferred behind the fork/custody design pass. Issue #20.

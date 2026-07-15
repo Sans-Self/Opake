@@ -62,7 +62,7 @@ No modifications to the PDS. All crypto happens on your machine.
 - `packages/opake-sdk/` — TypeScript SDK wrapping the WASM bindings.
 - `packages/opake-react/` — React hooks over the SDK.
 - `packages/opake-daemon/` — Scheduled maintenance tasks.
-- `lexicons/` — AT Protocol schemas (`app.opake.*`).
+- `lexicons/` — AT Protocol schemas (`at.opake.*`).
 
 ## Development
 

@@ -12,7 +12,7 @@ import {
 <ChapterHeader title="Sharing" />
 
 <Lead>
-  A grant is an `app.opake.grant` record on the sharer's PDS that wraps a document's content key
+  A grant is an `at.opake.grant` record on the sharer's PDS that wraps a document's content key
   to one specific recipient's public key. One record, one recipient, one document. This is the
   minimal sharing primitive — for folders of files shared with multiple people, use
   [workspaces](/docs/sdk/workspaces) instead.
@@ -23,7 +23,7 @@ import {
 <CodeBlock language="typescript" title="share.ts" code={shareDocument} />
 
 `resolveIdentity` takes a handle or DID, walks the atproto identity chain (handle resolution,
-DID document, PDS discovery), and fetches the target's `app.opake.publicKey/self` record. The
+DID document, PDS discovery), and fetches the target's `at.opake.publicKey/self` record. The
 result is everything `fm.share` needs: the recipient's DID and their X25519 public key.
 
 The grant itself lives on *your* PDS, not the recipient's. The recipient discovers it through
@@ -33,7 +33,7 @@ recipient. No write permission to the recipient's repository is needed.
 ## When the recipient hasn't set up Opake yet
 
 If `resolveIdentity` succeeds at the atproto layer (the handle exists, the DID resolves, the
-PDS is reachable) but there's no `app.opake.publicKey/self` record, you get `RecipientNotReady`.
+PDS is reachable) but there's no `at.opake.publicKey/self` record, you get `RecipientNotReady`.
 Handle it by queueing:
 
 <CodeBlock
@@ -42,7 +42,7 @@ Handle it by queueing:
   code={handleRecipientNotReady}
 />
 
-`createPendingShare` writes an `app.opake.pendingShare` record on your PDS. The daemon
+`createPendingShare` writes an `at.opake.pendingShare` record on your PDS. The daemon
 periodically resolves the target handle and tries again. When the recipient eventually logs
 into Opake and publishes their public key, the next retry succeeds: a real grant is written
 and the pending share is deleted. Pending shares expire after seven days.

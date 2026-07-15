@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{default_version, SCHEMA_VERSION};
 use crate::atproto::AtBytes;
 
-pub const PUBLIC_KEY_COLLECTION: &str = "app.opake.publicKey";
+pub const PUBLIC_KEY_COLLECTION: &str = "at.opake.publicKey";
 pub const PUBLIC_KEY_RKEY: &str = "self";
 
 /// Algorithm identifier for the classical encryption key.

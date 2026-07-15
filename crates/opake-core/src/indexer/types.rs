@@ -138,10 +138,10 @@ mod tests {
         let json = r#"{
             "grants": [
                 {
-                    "uri": "at://did:plc:author/app.opake.grant/tid1",
+                    "uri": "at://did:plc:author/at.opake.grant/tid1",
                     "record": {
                         "opakeVersion": 1,
-                        "document": "at://did:plc:author/app.opake.document/doc1",
+                        "document": "at://did:plc:author/at.opake.document/doc1",
                         "recipient": "did:plc:me",
                         "wrappedKey": {
                             "did": "did:plc:me",
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(resp.grants[0].record.recipient, "did:plc:me");
         assert_eq!(
             resp.grants[0].uri,
-            "at://did:plc:author/app.opake.grant/tid1"
+            "at://did:plc:author/at.opake.grant/tid1"
         );
         assert_eq!(resp.cursor.as_deref(), Some("next-page"));
     }

@@ -15,12 +15,12 @@ use crate::workspace::Workspace;
 
 const CALLER_DID: &str = "did:plc:caller";
 const OWNER_DID: &str = "did:plc:wsowner";
-const DOC_URI: &str = "at://did:plc:wsowner/app.opake.document/doc1";
+const DOC_URI: &str = "at://did:plc:wsowner/at.opake.document/doc1";
 
 fn workspace_context() -> FileContext {
     let group_key = generate_content_key(&mut OsRng);
     FileContext::Workspace(Workspace::from_keyring(
-        "at://did:plc:wsowner/app.opake.keyring/genesis".into(),
+        "at://did:plc:wsowner/at.opake.keyring/genesis".into(),
         "A shared workspace".into(),
         None,
         OWNER_DID.into(),

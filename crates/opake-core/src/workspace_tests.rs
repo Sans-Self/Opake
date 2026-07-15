@@ -6,7 +6,7 @@ use crate::crypto::OsRng;
 fn from_keyring_preserves_fields() {
     let gk = generate_content_key(&mut OsRng);
     let ws = Workspace::from_keyring(
-        "at://did:plc:owner/app.opake.keyring/abc123".into(),
+        "at://did:plc:owner/at.opake.keyring/abc123".into(),
         "My Project".into(),
         Some("A shared workspace".into()),
         "did:plc:owner".into(),
@@ -18,7 +18,7 @@ fn from_keyring_preserves_fields() {
 
     assert_eq!(
         ws.keyring_uri(),
-        "at://did:plc:owner/app.opake.keyring/abc123"
+        "at://did:plc:owner/at.opake.keyring/abc123"
     );
     assert_eq!(ws.name, "My Project");
     assert_eq!(ws.description.as_deref(), Some("A shared workspace"));

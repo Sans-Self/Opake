@@ -122,7 +122,7 @@ per-user salting redundant.
 | **ML-KEM-768 keypair** | Post-quantum half of encryption. The private half decapsulates the post-quantum component of every wrapped key. The 1184-byte public half is published on your PDS alongside the X25519 key. |
 | **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and (eventually) record envelopes. The public half is published alongside the encryption keys so services can verify signatures. |
 
-All three public halves live in a single `app.opake.publicKey/self` record on your PDS — a
+All three public halves live in a single `at.opake.publicKey/self` record on your PDS — a
 singleton, republished on every login so it stays current.
 
 ## Where Are My Keys Stored?

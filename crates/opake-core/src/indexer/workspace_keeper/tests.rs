@@ -296,7 +296,7 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
 
     let mut rng: OsRng = OsRng;
     let envelope = make_keyring_envelope(
-        "at://did:plc:alice/app.opake.keyring/abc",
+        "at://did:plc:alice/at.opake.keyring/abc",
         "did:plc:alice",
         crate::records::Role::Manager,
         &mut rng,
@@ -310,7 +310,7 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     let entry = entry.expect("unwrap failure must return Some, not None");
     assert_eq!(
         entry.workspace_id,
-        "at://did:plc:alice/app.opake.keyring/abc"
+        "at://did:plc:alice/at.opake.keyring/abc"
     );
     assert!(
         entry.name.is_none(),
@@ -393,8 +393,8 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
-    let head = "at://did:plc:alice/app.opake.keyring/head2";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
+    let head = "at://did:plc:alice/at.opake.keyring/head2";
     let keys = TestKeys::generate("did:plc:alice");
 
     let envelope = make_superseded_envelope_with_name(
@@ -433,8 +433,8 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
-    let head = "at://did:plc:alice/app.opake.keyring/head2";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
+    let head = "at://did:plc:alice/at.opake.keyring/head2";
     let alice = TestKeys::generate("did:plc:alice");
 
     // Bob's keeper tracks the workspace under its genesis id.
@@ -482,7 +482,7 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
 fn bug__genesis_delete_tombstone_drops_living_workspace() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
 
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
 
     let mut keeper = WorkspaceKeeper::new();
     keeper.bootstrap(vec![sample_entry(genesis, 0)]);
@@ -512,8 +512,8 @@ fn bug__genesis_delete_tombstone_drops_living_workspace() {
 fn rolled_back_delete_defers_to_the_follow_up_upsert() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
 
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
-    let head = "at://did:plc:alice/app.opake.keyring/head2";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
+    let head = "at://did:plc:alice/at.opake.keyring/head2";
 
     let mut keeper = WorkspaceKeeper::new();
     keeper.bootstrap(vec![sample_entry(genesis, 0)]);
@@ -535,7 +535,7 @@ fn rolled_back_delete_defers_to_the_follow_up_upsert() {
 fn torn_down_delete_drops_the_entry_by_workspace_id() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
 
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
 
     let mut keeper = WorkspaceKeeper::new();
     keeper.bootstrap(vec![sample_entry(genesis, 0)]);
@@ -561,8 +561,8 @@ fn torn_down_delete_drops_the_entry_by_workspace_id() {
 fn torn_down_delete_on_a_superseded_chain_drops_the_genesis_keyed_entry() {
     use crate::indexer::sse::events::{KeyringDeleteOutcome, SseKeyringDeletePayload};
 
-    let genesis = "at://did:plc:alice/app.opake.keyring/genesis";
-    let head = "at://did:plc:alice/app.opake.keyring/head3";
+    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
+    let head = "at://did:plc:alice/at.opake.keyring/head3";
 
     let mut keeper = WorkspaceKeeper::new();
     keeper.bootstrap(vec![sample_entry(genesis, 2)]);
@@ -595,7 +595,7 @@ fn try_build_entry_non_member_returns_none() {
 
     let mut rng: OsRng = OsRng;
     let envelope = make_keyring_envelope(
-        "at://did:plc:alice/app.opake.keyring/abc",
+        "at://did:plc:alice/at.opake.keyring/abc",
         "did:plc:alice",
         crate::records::Role::Manager,
         &mut rng,

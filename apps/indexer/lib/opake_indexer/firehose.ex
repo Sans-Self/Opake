@@ -19,7 +19,7 @@ defmodule OpakeIndexer.Firehose do
 
   ## Uniform record path
 
-  Every indexed `app.opake.*` record follows the same pipeline:
+  Every indexed `at.opake.*` record follows the same pipeline:
 
     1. Authority check (for chain-bearing supersedes — keyring + root
        directory chains).
@@ -61,11 +61,11 @@ defmodule OpakeIndexer.Firehose do
 
   @telemetry_prefix [:opake_indexer, :indexer]
 
-  @directory_collection "app.opake.directory"
-  @document_collection "app.opake.document"
-  @keyring_collection "app.opake.keyring"
-  @grant_collection "app.opake.grant"
-  @account_config_collection "app.opake.accountConfig"
+  @directory_collection "at.opake.directory"
+  @document_collection "at.opake.document"
+  @keyring_collection "at.opake.keyring"
+  @grant_collection "at.opake.grant"
+  @account_config_collection "at.opake.accountConfig"
 
   # -- State init --
 

@@ -1,7 +1,7 @@
-// Workspace: a shared file space backed by an `app.opake.keyring` record.
+// Workspace: a shared file space backed by an `at.opake.keyring` record.
 //
 // In the AT Protocol layer, workspaces are keyrings — the underlying record
-// type is `app.opake.keyring`. The `Workspace` type provides domain semantics
+// type is `at.opake.keyring`. The `Workspace` type provides domain semantics
 // over the keyring's crypto primitives: it's the aggregate root for shared
 // documents, directories, and membership.
 //
@@ -83,7 +83,7 @@ pub struct HistoricalKey {
 /// Zeroized on drop — holds the unwrapped group key.
 #[derive(Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Workspace {
-    /// The keyring AT-URI (e.g. `at://did:plc:owner/app.opake.keyring/abc`).
+    /// The keyring AT-URI (e.g. `at://did:plc:owner/at.opake.keyring/abc`).
     #[zeroize(skip)]
     pub uri: String,
     /// Decrypted workspace name.

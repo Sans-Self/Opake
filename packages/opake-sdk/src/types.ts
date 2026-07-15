@@ -6,7 +6,7 @@
 
 /**
  * Per-account config synced to the user's PDS as a singleton record
- * under `app.opake.accountConfig/self`. Holds non-sensitive preferences
+ * under `at.opake.accountConfig/self`. Holds non-sensitive preferences
  * that should follow the account across devices.
  */
 export interface AccountConfig {
@@ -145,7 +145,7 @@ export interface WorkspaceEntry {
 /**
  * Resolved identity for a handle or DID — both halves of the hybrid
  * public-key bundle, plus the algo strings advertised in the recipient's
- * `app.opake.publicKey/self` record. Pass either pubkey directly into
+ * `at.opake.publicKey/self` record. Pass either pubkey directly into
  * the matching half of `share` / `addWorkspaceMember` /
  * `approvePairRequest`.
  */

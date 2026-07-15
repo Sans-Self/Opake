@@ -602,7 +602,7 @@ export class FileManager {
   /**
    * Queue a pending share for a recipient who hasn't set up Opake yet.
    *
-   * Writes an `app.opake.pendingShare` record to the caller's PDS. The
+   * Writes an `at.opake.pendingShare` record to the caller's PDS. The
    * daemon retries periodically — when the recipient publishes their
    * public key, the pending share is replaced with a real grant and the
    * record is deleted. Pending shares expire after 7 days.

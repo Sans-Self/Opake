@@ -11,8 +11,8 @@ import type { DocumentMetadata } from "@opake/sdk";
 // spec:indexer-consistency § Client projections contain only indexer-confirmed state
 
 const DID = "did:plc:test";
-const rootDir = `at://${DID}/app.opake.directory/root`;
-const realDocUri = `at://${DID}/app.opake.document/real`;
+const rootDir = `at://${DID}/at.opake.directory/root`;
+const realDocUri = `at://${DID}/at.opake.document/real`;
 // Placeholder URIs the overlay mints; provisionality is carried by `pending`,
 // not by these shapes — the test never inspects the URI to decide pending.
 const pendingUploadUri = "pending:upload:notes.txt:123";

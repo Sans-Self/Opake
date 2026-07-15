@@ -204,13 +204,13 @@ mod tests {
     #[test]
     fn parses_single_frame() {
         let mut acc = SseLineAccumulator::new();
-        let data = "event: app.opake.directory:delete\ndata: {\"uri\":\"at://a/b/c\"}\n\n";
+        let data = "event: at.opake.directory:delete\ndata: {\"uri\":\"at://a/b/c\"}\n\n";
         let events = feed_string(&mut acc, data);
         assert_eq!(events.len(), 1);
         assert!(events[0].is_ok());
         assert_eq!(
             events[0].as_ref().unwrap().event_name(),
-            "app.opake.directory:delete"
+            "at.opake.directory:delete"
         );
     }
 
@@ -226,10 +226,7 @@ mod tests {
         let mut acc = SseLineAccumulator::new();
         // Split an event across three feeds, including mid-data and
         // mid-terminator.
-        assert_eq!(
-            feed_string(&mut acc, "event: app.opake.directory:").len(),
-            0
-        );
+        assert_eq!(feed_string(&mut acc, "event: at.opake.directory:").len(), 0);
         assert_eq!(feed_string(&mut acc, "delete\ndata: {\"uri").len(), 0);
         let events = feed_string(&mut acc, "\":\"at://x\"}\n\n");
         assert_eq!(events.len(), 1);
@@ -246,7 +243,7 @@ mod tests {
         let mut acc = SseLineAccumulator::new();
         let events = feed_string(
             &mut acc,
-            "event: app.opake.keyring:delete\r\ndata: {\"uri\":\"at://kr\"}\r\n\r\n",
+            "event: at.opake.keyring:delete\r\ndata: {\"uri\":\"at://kr\"}\r\n\r\n",
         );
         assert_eq!(events.len(), 1);
         assert!(events[0].is_ok());
@@ -256,10 +253,10 @@ mod tests {
     fn parses_multiple_frames_in_one_chunk() {
         let mut acc = SseLineAccumulator::new();
         let data = concat!(
-            "event: app.opake.grant:delete\n",
+            "event: at.opake.grant:delete\n",
             "data: {\"uri\":\"at://g1\"}\n",
             "\n",
-            "event: app.opake.grant:delete\n",
+            "event: at.opake.grant:delete\n",
             "data: {\"uri\":\"at://g2\"}\n",
             "\n",
         );
@@ -276,7 +273,7 @@ mod tests {
         // produce invalid JSON — confirming the parser joins multi-line
         // data with a newline per the SSE spec.
         let mut buf = SseFrameBuffer::new();
-        assert!(buf.feed_line(b"event: app.opake.keyring:delete").is_none());
+        assert!(buf.feed_line(b"event: at.opake.keyring:delete").is_none());
         assert!(buf.feed_line(b"data: {\"uri\": \"at://").is_none());
         assert!(buf.feed_line(b"data: a\"}").is_none());
         let result = buf.feed_line(b"").unwrap();
@@ -294,7 +291,7 @@ mod tests {
         // Sanity check: splitting between JSON tokens (where newline is
         // whitespace) parses fine.
         let mut buf = SseFrameBuffer::new();
-        assert!(buf.feed_line(b"event: app.opake.keyring:delete").is_none());
+        assert!(buf.feed_line(b"event: at.opake.keyring:delete").is_none());
         assert!(buf.feed_line(b"data: {\"uri\":").is_none());
         assert!(buf.feed_line(b"data: \"at://a\"}").is_none());
         let result = buf.feed_line(b"").unwrap();
@@ -307,7 +304,7 @@ mod tests {
         let data = concat!(
             "id: 42\n",
             "retry: 5000\n",
-            "event: app.opake.directory:delete\n",
+            "event: at.opake.directory:delete\n",
             "data: {\"uri\":\"at://x\"}\n",
             "\n",
         );
@@ -322,7 +319,7 @@ mod tests {
         let mut acc = SseLineAccumulator::new();
         let events = feed_string(
             &mut acc,
-            "event:app.opake.directory:delete\ndata:{\"uri\":\"at://y\"}\n\n",
+            "event:at.opake.directory:delete\ndata:{\"uri\":\"at://y\"}\n\n",
         );
         assert_eq!(events.len(), 1);
         assert!(events[0].is_ok());

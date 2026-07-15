@@ -9,7 +9,7 @@ fn sample_entry(uri: &str, owner: &str) -> InboxEntry {
     InboxEntry {
         uri: uri.to_string(),
         author_did: owner.to_string(),
-        document_uri: format!("at://{owner}/app.opake.document/doc1"),
+        document_uri: format!("at://{owner}/at.opake.document/doc1"),
         created_at: "2026-04-17T00:00:00Z".to_string(),
     }
 }
@@ -49,8 +49,8 @@ fn bootstrap_sets_loaded_and_notifies_watcher() {
     keeper.install_watcher(callback);
 
     keeper.bootstrap(vec![
-        sample_entry("at://a/app.opake.grant/g1", "did:plc:alice"),
-        sample_entry("at://a/app.opake.grant/g2", "did:plc:alice"),
+        sample_entry("at://a/at.opake.grant/g1", "did:plc:alice"),
+        sample_entry("at://a/at.opake.grant/g2", "did:plc:alice"),
     ]);
 
     let snaps = captured.borrow();
@@ -62,7 +62,7 @@ fn bootstrap_sets_loaded_and_notifies_watcher() {
 #[test]
 fn upsert_with_identical_entry_does_not_refire() {
     let mut keeper = InboxKeeper::new();
-    let entry = sample_entry("at://a/app.opake.grant/g1", "did:plc:alice");
+    let entry = sample_entry("at://a/at.opake.grant/g1", "did:plc:alice");
     keeper.bootstrap(vec![entry.clone()]);
 
     let (captured, callback) = capture_snapshots();
@@ -79,14 +79,14 @@ fn upsert_with_identical_entry_does_not_refire() {
 fn upsert_refires_on_change() {
     let mut keeper = InboxKeeper::new();
     keeper.bootstrap(vec![sample_entry(
-        "at://a/app.opake.grant/g1",
+        "at://a/at.opake.grant/g1",
         "did:plc:alice",
     )]);
 
     let (captured, callback) = capture_snapshots();
     keeper.install_watcher(callback);
 
-    let mut updated = sample_entry("at://a/app.opake.grant/g1", "did:plc:alice");
+    let mut updated = sample_entry("at://a/at.opake.grant/g1", "did:plc:alice");
     updated.created_at = "2026-04-18T00:00:00Z".to_string();
     keeper.upsert(updated);
 
@@ -98,14 +98,14 @@ fn upsert_refires_on_change() {
 fn delete_removes_and_fires() {
     let mut keeper = InboxKeeper::new();
     keeper.bootstrap(vec![sample_entry(
-        "at://a/app.opake.grant/g1",
+        "at://a/at.opake.grant/g1",
         "did:plc:alice",
     )]);
 
     let (captured, callback) = capture_snapshots();
     keeper.install_watcher(callback);
 
-    keeper.delete("at://a/app.opake.grant/g1");
+    keeper.delete("at://a/at.opake.grant/g1");
 
     let snaps = captured.borrow();
     assert_eq!(snaps.len(), 2);
@@ -116,14 +116,14 @@ fn delete_removes_and_fires() {
 fn delete_of_unknown_uri_does_not_fire() {
     let mut keeper = InboxKeeper::new();
     keeper.bootstrap(vec![sample_entry(
-        "at://a/app.opake.grant/g1",
+        "at://a/at.opake.grant/g1",
         "did:plc:alice",
     )]);
 
     let (captured, callback) = capture_snapshots();
     keeper.install_watcher(callback);
 
-    keeper.delete("at://a/app.opake.grant/g-unknown");
+    keeper.delete("at://a/at.opake.grant/g-unknown");
 
     let snaps = captured.borrow();
     assert_eq!(snaps.len(), 1, "no fire on no-op delete");
@@ -133,7 +133,7 @@ fn delete_of_unknown_uri_does_not_fire() {
 fn uninstall_all_drains_and_resets() {
     let mut keeper = InboxKeeper::new();
     keeper.bootstrap(vec![sample_entry(
-        "at://a/app.opake.grant/g1",
+        "at://a/at.opake.grant/g1",
         "did:plc:alice",
     )]);
 
@@ -187,9 +187,9 @@ fn fixture_envelope(
 #[test]
 fn try_build_entry_filters_non_recipient() {
     let envelope = fixture_envelope(
-        "at://did:plc:alice/app.opake.grant/g1",
+        "at://did:plc:alice/at.opake.grant/g1",
         "did:plc:bob",
-        "at://did:plc:alice/app.opake.document/d1",
+        "at://did:plc:alice/at.opake.document/d1",
         "2026-04-17T00:00:00Z",
     );
 
@@ -202,9 +202,9 @@ fn try_build_entry_filters_non_recipient() {
 #[test]
 fn try_build_entry_pulls_author_did_from_uri() {
     let envelope = fixture_envelope(
-        "at://did:plc:alice/app.opake.grant/g1",
+        "at://did:plc:alice/at.opake.grant/g1",
         "did:plc:bob",
-        "at://did:plc:alice/app.opake.document/d1",
+        "at://did:plc:alice/at.opake.document/d1",
         "2026-04-17T00:00:00Z",
     );
 
@@ -212,7 +212,7 @@ fn try_build_entry_pulls_author_did_from_uri() {
     assert_eq!(entry.author_did, "did:plc:alice");
     assert_eq!(
         entry.document_uri,
-        "at://did:plc:alice/app.opake.document/d1"
+        "at://did:plc:alice/at.opake.document/d1"
     );
     assert_eq!(entry.created_at, "2026-04-17T00:00:00Z");
 }

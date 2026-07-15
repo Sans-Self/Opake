@@ -128,7 +128,7 @@ BuildKit remote context can't satisfy (it checks out without `.git`).
 
 Six actors, two per PDS, defined in `fixtures/actors.json`. Identities derive
 from fixed BIP-39 mnemonics, so each actor always resolves to the same X25519
-encryption key and republishes the same `app.opake.publicKey/self` across resets.
+encryption key and republishes the same `at.opake.publicKey/self` across resets.
 DIDs are *not* stable (see reset blast radius) — always address actors by handle
 and resolve.
 
@@ -195,7 +195,7 @@ egress-blocked. Per actor:
    reads its PDS URL from account config, so it stays on `http://pds-x:3000`
    rather than resolving the DID-doc `https` endpoint,
 3. `opake recover` imports the fixed mnemonic and publishes
-   `app.opake.publicKey/self`,
+   `at.opake.publicKey/self`,
 4. seed the cabinet root: one tiny `opake upload`. A recovered cabinet has no
    root directory until something is written — `ls`/`mkdir`/web-upload all fail
    with "no root directory" until then (only a document upload materialises the

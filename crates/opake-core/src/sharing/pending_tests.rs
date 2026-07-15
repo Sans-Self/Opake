@@ -23,8 +23,8 @@ use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
 
 const OWNER_DID: &str = "did:plc:owner";
 const RECIPIENT_DID: &str = "did:plc:recipient";
-const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
-const PENDING_URI: &str = "at://did:plc:owner/app.opake.pendingShare/tid001";
+const DOC_URI: &str = "at://did:plc:owner/at.opake.document/doc1";
+const PENDING_URI: &str = "at://did:plc:owner/at.opake.pendingShare/tid001";
 
 fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
     let session = Session::Legacy(LegacySession {
@@ -284,7 +284,7 @@ async fn retry_transient_error_counts_as_failed_and_is_not_cached() {
 
     let share1 = pending_share(RECIPIENT_DID, "2026-04-01T00:00:00Z");
     let share2 = pending_share(RECIPIENT_DID, "2026-04-01T00:00:00Z");
-    let uri2 = "at://did:plc:owner/app.opake.pendingShare/tid002";
+    let uri2 = "at://did:plc:owner/at.opake.pendingShare/tid002";
 
     mock.enqueue(list_pending_shares_response(&[
         (PENDING_URI, share1),

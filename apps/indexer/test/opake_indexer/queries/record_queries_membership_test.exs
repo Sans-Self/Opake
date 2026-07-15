@@ -10,13 +10,13 @@ defmodule OpakeIndexer.Queries.RecordQueriesMembershipTest do
 
   @owner "did:plc:owner"
   @outsider "did:plc:outsider"
-  @genesis "at://#{@owner}/app.opake.keyring/genesis"
+  @genesis "at://#{@owner}/at.opake.keyring/genesis"
 
   defp put_keyring(uri, members) do
     {:ok, record} =
       RecordQueries.upsert(%{
         uri: uri,
-        collection: "app.opake.keyring",
+        collection: "at.opake.keyring",
         author_did: @owner,
         workspace_id: uri,
         cid: "bafy-#{uri}",

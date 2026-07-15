@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.keyring",
+  "id": "at.opake.keyring",
   "defs": {
     "keyHistoryEntry": {
       "type": "object",
@@ -13,7 +13,7 @@
         },
         "members": {
           "type": "array",
-          "items": { "type": "ref", "ref": "app.opake.defs#keyringMember" },
+          "items": { "type": "ref", "ref": "at.opake.defs#keyringMember" },
           "minLength": 1,
           "maxLength": 256
         }
@@ -29,7 +29,7 @@
         "properties": {
           "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
+            "description": "Schema version for the at.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
           },
           "algo": {
@@ -50,7 +50,7 @@
           "members": {
             "type": "array",
             "description": "Each member's wrapped group key and workspace role.",
-            "items": { "type": "ref", "ref": "app.opake.defs#keyringMember" },
+            "items": { "type": "ref", "ref": "at.opake.defs#keyringMember" },
             "minLength": 1,
             "maxLength": 256
           },
@@ -71,7 +71,7 @@
           },
           "encryptedMetadata": {
             "type": "ref",
-            "ref": "app.opake.defs#encryptedMetadata",
+            "ref": "at.opake.defs#encryptedMetadata",
             "description": "Encrypted keyring metadata (name, description). Encrypted with the group key so only members can read it."
           },
           "modifiedAt": {

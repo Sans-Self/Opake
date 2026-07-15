@@ -1,6 +1,6 @@
 defmodule OpakeIndexer.Schemas.Record do
   @moduledoc """
-  An indexed `app.opake.*` record.
+  An indexed `at.opake.*` record.
 
   `record_jsonb` is the verbatim on-PDS record JSON (camelCase, no field
   renaming). Structural columns are projections of the JSON used for

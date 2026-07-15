@@ -60,7 +60,7 @@ function arrivingHooks(
   let polls = 0;
   const hooks: ProbeHooks = {
     tier: "unit",
-    write: async () => ({ label: "at://did:plc:probe/app.opake.document/xyz" }),
+    write: async () => ({ label: "at://did:plc:probe/at.opake.document/xyz" }),
     hasArrived: async () => polls++ >= arriveAfterPolls,
     cleanup,
     evidence: async () => "cursor_age_secs=412 last_event_age_ms=none",

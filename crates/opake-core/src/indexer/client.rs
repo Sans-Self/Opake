@@ -451,10 +451,10 @@ mod tests {
     fn grant_envelope_json(suffix: &str, recipient: &str) -> String {
         format!(
             r#"{{
-                "uri": "at://did:plc:author/app.opake.grant/{suffix}",
+                "uri": "at://did:plc:author/at.opake.grant/{suffix}",
                 "record": {{
                     "opakeVersion": 1,
-                    "document": "at://did:plc:author/app.opake.document/doc-{suffix}",
+                    "document": "at://did:plc:author/at.opake.document/doc-{suffix}",
                     "recipient": "{recipient}",
                     "wrappedKey": {{
                         "did": "{recipient}",
@@ -627,7 +627,7 @@ mod tests {
     // ---------------------------------------------------------------------
 
     fn workspace() -> WorkspaceId {
-        WorkspaceId::from_resolved("at://did:plc:me/app.opake.keyring/genesis")
+        WorkspaceId::from_resolved("at://did:plc:me/at.opake.keyring/genesis")
     }
 
     async fn chain_head_error(status: u16, body: &str) -> Error {

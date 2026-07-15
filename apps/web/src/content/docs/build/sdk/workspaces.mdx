@@ -37,7 +37,7 @@ working files, a writing group's drafts.
 
 `createWorkspace` generates a fresh group key inside WASM, wraps it to the caller's public
 key with the `manager` role (owners are always managers of their own workspace), writes the
-`app.opake.keyring` record to the caller's PDS, and writes the workspace root directory
+`at.opake.keyring` record to the caller's PDS, and writes the workspace root directory
 entry. The returned `key` is the group key bytes; you can hold onto it for immediate use, but
 you don't need to store it anywhere. Opake re-resolves via `keyringUri` on every subsequent
 operation.
@@ -60,7 +60,7 @@ See [React bindings](/docs/react/overview) when those pages land.
 
 The invitee needs an Opake public key published on their PDS. If `resolveHandleAndPublicKey`
 fails with `RecipientNotReady`, it means the target has a valid atproto identity but hasn't
-logged into Opake yet and therefore has no `app.opake.publicKey/self` record. You can queue a
+logged into Opake yet and therefore has no `at.opake.publicKey/self` record. You can queue a
 pending invite and wait for them to sign up; see [Sharing](/docs/sdk/sharing) for the
 pending-share mechanic, which applies the same way to workspace invites.
 
@@ -124,7 +124,7 @@ document, supersedes a directory, or renames a file, the cascade lands on their 
 cross-PDS write authority required.
 
 The directory tree under a workspace is split into per-path **chains**. One chain per path
-(`/`, `/q1/`, `/q1/reports/`, etc.); each chain has a sequence of `app.opake.directory`
+(`/`, `/q1/`, `/q1/reports/`, etc.); each chain has a sequence of `at.opake.directory`
 records linked by `supersedes`. The newest record in each chain is the canonical head.
 A write to a path:
 

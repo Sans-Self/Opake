@@ -25,8 +25,8 @@ import type {
 // ---------------------------------------------------------------------------
 
 const DID = "did:plc:test";
-const dirUri = (rkey: string) => `at://${DID}/app.opake.directory/${rkey}`;
-const docUri = (rkey: string) => `at://${DID}/app.opake.document/${rkey}`;
+const dirUri = (rkey: string) => `at://${DID}/at.opake.directory/${rkey}`;
+const docUri = (rkey: string) => `at://${DID}/at.opake.document/${rkey}`;
 
 type EntrySeed = { readonly rkey: string; readonly type: "directory" | "document" };
 

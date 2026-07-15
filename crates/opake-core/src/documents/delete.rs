@@ -7,7 +7,7 @@ use crate::error::Error;
 use super::DOCUMENT_COLLECTION;
 
 /// Delete a document record by AT-URI. Validates the collection is
-/// `app.opake.document` to prevent accidental deletion of other
+/// `at.opake.document` to prevent accidental deletion of other
 /// record types. The blob becomes orphaned and will eventually be
 /// garbage-collected by the PDS.
 pub async fn delete_document(
@@ -49,7 +49,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock.clone());
-        let uri = format!("at://{}/app.opake.document/abc123", TEST_DID);
+        let uri = format!("at://{}/at.opake.document/abc123", TEST_DID);
         delete_document(&mut client, &uri).await.unwrap();
 
         let requests = mock.requests();
@@ -58,7 +58,7 @@ mod tests {
 
         match &requests[0].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.document");
+                assert_eq!(v["collection"], "at.opake.document");
                 assert_eq!(v["rkey"], "abc123");
                 assert_eq!(v["repo"], TEST_DID);
             }
@@ -70,7 +70,7 @@ mod tests {
     async fn rejects_grant_uri() {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let uri = format!("at://{}/app.opake.grant/abc123", TEST_DID);
+        let uri = format!("at://{}/at.opake.grant/abc123", TEST_DID);
         let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(
             err.to_string().contains("expected a document URI"),
@@ -108,7 +108,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let uri = format!("at://{}/app.opake.document/gone", TEST_DID);
+        let uri = format!("at://{}/at.opake.document/gone", TEST_DID);
         let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
     }
@@ -123,7 +123,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let uri = format!("at://{}/app.opake.document/abc", TEST_DID);
+        let uri = format!("at://{}/at.opake.document/abc", TEST_DID);
         let err = delete_document(&mut client, &uri).await.unwrap_err();
         assert!(matches!(err, Error::Xrpc { .. }));
     }

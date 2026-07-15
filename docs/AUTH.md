@@ -16,7 +16,7 @@ All token handling happens in WASM (opake-core). JS never parses token responses
 6. User authorizes in the browser; PDS redirects with `code` and `state`
 7. CSRF validation, authorization code exchange with DPoP proof + PKCE verifier — all in WASM
 8. WASM builds `OAuthSession` and saves to storage. Tokens never enter JS memory.
-9. Publish `app.opake.publicKey/self` via idempotent `putRecord`
+9. Publish `at.opake.publicKey/self` via idempotent `putRecord`
 
 The web frontend uses a two-step flow: `Opake.startLogin()` returns the auth URL + serializable `PendingLogin` state. The consumer saves this via `Opake.savePendingLogin()` (sessionStorage with 10-minute TTL), redirects, then calls `Opake.completeLogin()` on the callback page. `Opake.loadPendingLogin()` auto-clears the DPoP key material from sessionStorage on read.
 
@@ -25,12 +25,12 @@ The web frontend uses a two-step flow: `Opake.startLogin()` returns the auth URL
 Opake requests granular per-collection scopes instead of the catch-all `transition:generic`:
 
 ```
-atproto repo:app.opake.accountConfig repo:app.opake.directory ... repo:app.opake.publicKey blob:*/*
+atproto repo:at.opake.accountConfig repo:at.opake.directory ... repo:at.opake.publicKey blob:*/*
 ```
 
 The scope string is built from `crate::scope::OPAKE_COLLECTIONS` (single source of truth). The same scope is embedded in the loopback client ID via `build_client_id(redirect_uri, scope)` and passed to the PAR body — they must match.
 
-A permission set lexicon (`app.opake.authFullAccess`) bundles all collections for when `include:` scopes are supported by PDSes.
+A permission set lexicon (`at.opake.authFullAccess`) bundles all collections for when `include:` scopes are supported by PDSes.
 
 ### Legacy Flow
 

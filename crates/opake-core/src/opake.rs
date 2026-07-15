@@ -1398,7 +1398,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ///    at boot from `OPAKE_INDEXER_URL` (CLI) or `VITE_INDEXER_URL`
     ///    (web). Wins so dev/ops overrides aren't undone by stored config.
     /// 2. PDS accountConfig — `config_indexer_url`, mirrored from the
-    ///    user's `app.opake.accountConfig` record. Seeded best-effort by
+    ///    user's `at.opake.accountConfig` record. Seeded best-effort by
     ///    `for_account` at boot; kept in sync by `set_account_config`.
     /// 3. Compile-time `DEFAULT_INDEXER_URL` — always present.
     ///
@@ -1706,7 +1706,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// perform after a rotation.
     ///
     /// The work set is derived purely from records — the caller's own
-    /// `app.opake.document` records, each compared against its workspace head
+    /// `at.opake.document` records, each compared against its workspace head
     /// resolved at sweep time. Each re-wrap is an independent CAS write
     /// conditioned on the record's current CID, so a duplicate or interrupted
     /// runner re-derives exactly the unmigrated remainder and a document
@@ -1790,7 +1790,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         self.resolve_workspace_by_uri(&head_uri).await
     }
 
-    /// List the AT-URIs of every `app.opake.document` record in the caller's
+    /// List the AT-URIs of every `at.opake.document` record in the caller's
     /// own repo. The re-wrap sweep's candidate set is derived from these.
     /// spec:background-work § Remaining work is derived from records, never stored
     pub async fn list_own_document_uris(&mut self) -> Result<Vec<String>, Error> {

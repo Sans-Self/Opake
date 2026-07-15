@@ -70,26 +70,26 @@ If you see a new struct holding key material without `RedactedDebug`, that's a h
 
 ## Collection Registry
 
-`crate::scope::OPAKE_COLLECTIONS` is the single source of truth for the OAuth scope string. When a new `app.opake.*` collection is added, it must be registered in five places:
+`crate::scope::OPAKE_COLLECTIONS` is the single source of truth for the OAuth scope string. When a new `at.opake.*` collection is added, it must be registered in five places:
 
 1. Rust const `*_COLLECTION` in the record module
 2. `OPAKE_COLLECTIONS` in `crate::scope` (compile-time test enforces this)
 3. Lexicon JSON in `lexicons/`
-4. Permission set `app.opake.authFullAccess.json`
+4. Permission set `at.opake.authFullAccess.json`
 5. If indexer-indexed: `@wanted_collections` in `consumer.ex` + parser + dispatch
 
 A test enforces #1-#2 sync. The rest are manual. Flag any PR that adds a collection and misses any of these.
 
 ## Metadata Is Always Encrypted
 
-Every `app.opake.document` record has an `encryptedMetadata` field (AES-256-GCM with the content key). Record-level fields (`name`, `mimeType`) are dummies. Flag any code that:
+Every `at.opake.document` record has an `encryptedMetadata` field (AES-256-GCM with the content key). Record-level fields (`name`, `mimeType`) are dummies. Flag any code that:
 - Reads `record.name` or `record.mimeType` as meaningful
 - Stores filenames, tags, or sizes outside `encryptedMetadata`
 - Logs or displays record-level fields as real metadata
 
 ## Workspace vs Keyring
 
-"Workspace" is the domain concept. "Keyring" is the wire format (`app.opake.keyring`). Flag `keyring` in UI strings or user-facing CLI output. Flag `workspace` in lexicon definitions or XRPC paths.
+"Workspace" is the domain concept. "Keyring" is the wire format (`at.opake.keyring`). Flag `keyring` in UI strings or user-facing CLI output. Flag `workspace` in lexicon definitions or XRPC paths.
 
 ## Two-Layer Key Model
 
@@ -122,7 +122,7 @@ Flag any code that:
 
 ## OAuth Scopes
 
-Granular per-collection `repo:app.opake.*` scopes. No `transition:generic`. Scope string built from `OPAKE_COLLECTIONS`. The `build_client_id(redirect_uri, scope)` function takes the scope as a parameter — the scope in the client ID MUST match the scope in the PAR body.
+Granular per-collection `repo:at.opake.*` scopes. No `transition:generic`. Scope string built from `OPAKE_COLLECTIONS`. The `build_client_id(redirect_uri, scope)` function takes the scope as a parameter — the scope in the client ID MUST match the scope in the PAR body.
 
 ## Documentation Discipline
 
@@ -173,7 +173,7 @@ When given a diff or a set of files:
 
 1. **Read the actual code.** Don't skim. Trace the data flow.
 2. **Check every value that crosses a boundary** — WASM-JS, core-wasm, SDK-web. Does it belong there?
-3. **Check the collection registry** if any new `app.opake.*` types appear.
+3. **Check the collection registry** if any new `at.opake.*` types appear.
 4. **Check zeroization** if any new structs hold key material.
 5. **Check docs** if the change touches auth, crypto, collections, or architecture.
 6. **Check for JS reimplementation** of logic that exists in core.

@@ -22,7 +22,7 @@ defmodule OpakeIndexer.FirehoseRecordDeleteTest do
 
   @owner "did:plc:owner"
   @recipient "did:plc:recipient"
-  @workspace "at://#{@owner}/app.opake.keyring/genesis"
+  @workspace "at://#{@owner}/at.opake.keyring/genesis"
 
   defp delete_json(uri) do
     ["at:", "", did, collection, rkey] = String.split(uri, "/")
@@ -56,47 +56,47 @@ defmodule OpakeIndexer.FirehoseRecordDeleteTest do
   describe "grant delete fan-out" do
     # spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes
     test "grant delete reaches the recipient's personal topic" do
-      grant = "at://#{@owner}/app.opake.grant/g1"
-      seed(grant, "app.opake.grant", record_jsonb: %{"recipient" => @recipient})
+      grant = "at://#{@owner}/at.opake.grant/g1"
+      seed(grant, "at.opake.grant", record_jsonb: %{"recipient" => @recipient})
 
       :ok = Phoenix.PubSub.subscribe(OpakeIndexer.PubSub, Topics.personal(@recipient))
       process_delete(grant)
 
-      assert_receive {:sse_event, "app.opake.grant:delete", %{uri: ^grant}}
+      assert_receive {:sse_event, "at.opake.grant:delete", %{uri: ^grant}}
       assert %{deleted_at: %DateTime{}} = RecordQueries.lookup(grant)
     end
 
     # spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes
     test "grant delete also reaches the owner's personal topic" do
-      grant = "at://#{@owner}/app.opake.grant/g2"
-      seed(grant, "app.opake.grant", record_jsonb: %{"recipient" => @recipient})
+      grant = "at://#{@owner}/at.opake.grant/g2"
+      seed(grant, "at.opake.grant", record_jsonb: %{"recipient" => @recipient})
 
       :ok = Phoenix.PubSub.subscribe(OpakeIndexer.PubSub, Topics.personal(@owner))
       process_delete(grant)
 
-      assert_receive {:sse_event, "app.opake.grant:delete", %{uri: ^grant}}
+      assert_receive {:sse_event, "at.opake.grant:delete", %{uri: ^grant}}
     end
   end
 
   describe "directory / document delete fan-out" do
     test "workspace-scoped directory delete reaches the workspace topic" do
-      dir = "at://#{@owner}/app.opake.directory/d1"
-      seed(dir, "app.opake.directory", workspace_id: @workspace)
+      dir = "at://#{@owner}/at.opake.directory/d1"
+      seed(dir, "at.opake.directory", workspace_id: @workspace)
 
       :ok = Phoenix.PubSub.subscribe(OpakeIndexer.PubSub, Topics.workspace(@workspace))
       process_delete(dir)
 
-      assert_receive {:sse_event, "app.opake.directory:delete", %{uri: ^dir}}
+      assert_receive {:sse_event, "at.opake.directory:delete", %{uri: ^dir}}
     end
 
     test "cabinet document delete (no workspace) reaches the author's personal topic" do
-      doc = "at://#{@owner}/app.opake.document/doc1"
-      seed(doc, "app.opake.document", workspace_id: nil, author_did: @owner)
+      doc = "at://#{@owner}/at.opake.document/doc1"
+      seed(doc, "at.opake.document", workspace_id: nil, author_did: @owner)
 
       :ok = Phoenix.PubSub.subscribe(OpakeIndexer.PubSub, Topics.personal(@owner))
       process_delete(doc)
 
-      assert_receive {:sse_event, "app.opake.document:delete", %{uri: ^doc}}
+      assert_receive {:sse_event, "at.opake.document:delete", %{uri: ^doc}}
     end
   end
 end

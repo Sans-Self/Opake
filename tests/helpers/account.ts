@@ -121,7 +121,7 @@ handle = "${handle}"
   // 6. Publish public key to fake PDS (skip if no identity)
   if (!opts?.skipIdentity) {
     const publicKeyRecord: Record<string, unknown> = {
-      $type: "app.opake.publicKey",
+      $type: "at.opake.publicKey",
       opakeVersion: 1,
       publicKey: { $bytes: identity.public_key },
       algo: "x25519",
@@ -140,7 +140,7 @@ handle = "${handle}"
       },
       body: JSON.stringify({
         repo: did,
-        collection: "app.opake.publicKey",
+        collection: "at.opake.publicKey",
         rkey: "self",
         record: publicKeyRecord,
       }),

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.authFullAccess",
+  "id": "at.opake.authFullAccess",
   "defs": {
     "main": {
       "type": "permission-set",
@@ -11,15 +11,15 @@
           "type": "permission",
           "resource": "repo",
           "collection": [
-            "app.opake.accountConfig",
-            "app.opake.directory",
-            "app.opake.document",
-            "app.opake.grant",
-            "app.opake.keyring",
-            "app.opake.pairRequest",
-            "app.opake.pairResponse",
-            "app.opake.pendingShare",
-            "app.opake.publicKey"
+            "at.opake.accountConfig",
+            "at.opake.directory",
+            "at.opake.document",
+            "at.opake.grant",
+            "at.opake.keyring",
+            "at.opake.pairRequest",
+            "at.opake.pairResponse",
+            "at.opake.pendingShare",
+            "at.opake.publicKey"
           ]
         }
       ]

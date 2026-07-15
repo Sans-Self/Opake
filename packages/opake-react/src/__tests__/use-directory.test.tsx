@@ -45,7 +45,7 @@ async function flush() {
   });
 }
 
-const ROOT_URI = "at://did:plc:test/app.opake.directory/self";
+const ROOT_URI = "at://did:plc:test/at.opake.directory/self";
 
 describe("useDirectory", () => {
   it("loads tree, resolves root, installs watcher, delivers first snapshot", async () => {
@@ -82,7 +82,7 @@ describe("useDirectory", () => {
   it("uses the explicit directoryUri when provided and skips loadTree", async () => {
     const mock = createMockOpake();
     const capture = { current: emptyCapture() };
-    const childUri = "at://did:plc:test/app.opake.directory/photos";
+    const childUri = "at://did:plc:test/at.opake.directory/photos";
 
     render(wrap(mock, <Probe keyringUri={null} directoryUri={childUri} capture={capture} />));
     await flush();
@@ -190,8 +190,8 @@ describe("useDirectory", () => {
   it("switches watcher when directoryUri prop changes", async () => {
     const mock = createMockOpake();
     const capture = { current: emptyCapture() };
-    const uriA = "at://did:plc:test/app.opake.directory/a";
-    const uriB = "at://did:plc:test/app.opake.directory/b";
+    const uriA = "at://did:plc:test/at.opake.directory/a";
+    const uriB = "at://did:plc:test/at.opake.directory/b";
 
     const { rerender } = render(
       wrap(mock, <Probe keyringUri={null} directoryUri={uriA} capture={capture} />),

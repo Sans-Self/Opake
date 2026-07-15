@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.grant",
+  "id": "at.opake.grant",
   "defs": {
     "main": {
       "type": "record",
@@ -12,13 +12,13 @@
         "properties": {
           "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.* namespace. Clients should reject records with a version they do not understand.",
+            "description": "Schema version for the at.opake.* namespace. Clients should reject records with a version they do not understand.",
             "minimum": 1
           },
           "document": {
             "type": "string",
             "format": "at-uri",
-            "description": "AT URI of the app.opake.document record being shared."
+            "description": "AT URI of the at.opake.document record being shared."
           },
           "recipient": {
             "type": "string",
@@ -27,12 +27,12 @@
           },
           "wrappedKey": {
             "type": "ref",
-            "ref": "app.opake.defs#wrappedKey",
+            "ref": "at.opake.defs#wrappedKey",
             "description": "The document's content encryption key, wrapped to the recipient's DID public key."
           },
           "encryptedMetadata": {
             "type": "ref",
-            "ref": "app.opake.defs#encryptedMetadata",
+            "ref": "at.opake.defs#encryptedMetadata",
             "description": "Encrypted grant metadata (permissions, note). Encrypted with the document's content key so both grantor and recipient can read it."
           },
           "createdAt": {

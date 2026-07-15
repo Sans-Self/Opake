@@ -4,7 +4,7 @@
 
 ### Requirement: Deterministic actor fixtures
 
-The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `app.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
+The dev-env SHALL provision a fixed set of named actors from checked-in BIP-39 mnemonics, with at least one actor on each PDS instance, so owner/member/third-party scenarios have a resident actor per role. Each bootstrapped actor SHALL have a published `at.opake.publicKey/self` record derived from its mnemonic. Fixtures SHALL NOT hardcode `did:plc` values; actors are addressed by handle and resolved at runtime.
 
 Beyond the checked-in set, test harnesses SHALL be able to provision namespace-scoped actors on demand against a running dev-env. A namespaced actor's handle SHALL embed its namespace, its mnemonic SHALL derive deterministically from the namespace and actor role (no randomness), and its provisioning SHALL yield the same guarantees as bootstrap: a live account on the role's designated PDS and a published public-key record derived from the mnemonic. The checked-in fixture set is the default namespace; provisioning a namespace SHALL NOT mutate the default actors or any other namespace's actors.
 

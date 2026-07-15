@@ -24,7 +24,7 @@ fn file_context_owner_did_workspace() {
 
     let gk = generate_content_key(&mut OsRng);
     let ws = Workspace::from_keyring(
-        "at://did:plc:bob/app.opake.keyring/xyz".into(),
+        "at://did:plc:bob/at.opake.keyring/xyz".into(),
         "Bob's WS".into(),
         None,
         "did:plc:bob".into(),
@@ -57,9 +57,9 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
     use crate::test_utils::MockTransport;
 
     const DID: &str = "did:plc:test";
-    const PARENT_URI: &str = "at://did:plc:test/app.opake.directory/self";
-    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
-    const OTHER_DOC_URI: &str = "at://did:plc:test/app.opake.document/keep";
+    const PARENT_URI: &str = "at://did:plc:test/at.opake.directory/self";
+    const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
+    const OTHER_DOC_URI: &str = "at://did:plc:test/at.opake.document/keep";
 
     // Seed the mock: getRecord for the parent directory (loaded by
     // prepare_remove_entry), then applyWrites (the atomic delete + update).
@@ -107,12 +107,12 @@ async fn cabinet_delete_removes_doc_and_unlinks_parent_entry() {
 
     let delete_op = &writes[0];
     assert_eq!(delete_op["$type"], "com.atproto.repo.applyWrites#delete");
-    assert_eq!(delete_op["collection"], "app.opake.document");
+    assert_eq!(delete_op["collection"], "at.opake.document");
     assert_eq!(delete_op["rkey"], "doc1");
 
     let update_op = &writes[1];
     assert_eq!(update_op["$type"], "com.atproto.repo.applyWrites#update");
-    assert_eq!(update_op["collection"], "app.opake.directory");
+    assert_eq!(update_op["collection"], "at.opake.directory");
     let updated: Directory = serde_json::from_value(update_op["value"].clone()).unwrap();
     assert_eq!(
         updated
@@ -160,7 +160,7 @@ mod workspace_upload_cascade {
     use crate::workspace::Workspace;
 
     const ALICE_DID: &str = "did:plc:alice";
-    const KEYRING_URI: &str = "at://did:plc:alice/app.opake.keyring/ws1";
+    const KEYRING_URI: &str = "at://did:plc:alice/at.opake.keyring/ws1";
     const INDEXER_URL: &str = "https://indexer.test";
 
     /// Mock `/api/workspace/chain-head` response.
@@ -288,7 +288,7 @@ mod workspace_upload_cascade {
         mock.enqueue(upload_blob_response());
         // 3. createRecord for the document — explicit cid for downstream
         // assertion that it gets threaded into the genesis root's listing.
-        let doc_uri = format!("at://{ALICE_DID}/app.opake.document/doc1");
+        let doc_uri = format!("at://{ALICE_DID}/at.opake.document/doc1");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -299,7 +299,7 @@ mod workspace_upload_cascade {
             .unwrap(),
         });
         // 3. putRecord for the genesis root (stable rkey ws-ws1)
-        let root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
+        let root_uri = format!("at://{ALICE_DID}/at.opake.directory/ws-ws1");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -352,7 +352,7 @@ mod workspace_upload_cascade {
                     Some(RequestBody::Json(v)) => v,
                     _ => return None,
                 };
-                if body["collection"] == "app.opake.directory" {
+                if body["collection"] == "at.opake.directory" {
                     Some(idx)
                 } else {
                     None
@@ -363,7 +363,7 @@ mod workspace_upload_cascade {
 
         match &reqs[create_root_idx].body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.directory");
+                assert_eq!(v["collection"], "at.opake.directory");
                 let written: Directory =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert!(written.supersedes.is_none(), "genesis has no supersedes");
@@ -393,7 +393,7 @@ mod workspace_upload_cascade {
             None,
         ));
         // 2. createRecord for the new folder directory.
-        let folder_uri = format!("at://{ALICE_DID}/app.opake.directory/folder1");
+        let folder_uri = format!("at://{ALICE_DID}/at.opake.directory/folder1");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -404,7 +404,7 @@ mod workspace_upload_cascade {
             .unwrap(),
         });
         // 3. createRecord for the genesis root.
-        let root_uri = format!("at://{ALICE_DID}/app.opake.directory/genesisroot");
+        let root_uri = format!("at://{ALICE_DID}/at.opake.directory/genesisroot");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -436,7 +436,7 @@ mod workspace_upload_cascade {
                 let RequestBody::Json(v) = r.body.as_ref()? else {
                     return None;
                 };
-                if v["collection"] != "app.opake.directory" {
+                if v["collection"] != "at.opake.directory" {
                     return None;
                 }
                 let dir: Directory = serde_json::from_value(v["record"].clone()).ok()?;
@@ -467,8 +467,8 @@ mod workspace_upload_cascade {
         let mock = MockTransport::new();
 
         // The prior root lives on Alice's PDS (same DID — common case)
-        let prior_root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
-        let prior_doc_uri = format!("at://{ALICE_DID}/app.opake.document/preexisting");
+        let prior_root_uri = format!("at://{ALICE_DID}/at.opake.directory/ws-ws1");
+        let prior_doc_uri = format!("at://{ALICE_DID}/at.opake.document/preexisting");
 
         // 1. chain-head: root exists at prior_root_uri/cid
         mock.enqueue(chain_head_response(
@@ -480,7 +480,7 @@ mod workspace_upload_cascade {
         mock.enqueue(upload_blob_response());
         // 3. createRecord for the doc — explicit body with the cid we
         // assert downstream gets threaded into the cascade's listing.
-        let doc_uri = format!("at://{ALICE_DID}/app.opake.document/doc2");
+        let doc_uri = format!("at://{ALICE_DID}/at.opake.document/doc2");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -501,7 +501,7 @@ mod workspace_upload_cascade {
         ));
 
         // 4. createRecord for the new root (cascade-supersede write — TID rkey)
-        let new_root_uri = format!("at://{ALICE_DID}/app.opake.directory/3supernew");
+        let new_root_uri = format!("at://{ALICE_DID}/at.opake.directory/3supernew");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -537,7 +537,7 @@ mod workspace_upload_cascade {
 
         match &cascade_write.body {
             Some(RequestBody::Json(v)) => {
-                assert_eq!(v["collection"], "app.opake.directory");
+                assert_eq!(v["collection"], "at.opake.directory");
                 let written: Directory =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert_eq!(written.supersedes.as_deref(), Some(prior_root_uri.as_str()));
@@ -567,8 +567,8 @@ mod workspace_upload_cascade {
         // indexer is the one that decides whether the supersede joins the
         // canonical chain.
         const BOB_DID: &str = "did:plc:bob";
-        const ALICE_OWNED_KEYRING: &str = "at://did:plc:alice/app.opake.keyring/ws1";
-        let prior_root_uri = "at://did:plc:alice/app.opake.directory/ws-ws1";
+        const ALICE_OWNED_KEYRING: &str = "at://did:plc:alice/at.opake.keyring/ws1";
+        let prior_root_uri = "at://did:plc:alice/at.opake.directory/ws-ws1";
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(
@@ -576,7 +576,7 @@ mod workspace_upload_cascade {
             Some((prior_root_uri, "bafyrootcurrent")),
         ));
         mock.enqueue(upload_blob_response());
-        let doc_uri = format!("at://{BOB_DID}/app.opake.document/bobdoc");
+        let doc_uri = format!("at://{BOB_DID}/at.opake.document/bobdoc");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -595,7 +595,7 @@ mod workspace_upload_cascade {
             &dummy_directory_with_entries("root", vec![]),
         ));
         // Cascade write goes to BOB's PDS.
-        let new_root_uri = format!("at://{BOB_DID}/app.opake.directory/3bobsupersede");
+        let new_root_uri = format!("at://{BOB_DID}/at.opake.directory/3bobsupersede");
         mock.enqueue(HttpResponse {
             status: 200,
             headers: vec![],
@@ -691,7 +691,7 @@ mod workspace_delete_cascade {
     use crate::workspace::Workspace;
 
     const ALICE_DID: &str = "did:plc:alice";
-    const KEYRING_URI: &str = "at://did:plc:alice/app.opake.keyring/ws1";
+    const KEYRING_URI: &str = "at://did:plc:alice/at.opake.keyring/ws1";
     const INDEXER_URL: &str = "https://indexer.test";
 
     fn chain_head_response(
@@ -783,9 +783,9 @@ mod workspace_delete_cascade {
     /// in one applyWrites batch.
     #[tokio::test]
     async fn supersedes_root_atomically_with_doc_delete() {
-        let prior_root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
-        let doc_uri = format!("at://{ALICE_DID}/app.opake.document/doc1");
-        let keep_uri = format!("at://{ALICE_DID}/app.opake.document/keep");
+        let prior_root_uri = format!("at://{ALICE_DID}/at.opake.directory/ws-ws1");
+        let doc_uri = format!("at://{ALICE_DID}/at.opake.document/doc1");
+        let keep_uri = format!("at://{ALICE_DID}/at.opake.document/keep");
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(
@@ -822,9 +822,9 @@ mod workspace_delete_cascade {
                 let writes = v["writes"].as_array().expect("writes array");
                 assert_eq!(writes.len(), 2, "atomic [delete doc, create new root]");
                 assert_eq!(writes[0]["$type"], "com.atproto.repo.applyWrites#delete");
-                assert_eq!(writes[0]["collection"], "app.opake.document");
+                assert_eq!(writes[0]["collection"], "at.opake.document");
                 assert_eq!(writes[1]["$type"], "com.atproto.repo.applyWrites#create");
-                assert_eq!(writes[1]["collection"], "app.opake.directory");
+                assert_eq!(writes[1]["collection"], "at.opake.directory");
 
                 let new_root: Directory =
                     serde_json::from_value(writes[1]["value"].clone()).unwrap();
@@ -855,8 +855,8 @@ mod workspace_delete_cascade {
     /// — the cascade can't supersede a head that doesn't exist.
     #[tokio::test]
     async fn delete_without_indexed_root_errors_not_found() {
-        let doc_uri = format!("at://{ALICE_DID}/app.opake.document/orphan");
-        let parent_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
+        let doc_uri = format!("at://{ALICE_DID}/at.opake.document/orphan");
+        let parent_uri = format!("at://{ALICE_DID}/at.opake.directory/ws-ws1");
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(
@@ -879,9 +879,9 @@ mod workspace_delete_cascade {
     /// write.
     #[tokio::test]
     async fn delete_unknown_doc_errors_not_found() {
-        let prior_root_uri = format!("at://{ALICE_DID}/app.opake.directory/ws-ws1");
-        let other_doc_uri = format!("at://{ALICE_DID}/app.opake.document/other");
-        let unknown_doc_uri = format!("at://{ALICE_DID}/app.opake.document/ghost");
+        let prior_root_uri = format!("at://{ALICE_DID}/at.opake.directory/ws-ws1");
+        let other_doc_uri = format!("at://{ALICE_DID}/at.opake.document/other");
+        let unknown_doc_uri = format!("at://{ALICE_DID}/at.opake.document/ghost");
 
         let mock = MockTransport::new();
         mock.enqueue(chain_head_response(
@@ -966,9 +966,9 @@ mod move_entry_cycle {
     #[tokio::test]
     async fn cabinet_move_into_own_descendant_refused_at_domain_api() {
         const DID: &str = "did:plc:test";
-        let root_uri = format!("at://{DID}/app.opake.directory/self");
-        let dir_a = format!("at://{DID}/app.opake.directory/dirA");
-        let dir_b = format!("at://{DID}/app.opake.directory/dirB");
+        let root_uri = format!("at://{DID}/at.opake.directory/self");
+        let dir_a = format!("at://{DID}/at.opake.directory/dirA");
+        let dir_b = format!("at://{DID}/at.opake.directory/dirB");
 
         // Guard fetches A's record; A lists B, so moving A into B is a cycle.
         let mock = MockTransport::new();
@@ -1011,10 +1011,10 @@ mod move_entry_cycle {
     #[tokio::test]
     async fn workspace_move_into_own_descendant_refused_before_cascade() {
         const ALICE: &str = "did:plc:alice";
-        const KEYRING: &str = "at://did:plc:alice/app.opake.keyring/ws1";
-        let root_uri = format!("at://{ALICE}/app.opake.directory/ws-ws1");
-        let dir_a = format!("at://{ALICE}/app.opake.directory/dirA");
-        let dir_b = format!("at://{ALICE}/app.opake.directory/dirB");
+        const KEYRING: &str = "at://did:plc:alice/at.opake.keyring/ws1";
+        let root_uri = format!("at://{ALICE}/at.opake.directory/ws-ws1");
+        let dir_a = format!("at://{ALICE}/at.opake.directory/dirA");
+        let dir_b = format!("at://{ALICE}/at.opake.directory/dirB");
 
         // Guard walks A's subtree via fetch_chain_node: DID doc + getRecord(A).
         // A lists B, so A → B is refused before the chain-head lookup or any

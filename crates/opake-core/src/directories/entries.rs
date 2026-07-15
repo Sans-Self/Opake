@@ -127,9 +127,9 @@ mod tests {
         dummy_directory_with_entries, get_record_response, mock_client, put_record_response,
     };
 
-    const DIR_URI: &str = "at://did:plc:test/app.opake.directory/dir1";
-    const DOC_URI: &str = "at://did:plc:test/app.opake.document/doc1";
-    const DOC_URI_2: &str = "at://did:plc:test/app.opake.document/doc2";
+    const DIR_URI: &str = "at://did:plc:test/at.opake.directory/dir1";
+    const DOC_URI: &str = "at://did:plc:test/at.opake.document/doc1";
+    const DOC_URI_2: &str = "at://did:plc:test/at.opake.document/doc2";
     const DOC_CID: &str = "bafytestdoccid";
 
     #[tokio::test]
@@ -160,7 +160,7 @@ mod tests {
                 let writes = v["writes"].as_array().unwrap();
                 assert_eq!(writes.len(), 1);
                 let op = &writes[0];
-                assert_eq!(op["collection"], "app.opake.directory");
+                assert_eq!(op["collection"], "at.opake.directory");
                 let updated: Directory = serde_json::from_value(op["value"].clone()).unwrap();
                 assert_eq!(updated.entries.len(), 1);
                 assert_eq!(updated.entries[0].target, DOC_URI);
@@ -251,7 +251,7 @@ mod tests {
         let err = remove_entry(
             &mut client,
             DIR_URI,
-            "at://did:plc:test/app.opake.document/nope",
+            "at://did:plc:test/at.opake.document/nope",
             "2026-03-01T12:00:00Z",
         )
         .await

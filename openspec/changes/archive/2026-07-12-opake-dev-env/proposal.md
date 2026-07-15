@@ -7,7 +7,7 @@ Opake has no hermetic way to run its full federated stack locally: web e2e testi
 ## What Changes
 
 - New `dev-env/` compose stack in the monorepo: local PLC, multiple real PDS instances (official distribution image), jetstream, and the real Elixir indexer + Postgres — a complete hermetic atproto network on localhost.
-- Deterministic fixtures: fixed BIP-39 mnemonics per test actor, scripted account bootstrap (invite code → account → identity → published `app.opake.publicKey/self` record), actors distributed across PDSes so multi-PDS is the default topology.
+- Deterministic fixtures: fixed BIP-39 mnemonics per test actor, scripted account bootstrap (invite code → account → identity → published `at.opake.publicKey/self` record), actors distributed across PDSes so multi-PDS is the default topology.
 - `just dev-env-up|down|reset` lifecycle recipes; the same stack serves manual development, web e2e, and CLI e2e.
 - New Playwright-based web e2e tier running against the dev-env, with authentication performed once per fixture actor (storage-state reuse), not per test.
 - New CLI e2e tier against the dev-env for federation scenarios fake-pds cannot express (cross-PDS membership, leave, indexer-driven sync). The existing fake-pds CLI suite is retained unchanged as the fast single-PDS tier.

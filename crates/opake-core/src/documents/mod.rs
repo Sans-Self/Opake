@@ -25,7 +25,7 @@ pub use update::update_content;
 pub(crate) use upload::{prepare_upload, prepare_upload_keyring};
 pub use upload::{KeyringUploadParams, UploadParams};
 
-pub const DOCUMENT_COLLECTION: &str = "app.opake.document";
+pub const DOCUMENT_COLLECTION: &str = "at.opake.document";
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -33,7 +33,7 @@ pub(crate) mod tests {
     use crate::test_utils::MockTransport;
 
     pub const TEST_DID: &str = "did:plc:test";
-    pub const TEST_URI: &str = "at://did:plc:test/app.opake.document/abc123";
+    pub const TEST_URI: &str = "at://did:plc:test/at.opake.document/abc123";
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         let session = Session::Legacy(LegacySession {

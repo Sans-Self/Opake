@@ -19,7 +19,7 @@ fn account_config_json(telemetry: bool) -> String {
         ..AccountConfigRecord::new("2026-03-15T00:00:00Z")
     };
     serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.accountConfig/self",
+        "uri": "at://did:plc:test/at.opake.accountConfig/self",
         "cid": "bafyrecord",
         "value": record,
     })
@@ -33,7 +33,7 @@ fn account_config_json_ext(telemetry: bool, indexer: Option<&str>, modified_at: 
         ..AccountConfigRecord::new(modified_at)
     };
     serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.accountConfig/self",
+        "uri": "at://did:plc:test/at.opake.accountConfig/self",
         "cid": "bafyrecord",
         "value": record,
     })
@@ -41,7 +41,7 @@ fn account_config_json_ext(telemetry: bool, indexer: Option<&str>, modified_at: 
 }
 
 fn put_record_response() -> HttpResponse {
-    success(r#"{"uri":"at://did:plc:test/app.opake.accountConfig/self","cid":"bafynew"}"#)
+    success(r#"{"uri":"at://did:plc:test/at.opake.accountConfig/self","cid":"bafynew"}"#)
 }
 
 fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
@@ -108,7 +108,7 @@ async fn fetch_rejects_future_schema_version() {
     let mut record = AccountConfigRecord::new("2026-03-15T00:00:00Z");
     record.opake_version = SCHEMA_VERSION + 1;
     let entry = serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.accountConfig/self",
+        "uri": "at://did:plc:test/at.opake.accountConfig/self",
         "cid": "bafy",
         "value": record,
     });
@@ -125,7 +125,7 @@ async fn fetch_rejects_future_schema_version() {
 async fn publish_calls_put_record() {
     let mock = MockTransport::new();
     let put_response = serde_json::json!({
-        "uri": "at://did:plc:test/app.opake.accountConfig/self",
+        "uri": "at://did:plc:test/at.opake.accountConfig/self",
         "cid": "bafypublished",
     });
     mock.enqueue(success(&put_response.to_string()));
@@ -134,7 +134,7 @@ async fn publish_calls_put_record() {
     let config = AccountConfigRecord::new("2026-03-15T12:00:00Z");
     let uri = publish_account_config(&mut client, &config).await.unwrap();
 
-    assert_eq!(uri, "at://did:plc:test/app.opake.accountConfig/self");
+    assert_eq!(uri, "at://did:plc:test/at.opake.accountConfig/self");
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 1);

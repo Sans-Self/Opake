@@ -60,7 +60,7 @@ export interface MockDirectoryWatcher {
  * Build a fresh mock FileManager with the given initial tree.
  *
  * `initialTree` is what `loadTree()` resolves to. Defaults to an empty
- * cabinet with `rootUri = "at://did:plc:test/app.opake.directory/self"`.
+ * cabinet with `rootUri = "at://did:plc:test/at.opake.directory/self"`.
  *
  * The returned mock remembers the most recent watcher it handed out
  * via `activeHandler`; tests call `fm.emit(snapshot)` to simulate an
@@ -70,9 +70,9 @@ export function createMockFileManager(initialTree?: DirectoryTreeSnapshot): Mock
   const tree: DirectoryTreeSnapshot =
     initialTree ??
     ({
-      rootUri: "at://did:plc:test/app.opake.directory/self",
+      rootUri: "at://did:plc:test/at.opake.directory/self",
       directories: {
-        "at://did:plc:test/app.opake.directory/self": {
+        "at://did:plc:test/at.opake.directory/self": {
           name: "/",
           entries: [],
           parentUri: null,

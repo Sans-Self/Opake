@@ -7,7 +7,7 @@ use crate::error::Error;
 use super::GRANT_COLLECTION;
 
 /// Delete a grant record by AT-URI. Validates the collection is
-/// `app.opake.grant` to prevent accidental deletion of other
+/// `at.opake.grant` to prevent accidental deletion of other
 /// record types.
 pub async fn revoke_grant(client: &mut XrpcClient<impl Transport>, uri: &str) -> Result<(), Error> {
     let at_uri = atproto::parse_at_uri(uri)?;
@@ -55,7 +55,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock.clone());
-        let uri = format!("at://{}/app.opake.grant/tid123", TEST_DID);
+        let uri = format!("at://{}/at.opake.grant/tid123", TEST_DID);
         revoke_grant(&mut client, &uri).await.unwrap();
 
         let reqs = mock.requests();
@@ -76,7 +76,7 @@ mod tests {
     async fn rejects_document_uri() {
         let mock = MockTransport::new();
         let mut client = mock_client(mock);
-        let uri = format!("at://{}/app.opake.document/abc", TEST_DID);
+        let uri = format!("at://{}/at.opake.document/abc", TEST_DID);
         let err = revoke_grant(&mut client, &uri).await.unwrap_err();
         assert!(
             err.to_string().contains("expected a grant URI"),
@@ -121,7 +121,7 @@ mod tests {
             body: b"{}".to_vec(),
         });
         let mut client = mock_client(mock.clone());
-        let grant_uri = format!("at://{}/app.opake.grant/tid123", TEST_DID);
+        let grant_uri = format!("at://{}/at.opake.grant/tid123", TEST_DID);
         revoke_grant(&mut client, &grant_uri).await.unwrap();
 
         // Revoke performed exactly one network effect — the delete. It did NOT
@@ -152,7 +152,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let uri = format!("at://{}/app.opake.grant/gone", TEST_DID);
+        let uri = format!("at://{}/at.opake.grant/gone", TEST_DID);
         let err = revoke_grant(&mut client, &uri).await.unwrap_err();
         assert!(matches!(err, Error::NotFound(_)));
     }

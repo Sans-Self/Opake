@@ -9,8 +9,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 const OWNER_DID: &str = "did:plc:owner";
 const OWNER_PDS: &str = "https://pds.owner.example.com";
 const MEMBER_DID: &str = "did:plc:member";
-const DOC_URI: &str = "at://did:plc:owner/app.opake.document/doc1";
-const KR_URI: &str = "at://did:plc:owner/app.opake.keyring/kr1";
+const DOC_URI: &str = "at://did:plc:owner/at.opake.document/doc1";
+const KR_URI: &str = "at://did:plc:owner/at.opake.keyring/kr1";
 
 fn did_document_response() -> HttpResponse {
     let body = serde_json::json!({
@@ -157,7 +157,7 @@ async fn roundtrip() {
     assert!(reqs[1].url.contains(OWNER_PDS), "from owner PDS");
     assert!(reqs[2].url.contains("getBlob"), "blob fetch");
     assert!(
-        !reqs.iter().any(|r| r.url.contains("app.opake.keyring")),
+        !reqs.iter().any(|r| r.url.contains("at.opake.keyring")),
         "key-driven download must never fetch the keyring"
     );
 }
@@ -169,7 +169,7 @@ async fn rejects_non_document_uri() {
     let err = download_keyring_document(
         &mock,
         current_keys(0, &key),
-        "at://did:plc:x/app.opake.grant/abc",
+        "at://did:plc:x/at.opake.grant/abc",
     )
     .await
     .unwrap_err();
@@ -326,7 +326,7 @@ async fn bug__post_genesis_member_opens_pre_membership_document() {
 
     let reqs = mock.requests();
     assert!(
-        !reqs.iter().any(|r| r.url.contains("app.opake.keyring")),
+        !reqs.iter().any(|r| r.url.contains("at.opake.keyring")),
         "must not consult the keyring — membership was settled at resolution time"
     );
 }

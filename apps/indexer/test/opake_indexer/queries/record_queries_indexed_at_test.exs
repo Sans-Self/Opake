@@ -11,7 +11,7 @@ defmodule OpakeIndexer.Queries.RecordQueriesIndexedAtTest do
   alias OpakeIndexer.Queries.RecordQueries
 
   @recipient "did:plc:recipient"
-  @workspace_id "at://did:plc:alice/app.opake.keyring/genesis"
+  @workspace_id "at://did:plc:alice/at.opake.keyring/genesis"
 
   defp t1, do: ~U[2026-07-12 10:00:00.000000Z]
   defp t_mid, do: ~U[2026-07-12 10:02:30.000000Z]
@@ -48,7 +48,7 @@ defmodule OpakeIndexer.Queries.RecordQueriesIndexedAtTest do
 
   # spec:indexer-consistency § indexed_at is first-seen
   test "update does not modify indexed_at" do
-    uri = "at://did:plc:alice/app.opake.grant/g1"
+    uri = "at://did:plc:alice/at.opake.grant/g1"
     put_grant(uri, @recipient, t1())
 
     put_grant(uri, @recipient, t2(), %{"note" => "later event"})
@@ -59,8 +59,8 @@ defmodule OpakeIndexer.Queries.RecordQueriesIndexedAtTest do
 
   # spec:indexer-consistency § indexed_at is first-seen
   test "update does not reposition a record in an indexed_at-ordered page" do
-    older = "at://did:plc:alice/app.opake.grant/older"
-    newer = "at://did:plc:alice/app.opake.grant/newer"
+    older = "at://did:plc:alice/at.opake.grant/older"
+    newer = "at://did:plc:alice/at.opake.grant/newer"
 
     put_grant(older, @recipient, t1())
     put_grant(newer, @recipient, t2())
@@ -78,7 +78,7 @@ defmodule OpakeIndexer.Queries.RecordQueriesIndexedAtTest do
 
   # spec:indexer-consistency § indexed_at is first-seen
   test "changes_since re-delivers a record updated in place, keyed to its first-seen order" do
-    uri = "at://did:plc:alice/app.opake.document/doc1"
+    uri = "at://did:plc:alice/at.opake.document/doc1"
     put_document(uri, t1())
 
     put_document(uri, t2(), %{"name" => "still encrypted"})
@@ -99,7 +99,7 @@ defmodule OpakeIndexer.Queries.RecordQueriesIndexedAtTest do
   # The last-write watermark `updated_at` fixes delivery without moving the
   # record's pagination position.
   test "bug__in_place_update_invisible_to_changes_since" do
-    uri = "at://did:plc:alice/app.opake.document/doc1"
+    uri = "at://did:plc:alice/at.opake.document/doc1"
     put_document(uri, t1())
 
     # Client's cursor sits between first-seen and the later in-place update.

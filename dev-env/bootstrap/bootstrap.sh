@@ -2,7 +2,7 @@
 # dev-env bootstrap — runs INSIDE the internal (egress-blocked) network via the
 # opake CLI container. For each fixture actor: mint invite → create account →
 # derive the encryption identity from the FIXED mnemonic and publish
-# app.opake.publicKey/self. All over plain http to the internal PDS, so no TLS
+# at.opake.publicKey/self. All over plain http to the internal PDS, so no TLS
 # trust is needed and the PDSes stay strictly internal-only.
 #
 # Why this shape (not `opake account login`): legacy login GENERATES a fresh
@@ -76,7 +76,7 @@ for i in $(seq 0 $((n - 1))); do
 
   # Import the fixed mnemonic and publish the encryption public key.
   echo "$mnemonic" | opake --as "$did" recover >/dev/null
-  echo "   published app.opake.publicKey/self"
+  echo "   published at.opake.publicKey/self"
 
   # Genesis-create the cabinet root directory with a first write. A recovered
   # cabinet has no root until something is written; `opake ls`/`mkdir` fail with

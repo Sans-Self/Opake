@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Opake.Resync do
   @moduledoc """
-  Backfill a DID's `app.opake.*` records from their PDS into the indexer DB.
+  Backfill a DID's `at.opake.*` records from their PDS into the indexer DB.
 
   Fetches keyrings, directories, documents, and grants via the public
   `com.atproto.repo.listRecords` endpoint and upserts them through the

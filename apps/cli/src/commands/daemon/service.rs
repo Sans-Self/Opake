@@ -60,7 +60,7 @@ fn home_dir() -> Result<PathBuf> {
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
-const LAUNCHD_LABEL: &str = "app.opake.daemon";
+const LAUNCHD_LABEL: &str = "at.opake.daemon";
 
 #[cfg(target_os = "macos")]
 fn xml_escape(s: &str) -> String {

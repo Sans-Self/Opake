@@ -74,9 +74,9 @@ describe("createStorageAdapter", () => {
     const storage = new MemoryStorage();
     const adapter = createStorageAdapter(storage);
     const did = "did:plc:x";
-    const collection = "app.opake.document";
+    const collection = "at.opake.document";
 
-    const record = { uri: "at://did:plc:x/app.opake.document/abc", cid: "cid1", value: { test: true } };
+    const record = { uri: "at://did:plc:x/at.opake.document/abc", cid: "cid1", value: { test: true } };
     await adapter.cachePutRecords(did, collection, [record]);
 
     const cached = await adapter.cacheGetRecord(did, collection, record.uri);

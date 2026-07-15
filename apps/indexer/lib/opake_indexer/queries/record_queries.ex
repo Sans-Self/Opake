@@ -13,10 +13,10 @@ defmodule OpakeIndexer.Queries.RecordQueries do
   alias OpakeIndexer.Repo
   alias OpakeIndexer.Schemas.Record, as: RecordSchema
 
-  @directory_collection "app.opake.directory"
-  @document_collection "app.opake.document"
-  @keyring_collection "app.opake.keyring"
-  @grant_collection "app.opake.grant"
+  @directory_collection "at.opake.directory"
+  @document_collection "at.opake.document"
+  @keyring_collection "at.opake.keyring"
+  @grant_collection "at.opake.grant"
 
   @doc """
   Upsert a record. `updated_at` is the last-write watermark: it is stamped

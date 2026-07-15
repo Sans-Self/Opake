@@ -112,7 +112,7 @@ mod tests {
         let owner = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
         let rkey = "tid123";
-        let uri = format!("at://{TEST_DID}/app.opake.keyring/{rkey}");
+        let uri = format!("at://{TEST_DID}/at.opake.keyring/{rkey}");
         mock.enqueue(put_record_response(&uri));
 
         let mut client = mock_client(mock.clone());

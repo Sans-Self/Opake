@@ -58,7 +58,7 @@ impl Cabinet {
         }
     }
 
-    /// AT-URI for this user's root directory (`at://{did}/app.opake.directory/self`).
+    /// AT-URI for this user's root directory (`at://{did}/at.opake.directory/self`).
     pub fn root_directory_uri(&self) -> String {
         root_directory_uri(&self.did)
     }

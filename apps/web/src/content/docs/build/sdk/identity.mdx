@@ -39,7 +39,7 @@ The phrase is shown once, and only once. You don't hold onto it after `createIde
 and neither does WASM. If you want a "show again" feature later, your app has to store the
 phrase itself (encrypted under a passphrase, or behind a biometric prompt, or similar).
 
-`publishPublicKey` writes `app.opake.publicKey/self` on the PDS as an idempotent `putRecord`.
+`publishPublicKey` writes `at.opake.publicKey/self` on the PDS as an idempotent `putRecord`.
 Without it, other users can't encrypt files to this DID.
 
 ## Recovering from a seed phrase
@@ -62,7 +62,7 @@ you consider the recovery complete. Surfacing this as an in-SDK helper is on the
 
 The user has Opake running on another device and would rather not type 24 words. They open the
 pair flow on this new device. The SDK generates an ephemeral hybrid (X25519 + ML-KEM-768)
-keypair, writes an `app.opake.pairRequest` record to the PDS containing both public halves,
+keypair, writes an `at.opake.pairRequest` record to the PDS containing both public halves,
 and stashes the private bundle in Storage for `awaitPairCompletion` to read back later. JS
 never sees the private halves.
 
@@ -73,7 +73,7 @@ never sees the private halves.
 />
 
 Now wait for approval from the other device. `awaitPairCompletion` polls the PDS for a matching
-`app.opake.pairResponse` record, decrypts the identity payload inside WASM using the stored
+`at.opake.pairResponse` record, decrypts the identity payload inside WASM using the stored
 ephemeral private key, writes the resulting `Identity` to Storage, and deletes both the request
 and response records. One call covers all of that.
 
@@ -99,7 +99,7 @@ recognises.
 />
 
 `approvePairRequest` wraps this device's identity under the requester's ephemeral public key,
-writes the encrypted bundle as `app.opake.pairResponse`, and returns. The requesting device's
+writes the encrypted bundle as `at.opake.pairResponse`, and returns. The requesting device's
 `awaitPairCompletion` picks it up on its next poll.
 
 ## Fingerprints are doing real work

@@ -51,7 +51,7 @@ pub enum Error {
     IdentityMissing,
 
     /// The target handle or DID is a valid identity but has not published an
-    /// Opake public key yet (`app.opake.publicKey/self` is absent). Distinct
+    /// Opake public key yet (`at.opake.publicKey/self` is absent). Distinct
     /// from `NotFound` (which covers handle-resolution failures) so callers
     /// can offer a pending-share queue for this case without silently swallowing
     /// typos.

@@ -171,7 +171,7 @@ sequenceDiagram
     participant SSE as SSE Topics
     participant Client as Member Client
 
-    PDS->>FH: delete app.opake.keyring/<rkey>
+    PDS->>FH: delete at.opake.keyring/<rkey>
     FH->>IX: dispatch_delete(uri)
     IX->>IX: soft-delete row, resolve outcome vs chain head
     IX->>SSE: keyring:delete {uri, workspace_id, outcome}
@@ -194,7 +194,7 @@ See the keyring-tombstones spec (`openspec/specs/keyring-tombstones/spec.md`) fo
 
 ## Upload with Workspace
 
-Workspace uploads split by caller role, but both write the canonical `app.opake.document` record to the **caller's** PDS — federated, atproto-shaped. The keyring (which holds the group key wrapped to each member) and the directory record (which holds the entry list) stay on the workspace owner's PDS.
+Workspace uploads split by caller role, but both write the canonical `at.opake.document` record to the **caller's** PDS — federated, atproto-shaped. The keyring (which holds the group key wrapped to each member) and the directory record (which holds the entry list) stay on the workspace owner's PDS.
 
 - **Owner uploads** are atomic on the owner's PDS: blob + document + directory entry update in a single `applyWrites`.
 - **Member uploads** are atomic on the member's PDS: blob + document + a `directoryUpdate.addEntry` proposal in a single `applyWrites`. The owner's daemon applies the proposal to register the entry in the workspace directory.

@@ -45,8 +45,8 @@ defmodule OpakeIndexer.Firehose.HeartbeatTest do
         per_collection: %{
           "app.bsky.feed.post" => 1100,
           "app.bsky.feed.like" => 100,
-          "app.opake.document" => 4,
-          "app.opake.grant" => 3
+          "at.opake.document" => 4,
+          "at.opake.grant" => 3
         }
       })
 

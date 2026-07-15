@@ -42,9 +42,9 @@ const uniqueName = (tag: string): string => `share-${tag}-${Date.now()}-${seq++}
 // eslint-disable-next-line functional/no-let
 let recipientDid = "";
 
-const PENDING_COLLECTION = "app.opake.pendingShare";
+const PENDING_COLLECTION = "at.opake.pendingShare";
 const rkeyOfPending = (text: string): string | null => {
-  const m = text.match(/app\.opake\.pendingShare\/([^\s),]+)/);
+  const m = text.match(/at\.opake\.pendingShare\/([^\s),]+)/);
   return m?.[1] ?? null;
 };
 

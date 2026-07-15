@@ -37,7 +37,7 @@ sequenceDiagram
 
     Note over Opake: #[signoff] auto-persists session if refreshed
 
-    CLI->>User: Uploaded: at://did/app.opake.document/<tid>
+    CLI->>User: Uploaded: at://did/at.opake.document/<tid>
 ```
 
 ## Download (Own Files)

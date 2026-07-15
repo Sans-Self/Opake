@@ -65,7 +65,7 @@ Recovery (apps/cli/src/commands/recover.rs; web: apps/web/src/components/devices
 
 ### Requirement: The encryption public keys are published as the publicKey self-record
 
-An identity's public halves SHALL be published as the `app.opake.publicKey/self` singleton (lexicons/app.opake.publicKey.json; crates/opake-core/src/records/public_key.rs): X25519 and ML-KEM-768 public keys with their algorithm tags, optionally the Ed25519 verifying key. The record is (re)written by login, recovery, and share healing (`publish_public_key`, crates/opake-core/src/resolve.rs; callers in crates/opake-core/src/opake.rs and crates/opake-core/src/sharing/heal.rs). This record is what other parties wrap content keys to, and what recovery and pairing verify against.
+An identity's public halves SHALL be published as the `at.opake.publicKey/self` singleton (lexicons/at.opake.publicKey.json; crates/opake-core/src/records/public_key.rs): X25519 and ML-KEM-768 public keys with their algorithm tags, optionally the Ed25519 verifying key. The record is (re)written by login, recovery, and share healing (`publish_public_key`, crates/opake-core/src/resolve.rs; callers in crates/opake-core/src/opake.rs and crates/opake-core/src/sharing/heal.rs). This record is what other parties wrap content keys to, and what recovery and pairing verify against.
 
 #### Scenario: login publishes the key others wrap to
 

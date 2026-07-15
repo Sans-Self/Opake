@@ -4,7 +4,7 @@
 
 Define what identifies a workspace across the lifetime of its keyring supersede chain, and which URI — genesis or chain head — each layer of the system uses.
 
-A workspace exists as a chain of `app.opake.keyring` records: every rotation and membership change supersedes the current head with a new record, so the head URI churns while the workspace persists. Its stable identity is the genesis URI, and everything keyed on a workspace — indexer lookups, AEAD wrap contexts, keeper state, routes, long-lived references — keys on genesis. The head URI is what callers naturally hold, which makes the mix-up silent: head equals genesis until the first supersede, so a call site using the wrong one passes every test on a fresh workspace and fails only in workspaces with history. The rules here make that mix-up checkable at every call site, and on the Rust side unrepresentable.
+A workspace exists as a chain of `at.opake.keyring` records: every rotation and membership change supersedes the current head with a new record, so the head URI churns while the workspace persists. Its stable identity is the genesis URI, and everything keyed on a workspace — indexer lookups, AEAD wrap contexts, keeper state, routes, long-lived references — keys on genesis. The head URI is what callers naturally hold, which makes the mix-up silent: head equals genesis until the first supersede, so a call site using the wrong one passes every test on a fresh workspace and fails only in workspaces with history. The rules here make that mix-up checkable at every call site, and on the Rust side unrepresentable.
 
 Terms:
 

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "app.opake.directory",
+  "id": "at.opake.directory",
   "defs": {
     "main": {
       "type": "record",
@@ -12,20 +12,20 @@
         "properties": {
           "opakeVersion": {
             "type": "integer",
-            "description": "Schema version for the app.opake.* namespace.",
+            "description": "Schema version for the at.opake.* namespace.",
             "minimum": 1
           },
           "keyWrapping": {
             "type": "union",
             "description": "How to unwrap the content key that protects encryptedMetadata. Directories have no blob, so only key material is needed — no cipher algorithm or nonce.",
             "refs": [
-              "app.opake.defs#directKeyWrapping",
-              "app.opake.defs#keyringKeyWrapping"
+              "at.opake.defs#directKeyWrapping",
+              "at.opake.defs#keyringKeyWrapping"
             ]
           },
           "encryptedMetadata": {
             "type": "ref",
-            "ref": "app.opake.defs#encryptedMetadata"
+            "ref": "at.opake.defs#encryptedMetadata"
           },
           "entries": {
             "type": "array",
@@ -61,7 +61,7 @@
         "target": {
           "type": "string",
           "format": "at-uri",
-          "description": "AT-URI of the entry — either an app.opake.document or an app.opake.directory."
+          "description": "AT-URI of the entry — either an at.opake.document or an at.opake.directory."
         },
         "targetCid": {
           "type": "cid-link",

@@ -65,7 +65,7 @@ describe("pending shares", () => {
     const pending = await aliceOpake(["share", "pending"]);
     expect(pending.code).toBe(0);
     expect(pending.stdout).toContain("nopake.test");
-    expect(pending.stdout).toContain("app.opake.document");
+    expect(pending.stdout).toContain("at.opake.document");
   });
 
   it("retries pending shares (still pending when recipient not ready)", async () => {
@@ -93,7 +93,7 @@ describe("pending shares", () => {
     expect(pending.stdout).toContain("no pending shares");
 
     // Grant should exist
-    const grants = pds.listRecords("did:plc:alice", "app.opake.grant");
+    const grants = pds.listRecords("did:plc:alice", "at.opake.grant");
     const charlieGrants = grants.filter(
       (r: { value: { recipient?: string } }) =>
         r.value.recipient === "did:plc:nopake-test",

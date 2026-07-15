@@ -22,9 +22,9 @@ pub struct KeyringEncryption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "$type")]
 pub enum Encryption {
-    #[serde(rename = "app.opake.document#directEncryption")]
+    #[serde(rename = "at.opake.document#directEncryption")]
     Direct(DirectEncryption),
-    #[serde(rename = "app.opake.document#keyringEncryption")]
+    #[serde(rename = "at.opake.document#keyringEncryption")]
     Keyring(KeyringEncryption),
 }
 

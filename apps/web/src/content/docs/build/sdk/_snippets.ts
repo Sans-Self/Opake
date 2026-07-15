@@ -381,10 +381,10 @@ watcher.close();`;
 
 export const shareDocument = `// Resolve the recipient first. This returns the recipient's hybrid public-key
 // bundle: x25519PublicKey (classical) + mlKemPublicKey (post-quantum), plus
-// the algo strings advertised on their app.opake.publicKey/self record.
+// the algo strings advertised on their at.opake.publicKey/self record.
 const recipient = await opake.resolveIdentity("bob.bsky.social");
 
-// Direct share. Writes an app.opake.grant record on YOUR PDS that wraps
+// Direct share. Writes an at.opake.grant record on YOUR PDS that wraps
 // the document's content key to BOTH halves of the recipient's hybrid
 // bundle. The grant lives under your repo; the recipient discovers it
 // via the indexer.
