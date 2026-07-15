@@ -717,9 +717,13 @@ mod keyring_supersede {
             .iter()
             .find(|m| m.did() == NEW_DID)
             .expect("joiner granted rotation-0 history wrap");
-        let unwrapped_hist =
-            crypto::unwrap_key(&hist_member.wrapped_key, &bundle, &ctx, written.opake_version)
-                .unwrap();
+        let unwrapped_hist = crypto::unwrap_key(
+            &hist_member.wrapped_key,
+            &bundle,
+            &ctx,
+            written.opake_version,
+        )
+        .unwrap();
         assert_eq!(unwrapped_hist.0, historical_key.0);
     }
 

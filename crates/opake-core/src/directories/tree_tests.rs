@@ -912,7 +912,10 @@ fn corrupt_referenced_directory_becomes_placeholder() {
     assert!(tree.is_placeholder(PH_CHILD));
     assert!(tree.is_directory(PH_CHILD));
     // Name is client-assigned, never record content.
-    assert_eq!(tree.directory_name(PH_CHILD), Some(PLACEHOLDER_DISPLAY_NAME));
+    assert_eq!(
+        tree.directory_name(PH_CHILD),
+        Some(PLACEHOLDER_DISPLAY_NAME)
+    );
     assert_eq!(
         tree.placeholder_reason(PH_CHILD),
         Some(crate::records::UnreadableReason::Corrupt)
@@ -956,9 +959,9 @@ fn corrupt_document_ref_is_count_only() {
 #[test]
 fn future_version_referenced_directory_is_placeholder_with_reason() {
     let mut tree = root_listing(vec![PH_CHILD.into()]);
-    let tally = tree.apply_unreadable_refs(&[
-        crate::records::UnreadableRef::needs_newer_client(Some(PH_CHILD.into())),
-    ]);
+    let tally = tree.apply_unreadable_refs(&[crate::records::UnreadableRef::needs_newer_client(
+        Some(PH_CHILD.into()),
+    )]);
     assert_eq!(tally.placeholders, 1);
     assert_eq!(
         tree.placeholder_reason(PH_CHILD),
@@ -969,7 +972,9 @@ fn future_version_referenced_directory_is_placeholder_with_reason() {
 #[test]
 fn readable_record_upgrades_a_placeholder() {
     let mut tree = root_listing(vec![PH_CHILD.into()]);
-    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(PH_CHILD.into()))]);
+    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(
+        PH_CHILD.into(),
+    ))]);
     assert!(tree.is_placeholder(PH_CHILD));
 
     // A readable record for the same URI supersedes the placeholder.
@@ -985,13 +990,17 @@ fn readable_record_upgrades_a_placeholder() {
 #[test]
 fn placeholder_position_is_stable_across_reapplication() {
     let mut tree = root_listing(vec![PH_CHILD.into()]);
-    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(PH_CHILD.into()))]);
+    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(
+        PH_CHILD.into(),
+    ))]);
     let before: Vec<String> = tree.entries_for(PH_ROOT).unwrap().to_vec();
 
     // Re-applying the same ref (e.g. a snapshot refresh) is idempotent and
     // never moves the placeholder: its position follows the surviving
     // reference from the root, which did not change.
-    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(PH_CHILD.into()))]);
+    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(
+        PH_CHILD.into(),
+    ))]);
     assert!(tree.is_placeholder(PH_CHILD));
     assert_eq!(tree.entries_for(PH_ROOT).unwrap().to_vec(), before);
 }
@@ -1015,10 +1024,15 @@ fn degraded_directory_keeps_children_beneath_placeholder() {
 
     // The child is corrupted (e.g. a poison supersede). Degrading it preserves
     // its children so the subtree stays attached beneath the placeholder.
-    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(PH_CHILD.into()))]);
+    tree.apply_unreadable_refs(&[crate::records::UnreadableRef::corrupt(Some(
+        PH_CHILD.into(),
+    ))]);
 
     assert!(tree.is_placeholder(PH_CHILD));
-    assert_eq!(tree.directory_name(PH_CHILD), Some(PLACEHOLDER_DISPLAY_NAME));
+    assert_eq!(
+        tree.directory_name(PH_CHILD),
+        Some(PLACEHOLDER_DISPLAY_NAME)
+    );
     assert_eq!(
         tree.entries_for(PH_CHILD).map(|e| e.to_vec()),
         Some(vec![GRANDCHILD.to_string()]),

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SCHEMA_VERSION};
+use super::SCHEMA_VERSION;
 
 pub const ACCOUNT_CONFIG_COLLECTION: &str = "at.opake.accountConfig";
 pub const ACCOUNT_CONFIG_RKEY: &str = "self";

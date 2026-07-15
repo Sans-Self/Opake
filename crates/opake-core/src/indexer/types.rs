@@ -176,7 +176,10 @@ fn classify_envelopes<T: DeserializeOwned>(
                 deleted_at: env.deleted_at,
             }),
             Err(reason) => {
-                log::warn!("skipping unreadable {kind:?} record {}: {reason:?}", env.uri);
+                log::warn!(
+                    "skipping unreadable {kind:?} record {}: {reason:?}",
+                    env.uri
+                );
                 unreadable.push(UnreadableRef {
                     uri: Some(env.uri),
                     reason,
@@ -494,7 +497,11 @@ mod tests {
 
         let delta = tree_delta(&[("good", well_formed_directory()), ("future", future)]);
 
-        assert_eq!(delta.directories.len(), 1, "future record is not typed-parsed");
+        assert_eq!(
+            delta.directories.len(),
+            1,
+            "future record is not typed-parsed"
+        );
         assert_eq!(delta.unreadable.len(), 1);
         assert_eq!(
             delta.unreadable[0].reason,

@@ -209,4 +209,3 @@ pub fn build_snapshot(
         directories,
     }
 }
-

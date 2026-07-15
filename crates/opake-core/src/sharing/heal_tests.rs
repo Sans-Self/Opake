@@ -67,7 +67,10 @@ async fn healing_never_revokes_a_future_version_grant() {
     let result = heal_stale_grants(&mut client).await.unwrap();
 
     assert_eq!(result.grants_checked, 1);
-    assert_eq!(result.grants_skipped_locked, 1, "future-version grant reported");
+    assert_eq!(
+        result.grants_skipped_locked, 1,
+        "future-version grant reported"
+    );
     assert_eq!(result.grants_deleted, 0, "never revoked");
     assert_eq!(result.grants_failed, 0);
 

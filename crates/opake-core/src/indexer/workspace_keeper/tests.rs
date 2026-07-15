@@ -641,7 +641,10 @@ fn bootstrap_with_signals_carries_unreadable() {
     let snap = keeper.snapshot();
     assert_eq!(snap.entries.len(), 1);
     assert_eq!(snap.unreadable.len(), 1);
-    assert_eq!(snap.unreadable[0].reason, UnreadableReason::NeedsNewerClient);
+    assert_eq!(
+        snap.unreadable[0].reason,
+        UnreadableReason::NeedsNewerClient
+    );
 }
 
 // A corrupt keyring met via SSE upsert signals identically to bootstrap, and a

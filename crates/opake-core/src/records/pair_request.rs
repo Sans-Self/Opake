@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SCHEMA_VERSION};
+use super::SCHEMA_VERSION;
 use crate::atproto::AtBytes;
 
 pub const PAIR_REQUEST_COLLECTION: &str = "at.opake.pairRequest";

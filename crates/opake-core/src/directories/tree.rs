@@ -569,9 +569,7 @@ impl DirectoryTree {
         if let Some(info) = self.directories.get(uri) {
             return Some(info.name.as_str());
         }
-        self.placeholders
-            .get(uri)
-            .map(|_| PLACEHOLDER_DISPLAY_NAME)
+        self.placeholders.get(uri).map(|_| PLACEHOLDER_DISPLAY_NAME)
     }
 
     /// Whether the given URI is a known directory in this tree — a readable

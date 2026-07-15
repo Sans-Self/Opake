@@ -149,8 +149,7 @@ async fn future_version_chain_link_requires_newer_client() {
     // names the link — writes against it are refused, the block is self-explanatory.
     let mock = MockTransport::new();
     let mut value = serde_json::to_value(dummy_directory("/")).unwrap();
-    value["opakeVersion"] =
-        serde_json::json!(crate::records::SCHEMA_VERSION + 1);
+    value["opakeVersion"] = serde_json::json!(crate::records::SCHEMA_VERSION + 1);
 
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(raw_record_entry(URI_HEAD, "bafyhead", value)));
@@ -188,7 +187,11 @@ async fn corrupt_intermediate_link_rejects_the_whole_chain() {
     mock.enqueue(ok(did_doc(DID_A, PDS_A)));
     mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
     mock.enqueue(ok(did_doc(DID_B, PDS_B)));
-    mock.enqueue(ok(raw_record_entry(URI_MIDDLE, "bafymiddle", malformed_middle)));
+    mock.enqueue(ok(raw_record_entry(
+        URI_MIDDLE,
+        "bafymiddle",
+        malformed_middle,
+    )));
 
     let err = walk_back_to_genesis::<Directory>(&mock, URI_HEAD)
         .await

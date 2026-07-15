@@ -93,11 +93,18 @@ impl Vocabulary {
                 };
                 let values: Vec<String> = values
                     .as_array()
-                    .unwrap_or_else(|| panic!("vocabulary {} v{version} is not an array", field.json_key()))
+                    .unwrap_or_else(|| {
+                        panic!("vocabulary {} v{version} is not an array", field.json_key())
+                    })
                     .iter()
                     .map(|v| {
                         v.as_str()
-                            .unwrap_or_else(|| panic!("vocabulary {} v{version} has a non-string value", field.json_key()))
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "vocabulary {} v{version} has a non-string value",
+                                    field.json_key()
+                                )
+                            })
                             .to_owned()
                     })
                     .collect();
@@ -256,8 +263,11 @@ impl RecordKind {
             Self::Directory => key_wrapping_ok(raw.get("keyWrapping"), version),
             Self::Document => document_encryption_ok(raw.get("encryption"), version),
             Self::Keyring => {
-                algo_ok(raw.get("algo"), VocabularyField::ContentEncryptionAlgo, version)
-                    && members_ok(raw.get("members"), version)
+                algo_ok(
+                    raw.get("algo"),
+                    VocabularyField::ContentEncryptionAlgo,
+                    version,
+                ) && members_ok(raw.get("members"), version)
                     && key_history_ok(raw.get("keyHistory"), version)
             }
             Self::PublicKey => {
@@ -303,9 +313,7 @@ fn key_wrapping_ok(key_wrapping: Option<&Value>, version: u32) -> bool {
         return false;
     };
     match kw.get("keys").and_then(Value::as_array) {
-        Some(keys) => keys
-            .iter()
-            .all(|k| wrapped_key_algo_ok(Some(k), version)),
+        Some(keys) => keys.iter().all(|k| wrapped_key_algo_ok(Some(k), version)),
         None => true,
     }
 }
@@ -395,8 +403,7 @@ pub fn classify_record<T: DeserializeOwned>(
         };
     }
 
-    let record: T =
-        serde_json::from_value(raw.clone()).map_err(|_| UnreadableReason::Corrupt)?;
+    let record: T = serde_json::from_value(raw.clone()).map_err(|_| UnreadableReason::Corrupt)?;
 
     if !kind.vocabulary_valid(version, raw) {
         return Err(UnreadableReason::Corrupt);
@@ -429,7 +436,11 @@ mod tests {
             1,
             "x25519-mlkem768-hkdf-a256kw-v2"
         ));
-        assert!(permits(VocabularyField::ContentEncryptionAlgo, 1, "aes-256-gcm"));
+        assert!(permits(
+            VocabularyField::ContentEncryptionAlgo,
+            1,
+            "aes-256-gcm"
+        ));
         assert!(permits(VocabularyField::PublicKeyAlgo, 1, "ml-kem-768"));
         assert!(permits(VocabularyField::PairingAlgo, 1, "x25519-mlkem768"));
         assert!(permits(VocabularyField::KeyringMemberRole, 1, "manager"));

@@ -10,7 +10,6 @@ mod account_config;
 pub mod classify;
 mod defs;
 mod directory;
-pub mod vocabulary;
 mod document;
 mod grant;
 mod keyring;
@@ -18,6 +17,7 @@ mod pair_request;
 mod pair_response;
 mod pending_share;
 mod public_key;
+pub mod vocabulary;
 
 use crate::error::Error;
 

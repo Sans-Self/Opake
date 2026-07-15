@@ -139,7 +139,13 @@ fn wrap_unwrap_roundtrips() {
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).unwrap();
+    let unwrapped = unwrap_key(
+        &wrapped,
+        &keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION,
+    )
+    .unwrap();
 
     assert_eq!(content_key.0, unwrapped.0);
 }
@@ -245,7 +251,13 @@ fn wrong_private_key_fails_unwrap() {
         &mut OsRng,
     )
     .unwrap();
-    assert!(unwrap_key(&wrapped, &wrong_keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
+    assert!(unwrap_key(
+        &wrapped,
+        &wrong_keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION
+    )
+    .is_err());
 }
 
 #[test]
@@ -267,7 +279,13 @@ fn tampered_wrapped_ciphertext_fails_unwrap() {
     bytes[last_byte_index] ^= 0xff;
     wrapped.ciphertext.encoded = BASE64.encode(&bytes);
 
-    assert!(unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
+    assert!(unwrap_key(
+        &wrapped,
+        &keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION
+    )
+    .is_err());
 }
 
 #[test]
@@ -323,8 +341,20 @@ fn create_group_key_wraps_to_all_members() {
     assert_eq!(wrapped_keys[0].did, "did:plc:alice");
     assert_eq!(wrapped_keys[1].did, "did:plc:bob");
 
-    let unwrapped_a = unwrap_key(&wrapped_keys[0], &alice.private_keys(), &context, SCHEMA_VERSION).unwrap();
-    let unwrapped_b = unwrap_key(&wrapped_keys[1], &bob.private_keys(), &context, SCHEMA_VERSION).unwrap();
+    let unwrapped_a = unwrap_key(
+        &wrapped_keys[0],
+        &alice.private_keys(),
+        &context,
+        SCHEMA_VERSION,
+    )
+    .unwrap();
+    let unwrapped_b = unwrap_key(
+        &wrapped_keys[1],
+        &bob.private_keys(),
+        &context,
+        SCHEMA_VERSION,
+    )
+    .unwrap();
     assert_eq!(group_key.0, unwrapped_a.0);
     assert_eq!(group_key.0, unwrapped_b.0);
 }
@@ -430,7 +460,13 @@ fn unwrap_rejects_unknown_algo() {
         },
         algo: "x25519-hkdf-a256kw".into(),
     };
-    assert!(unwrap_key(&bogus, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
+    assert!(unwrap_key(
+        &bogus,
+        &keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION
+    )
+    .is_err());
 }
 
 // -- Ephemeral keypair (hybrid) --
@@ -470,7 +506,13 @@ fn ephemeral_keypair_roundtrips_through_hybrid_wrap() {
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &kp.private_keys(), &WrapContext::PairResponse, SCHEMA_VERSION).unwrap();
+    let unwrapped = unwrap_key(
+        &wrapped,
+        &kp.private_keys(),
+        &WrapContext::PairResponse,
+        SCHEMA_VERSION,
+    )
+    .unwrap();
     assert_eq!(content_key.0, unwrapped.0);
 }
 

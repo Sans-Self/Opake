@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{SCHEMA_VERSION};
+use super::SCHEMA_VERSION;
 use crate::atproto::AtBytes;
 
 pub const PUBLIC_KEY_COLLECTION: &str = "at.opake.publicKey";

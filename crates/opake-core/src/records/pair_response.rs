@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{WrappedKey};
+use super::WrappedKey;
 use crate::atproto::AtBytes;
 
 pub const PAIR_RESPONSE_COLLECTION: &str = "at.opake.pairResponse";

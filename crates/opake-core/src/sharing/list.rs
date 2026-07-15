@@ -221,7 +221,10 @@ mod tests {
         let mut client = mock_client(mock);
         let entries = list_grants(&mut client).await.unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(entries[0].needs_newer, "future-version grant kept but marked");
+        assert!(
+            entries[0].needs_newer,
+            "future-version grant kept but marked"
+        );
         assert_eq!(entries[0].recipient, "did:plc:bob");
     }
 

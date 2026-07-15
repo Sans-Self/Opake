@@ -169,7 +169,11 @@ impl InboxKeeper {
     /// full-list fetch. Blind-replace, same contract as [`bootstrap`].
     ///
     /// [`bootstrap`]: Self::bootstrap
-    pub fn bootstrap_with_signals(&mut self, entries: Vec<InboxEntry>, unreadable: &[UnreadableRef]) {
+    pub fn bootstrap_with_signals(
+        &mut self,
+        entries: Vec<InboxEntry>,
+        unreadable: &[UnreadableRef],
+    ) {
         self.entries = entries.into_iter().map(|e| (e.uri.clone(), e)).collect();
         self.unreadable = unreadable
             .iter()

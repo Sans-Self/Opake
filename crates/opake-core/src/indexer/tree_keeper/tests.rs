@@ -814,7 +814,7 @@ fn held_tree_boxes_key_material_out_of_line() {
 
 use crate::directories::PLACEHOLDER_DISPLAY_NAME;
 use crate::indexer::sse::events::{CorruptScope, SseCorruptRecord};
-use crate::records::{UnreadableRef, UnreadableReason};
+use crate::records::{UnreadableReason, UnreadableRef};
 
 const CORRUPT_CHILD_URI: &str = "at://did:plc:test/at.opake.directory/corrupt-child";
 
@@ -844,7 +844,9 @@ fn sse_corrupt_directory_creates_placeholder_and_fires_watchers() {
     keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
     let before = sink.count();
 
-    keeper.apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI)).unwrap();
+    keeper
+        .apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI))
+        .unwrap();
 
     assert_eq!(
         sink.count(),
@@ -868,10 +870,19 @@ fn sse_corrupt_directory_unreferenced_is_count_only_no_fire() {
     keeper.watch_cabinet(ROOT_URI.into(), sink.callback());
     let before = sink.count();
 
-    keeper.apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI)).unwrap();
+    keeper
+        .apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI))
+        .unwrap();
 
-    assert_eq!(sink.count(), before, "unreferenced corrupt ref does not fire");
-    assert!(!keeper.cabinet_tree().unwrap().is_placeholder(CORRUPT_CHILD_URI));
+    assert_eq!(
+        sink.count(),
+        before,
+        "unreferenced corrupt ref does not fire"
+    );
+    assert!(!keeper
+        .cabinet_tree()
+        .unwrap()
+        .is_placeholder(CORRUPT_CHILD_URI));
 }
 
 // The SAME corrupt record delivered via snapshot and via SSE upsert converges
@@ -888,7 +899,9 @@ fn snapshot_and_sse_converge_on_same_placeholder() {
 
     // SSE path: deliver the corrupt event to an equivalent installed tree.
     let mut sse_keeper = cabinet_with_root_listing(vec![CORRUPT_CHILD_URI.into()]);
-    sse_keeper.apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI)).unwrap();
+    sse_keeper
+        .apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI))
+        .unwrap();
     let sse_tree = sse_keeper.cabinet_tree().unwrap();
 
     assert_eq!(
@@ -899,14 +912,23 @@ fn snapshot_and_sse_converge_on_same_placeholder() {
         snap_tree.directory_name(CORRUPT_CHILD_URI),
         sse_tree.directory_name(CORRUPT_CHILD_URI)
     );
-    assert_eq!(snap_tree.entries_for(ROOT_URI), sse_tree.entries_for(ROOT_URI));
+    assert_eq!(
+        snap_tree.entries_for(ROOT_URI),
+        sse_tree.entries_for(ROOT_URI)
+    );
 }
 
 #[test]
 fn placeholder_survives_readable_sibling_upsert_position_stable() {
     let mut keeper = cabinet_with_root_listing(vec![CORRUPT_CHILD_URI.into()]);
-    keeper.apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI)).unwrap();
-    let before = keeper.cabinet_tree().unwrap().entries_for(ROOT_URI).map(<[String]>::to_vec);
+    keeper
+        .apply_event(&corrupt_dir_event(CORRUPT_CHILD_URI))
+        .unwrap();
+    let before = keeper
+        .cabinet_tree()
+        .unwrap()
+        .entries_for(ROOT_URI)
+        .map(<[String]>::to_vec);
 
     // A readable, unrelated directory upsert doesn't disturb the placeholder's
     // position — the surviving reference from root is unchanged.

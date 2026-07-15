@@ -91,10 +91,7 @@ mod tests {
             peek_version(&serde_json::json!({"opakeVersion": "1"})),
             None
         );
-        assert_eq!(
-            peek_version(&serde_json::json!({"opakeVersion": -1})),
-            None
-        );
+        assert_eq!(peek_version(&serde_json::json!({"opakeVersion": -1})), None);
     }
 
     #[test]

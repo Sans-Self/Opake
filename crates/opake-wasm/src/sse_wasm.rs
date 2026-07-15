@@ -689,7 +689,13 @@ pub(crate) async fn bootstrap_workspace_keeper(
 /// divergence would cause spurious watcher re-fires after SSE echoes.
 async fn fetch_workspace_entries(
     opake_rc: &Rc<Mutex<WasmOpake>>,
-) -> Result<(Vec<wk::WorkspaceEntry>, Vec<opake_core::records::UnreadableRef>), JsError> {
+) -> Result<
+    (
+        Vec<wk::WorkspaceEntry>,
+        Vec<opake_core::records::UnreadableRef>,
+    ),
+    JsError,
+> {
     let mut opake = opake_rc.lock().await;
     let private_keys = opake.identity().owned_private_keys().map_err(wasm_err)?;
     let did = opake.did().to_string();

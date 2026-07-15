@@ -173,9 +173,11 @@ pub async fn fetch_inbox_all(
     did: &str,
     signing_key: &[u8; 32],
 ) -> Result<Vec<IndexerEnvelope<Grant>>, Error> {
-    Ok(fetch_inbox_all_detailed(transport, indexer_url, did, signing_key)
-        .await?
-        .grants)
+    Ok(
+        fetch_inbox_all_detailed(transport, indexer_url, did, signing_key)
+            .await?
+            .grants,
+    )
 }
 
 /// Fetch every keyring head for which the caller is a current member.

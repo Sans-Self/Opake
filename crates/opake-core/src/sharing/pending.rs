@@ -12,10 +12,10 @@ use log::{info, trace, warn};
 
 use crate::atproto;
 use crate::client::{list_collection, time, DegradationPolicy, Transport, XrpcClient};
-use crate::records::vocabulary::RecordKind;
 use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PrivateKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
+use crate::records::vocabulary::RecordKind;
 use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
 use crate::resolve::{self, ResolvedIdentity};
 
@@ -186,7 +186,10 @@ pub async fn retry_pending_shares(
         // the record) are both writes against misunderstood state, so leave it
         // queued untouched until the client is updated.
         if entry.needs_newer {
-            trace!("pending share {} is future-version, leaving queued", entry.uri);
+            trace!(
+                "pending share {} is future-version, leaving queued",
+                entry.uri
+            );
             result.still_pending += 1;
             continue;
         }

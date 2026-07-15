@@ -111,7 +111,10 @@ where
         }
     }
 
-    Ok(ListOutcome { entries, unreadable })
+    Ok(ListOutcome {
+        entries,
+        unreadable,
+    })
 }
 
 /// Paginate an entire collection and return raw record entries (uri + cid + value).
@@ -281,7 +284,10 @@ mod tests {
     #[tokio::test]
     async fn paginates_across_pages() {
         let mock = MockTransport::new();
-        mock.enqueue(page(&[("r1", grant_value("did:plc:first"))], Some("cursor-1")));
+        mock.enqueue(page(
+            &[("r1", grant_value("did:plc:first"))],
+            Some("cursor-1"),
+        ));
         mock.enqueue(page(&[("r2", grant_value("did:plc:second"))], None));
 
         let mut client = mock_client(mock.clone());
@@ -405,9 +411,15 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let err = list_collection(&mut client, COLLECTION, RecordKind::Grant, DegradationPolicy::Counted, extract)
-            .await
-            .unwrap_err();
+        let err = list_collection(
+            &mut client,
+            COLLECTION,
+            RecordKind::Grant,
+            DegradationPolicy::Counted,
+            extract,
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(err, Error::Xrpc { .. }));
     }

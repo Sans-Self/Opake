@@ -289,7 +289,10 @@ mod tests {
             "got: {err:?}"
         );
         assert!(err.to_string().contains("schema version"), "got: {err}");
-        assert!(err.to_string().to_lowercase().contains("update"), "got: {err}");
+        assert!(
+            err.to_string().to_lowercase().contains("update"),
+            "got: {err}"
+        );
 
         // The write is refused before it reaches the PDS: only the initial
         // getRecord fetch happened — no putRecord.
