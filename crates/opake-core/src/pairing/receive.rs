@@ -155,6 +155,7 @@ async fn decrypt_pair_response(
         &response.wrapped_key,
         &bundle,
         &crate::crypto::WrapContext::PairResponse,
+        response.opake_version,
     )?;
 
     let ciphertext = response.ciphertext.decode().map_err(|e| {

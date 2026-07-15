@@ -216,3 +216,47 @@ fn try_build_entry_pulls_author_did_from_uri() {
     );
     assert_eq!(entry.created_at, "2026-04-17T00:00:00Z");
 }
+
+// ---------------------------------------------------------------------------
+// Distinct unreadable-grant signal (poison-record-resilience 3.2)
+// ---------------------------------------------------------------------------
+
+use crate::records::{UnreadableReason, UnreadableRef};
+
+const CORRUPT_GRANT: &str = "at://did:plc:author/at.opake.grant/corrupt";
+
+#[test]
+fn signal_unreadable_grant_is_distinct_from_entries() {
+    let mut keeper = InboxKeeper::new();
+    keeper.bootstrap(vec![sample_entry("at://g/readable", "did:plc:author")]);
+    keeper.signal_unreadable(CORRUPT_GRANT, UnreadableReason::Corrupt);
+
+    let snap = keeper.snapshot();
+    assert_eq!(snap.entries.len(), 1);
+    assert_eq!(snap.unreadable.len(), 1);
+    assert_eq!(snap.unreadable[0].uri, CORRUPT_GRANT);
+    assert!(!snap.entries.iter().any(|e| e.uri == CORRUPT_GRANT));
+}
+
+#[test]
+fn readable_grant_upsert_clears_unreadable_signal() {
+    let mut keeper = InboxKeeper::new();
+    keeper.signal_unreadable(CORRUPT_GRANT, UnreadableReason::Corrupt);
+    assert_eq!(keeper.unreadable_count(), 1);
+
+    keeper.upsert(sample_entry(CORRUPT_GRANT, "did:plc:author"));
+    assert_eq!(keeper.unreadable_count(), 0);
+    assert!(keeper.snapshot().unreadable.is_empty());
+}
+
+#[test]
+fn bootstrap_with_signals_carries_unreadable_grants() {
+    let mut keeper = InboxKeeper::new();
+    keeper.bootstrap_with_signals(
+        vec![sample_entry("at://g/a", "did:plc:author")],
+        &[UnreadableRef::corrupt(Some(CORRUPT_GRANT.into()))],
+    );
+    let snap = keeper.snapshot();
+    assert_eq!(snap.entries.len(), 1);
+    assert_eq!(snap.unreadable.len(), 1);
+}

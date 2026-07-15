@@ -1,0 +1,25 @@
+{
+  "$comment": "Version-pinned registry vocabulary for at.opake.* records. Single source of truth, consumed by opake-core (Rust, compile time) and the indexer (Elixir, boot). Governed by openspec/specs/record-validity: vocabulary is cumulative (version N permits every value pinned at or below N); introducing a new value is a version bump; extending the field list is itself a version bump. Structural discriminants ($type tags) are NOT vocabulary. See docs/CRYPTO.md and lexicons/README.md.",
+  "fields": {
+    "keyWrapAlgo": {
+      "$comment": "wrappedKey.algo, on grants, directories (keyWrapping), keyrings, and pair responses.",
+      "1": ["x25519-mlkem768-hkdf-a256kw-v2"]
+    },
+    "contentEncryptionAlgo": {
+      "$comment": "encryption envelope algo, on documents and keyrings.",
+      "1": ["aes-256-gcm"]
+    },
+    "publicKeyAlgo": {
+      "$comment": "at.opake.publicKey x25519Algo / mlKemAlgo / ed25519Algo identifiers.",
+      "1": ["x25519", "ml-kem-768", "ed25519"]
+    },
+    "pairingAlgo": {
+      "$comment": "pairRequest.algo (KEM suite) and pairResponse.algo (symmetric cipher).",
+      "1": ["x25519-mlkem768", "aes-256-gcm"]
+    },
+    "keyringMemberRole": {
+      "$comment": "keyringMember.role, plaintext authorization vocabulary.",
+      "1": ["manager", "editor", "viewer"]
+    }
+  }
+}

@@ -11,7 +11,8 @@ use std::rc::Rc;
 use log::{info, trace, warn};
 
 use crate::atproto;
-use crate::client::{list_collection, time, Transport, XrpcClient};
+use crate::client::{list_collection, time, DegradationPolicy, Transport, XrpcClient};
+use crate::records::vocabulary::RecordKind;
 use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PrivateKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
@@ -75,24 +76,35 @@ pub struct PendingShareEntry {
     pub recipient: String,
     pub encrypted_metadata: EncryptedMetadata,
     pub created_at: String,
+    /// `true` when the record declares a schema version newer than this client
+    /// supports. Retry leaves it queued rather than completing a share it does
+    /// not fully understand.
+    pub needs_newer: bool,
 }
 
 /// List all pending share records for the authenticated account.
+///
+/// Corrupt records are skipped with a warning; future-version records are kept
+/// and flagged `needs_newer` (see `openspec/specs/record-validity`).
 pub async fn list_pending_shares(
     client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<PendingShareEntry>, Error> {
-    list_collection(
+    let outcome = list_collection(
         client,
         PENDING_SHARE_COLLECTION,
-        |uri, record: PendingShare| PendingShareEntry {
+        RecordKind::PendingShare,
+        DegradationPolicy::Counted,
+        |uri, record: PendingShare, needs_newer| PendingShareEntry {
             uri: uri.to_owned(),
             document: record.document,
             recipient: record.recipient,
             encrypted_metadata: record.encrypted_metadata,
             created_at: record.created_at,
+            needs_newer,
         },
     )
-    .await
+    .await?;
+    Ok(outcome.entries)
 }
 
 /// Cancel (delete) a pending share by its AT-URI.
@@ -168,6 +180,16 @@ pub async fn retry_pending_shares(
                 continue;
             }
         };
+
+        // A future-version pending share is state this client cannot fully
+        // understand. Completing it (writing a grant) or expiring it (deleting
+        // the record) are both writes against misunderstood state, so leave it
+        // queued untouched until the client is updated.
+        if entry.needs_newer {
+            trace!("pending share {} is future-version, leaving queued", entry.uri);
+            result.still_pending += 1;
+            continue;
+        }
 
         // Check expiry
         if let Some(created_ts) = time::parse_rfc3339(&entry.created_at) {

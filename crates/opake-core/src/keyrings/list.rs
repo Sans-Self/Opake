@@ -1,5 +1,6 @@
-use crate::client::{list_collection, Transport, XrpcClient};
+use crate::client::{list_collection, DegradationPolicy, Transport, XrpcClient};
 use crate::error::Error;
+use crate::records::vocabulary::RecordKind;
 use crate::records::{EncryptedMetadata, Keyring, KeyringMember};
 
 use super::KEYRING_COLLECTION;
@@ -13,23 +14,36 @@ pub struct KeyringEntry {
     pub encrypted_metadata: EncryptedMetadata,
     pub members: Vec<KeyringMember>,
     pub created_at: String,
+    /// `true` when the keyring declares a schema version newer than this client
+    /// supports. Visible but locked: mutations against it (re-wrap, membership
+    /// changes) MUST be refused with a newer-client-required message.
+    pub needs_newer: bool,
 }
 
 /// Fetch all keyring records, paginating through the full collection.
+///
+/// Corrupt keyrings are skipped with a warning; future-version keyrings are
+/// kept and flagged `needs_newer` (see `openspec/specs/record-validity`).
 pub async fn list_keyrings(
     client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<KeyringEntry>, Error> {
-    list_collection(client, KEYRING_COLLECTION, |uri, keyring: Keyring| {
-        KeyringEntry {
+    let outcome = list_collection(
+        client,
+        KEYRING_COLLECTION,
+        RecordKind::Keyring,
+        DegradationPolicy::Counted,
+        |uri, keyring: Keyring, needs_newer| KeyringEntry {
             uri: uri.to_owned(),
             member_count: keyring.members.len(),
             rotation: keyring.rotation,
             encrypted_metadata: keyring.encrypted_metadata,
             members: keyring.members,
             created_at: keyring.created_at,
-        }
-    })
-    .await
+            needs_newer,
+        },
+    )
+    .await?;
+    Ok(outcome.entries)
 }
 
 #[cfg(test)]
@@ -166,8 +180,10 @@ mod tests {
         assert!(reqs[1].url.contains("cursor=cursor-1"));
     }
 
+    /// Future-version keyrings satisfy the required-field floor, so they stay
+    /// visible and are flagged `needs_newer` rather than dropped.
     #[tokio::test]
-    async fn skips_future_version() {
+    async fn keeps_future_version_marked() {
         let mut kr = dummy_keyring(1);
         kr.opake_version = records::SCHEMA_VERSION + 1;
 
@@ -176,6 +192,7 @@ mod tests {
 
         let mut client = mock_client(mock);
         let entries = list_keyrings(&mut client).await.unwrap();
-        assert!(entries.is_empty());
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].needs_newer, "future-version keyring kept but marked");
     }
 }

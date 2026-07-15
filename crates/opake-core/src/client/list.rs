@@ -4,28 +4,67 @@
 // pagination-parse-version-check loop over `listRecords`. This module
 // extracts that into a single reusable function.
 
-use log::trace;
+use log::{trace, warn};
 use serde::de::DeserializeOwned;
 
 use super::{RecordEntry, RecordPage, Transport, XrpcClient};
 use crate::error::Error;
-use crate::records::{self, Versioned};
+use crate::records::vocabulary::{self, RecordKind};
+use crate::records::{self, UnreadableReason, UnreadableRef};
 
-/// Paginate through an entire collection, deserializing each record into `R`,
-/// rejecting unsupported schema versions, and mapping valid records to `E`
-/// via the provided closure.
+/// Per-caller degradation policy for [`list_collection`].
 ///
-/// Records that fail to parse or have a future schema version are silently
-/// skipped — this is expected when older clients encounter newer records.
+/// The PDS collection-listing policy is per-caller (see
+/// `openspec/specs/record-validity` § "PDS collection listing policy is
+/// per-caller"): a user-facing surface reports what it skips so the client can
+/// message it, while pairing cleanup keeps its historical skip-quietly
+/// behaviour. Every caller of the shared machinery chooses explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DegradationPolicy {
+    /// User-facing collections (grants, keyrings, directories, pending shares).
+    /// Corrupt records are skipped and reported as references; future-version
+    /// records are kept and marked needs-newer-client so downstream logic can
+    /// present them as locked rather than acting on them.
+    Counted,
+    /// Pairing collections. Corrupt and future-version records are skipped
+    /// quietly with no references reported — pairing has no user-facing
+    /// degradation surface and its records are ephemeral.
+    SkipQuietly,
+}
+
+/// The outcome of a lenient collection listing: the mapped entries plus any
+/// references to records that were skipped or could not be re-parsed.
+#[derive(Debug)]
+pub struct ListOutcome<E> {
+    /// Successfully mapped entries. Under [`DegradationPolicy::Counted`] this
+    /// includes future-version records (re-parsed under the known schema and
+    /// flagged needs-newer in the `map` closure).
+    pub entries: Vec<E>,
+    /// Corrupt references, plus future-version references whose known-schema
+    /// re-parse failed. Always empty under [`DegradationPolicy::SkipQuietly`].
+    pub unreadable: Vec<UnreadableRef>,
+}
+
+/// Paginate through an entire collection, classifying each record per-record
+/// and mapping the understood ones to `E` via the provided closure.
+///
+/// Classification is the shared `record-validity` contract: version peeked
+/// first, future-version records judged by the required-field floor, known
+/// versions given full structural + vocabulary judgment. The `map` closure
+/// receives `(uri, record, needs_newer)` — `needs_newer` is `true` for a
+/// future-version record kept under [`DegradationPolicy::Counted`].
 pub async fn list_collection<R, E>(
     client: &mut XrpcClient<impl Transport>,
     collection: &str,
-    map: impl Fn(&str, R) -> E,
-) -> Result<Vec<E>, Error>
+    kind: RecordKind,
+    policy: DegradationPolicy,
+    map: impl Fn(&str, R, bool) -> E,
+) -> Result<ListOutcome<E>, Error>
 where
-    R: DeserializeOwned + Versioned,
+    R: DeserializeOwned,
 {
     let mut entries = Vec::new();
+    let mut unreadable = Vec::new();
     let mut cursor: Option<String> = None;
 
     loop {
@@ -35,24 +74,35 @@ where
             .await?;
 
         for record in &page.records {
-            let parsed: R = match serde_json::from_value(record.value.clone()) {
-                Ok(v) => v,
-                Err(e) => {
-                    trace!("skipping unparseable record {}: {}", record.uri, e);
-                    continue;
-                }
-            };
-
-            if records::check_version(parsed.opake_version()).is_err() {
-                trace!(
-                    "skipping record {} with unsupported version {}",
-                    record.uri,
-                    parsed.opake_version()
-                );
-                continue;
+            match vocabulary::classify_record::<R>(kind, &record.value) {
+                Ok(parsed) => entries.push(map(&record.uri, parsed, false)),
+                Err(UnreadableReason::NeedsNewerClient) => match policy {
+                    DegradationPolicy::SkipQuietly => {
+                        trace!("skipping future-version record {}", record.uri);
+                    }
+                    DegradationPolicy::Counted => {
+                        // Additive evolution guarantees the known-schema floor
+                        // fields carry their known meaning, so re-parse under
+                        // the known schema and keep the record, marked. If even
+                        // the known fields don't shape up, keep it as a marked
+                        // reference rather than dropping it from view.
+                        match serde_json::from_value::<R>(record.value.clone()) {
+                            Ok(parsed) => entries.push(map(&record.uri, parsed, true)),
+                            Err(_) => unreadable
+                                .push(UnreadableRef::needs_newer_client(Some(record.uri.clone()))),
+                        }
+                    }
+                },
+                Err(UnreadableReason::Corrupt) => match policy {
+                    DegradationPolicy::SkipQuietly => {
+                        trace!("skipping corrupt record {}", record.uri);
+                    }
+                    DegradationPolicy::Counted => {
+                        warn!("skipping corrupt record {}", record.uri);
+                        unreadable.push(UnreadableRef::corrupt(Some(record.uri.clone())));
+                    }
+                },
             }
-
-            entries.push(map(&record.uri, parsed));
         }
 
         match page.cursor {
@@ -61,7 +111,7 @@ where
         }
     }
 
-    Ok(entries)
+    Ok(ListOutcome { entries, unreadable })
 }
 
 /// Paginate an entire collection and return raw record entries (uri + cid + value).
@@ -116,25 +166,12 @@ pub async fn list_collection_raw(
 mod tests {
     use super::*;
     use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
-    use crate::records;
-    use crate::test_utils::MockTransport;
-    use serde::{Deserialize, Serialize};
+    use crate::records::{self, AtBytes, Grant, WrappedKey};
+    use crate::test_utils::{dummy_encrypted_metadata, MockTransport};
+    use serde_json::json;
 
     const TEST_DID: &str = "did:plc:test";
-
-    /// Minimal record type for testing the generic pagination.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct FakeRecord {
-        #[serde(default)]
-        version: u32,
-        label: String,
-    }
-
-    impl Versioned for FakeRecord {
-        fn opake_version(&self) -> u32 {
-            self.version
-        }
-    }
+    const COLLECTION: &str = "at.opake.grant";
 
     fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
         let session = Session::Legacy(LegacySession {
@@ -146,19 +183,41 @@ mod tests {
         XrpcClient::with_session(mock, "https://pds.test".into(), session)
     }
 
-    fn page_response(records: &[(&str, FakeRecord)], cursor: Option<&str>) -> HttpResponse {
+    fn grant(recipient: &str) -> Grant {
+        Grant::new(
+            format!("at://{TEST_DID}/at.opake.document/doc"),
+            recipient.into(),
+            WrappedKey {
+                did: recipient.into(),
+                ciphertext: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+            },
+            dummy_encrypted_metadata(),
+            "2026-03-01T12:00:00Z".into(),
+        )
+    }
+
+    /// A well-formed v1 grant as a raw JSON value.
+    fn grant_value(recipient: &str) -> serde_json::Value {
+        serde_json::to_value(grant(recipient)).unwrap()
+    }
+
+    /// Build a `listRecords` page from raw record values.
+    fn page(records: &[(&str, serde_json::Value)], cursor: Option<&str>) -> HttpResponse {
         let entries: Vec<serde_json::Value> = records
             .iter()
-            .map(|(rkey, rec)| {
-                serde_json::json!({
-                    "uri": format!("at://{TEST_DID}/com.test.fake/{rkey}"),
-                    "cid": "bafyfake",
-                    "value": rec,
+            .map(|(rkey, value)| {
+                json!({
+                    "uri": format!("at://{TEST_DID}/{COLLECTION}/{rkey}"),
+                    "cid": "bafygrant",
+                    "value": value,
                 })
             })
             .collect();
 
-        let mut body = serde_json::json!({ "records": entries });
+        let mut body = json!({ "records": entries });
         if let Some(c) = cursor {
             body["cursor"] = serde_json::Value::String(c.into());
         }
@@ -170,70 +229,67 @@ mod tests {
         }
     }
 
-    fn fake(label: &str) -> FakeRecord {
-        FakeRecord {
-            version: records::SCHEMA_VERSION,
-            label: label.into(),
-        }
+    /// The map closure used across tests: `(uri, recipient, needs_newer)`.
+    fn extract(uri: &str, g: Grant, needs_newer: bool) -> (String, String, bool) {
+        (uri.to_owned(), g.recipient, needs_newer)
     }
 
-    /// The map closure we use in all tests: extract (uri, label) pairs.
-    fn extract(uri: &str, rec: FakeRecord) -> (String, String) {
-        (uri.to_owned(), rec.label)
+    async fn list(
+        client: &mut XrpcClient<MockTransport>,
+        policy: DegradationPolicy,
+    ) -> ListOutcome<(String, String, bool)> {
+        list_collection(client, COLLECTION, RecordKind::Grant, policy, extract)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn collects_single_page() {
         let mock = MockTransport::new();
-        mock.enqueue(page_response(&[("r1", fake("alpha"))], None));
+        mock.enqueue(page(&[("r1", grant_value("did:plc:alpha"))], None));
 
         let mut client = mock_client(mock);
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, "alpha");
-        assert!(results[0].0.contains("r1"));
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].1, "did:plc:alpha");
+        assert!(out.entries[0].0.contains("r1"));
+        assert!(out.unreadable.is_empty());
     }
 
     #[tokio::test]
     async fn collects_multiple_records() {
         let mock = MockTransport::new();
-        mock.enqueue(page_response(
+        mock.enqueue(page(
             &[
-                ("r1", fake("alpha")),
-                ("r2", fake("beta")),
-                ("r3", fake("gamma")),
+                ("r1", grant_value("did:plc:alpha")),
+                ("r2", grant_value("did:plc:beta")),
+                ("r3", grant_value("did:plc:gamma")),
             ],
             None,
         ));
 
         let mut client = mock_client(mock);
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0].1, "alpha");
-        assert_eq!(results[1].1, "beta");
-        assert_eq!(results[2].1, "gamma");
+        assert_eq!(out.entries.len(), 3);
+        assert_eq!(out.entries[0].1, "did:plc:alpha");
+        assert_eq!(out.entries[1].1, "did:plc:beta");
+        assert_eq!(out.entries[2].1, "did:plc:gamma");
     }
 
     #[tokio::test]
     async fn paginates_across_pages() {
         let mock = MockTransport::new();
-        mock.enqueue(page_response(&[("r1", fake("first"))], Some("cursor-1")));
-        mock.enqueue(page_response(&[("r2", fake("second"))], None));
+        mock.enqueue(page(&[("r1", grant_value("did:plc:first"))], Some("cursor-1")));
+        mock.enqueue(page(&[("r2", grant_value("did:plc:second"))], None));
 
         let mut client = mock_client(mock.clone());
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].1, "first");
-        assert_eq!(results[1].1, "second");
+        assert_eq!(out.entries.len(), 2);
+        assert_eq!(out.entries[0].1, "did:plc:first");
+        assert_eq!(out.entries[1].1, "did:plc:second");
 
         let requests = mock.requests();
         assert_eq!(requests.len(), 2);
@@ -243,63 +299,100 @@ mod tests {
     #[tokio::test]
     async fn empty_collection_returns_empty_vec() {
         let mock = MockTransport::new();
-        mock.enqueue(page_response(&[], None));
+        mock.enqueue(page(&[], None));
 
         let mut client = mock_client(mock);
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert!(results.is_empty());
+        assert!(out.entries.is_empty());
+        assert!(out.unreadable.is_empty());
     }
 
+    /// Counted policy: a corrupt record (no `opakeVersion`) is skipped from the
+    /// entries and reported as a corrupt reference carrying its URI, while the
+    /// well-formed record parses normally.
     #[tokio::test]
-    async fn skips_unparseable_records() {
-        let body = serde_json::json!({
-            "records": [
-                {
-                    "uri": "at://did:plc:test/com.test.fake/bad",
-                    "cid": "bafybad",
-                    "value": { "not": "a FakeRecord" },
-                },
-                {
-                    "uri": "at://did:plc:test/com.test.fake/good",
-                    "cid": "bafygood",
-                    "value": fake("valid"),
-                },
-            ]
-        });
-
+    async fn corrupt_record_is_skipped_and_referenced() {
         let mock = MockTransport::new();
-        mock.enqueue(HttpResponse {
-            status: 200,
-            headers: vec![],
-            body: serde_json::to_vec(&body).unwrap(),
-        });
+        mock.enqueue(page(
+            &[
+                ("bad", json!({ "not": "a grant" })),
+                ("good", grant_value("did:plc:bob")),
+            ],
+            None,
+        ));
 
         let mut client = mock_client(mock);
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, "valid");
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].1, "did:plc:bob");
+        assert_eq!(out.unreadable.len(), 1);
+        assert!(out.unreadable[0].is_corrupt());
+        assert!(out.unreadable[0].uri.as_deref().unwrap().contains("bad"));
     }
 
+    /// Counted policy: a future-version record satisfies the required-field
+    /// floor, so it is kept (re-parsed under the known schema) and flagged
+    /// needs-newer rather than dropped — the inversion of the old skip.
     #[tokio::test]
-    async fn skips_future_schema_version() {
-        let mut rec = fake("future");
-        rec.version = records::SCHEMA_VERSION + 1;
+    async fn future_version_is_kept_and_marked() {
+        let mut value = grant_value("did:plc:future");
+        value["opakeVersion"] = json!(records::SCHEMA_VERSION + 1);
 
         let mock = MockTransport::new();
-        mock.enqueue(page_response(&[("r1", rec)], None));
+        mock.enqueue(page(&[("r1", value)], None));
 
         let mut client = mock_client(mock);
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert!(results.is_empty());
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].1, "did:plc:future");
+        assert!(out.entries[0].2, "future-version grant flagged needs_newer");
+        assert!(out.unreadable.is_empty());
+    }
+
+    /// Counted policy: a known-version record whose vocabulary is out of range
+    /// (unknown key-wrap algo) is corrupt, not future — skipped and referenced.
+    #[tokio::test]
+    async fn vocabulary_violation_is_corrupt() {
+        let mut value = grant_value("did:plc:bob");
+        value["wrappedKey"]["algo"] = json!("rot13");
+
+        let mock = MockTransport::new();
+        mock.enqueue(page(&[("v", value)], None));
+
+        let mut client = mock_client(mock);
+        let out = list(&mut client, DegradationPolicy::Counted).await;
+
+        assert!(out.entries.is_empty());
+        assert_eq!(out.unreadable.len(), 1);
+        assert!(out.unreadable[0].is_corrupt());
+    }
+
+    /// SkipQuietly policy (pairing): corrupt and future-version records are both
+    /// dropped with no references reported.
+    #[tokio::test]
+    async fn skip_quietly_drops_without_references() {
+        let mut future = grant_value("did:plc:future");
+        future["opakeVersion"] = json!(records::SCHEMA_VERSION + 1);
+
+        let mock = MockTransport::new();
+        mock.enqueue(page(
+            &[
+                ("bad", json!({ "not": "a grant" })),
+                ("future", future),
+                ("good", grant_value("did:plc:bob")),
+            ],
+            None,
+        ));
+
+        let mut client = mock_client(mock);
+        let out = list(&mut client, DegradationPolicy::SkipQuietly).await;
+
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].1, "did:plc:bob");
+        assert!(out.unreadable.is_empty());
     }
 
     #[tokio::test]
@@ -312,7 +405,7 @@ mod tests {
         });
 
         let mut client = mock_client(mock);
-        let err = list_collection(&mut client, "com.test.fake", extract)
+        let err = list_collection(&mut client, COLLECTION, RecordKind::Grant, DegradationPolicy::Counted, extract)
             .await
             .unwrap_err();
 
@@ -322,16 +415,14 @@ mod tests {
     #[tokio::test]
     async fn three_pages_all_collected() {
         let mock = MockTransport::new();
-        mock.enqueue(page_response(&[("r1", fake("a"))], Some("c1")));
-        mock.enqueue(page_response(&[("r2", fake("b"))], Some("c2")));
-        mock.enqueue(page_response(&[("r3", fake("c"))], None));
+        mock.enqueue(page(&[("r1", grant_value("did:plc:a"))], Some("c1")));
+        mock.enqueue(page(&[("r2", grant_value("did:plc:b"))], Some("c2")));
+        mock.enqueue(page(&[("r3", grant_value("did:plc:c"))], None));
 
         let mut client = mock_client(mock.clone());
-        let results = list_collection(&mut client, "com.test.fake", extract)
-            .await
-            .unwrap();
+        let out = list(&mut client, DegradationPolicy::Counted).await;
 
-        assert_eq!(results.len(), 3);
+        assert_eq!(out.entries.len(), 3);
 
         let requests = mock.requests();
         assert_eq!(requests.len(), 3);

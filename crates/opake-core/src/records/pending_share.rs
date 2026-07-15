@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, EncryptedMetadata, SCHEMA_VERSION};
+use super::{EncryptedMetadata, SCHEMA_VERSION};
 
 pub const PENDING_SHARE_COLLECTION: &str = "at.opake.pendingShare";
 
@@ -10,7 +10,6 @@ pub const PENDING_SHARE_COLLECTION: &str = "at.opake.pendingShare";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingShare {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub document: String,
     pub recipient: String,

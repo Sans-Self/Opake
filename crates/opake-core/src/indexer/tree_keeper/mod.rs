@@ -28,8 +28,9 @@ use std::collections::HashMap;
 use crate::crypto::{ContentKey, X25519PrivateKey};
 use crate::directories::{DecryptionCtx, DirectoryTree, TreeChange};
 use crate::error::Error;
-use crate::indexer::sse::events::SseEvent;
+use crate::indexer::sse::events::{CorruptScope, SseCorruptRecord, SseEvent};
 use crate::indexer::types::IndexerEnvelope;
+use crate::records::UnreadableRef;
 
 /// Callback fired when a watched directory's tree state changes.
 ///
@@ -376,6 +377,7 @@ impl TreeKeeper {
             }
             SseEvent::KeyringDelete(_) => {}
             SseEvent::GrantUpsert(_) | SseEvent::GrantDelete(_) => {}
+            SseEvent::CorruptRecord(corrupt) => self.apply_corrupt_record(corrupt),
             SseEvent::ChainForked(fork) => {
                 log::warn!(
                     "chain forked: workspace={} scope={} path={:?} your={} fork_point={} winner={} winner_cid={}",
@@ -460,6 +462,7 @@ impl TreeKeeper {
             &my_member.wrapped_key,
             &bundle,
             &crate::crypto::WrapContext::Keyring { uri: anchor },
+            record.opake_version,
         ) {
             Ok(key) => key,
             Err(e) => {
@@ -597,6 +600,59 @@ impl TreeKeeper {
         }
 
         Ok(())
+    }
+
+    /// Apply a corrupt / future-version directory record delivered by SSE,
+    /// producing the same placeholder state as the snapshot path would.
+    ///
+    /// A corrupt record body can't be trusted to name its workspace, so the URI
+    /// is matched against the references already present in each installed tree
+    /// — the authorized-snapshot invariant. The first tree that references the
+    /// URI gets the placeholder (a directory is parented in exactly one place);
+    /// a URI nothing references is count-only, upholding the no-out-of-scope
+    /// -disclosure rule. Corrupt documents, keyrings and grants are not this
+    /// keeper's domain and leave the trees untouched.
+    ///
+    /// spec:record-validity § SSE delivery matches snapshot delivery
+    fn apply_corrupt_record(&mut self, corrupt: &SseCorruptRecord) {
+        if corrupt.scope != CorruptScope::Directory {
+            return;
+        }
+        let Some(uri) = corrupt.uri.as_deref() else {
+            return; // count-only: no URI to hang a placeholder on
+        };
+        let reference = UnreadableRef {
+            uri: Some(uri.to_string()),
+            reason: corrupt.reason,
+        };
+
+        // Cabinet first.
+        if let Some(HeldTree::Cabinet { tree, .. }) = self.cabinet.as_mut() {
+            if tree.apply_unreadable_ref(&reference) {
+                self.notify_scope(&TreeScope::Cabinet);
+                return;
+            }
+        }
+
+        // Then each installed workspace, in turn (mirrors `apply_directory_delete`).
+        let keyring_uris: Vec<String> = self.workspaces.keys().cloned().collect();
+        for keyring_uri in keyring_uris {
+            let applied = {
+                let Some(HeldTree::Workspace { tree, .. }) = self.workspaces.get_mut(&keyring_uri)
+                else {
+                    continue;
+                };
+                tree.apply_unreadable_ref(&reference)
+            };
+            if applied {
+                self.notify_scope(&TreeScope::Workspace(keyring_uri));
+                return;
+            }
+        }
+
+        log::debug!(
+            "[tree_keeper] corrupt directory {uri} not referenced by any installed tree; count-only"
+        );
     }
 
     // -- Watcher notification --

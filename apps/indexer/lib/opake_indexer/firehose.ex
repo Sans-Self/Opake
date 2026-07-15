@@ -50,6 +50,7 @@ defmodule OpakeIndexer.Firehose do
   alias OpakeIndexer.Jetstream.Event
   alias OpakeIndexer.Firehose.ConsumeLag
   alias OpakeIndexer.Firehose.State
+  alias OpakeIndexer.Lexicon.Validator
 
   alias OpakeIndexer.Queries.{
     ChainHeadQueries,
@@ -111,22 +112,21 @@ defmodule OpakeIndexer.Firehose do
 
   # -- Dispatch -------------------------------------------------------
 
+  # Ingest gate (D6): structural validation for all versions, vocabulary
+  # enforcement for known versions. A refused record is not indexed and not
+  # broadcast — rejection, not deletion; it remains on the author's PDS.
   defp dispatch({:upsert_record, attrs}, _time_us, now) do
-    case attrs.collection do
-      @keyring_collection ->
-        dispatch_keyring_upsert(attrs, now)
+    case Validator.validate(attrs.collection, attrs.record_jsonb) do
+      :ok ->
+        dispatch_upsert(attrs, now)
 
-      @directory_collection ->
-        dispatch_directory_upsert(attrs, now)
+      {:refused, reason} ->
+        Logger.warning(
+          "[Indexer] ingest gate refused #{attrs.collection} #{attrs.uri} " <>
+            "by #{attrs.author_did}: #{inspect(reason)}"
+        )
 
-      @document_collection ->
-        dispatch_document_upsert(attrs, now)
-
-      @grant_collection ->
-        dispatch_grant_upsert(attrs, now)
-
-      _ ->
-        :ok
+        emit_event_telemetry(attrs.collection, :upsert, :refused)
     end
   end
 
@@ -145,6 +145,25 @@ defmodule OpakeIndexer.Firehose do
       end
 
     emit_event_telemetry(@account_config_collection, action, :ok)
+  end
+
+  defp dispatch_upsert(attrs, now) do
+    case attrs.collection do
+      @keyring_collection ->
+        dispatch_keyring_upsert(attrs, now)
+
+      @directory_collection ->
+        dispatch_directory_upsert(attrs, now)
+
+      @document_collection ->
+        dispatch_document_upsert(attrs, now)
+
+      @grant_collection ->
+        dispatch_grant_upsert(attrs, now)
+
+      _ ->
+        :ok
+    end
   end
 
   # -- Keyring upsert -------------------------------------------------

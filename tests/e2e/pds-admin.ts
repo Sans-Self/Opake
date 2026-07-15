@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { actorsFor, assertNamespace, type Actor } from "./namespace.js";
 
 const PUBLIC_KEY_COLLECTION = "at.opake.publicKey";
+const DIRECTORY_COLLECTION = "at.opake.directory";
 const PUBLIC_KEY_RKEY = "self";
 
 // The dev-env's PDS admin password (dev-env/docker-compose.yml). A public test
@@ -107,6 +108,71 @@ export async function clearGrantsTo(sharer: Actor, recipient: Actor): Promise<vo
       body: { repo: did, collection: "at.opake.grant", rkey: rkeyOf(rec.uri) },
     });
   }
+}
+
+/**
+ * Write a poison `at.opake.directory` record into an actor's own repo,
+ * bypassing lexicon validation (`validate: false`) so the malformed shape lands
+ * exactly as the original incident's did. The dev-env indexer relays it into
+ * the actor's cabinet snapshot; the client must degrade around it rather than
+ * fail the whole snapshot parse.
+ *
+ * `kind`:
+ *   - "malformed": missing the crypto envelope (`keyWrapping`/`encryptedMetadata`)
+ *     — the byte-shape of the reported incident. Corrupt on any client.
+ *   - "future": well-formed but `opakeVersion` far in the future — passes the
+ *     required-field floor, so the client keeps it as needs-newer-client.
+ *
+ * Returns the record's AT-URI and a cleanup function that deletes it.
+ */
+export async function injectPoisonDirectory(
+  actor: Actor,
+  kind: "malformed" | "future",
+): Promise<{ uri: string; cleanup: () => Promise<void> }> {
+  const host = pdsHost(actor);
+  const { did, token } = await createSession(actor);
+
+  const record =
+    kind === "malformed"
+      ? { opakeVersion: 1, createdAt: new Date(0).toISOString() }
+      : {
+          opakeVersion: 999,
+          keyWrapping: {
+            $type: "at.opake.defs#directKeyWrapping",
+            keys: [
+              {
+                did,
+                ciphertext: { $bytes: "AAAA" },
+                algo: "x25519-mlkem768-hkdf-a256kw-v2",
+              },
+            ],
+          },
+          encryptedMetadata: { ciphertext: { $bytes: "AAAA" }, nonce: { $bytes: "BBBBBBBBBBBBBBBB" } },
+          createdAt: new Date(0).toISOString(),
+        };
+
+  const res = await xrpc(host, "/xrpc/com.atproto.repo.createRecord", {
+    method: "POST",
+    token,
+    body: { repo: did, collection: DIRECTORY_COLLECTION, validate: false, record },
+  });
+  if (res.status !== 200) {
+    throw new Error(
+      `inject poison directory (${kind}) for ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
+  }
+  const uri = (res.json as { uri: string }).uri;
+
+  return {
+    uri,
+    cleanup: async () => {
+      await xrpc(host, "/xrpc/com.atproto.repo.deleteRecord", {
+        method: "POST",
+        token,
+        body: { repo: did, collection: DIRECTORY_COLLECTION, rkey: rkeyOf(uri) },
+      });
+    },
+  };
 }
 
 async function createSession(actor: Actor): Promise<{ did: string; token: string }> {

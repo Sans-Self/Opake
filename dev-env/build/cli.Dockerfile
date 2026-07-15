@@ -11,6 +11,10 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY apps/cli apps/cli
+# opake-core embeds lexicons/vocabulary.json at compile time (include_str!,
+# resolving ../../../../lexicons from crates/opake-core/src/records to /src).
+# Shared single source of truth with the indexer; the build needs it present.
+COPY lexicons lexicons
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release -p opake-cli && cp target/release/opake /opake

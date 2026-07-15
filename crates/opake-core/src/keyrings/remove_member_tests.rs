@@ -136,6 +136,7 @@ async fn happy_path_removes_and_rotates() {
                 &updated.members[0].wrapped_key,
                 &owner.private_keys(),
                 &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+                updated.opake_version,
             )
             .unwrap();
             assert_eq!(unwrapped.0, new_group_key.0);

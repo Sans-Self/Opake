@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, EncryptedMetadata, EncryptionEnvelope, KeyringRef, SCHEMA_VERSION};
+use super::{EncryptedMetadata, EncryptionEnvelope, KeyringRef, SCHEMA_VERSION};
 use crate::atproto::{AtBytes, BlobRef};
 
 /// Content key wrapped directly to individual DIDs.
@@ -31,7 +31,6 @@ pub enum Encryption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub blob: BlobRef,
     pub encryption: Encryption,

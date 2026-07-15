@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, SCHEMA_VERSION};
+use super::{SCHEMA_VERSION};
 use crate::atproto::AtBytes;
 
 pub const PUBLIC_KEY_COLLECTION: &str = "at.opake.publicKey";
@@ -24,7 +24,6 @@ pub const ED25519_ALGO: &str = "ed25519";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyRecord {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     /// Raw X25519 public key (32 bytes).
     pub x25519_public_key: AtBytes,

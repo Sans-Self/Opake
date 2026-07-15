@@ -13,8 +13,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::indexer::types::IndexerEnvelope;
-use crate::records::{Directory, Document, Grant, Keyring};
+use crate::indexer::types::{classify_sse_envelope, EnvelopeClassification, IndexerEnvelope};
+use crate::records::vocabulary::RecordKind;
+use crate::records::{Directory, Document, Grant, Keyring, UnreadableReason, UnreadableRef};
 
 // ---------------------------------------------------------------------------
 // Delete payloads
@@ -101,6 +102,51 @@ pub struct SseChainForked {
 }
 
 // ---------------------------------------------------------------------------
+// Corrupt-record event — an upsert whose record body could not be understood.
+// ---------------------------------------------------------------------------
+
+/// Which keeper domain a corrupt SSE record belongs to. Derived from the wire
+/// event name (a corrupt record body can't be trusted to say what it is), so a
+/// keeper knows whether to placeholder it (directory/document → tree) or signal
+/// it (keyring → workspace, grant → inbox).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CorruptScope {
+    Directory,
+    Document,
+    Keyring,
+    Grant,
+}
+
+/// A record delivered by SSE upsert that the client could not fully understand
+/// — corrupt, or written by a newer schema version. Carries the envelope URI
+/// (when extractable) so keepers can render a placeholder or signal an
+/// unreadable workspace, exactly as the snapshot path does with an
+/// [`UnreadableRef`]. The stream is never interrupted for one of these (see
+/// `record-validity` § SSE delivery matches snapshot delivery).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SseCorruptRecord {
+    /// AT-URI of the record, when the envelope yielded one; `None` is
+    /// count-only (no placeholder can be hung on it).
+    pub uri: Option<String>,
+    /// Why the record is unreadable — corrupt vs needs-newer-client.
+    pub reason: UnreadableReason,
+    /// The keeper domain this record would have patched.
+    pub scope: CorruptScope,
+}
+
+impl SseCorruptRecord {
+    fn from_ref(reference: UnreadableRef, scope: CorruptScope) -> Self {
+        Self {
+            uri: reference.uri,
+            reason: reference.reason,
+            scope,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Top-level event enum
 // ---------------------------------------------------------------------------
 
@@ -121,6 +167,11 @@ pub enum SseEvent {
     KeyringDelete(SseKeyringDeletePayload),
     GrantUpsert(IndexerEnvelope<Grant>),
     GrantDelete(SseDeletePayload),
+
+    /// An upsert whose record body was corrupt or future-version. Delivered as
+    /// a normal event so keepers converge on the same state as the snapshot
+    /// path — it never terminates the stream.
+    CorruptRecord(SseCorruptRecord),
 
     /// Indexer detected a fork race against this client's latest supersede.
     ChainForked(SseChainForked),
@@ -161,12 +212,22 @@ impl SseEvent {
             Self::KeyringDelete(_) => "at.opake.keyring:delete",
             Self::GrantUpsert(_) => "at.opake.grant:upsert",
             Self::GrantDelete(_) => "at.opake.grant:delete",
+            Self::CorruptRecord(_) => "__corrupt__",
             Self::ChainForked(_) => "chain:forked",
             Self::Reconnect => "__reconnect__",
         }
     }
 
     /// Parse an event from its name + JSON data payload.
+    ///
+    /// Record upserts (directory/document/keyring/grant) NEVER return `Err`
+    /// for a record-level failure: a corrupt or future-version record body
+    /// yields `Ok(SseEvent::CorruptRecord)` so a poison record is a delivered
+    /// event, not a stream fault (see `record-validity` § SSE delivery matches
+    /// snapshot delivery). Only genuinely unparseable control payloads
+    /// (deletes, `chain:forked`) or an unknown event name return `Err`; the
+    /// connection/consumer layer treats those and true transport failures alike
+    /// as the sole reconnect triggers.
     pub fn from_name_and_data(name: &str, data: &[u8]) -> Result<Self, crate::error::Error> {
         fn decode<T: serde::de::DeserializeOwned>(
             data: &[u8],
@@ -177,26 +238,57 @@ impl SseEvent {
             })
         }
 
-        let event = match name {
-            "at.opake.directory:upsert" => {
-                Self::DirectoryUpsert(decode(data, "at.opake.directory:upsert")?)
+        /// Turn a lenient envelope classification into either the typed upsert
+        /// (via `on_ok`) or a `CorruptRecord` event. Logs the skip so a poison
+        /// record is never silent.
+        fn upsert<T>(
+            classification: EnvelopeClassification<T>,
+            scope: CorruptScope,
+            on_ok: impl FnOnce(IndexerEnvelope<T>) -> SseEvent,
+        ) -> SseEvent {
+            match classification {
+                EnvelopeClassification::Understood(env) => on_ok(env),
+                EnvelopeClassification::Unreadable(reference) => {
+                    log::warn!(
+                        "[sse] delivering unreadable {scope:?} record {:?} as corrupt event: {:?}",
+                        reference.uri,
+                        reference.reason,
+                    );
+                    SseEvent::CorruptRecord(SseCorruptRecord::from_ref(reference, scope))
+                }
             }
+        }
+
+        let event = match name {
+            "at.opake.directory:upsert" => upsert(
+                classify_sse_envelope::<Directory>(RecordKind::Directory, data),
+                CorruptScope::Directory,
+                Self::DirectoryUpsert,
+            ),
             "at.opake.directory:delete" => {
                 Self::DirectoryDelete(decode(data, "at.opake.directory:delete")?)
             }
-            "at.opake.document:upsert" => {
-                Self::DocumentUpsert(decode(data, "at.opake.document:upsert")?)
-            }
+            "at.opake.document:upsert" => upsert(
+                classify_sse_envelope::<Document>(RecordKind::Document, data),
+                CorruptScope::Document,
+                Self::DocumentUpsert,
+            ),
             "at.opake.document:delete" => {
                 Self::DocumentDelete(decode(data, "at.opake.document:delete")?)
             }
-            "at.opake.keyring:upsert" => {
-                Self::KeyringUpsert(decode(data, "at.opake.keyring:upsert")?)
-            }
+            "at.opake.keyring:upsert" => upsert(
+                classify_sse_envelope::<Keyring>(RecordKind::Keyring, data),
+                CorruptScope::Keyring,
+                Self::KeyringUpsert,
+            ),
             "at.opake.keyring:delete" => {
                 Self::KeyringDelete(decode(data, "at.opake.keyring:delete")?)
             }
-            "at.opake.grant:upsert" => Self::GrantUpsert(decode(data, "at.opake.grant:upsert")?),
+            "at.opake.grant:upsert" => upsert(
+                classify_sse_envelope::<Grant>(RecordKind::Grant, data),
+                CorruptScope::Grant,
+                Self::GrantUpsert,
+            ),
             "at.opake.grant:delete" => Self::GrantDelete(decode(data, "at.opake.grant:delete")?),
             "chain:forked" => Self::ChainForked(decode(data, "chain:forked")?),
             other => {
@@ -228,6 +320,10 @@ impl SseEvent {
             | Self::DocumentDelete(_)
             | Self::GrantUpsert(_)
             | Self::GrantDelete(_)
+            // A corrupt record body can't be trusted to name its workspace, and
+            // the URI alone doesn't identify one — keepers place it by matching
+            // its URI against references already in their authorized state.
+            | Self::CorruptRecord(_)
             | Self::Reconnect => None,
         }
     }
@@ -361,6 +457,124 @@ mod tests {
         let json = br#"{"uri": "at://a", "workspace_id": "at://g", "outcome": "torn_down"}"#;
         let event = SseEvent::from_name_and_data("at.opake.keyring:delete", json).unwrap();
         assert_eq!(event.workspace_id(), Some("at://g"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-event lenience (poison-record-resilience, task 3.3)
+    // -----------------------------------------------------------------------
+
+    fn dir_upsert_envelope(rkey: &str, record: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "uri": format!("at://did:plc:author/at.opake.directory/{rkey}"),
+            "record": record,
+            "indexedAt": "2026-03-01T00:00:01Z"
+        }))
+        .unwrap()
+    }
+
+    fn well_formed_directory() -> serde_json::Value {
+        serde_json::json!({
+            "opakeVersion": 1,
+            "keyWrapping": {
+                "$type": "at.opake.defs#directKeyWrapping",
+                "keys": [{
+                    "did": "did:plc:me",
+                    "ciphertext": { "$bytes": "AAAA" },
+                    "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+                }]
+            },
+            "encryptedMetadata": { "ciphertext": { "$bytes": "AAAA" }, "nonce": { "$bytes": "BBBB" } },
+            "createdAt": "2026-03-01T00:00:00Z"
+        })
+    }
+
+    /// A well-formed directory upsert parses to the typed event.
+    #[test]
+    fn well_formed_directory_upsert_parses() {
+        let data = dir_upsert_envelope("good", well_formed_directory());
+        let event = SseEvent::from_name_and_data("at.opake.directory:upsert", &data).unwrap();
+        assert!(matches!(event, SseEvent::DirectoryUpsert(_)));
+    }
+
+    /// A corrupt directory record body NEVER errors — it becomes a delivered
+    /// `CorruptRecord` event carrying the envelope URI, so the stream survives.
+    #[test]
+    fn corrupt_directory_upsert_is_delivered_not_errored() {
+        let malformed = serde_json::json!({
+            "opakeVersion": 1,
+            "createdAt": "2026-03-01T00:00:00Z"
+            // no keyWrapping / encryptedMetadata
+        });
+        let data = dir_upsert_envelope("bad", malformed);
+        let event = SseEvent::from_name_and_data("at.opake.directory:upsert", &data).unwrap();
+        match event {
+            SseEvent::CorruptRecord(c) => {
+                assert_eq!(c.scope, CorruptScope::Directory);
+                assert_eq!(c.reason, UnreadableReason::Corrupt);
+                assert_eq!(
+                    c.uri.as_deref(),
+                    Some("at://did:plc:author/at.opake.directory/bad")
+                );
+            }
+            other => panic!("expected CorruptRecord, got {other:?}"),
+        }
+    }
+
+    /// A future-version directory (floor present) becomes a needs-newer-client
+    /// `CorruptRecord`, matching the snapshot path's classification.
+    #[test]
+    fn future_version_directory_upsert_is_needs_newer() {
+        let mut future = well_formed_directory();
+        future["opakeVersion"] = serde_json::json!(crate::records::SCHEMA_VERSION + 1);
+        let data = dir_upsert_envelope("future", future);
+        let event = SseEvent::from_name_and_data("at.opake.directory:upsert", &data).unwrap();
+        match event {
+            SseEvent::CorruptRecord(c) => {
+                assert_eq!(c.reason, UnreadableReason::NeedsNewerClient);
+                assert_eq!(c.scope, CorruptScope::Directory);
+            }
+            other => panic!("expected CorruptRecord, got {other:?}"),
+        }
+    }
+
+    /// An envelope with no extractable URI is count-only: still a delivered
+    /// `CorruptRecord`, never an error, but `uri` is `None`.
+    #[test]
+    fn envelopeless_upsert_is_count_only_corrupt() {
+        let data = br#"{"record": 42}"#;
+        let event = SseEvent::from_name_and_data("at.opake.directory:upsert", data).unwrap();
+        match event {
+            SseEvent::CorruptRecord(c) => {
+                assert!(c.uri.is_none());
+                assert_eq!(c.reason, UnreadableReason::Corrupt);
+            }
+            other => panic!("expected CorruptRecord, got {other:?}"),
+        }
+    }
+
+    /// A corrupt keyring upsert carries the Keyring scope so the workspace
+    /// keeper can signal it distinctly.
+    #[test]
+    fn corrupt_keyring_upsert_carries_keyring_scope() {
+        let data = serde_json::to_vec(&serde_json::json!({
+            "uri": "at://did:plc:author/at.opake.keyring/kr",
+            "record": { "opakeVersion": 1, "createdAt": "2026-03-01T00:00:00Z" },
+            "indexedAt": "2026-03-01T00:00:01Z"
+        }))
+        .unwrap();
+        let event = SseEvent::from_name_and_data("at.opake.keyring:upsert", &data).unwrap();
+        match event {
+            SseEvent::CorruptRecord(c) => assert_eq!(c.scope, CorruptScope::Keyring),
+            other => panic!("expected CorruptRecord, got {other:?}"),
+        }
+    }
+
+    /// Totally unparseable JSON for a record upsert is still a delivered
+    /// event, not a stream-terminating error.
+    #[test]
+    fn garbage_upsert_bytes_do_not_error() {
+        let event = SseEvent::from_name_and_data("at.opake.grant:upsert", b"not json at all");
+        assert!(matches!(event, Ok(SseEvent::CorruptRecord(_))));
     }
 
     #[test]

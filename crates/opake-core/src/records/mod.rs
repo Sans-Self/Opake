@@ -7,8 +7,10 @@
 // `atproto` module. The ones used as record fields are re-exported here.
 
 mod account_config;
+pub mod classify;
 mod defs;
 mod directory;
+pub mod vocabulary;
 mod document;
 mod grant;
 mod keyring;
@@ -27,6 +29,7 @@ pub use crate::atproto::{AtBytes, BlobRef, CidLink};
 pub use account_config::{
     AccountConfigRecord, AccountConfigUpdates, ACCOUNT_CONFIG_COLLECTION, ACCOUNT_CONFIG_RKEY,
 };
+pub use classify::{peek_version, UnreadableReason, UnreadableRef};
 pub use defs::{
     DirectKeyWrapping, EncryptedMetadata, EncryptionEnvelope, KeyWrapping, KeyringKeyWrapping,
     KeyringMember, KeyringRef, Role, WrappedKey,
@@ -71,10 +74,6 @@ impl_versioned!(
     PendingShare,
 );
 
-fn default_version() -> u32 {
-    SCHEMA_VERSION
-}
-
 /// Reject records written by a newer schema version than this client understands.
 pub fn check_version(record_version: u32) -> Result<(), Error> {
     if record_version > SCHEMA_VERSION {
@@ -88,6 +87,152 @@ pub fn check_version(record_version: u32) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dummy_wrapped_key() -> WrappedKey {
+        WrappedKey {
+            did: "did:plc:test".into(),
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
+            },
+            algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+        }
+    }
+
+    fn dummy_metadata() -> EncryptedMetadata {
+        EncryptedMetadata {
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
+            },
+            nonce: AtBytes {
+                encoded: "BBBB".into(),
+            },
+        }
+    }
+
+    /// One serialized instance per record type. The protocol contract: every
+    /// record carries `opakeVersion` as a top-level integer field, stable
+    /// across schema versions.
+    fn all_record_jsons() -> Vec<(&'static str, serde_json::Value)> {
+        let t = "2026-03-01T00:00:00Z";
+        let document = Document::new(
+            crate::atproto::BlobRef {
+                blob_type: "blob".into(),
+                reference: CidLink { cid: "bafy".into() },
+                mime_type: "application/octet-stream".into(),
+                size: 1,
+            },
+            Encryption::Direct(DirectEncryption {
+                envelope: EncryptionEnvelope {
+                    algo: "aes-256-gcm".into(),
+                    nonce: AtBytes {
+                        encoded: "CCCC".into(),
+                    },
+                    keys: vec![dummy_wrapped_key()],
+                },
+            }),
+            dummy_metadata(),
+            t.into(),
+        );
+        let keyring = Keyring::new(
+            vec![KeyringMember {
+                wrapped_key: dummy_wrapped_key(),
+                role: Role::Manager,
+            }],
+            dummy_metadata(),
+            t.into(),
+        );
+        let pair_response = PairResponse {
+            opake_version: SCHEMA_VERSION,
+            request: "at://did:plc:test/at.opake.pairRequest/req".into(),
+            wrapped_key: dummy_wrapped_key(),
+            ciphertext: AtBytes {
+                encoded: "AAAA".into(),
+            },
+            nonce: AtBytes {
+                encoded: "BBBB".into(),
+            },
+            algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+            created_at: t.into(),
+        };
+        vec![
+            (
+                "accountConfig",
+                serde_json::to_value(AccountConfigRecord::new(t)).unwrap(),
+            ),
+            (
+                "directory",
+                serde_json::to_value(dummy_encrypted_directory(t)).unwrap(),
+            ),
+            ("document", serde_json::to_value(document).unwrap()),
+            (
+                "grant",
+                serde_json::to_value(Grant::new(
+                    "at://did:plc:test/at.opake.document/doc".into(),
+                    "did:plc:bob".into(),
+                    dummy_wrapped_key(),
+                    dummy_metadata(),
+                    t.into(),
+                ))
+                .unwrap(),
+            ),
+            ("keyring", serde_json::to_value(keyring).unwrap()),
+            (
+                "pairRequest",
+                serde_json::to_value(PairRequest::new(&[1u8; 32], &[2u8; 1184], t)).unwrap(),
+            ),
+            ("pairResponse", serde_json::to_value(pair_response).unwrap()),
+            (
+                "pendingShare",
+                serde_json::to_value(PendingShare::new(
+                    "at://did:plc:test/at.opake.document/doc".into(),
+                    "did:plc:bob".into(),
+                    dummy_metadata(),
+                    t.into(),
+                ))
+                .unwrap(),
+            ),
+            (
+                "publicKey",
+                serde_json::to_value(PublicKeyRecord::new(&[3u8; 32], &[4u8; 1184], t)).unwrap(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn all_record_types_carry_top_level_opake_version() {
+        let records = all_record_jsons();
+        assert_eq!(records.len(), 9, "census must cover every record type");
+        for (name, json) in records {
+            let version = json.get("opakeVersion");
+            assert!(
+                version.is_some_and(|v| v.is_u64()),
+                "{name} must carry top-level integer opakeVersion, got: {json}"
+            );
+        }
+    }
+
+    #[test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    fn bug__missing_opake_version_masked_as_current() {
+        // Records without opakeVersion used to deserialize as the CURRENT
+        // version via a serde default, masking absence. Absence is corrupt.
+        for (name, mut json) in all_record_jsons() {
+            json.as_object_mut().unwrap().remove("opakeVersion");
+            let failed = match name {
+                "accountConfig" => serde_json::from_value::<AccountConfigRecord>(json).is_err(),
+                "directory" => serde_json::from_value::<Directory>(json).is_err(),
+                "document" => serde_json::from_value::<Document>(json).is_err(),
+                "grant" => serde_json::from_value::<Grant>(json).is_err(),
+                "keyring" => serde_json::from_value::<Keyring>(json).is_err(),
+                "pairRequest" => serde_json::from_value::<PairRequest>(json).is_err(),
+                "pairResponse" => serde_json::from_value::<PairResponse>(json).is_err(),
+                "pendingShare" => serde_json::from_value::<PendingShare>(json).is_err(),
+                "publicKey" => serde_json::from_value::<PublicKeyRecord>(json).is_err(),
+                _ => unreachable!("unknown record type {name}"),
+            };
+            assert!(failed, "{name} without opakeVersion must fail to parse");
+        }
+    }
 
     #[test]
     fn check_version_accepts_current() {

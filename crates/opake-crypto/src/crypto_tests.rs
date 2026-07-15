@@ -139,9 +139,59 @@ fn wrap_unwrap_roundtrips() {
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet).unwrap();
+    let unwrapped = unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).unwrap();
 
     assert_eq!(content_key.0, unwrapped.0);
+}
+
+// record-validity § cryptographic parameters derive from the record's declaration
+//
+// Mechanism-only: with a single real schema version defined, this exercises
+// the *plumbing* — that the declared version threaded into `unwrap_key` is a
+// live input to the KDF transcript, not a value the function ignores in favour
+// of the compile-time `SCHEMA_VERSION`. It uses a synthetic future version and
+// asserts (a) the declared version round-trips and (b) a mismatched declared
+// version derives a different wrapping key and fails AES-KW integrity. Once a
+// real v2 exists, the "newer writer, older declared version" migration is a
+// higher-level test; this one guards the crypto contract.
+#[test]
+fn declared_version_is_a_live_transcript_input() {
+    let content_key = generate_content_key(&mut OsRng);
+    let keys = LocalKeys::generate();
+
+    // The wrap side stamps its own current schema version into the transcript.
+    let wrapped = wrap_key(
+        &content_key,
+        &keys.public_keys(),
+        "did:plc:test",
+        &WrapContext::Cabinet,
+        &mut OsRng,
+    )
+    .unwrap();
+
+    // Unwrapping under the version the record was written at succeeds.
+    let ok = unwrap_key(
+        &wrapped,
+        &keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION,
+    )
+    .unwrap();
+    assert_eq!(ok.0, content_key.0);
+
+    // Unwrapping under a *different* declared version must derive a different
+    // wrapping key and fail integrity — proof the version is actually folded
+    // into the transcript rather than silently pinned to the constant.
+    let mismatched = unwrap_key(
+        &wrapped,
+        &keys.private_keys(),
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION + 1,
+    );
+    assert!(
+        mismatched.is_err(),
+        "a mismatched declared version must not unwrap — version binds the transcript",
+    );
 }
 
 // spec:document-crypto § Asymmetric wraps use the hybrid post-quantum construction
@@ -195,7 +245,7 @@ fn wrong_private_key_fails_unwrap() {
         &mut OsRng,
     )
     .unwrap();
-    assert!(unwrap_key(&wrapped, &wrong_keys.private_keys(), &WrapContext::Cabinet).is_err());
+    assert!(unwrap_key(&wrapped, &wrong_keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
 }
 
 #[test]
@@ -217,7 +267,7 @@ fn tampered_wrapped_ciphertext_fails_unwrap() {
     bytes[last_byte_index] ^= 0xff;
     wrapped.ciphertext.encoded = BASE64.encode(&bytes);
 
-    assert!(unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet).is_err());
+    assert!(unwrap_key(&wrapped, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
 }
 
 #[test]
@@ -273,8 +323,8 @@ fn create_group_key_wraps_to_all_members() {
     assert_eq!(wrapped_keys[0].did, "did:plc:alice");
     assert_eq!(wrapped_keys[1].did, "did:plc:bob");
 
-    let unwrapped_a = unwrap_key(&wrapped_keys[0], &alice.private_keys(), &context).unwrap();
-    let unwrapped_b = unwrap_key(&wrapped_keys[1], &bob.private_keys(), &context).unwrap();
+    let unwrapped_a = unwrap_key(&wrapped_keys[0], &alice.private_keys(), &context, SCHEMA_VERSION).unwrap();
+    let unwrapped_b = unwrap_key(&wrapped_keys[1], &bob.private_keys(), &context, SCHEMA_VERSION).unwrap();
     assert_eq!(group_key.0, unwrapped_a.0);
     assert_eq!(group_key.0, unwrapped_b.0);
 }
@@ -299,7 +349,8 @@ fn cross_recipient_splice_rejected() {
     assert!(unwrap_key(
         &wrapped_for_alice,
         &bob.private_keys(),
-        &WrapContext::Cabinet
+        &WrapContext::Cabinet,
+        SCHEMA_VERSION,
     )
     .is_err());
 }
@@ -331,6 +382,7 @@ fn cross_context_splice_rejected() {
         &wrapped_in_keyring,
         &alice.private_keys(),
         &WrapContext::Document { uri: document_uri },
+        SCHEMA_VERSION,
     );
     assert!(
         result.is_err(),
@@ -345,6 +397,7 @@ fn cross_context_splice_rejected() {
         &WrapContext::Keyring {
             uri: "at://did:plc:owner/at.opake.keyring/k2",
         },
+        SCHEMA_VERSION,
     );
     assert!(
         result.is_err(),
@@ -356,6 +409,7 @@ fn cross_context_splice_rejected() {
         &wrapped_in_keyring,
         &alice.private_keys(),
         &WrapContext::Keyring { uri: keyring_uri },
+        SCHEMA_VERSION,
     )
     .unwrap();
     assert_eq!(unwrapped.0, content_key.0);
@@ -376,7 +430,7 @@ fn unwrap_rejects_unknown_algo() {
         },
         algo: "x25519-hkdf-a256kw".into(),
     };
-    assert!(unwrap_key(&bogus, &keys.private_keys(), &WrapContext::Cabinet).is_err());
+    assert!(unwrap_key(&bogus, &keys.private_keys(), &WrapContext::Cabinet, SCHEMA_VERSION).is_err());
 }
 
 // -- Ephemeral keypair (hybrid) --
@@ -416,7 +470,7 @@ fn ephemeral_keypair_roundtrips_through_hybrid_wrap() {
         &mut OsRng,
     )
     .unwrap();
-    let unwrapped = unwrap_key(&wrapped, &kp.private_keys(), &WrapContext::PairResponse).unwrap();
+    let unwrapped = unwrap_key(&wrapped, &kp.private_keys(), &WrapContext::PairResponse, SCHEMA_VERSION).unwrap();
     assert_eq!(content_key.0, unwrapped.0);
 }
 

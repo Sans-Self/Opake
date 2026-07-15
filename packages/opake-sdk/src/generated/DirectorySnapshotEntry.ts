@@ -5,4 +5,11 @@ import type { TypedEntry } from "./TypedEntry";
  * One directory's view: its decrypted name, its tagged child entries,
  * and the parent URI (None for the root).
  */
-export type DirectorySnapshotEntry = { name: string, entries: Array<TypedEntry>, parentUri: string | null, };
+export type DirectorySnapshotEntry = { name: string, entries: Array<TypedEntry>, parentUri: string | null, 
+/**
+ * Set when this node is a placeholder for a record the client could not
+ * read — `"corrupt"` or `"needs-newer-client"`. `None` for readable
+ * directories. Drives the tree-view "unreadable" badge; the `name` is the
+ * client-assigned placeholder label, never record content.
+ */
+unreadable?: string, };

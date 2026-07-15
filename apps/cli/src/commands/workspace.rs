@@ -181,7 +181,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
             &workspace.key,
             &workspace.historical_keys,
             &resolved.did,
-            args.role,
+            args.role.clone(),
         )
         .await?;
 

@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, EncryptedMetadata, WrappedKey, SCHEMA_VERSION};
+use super::{EncryptedMetadata, WrappedKey, SCHEMA_VERSION};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Grant {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub document: String,
     pub recipient: String,

@@ -37,6 +37,11 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Sse(_) => "Sse",
         Error::VisibilityTimeout { .. } => "VisibilityTimeout",
         Error::CasConflict(_) => "CasConflict",
+        // Write-strictness guards (poison-record-resilience group 4): a mutation
+        // was refused because its target chain/keyring crossed an unreadable
+        // link. Surfaced to JS so the UI can message "update your client".
+        Error::ChainLinkCorrupt { .. } => "ChainLinkCorrupt",
+        Error::ChainLinkNeedsNewerClient { .. } => "ChainLinkNeedsNewerClient",
     };
     JsError::new(&format!("{kind}: {e}"))
 }
@@ -147,18 +152,28 @@ pub fn build_snapshot(
     // supersede is listed by every prior version of that parent).
     let canonical = tree.canonical_directory_uris();
 
+    // Placeholder nodes stand in for corrupt / future-version directories the
+    // authorized snapshot references. They render alongside readable nodes so a
+    // corrupt container never blanks the subtree beneath it.
+    let placeholder_uris: Vec<String> = tree.placeholder_uris().map(str::to_owned).collect();
+    let node_uris: Vec<String> = canonical
+        .iter()
+        .map(|&u| u.to_owned())
+        .chain(placeholder_uris.iter().cloned())
+        .collect();
+
     let mut parent_index: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
-    for &uri in &canonical {
+    for uri in &node_uris {
         if let Some(entries) = tree.entries_for(uri) {
             for entry_uri in entries {
-                parent_index.insert(entry_uri.clone(), uri.to_owned());
+                parent_index.insert(entry_uri.clone(), uri.clone());
             }
         }
     }
 
     let mut directories = std::collections::HashMap::new();
-    for &uri in &canonical {
+    for uri in &node_uris {
         let name = tree.directory_name(uri).unwrap_or("?").to_owned();
         let entries: Vec<crate::TypedEntry> = tree
             .entries_for(uri)
@@ -176,12 +191,16 @@ pub fn build_snapshot(
             })
             .unwrap_or_default();
         let parent_uri = parent_index.get(uri).cloned();
+        let unreadable = tree
+            .placeholder_reason(uri)
+            .map(crate::bindings::unreadable_reason_str);
         directories.insert(
-            uri.to_owned(),
+            uri.clone(),
             crate::DirectorySnapshotEntry {
                 name,
                 entries,
                 parent_uri,
+                unreadable,
             },
         );
     }
@@ -190,3 +209,4 @@ pub fn build_snapshot(
         directories,
     }
 }
+

@@ -36,6 +36,18 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `at.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
 | `at.opake.authFullAccess` | permission-set | OAuth permission set bundling all `at.opake.*` collections — for `include:` scopes |
 
+## Schema evolution
+
+Records carry a top-level `opakeVersion`. Any client can read that field on any record, of any version, and it is the whole compatibility test: a record whose version a client supports is understood; a higher version means "written by a newer client." Two rules keep that test honest.
+
+**Fields only grow, and only in ignore-safe ways.** A schema version may add optional fields. It may never remove a field, make an optional field required, or change what an existing field means for a reader that ignores the new one. A change that can't be expressed that way is not a version bump — it is a new NSID. This is why the crypto-envelope fields on every record are `required`: those markings are permanent, so the current lexicons are the last chance to get required-vs-optional right before v1.
+
+**New vocabulary rides a version bump.** Some fields hold identifier strings from a fixed registry — key-wrap and content-encryption algorithms (`wrappedKey.algo`, the encryption-envelope `algo`), the public-key and pairing algorithm identifiers, and `keyringMember.role`. Each schema version pins the exact set of values these fields may hold, cumulatively (a value valid at version N stays valid forever). Introducing a new value — a new algorithm, a new role — bumps `opakeVersion` together with the new entry, so a record can never quietly use vocabulary its declared version doesn't sanction. A record that declares version N but carries a value outside N's set is malformed, not merely new. The registry lives in [`vocabulary.json`](vocabulary.json) — one artifact, read by both the Rust client and the indexer, so neither can drift.
+
+The consequence for encryption agility: a new algorithm that fits the existing wire shape is a vocabulary bump. A genuinely different construction (a new envelope layout, a different KEM shape) is a structural change and takes a new NSID — the same door as any other breaking change. The X25519 → X25519+ML-KEM migration went through the algorithm registry precisely because it kept the wire shape; that is the sanctioned path.
+
+Validation happens in three places, each trusting less than the last: the author's PDS rejects malformed writes when it can resolve the lexicons; the indexer refuses malformed or vocabulary-violating records at ingest; and the client treats every record as untrusted, degrading around anything it can't read rather than failing wholesale. Only the last is load-bearing — the others are hygiene.
+
 ## Flow: Sharing a file with another DID
 
 ```mermaid

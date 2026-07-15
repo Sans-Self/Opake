@@ -102,9 +102,17 @@ pub struct ReqwestSseConnection {
 impl SseConnection for ReqwestSseConnection {
     async fn next_event(&mut self) -> Result<Option<SseEvent>, Error> {
         loop {
-            // Drain the pending buffer first.
-            if let Some(result) = self.pending.pop_front() {
-                return result.map(Some);
+            // Drain the pending buffer first. A per-frame parse error is NOT a
+            // transport failure — log and skip it so a corrupt record can't
+            // trip the consumer's reconnect loop (record-level lenience lives in
+            // `SseEvent::from_name_and_data`, which now delivers poison records
+            // as `CorruptRecord` events; anything still surfacing as `Err` here
+            // is a malformed control frame we drop rather than reconnect on).
+            while let Some(result) = self.pending.pop_front() {
+                match result {
+                    Ok(event) => return Ok(Some(event)),
+                    Err(e) => log::warn!("[sse] skipping unparseable frame: {e}"),
+                }
             }
 
             // Pull the next chunk from the stream.
@@ -115,6 +123,7 @@ impl SseConnection for ReqwestSseConnection {
                     // Fall through to the drain step on the next loop iter.
                 }
                 Some(Err(e)) => {
+                    // The one genuine transport failure — reconnectable.
                     return Err(Error::Sse(format!("SSE stream error: {e}")));
                 }
                 None => {

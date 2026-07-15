@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use log::{info, trace, warn};
 
 use crate::atproto;
-use crate::client::{list_collection, time, Transport, XrpcClient};
+use crate::client::{list_collection, time, DegradationPolicy, Transport, XrpcClient};
 use crate::error::Error;
+use crate::records::vocabulary::RecordKind;
 use crate::records::{
     PairRequest, PairResponse, PAIR_REQUEST_COLLECTION, PAIR_RESPONSE_COLLECTION,
 };
@@ -38,12 +39,18 @@ pub async fn cleanup_expired_pair_requests(
 ) -> Result<CleanupResult, Error> {
     let mut result = CleanupResult::default();
 
-    // List all pair requests and identify expired ones
-    let requests: Vec<(String, String)> =
-        list_collection(client, PAIR_REQUEST_COLLECTION, |uri, req: PairRequest| {
-            (uri.to_owned(), req.created_at)
-        })
-        .await?;
+    // List all pair requests and identify expired ones. Pairing keeps its
+    // historical skip-quietly semantics — unreadable pairing records are
+    // ephemeral and have no user-facing degradation surface.
+    let requests: Vec<(String, String)> = list_collection(
+        client,
+        PAIR_REQUEST_COLLECTION,
+        RecordKind::PairRequest,
+        DegradationPolicy::SkipQuietly,
+        |uri, req: PairRequest, _needs_newer| (uri.to_owned(), req.created_at),
+    )
+    .await?
+    .entries;
 
     let mut surviving_request_uris: HashSet<String> = HashSet::new();
 
@@ -75,13 +82,16 @@ pub async fn cleanup_expired_pair_requests(
         }
     }
 
-    // List all pair responses and delete orphans (whose request was deleted)
+    // List all pair responses and delete orphans (whose request was deleted).
     let responses: Vec<(String, String)> = list_collection(
         client,
         PAIR_RESPONSE_COLLECTION,
-        |uri, resp: PairResponse| (uri.to_owned(), resp.request),
+        RecordKind::PairResponse,
+        DegradationPolicy::SkipQuietly,
+        |uri, resp: PairResponse, _needs_newer| (uri.to_owned(), resp.request),
     )
-    .await?;
+    .await?
+    .entries;
 
     for (uri, parent_request_uri) in &responses {
         if !surviving_request_uris.contains(parent_request_uri) {

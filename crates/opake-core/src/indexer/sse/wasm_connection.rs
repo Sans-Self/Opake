@@ -69,10 +69,21 @@ impl SseTransport for WasmSseTransport {
                         return;
                     }
                 };
-                let result = SseEvent::from_name_and_data(name, data_str.as_bytes());
-                // Channel may be closed if the connection was dropped
-                // mid-flight; silently ignore.
-                let _ = tx_clone.unbounded_send(result);
+                match SseEvent::from_name_and_data(name, data_str.as_bytes()) {
+                    // Channel may be closed if the connection was dropped
+                    // mid-flight; silently ignore.
+                    Ok(event) => {
+                        let _ = tx_clone.unbounded_send(Ok(event));
+                    }
+                    // A per-frame parse error is NOT a transport failure. Only
+                    // the `onerror` handler below (a genuine EventSource fault)
+                    // sends `Err` through the channel, so a malformed control
+                    // frame is dropped here rather than triggering the
+                    // consumer's reconnect loop. Poison record bodies never
+                    // reach this arm — `from_name_and_data` delivers them as
+                    // `CorruptRecord` events.
+                    Err(e) => log::warn!("[sse] skipping unparseable {name} frame: {e}"),
+                }
             }) as Box<dyn FnMut(MessageEvent)>);
 
             es.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())

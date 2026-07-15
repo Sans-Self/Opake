@@ -155,13 +155,35 @@ where
     )
     .await?;
 
-    let record: R = serde_json::from_value(entry.value)?;
+    // Classify the link's understandability BEFORE the typed parse, the same
+    // ordering the read-surface classifier uses (peek version first). A chain
+    // link is not a view record: an authority walk that crosses one it cannot
+    // fully understand must not verify the proposed head (see `tree-chains` §
+    // unverifiable heads degrade to the last verifiable state, `record-validity`
+    // § writes refuse state they do not fully understand). Naming the link URI
+    // is required so the refusal is actionable.
+    match crate::records::peek_version(&entry.value) {
+        // Missing or non-integer `opakeVersion` — corrupt, never defaulted.
+        None => return Err(Error::ChainLinkCorrupt { uri: entry.uri }),
+        // Declares a version this client cannot understand. Well-formed but
+        // locked: the remedy is a client update, and the error says so.
+        Some(version) if version > crate::records::SCHEMA_VERSION => {
+            return Err(Error::ChainLinkNeedsNewerClient {
+                uri: entry.uri,
+                version,
+                supported: crate::records::SCHEMA_VERSION,
+            });
+        }
+        Some(_) => {}
+    }
 
-    Ok(ChainNode {
-        uri: entry.uri,
-        cid: entry.cid,
-        record,
-    })
+    // Known version: a structural parse failure is corruption of this link.
+    let uri = entry.uri;
+    let cid = entry.cid;
+    let record: R = serde_json::from_value(entry.value)
+        .map_err(|_| Error::ChainLinkCorrupt { uri: uri.clone() })?;
+
+    Ok(ChainNode { uri, cid, record })
 }
 
 /// Walk a chain back from `start_uri` to genesis.

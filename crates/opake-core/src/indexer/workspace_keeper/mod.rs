@@ -38,6 +38,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
+use crate::records::{UnreadableReason, UnreadableRef};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,11 +76,30 @@ pub struct WorkspaceEntry {
     pub my_role: Option<String>,
 }
 
+/// A workspace that exists but could not be read — its keyring record was
+/// corrupt or written by a newer schema version. Carried DISTINCTLY from the
+/// entry list so a client can tell "exists-but-unreadable" apart from "does not
+/// exist" (see `record-validity` § corrupt workspaces are skipped with a
+/// distinct signal). The name is never derived from the unreadable record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UnreadableWorkspace {
+    /// Keyring URI of the skipped workspace (its stable identity when the
+    /// keyring is genesis-shaped; the head URI otherwise — the only handle a
+    /// corrupt record yields).
+    pub uri: String,
+    /// Corrupt vs needs-newer-client — lets the UI message each distinctly.
+    pub reason: UnreadableReason,
+}
+
 /// A snapshot of the full workspace list at one moment in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspaceSnapshot {
     pub entries: Vec<WorkspaceEntry>,
+    /// Workspaces skipped from `entries` because their keyring was unreadable.
+    /// A distinct signal, never conflated with a workspace that does not exist.
+    pub unreadable: Vec<UnreadableWorkspace>,
     /// `true` once the keeper has been bootstrapped at least once. The
     /// initial watcher snapshot fires with `loaded == false` and an
     /// empty `entries` list so the UI can show a loading state rather
@@ -101,6 +121,9 @@ pub type WorkspaceWatcherCallback = Box<dyn FnMut(&WorkspaceSnapshot)>;
 /// Owns the workspace list and routes SSE keyring events to it.
 pub struct WorkspaceKeeper {
     entries: HashMap<String, WorkspaceEntry>,
+    /// Keyring URI → reason for workspaces skipped as unreadable. Distinct from
+    /// `entries` (readable) and from absence (does not exist).
+    unreadable: HashMap<String, UnreadableReason>,
     watchers: HashMap<WorkspaceWatcherHandle, WorkspaceWatcherCallback>,
     next_watcher_id: u64,
     loaded: bool,
@@ -110,6 +133,7 @@ impl WorkspaceKeeper {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            unreadable: HashMap::new(),
             watchers: HashMap::new(),
             next_watcher_id: 0,
             loaded: false,
@@ -138,13 +162,28 @@ impl WorkspaceKeeper {
         self.entries.get(workspace_id)
     }
 
-    /// Build a fresh snapshot. Entries are sorted by workspace ID for
-    /// stable iteration order.
+    /// Number of workspaces currently signalled as existing-but-unreadable.
+    pub fn unreadable_count(&self) -> usize {
+        self.unreadable.len()
+    }
+
+    /// Build a fresh snapshot. Entries and unreadable signals are each sorted
+    /// by URI for stable iteration order.
     pub fn snapshot(&self) -> WorkspaceSnapshot {
         let mut entries: Vec<WorkspaceEntry> = self.entries.values().cloned().collect();
         entries.sort_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
+        let mut unreadable: Vec<UnreadableWorkspace> = self
+            .unreadable
+            .iter()
+            .map(|(uri, &reason)| UnreadableWorkspace {
+                uri: uri.clone(),
+                reason,
+            })
+            .collect();
+        unreadable.sort_by(|a, b| a.uri.cmp(&b.uri));
         WorkspaceSnapshot {
             entries,
+            unreadable,
             loaded: self.loaded,
         }
     }
@@ -162,11 +201,47 @@ impl WorkspaceKeeper {
     /// mid-fetch will be clobbered by the stale snapshot. See the
     /// `opake-wasm` consumer for that policy.
     pub fn bootstrap(&mut self, entries: Vec<WorkspaceEntry>) {
+        self.bootstrap_with_signals(entries, &[]);
+    }
+
+    /// Replace the entire entry set AND the unreadable-workspace signal set
+    /// from a full-list fetch. A corrupt keyring in the listing appears here
+    /// (skipped from `entries`, present in `unreadable`), so the client can
+    /// show "this workspace exists but can't be read" distinctly from a
+    /// workspace that isn't there.
+    ///
+    /// Same blind-replace contract as [`bootstrap`]: the caller owns
+    /// snapshot-vs-stream sequencing.
+    ///
+    /// [`bootstrap`]: Self::bootstrap
+    pub fn bootstrap_with_signals(
+        &mut self,
+        entries: Vec<WorkspaceEntry>,
+        unreadable: &[UnreadableRef],
+    ) {
         self.entries = entries
             .into_iter()
             .map(|e| (e.workspace_id.clone(), e))
             .collect();
+        self.unreadable = unreadable
+            .iter()
+            .filter_map(|r| r.uri.clone().map(|uri| (uri, r.reason)))
+            .collect();
         self.loaded = true;
+        self.notify();
+    }
+
+    /// Signal that a workspace exists but its keyring record could not be read
+    /// (corrupt or future-version), keyed by the keyring URI. Fired by the SSE
+    /// path so a poison keyring upsert converges on the same state a bootstrap
+    /// would produce. No-op (no watcher fire) if the signal is unchanged.
+    ///
+    /// spec:record-validity § SSE delivery matches snapshot delivery
+    pub fn signal_unreadable(&mut self, uri: &str, reason: UnreadableReason) {
+        if self.unreadable.get(uri) == Some(&reason) {
+            return;
+        }
+        self.unreadable.insert(uri.to_string(), reason);
         self.notify();
     }
 
@@ -175,8 +250,13 @@ impl WorkspaceKeeper {
     /// after a local write gracefully.
     pub fn upsert(&mut self, entry: WorkspaceEntry) {
         let workspace_id = entry.workspace_id.clone();
+        // A readable record clears any prior unreadable signal for this
+        // workspace — keyed by both its stable id and its current head URI,
+        // since a corrupt signal may have been recorded under either.
+        let cleared = self.unreadable.remove(&workspace_id).is_some()
+            | self.unreadable.remove(&entry.head_uri).is_some();
         if let Some(existing) = self.entries.get(&workspace_id) {
-            if existing == &entry {
+            if existing == &entry && !cleared {
                 return;
             }
         }
@@ -259,6 +339,7 @@ impl WorkspaceKeeper {
     /// user's workspace list into the next session's UI.
     pub fn uninstall_all(&mut self) {
         self.entries.clear();
+        self.unreadable.clear();
         self.watchers.clear();
         self.loaded = false;
     }
@@ -307,7 +388,7 @@ pub fn try_build_entry(
 
     // Locate our member entry. If not found, we're not a member.
     let my_member = keyring.members.iter().find(|m| m.did() == my_did)?;
-    let my_role = my_member.role;
+    let my_role = my_member.role.clone();
     let member_count = keyring.members.len();
 
     // Member wraps are anchored to the workspace's stable (genesis) URI, not
@@ -320,6 +401,7 @@ pub fn try_build_entry(
         &crypto::WrapContext::Keyring {
             uri: keyring.wrap_anchor(head_uri),
         },
+        keyring.opake_version,
     ) {
         Ok(k) => k,
         Err(_) => {

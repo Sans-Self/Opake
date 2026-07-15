@@ -1,5 +1,6 @@
-use crate::client::{list_collection, Transport, XrpcClient};
+use crate::client::{list_collection, DegradationPolicy, Transport, XrpcClient};
 use crate::error::Error;
+use crate::records::vocabulary::RecordKind;
 use crate::records::{EncryptedMetadata, Grant};
 
 use super::GRANT_COLLECTION;
@@ -12,22 +13,37 @@ pub struct GrantEntry {
     pub recipient: String,
     pub encrypted_metadata: EncryptedMetadata,
     pub created_at: String,
+    /// `true` when the grant declares a schema version newer than this client
+    /// supports. The grant is visible but locked — downstream maintenance
+    /// (grant healing) MUST NOT revoke it, since a write against state the
+    /// client cannot fully understand clobbers semantics it can't see.
+    pub needs_newer: bool,
 }
 
 /// Fetch all grant records, paginating through the full collection.
-/// Silently skips records that can't be parsed or have an unsupported
-/// schema version.
+///
+/// Corrupt records are skipped with a warning; future-version records are kept
+/// and flagged `needs_newer` so callers can present them as locked and refuse
+/// to mutate them (see `openspec/specs/record-validity`).
 pub async fn list_grants(
     client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<GrantEntry>, Error> {
-    list_collection(client, GRANT_COLLECTION, |uri, grant: Grant| GrantEntry {
-        uri: uri.to_owned(),
-        document: grant.document,
-        recipient: grant.recipient,
-        encrypted_metadata: grant.encrypted_metadata,
-        created_at: grant.created_at,
-    })
-    .await
+    let outcome = list_collection(
+        client,
+        GRANT_COLLECTION,
+        RecordKind::Grant,
+        DegradationPolicy::Counted,
+        |uri, grant: Grant, needs_newer| GrantEntry {
+            uri: uri.to_owned(),
+            document: grant.document,
+            recipient: grant.recipient,
+            encrypted_metadata: grant.encrypted_metadata,
+            created_at: grant.created_at,
+            needs_newer,
+        },
+    )
+    .await?;
+    Ok(outcome.entries)
 }
 
 #[cfg(test)]
@@ -191,8 +207,11 @@ mod tests {
         assert_eq!(entries[0].recipient, "did:plc:bob");
     }
 
+    /// Future-version grants are no longer dropped: they satisfy the required-
+    /// field floor, so they stay visible and are flagged `needs_newer` (the
+    /// counted policy keeps + marks; corrupt records are what get skipped).
     #[tokio::test]
-    async fn skips_future_version() {
+    async fn keeps_future_version_marked() {
         let mut grant = dummy_grant("did:plc:bob", "doc1");
         grant.opake_version = records::SCHEMA_VERSION + 1;
 
@@ -201,7 +220,9 @@ mod tests {
 
         let mut client = mock_client(mock);
         let entries = list_grants(&mut client).await.unwrap();
-        assert!(entries.is_empty());
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].needs_newer, "future-version grant kept but marked");
+        assert_eq!(entries[0].recipient, "did:plc:bob");
     }
 
     #[tokio::test]

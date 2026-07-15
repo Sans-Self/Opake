@@ -4,7 +4,7 @@ use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, PublicKeyBundle, RngCore};
 use crate::error::Error;
-use crate::records::{self, Keyring, KeyringMember, Role};
+use crate::records::{Keyring, KeyringMember, Role};
 
 use super::KEYRING_COLLECTION;
 
@@ -43,7 +43,9 @@ pub async fn add_member(
         .await?;
 
     let mut keyring: Keyring = serde_json::from_value(entry.value)?;
-    records::check_version(keyring.opake_version)?;
+    // Write-strict: refuse to re-wrap a keyring newer than this client
+    // understands, naming the keyring and the required remedy.
+    super::guard_keyring_writable(params.keyring_uri, &keyring)?;
 
     if keyring
         .members
@@ -72,7 +74,7 @@ pub async fn add_member(
     )?;
     keyring.members.push(KeyringMember {
         wrapped_key: wrapped,
-        role: params.role,
+        role: params.role.clone(),
     });
     keyring.modified_at = Some(params.modified_at.to_string());
 
@@ -195,6 +197,7 @@ mod tests {
                     &updated.members[1].wrapped_key,
                     &new_member.private_keys(),
                     &crypto::WrapContext::Keyring { uri: KEYRING_URI },
+                    updated.opake_version,
                 )
                 .unwrap();
                 assert_eq!(unwrapped.0, group_key.0);
@@ -278,6 +281,23 @@ mod tests {
             .await
             .unwrap_err();
 
+        // Actionable refusal: names the keyring, states a newer client is
+        // required (record-validity § future-version records are visible,
+        // locked, and actionable).
+        assert!(
+            matches!(err, Error::ChainLinkNeedsNewerClient { .. }),
+            "got: {err:?}"
+        );
         assert!(err.to_string().contains("schema version"), "got: {err}");
+        assert!(err.to_string().to_lowercase().contains("update"), "got: {err}");
+
+        // The write is refused before it reaches the PDS: only the initial
+        // getRecord fetch happened — no putRecord.
+        let reqs = client.transport().requests();
+        assert_eq!(reqs.len(), 1, "only the keyring fetch, no write");
+        assert!(
+            reqs.iter().all(|r| !r.url.contains("putRecord")),
+            "future-version keyring must not be written"
+        );
     }
 }

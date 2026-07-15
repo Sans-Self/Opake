@@ -207,6 +207,7 @@ mod tests {
                 &crypto::WrapContext::Document {
                     uri: &grant.document,
                 },
+                grant.opake_version,
             )
             .unwrap();
             assert_eq!(unwrapped.0, content_key.0);

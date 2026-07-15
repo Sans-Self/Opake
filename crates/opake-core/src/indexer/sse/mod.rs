@@ -42,5 +42,5 @@ pub mod wasm_connection;
 pub mod reqwest_connection;
 
 pub use consumer::{JitterRng, SleepFn, SseConsumer, TokenFetcher};
-pub use events::{SseChainForked, SseDeletePayload, SseEvent};
+pub use events::{CorruptScope, SseChainForked, SseCorruptRecord, SseDeletePayload, SseEvent};
 pub use transport::{SseConnection, SseTransport};

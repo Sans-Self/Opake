@@ -519,7 +519,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             )
             .await?;
 
-        Ok(DirectoryTree::from_cached_records(&dir_records))
+        // Render placeholders for directories the snapshot could not parse
+        // (corrupt or future-version) but which a readable directory still
+        // references. This is the cold-start half of poison-record resilience:
+        // the lenient snapshot parse already excluded unreadable records from
+        // `dir_records` and collected them as `snapshot.unreadable`; applying
+        // them here means a poison record present at first load degrades to a
+        // visible placeholder instead of silently vanishing (or, before this
+        // change, bricking the whole snapshot).
+        let mut tree = DirectoryTree::from_cached_records(&dir_records);
+        tree.apply_unreadable_refs(&snapshot.unreadable);
+        Ok(tree)
     }
 
     /// Set root URI and decrypt directory names based on context.
@@ -891,7 +901,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
                 match wrapped {
                     Some(w) => {
-                        crypto::unwrap_key(w, private_keys, &crypto::WrapContext::Document { uri })?
+                        crypto::unwrap_key(
+                            w,
+                            private_keys,
+                            &crypto::WrapContext::Document { uri },
+                            doc.opake_version,
+                        )?
                     }
                     None => return Ok(None),
                 }

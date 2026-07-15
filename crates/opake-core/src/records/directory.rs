@@ -1,7 +1,7 @@
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, CidLink, EncryptedMetadata, KeyWrapping, SCHEMA_VERSION};
+use super::{CidLink, EncryptedMetadata, KeyWrapping, SCHEMA_VERSION};
 
 /// One entry in a directory's listing.
 ///
@@ -94,7 +94,6 @@ impl<'de> Deserialize<'de> for ListingEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Directory {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub key_wrapping: KeyWrapping,
     pub encrypted_metadata: EncryptedMetadata,

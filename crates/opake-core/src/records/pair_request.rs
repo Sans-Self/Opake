@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{default_version, SCHEMA_VERSION};
+use super::{SCHEMA_VERSION};
 use crate::atproto::AtBytes;
 
 pub const PAIR_REQUEST_COLLECTION: &str = "at.opake.pairRequest";
@@ -17,7 +17,6 @@ pub const PAIR_REQUEST_ALGO: &str = "x25519-mlkem768";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairRequest {
-    #[serde(default = "default_version")]
     pub opake_version: u32,
     pub x25519_ephemeral_key: AtBytes,
     pub ml_kem_ephemeral_key: AtBytes,
