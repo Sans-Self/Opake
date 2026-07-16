@@ -1,8 +1,8 @@
-<!-- 
-  NOTE TO EDITORS: 
-  Opake uses a dual-documentation system. If you modify the technical details, 
-  architecture, or code style in this file, you MUST also update the 
-  corresponding MDX content in `apps/web/src/content/` to prevent documentation drift. 
+<!--
+  NOTE TO EDITORS:
+  Opake uses a dual-documentation system. If you modify the technical details,
+  architecture, or code style in this file, you MUST also update the
+  corresponding MDX content in `apps/web/src/content/` to prevent documentation drift.
 -->
 
 # Contributing to Opake
@@ -119,6 +119,7 @@ AI-assisted contributions are welcome. No special rules beyond:
 - Keep PRs focused. One logical change per PR.
 - All CI checks must pass (fmt, clippy, test).
 - Describe what changed and why in the PR body.
+- There is no CI-suite for the e2e tests as they require a significant amount of infrastructure to run. If you can, please run these tests locally or ask another contributor to do so for you.
 
 ## Security
 
@@ -126,11 +127,16 @@ Found a vulnerability? **Do not open a public issue.** See [SECURITY.md](SECURIT
 
 ## License
 
-By submitting a pull request, you agree that your contribution is licensed under [AGPL-3.0](LICENSE), the same license as the rest of the project. See [docs/LICENSING.md](docs/LICENSING.md) for details on what AGPL means for different use cases.
+Opake is licensed under [AGPL-3.0](LICENSE); contributions are distributed under the same license. See [docs/LICENSING.md](docs/LICENSING.md) for what AGPL means for different use cases.
+
+Contributions also require agreement to the [Contributor License Agreement](CLA.md). The CLA grants the project steward a license to your contribution — including the right to offer the project under additional licenses — which is what keeps a future commercial offering (a managed, hosted Opake) possible alongside the AGPL release. It does not restrict your own use of your work. Signing is a one-time step handled automatically on your first pull request: an assistant will comment with instructions, and it remembers you afterwards.
+
+Why? Because Noï started this project based on a good idea for a way to share and store files in a decentralized manner. While the intention is to have the software be free forever, some commercial flexibility is warranted in the future in case it ends up being a permanent money sink.
+
+If your employer holds rights to the work you contribute, your employer signs the [Corporate CLA](CORPORATE_CLA.md) instead — a one-time out-of-band step that names the employees authorized to contribute on the company's behalf.
 
 ## Project management
 
-Issues are tracked on GitHub in the private `Opake-at/Opake` repository. Use the
+Issues are tracked on GitHub in the `Opake-at/Opake` repository. Use the
 `gh` CLI (`gh issue list`, `gh issue create`, `gh issue view`) to browse and file
-work. Coding standards live in `CLAUDE.md`; Rust style is enforced by
-`cargo fmt` and `cargo clippy`.
+work. Rust style is enforced by `cargo fmt` and `cargo clippy`.
