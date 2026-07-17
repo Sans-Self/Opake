@@ -51,10 +51,10 @@ If you find a vulnerability, we want to know about it before anyone else does.
 Opake uses client-side encryption exclusively. The PDS never sees plaintext.
 
 - **Content encryption:** AES-256-GCM with random per-document keys
-- **Key wrapping:** X25519-HKDF-A256KW (HKDF-SHA256, not JWE's Concat KDF)
-- **Key derivation:** BIP-39 24-word mnemonic → PBKDF2 → HKDF → X25519 + Ed25519 keypairs
+- **Key wrapping:** hybrid `x25519-mlkem768-hkdf-a256kw-v2` — X25519 ECDH and ML-KEM-768 encapsulation combined through HKDF-SHA256, then AES-KW. The HKDF transcript commits to both static recipient public keys, the ephemeral X25519 key, and the ML-KEM ciphertext, so a tampered encapsulation cannot redirect the wrap
+- **Key derivation:** BIP-39 24-word mnemonic → PBKDF2-HMAC-SHA512 → HKDF (separate paths) → X25519 + Ed25519 + ML-KEM-768 keypairs
 - **Metadata:** Always encrypted with the same content key (separate nonce)
-- **Ciphertext layout:** `[32-byte ephemeral pubkey || 40-byte AES-KW wrapped key]`
+- **Wrapped-key layout:** `[X25519 ephemeral pubkey (32) || ML-KEM-768 ciphertext (1088) || AES-KW wrapped key (40)]`
 
 The full encryption model, threat assumptions, and data flow are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

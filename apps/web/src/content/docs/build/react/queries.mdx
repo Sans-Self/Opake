@@ -49,6 +49,7 @@ the same render tick. See the [mutations page](/docs/react/mutations) for detail
 Subscribes to the `WorkspaceKeeper`. First call bootstraps the keeper via `listWorkspaces`;
 subsequent SSE `keyring:upsert` / `keyring:delete` events patch the list in place.
 
+{/* update-needed(#25): WorkspaceEntry has no `uri`/`ownerDid`; actual fields are `workspaceId, headUri, name, description, icon, createdAt, rotation, memberCount, myRole` (packages/opake-sdk/src/types.ts). */}
 `data` is a `readonly WorkspaceEntry[]` with `{ uri, ownerDid, rotation, memberCount,
 createdAt, name, description, icon }`. `isLoading` is `true` until the keeper has
 bootstrapped once; after that it stays `false` even when the list is empty. The raw
@@ -63,6 +64,7 @@ Same subscription shape as `useWorkspaces`. Backed by the `InboxKeeper`, which t
 fans into the caller's personal topic for both owner-side (you just shared something) and
 recipient-side (someone shared with you) events.
 
+{/* update-needed(#25): InboxGrant field is `authorDid`, not `ownerDid` (packages/opake-sdk/src/types.ts). */}
 Entries are `InboxGrant` values: `{ uri, ownerDid, documentUri, createdAt }`. To actually
 open an incoming share, call `opake.downloadFromGrant(grantUri)` or
 `opake.resolveGrantMetadata(grantUri)` — see the [SDK sharing page](/docs/sdk/sharing).

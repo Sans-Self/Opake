@@ -35,10 +35,15 @@ sequenceDiagram
     Opake->>PDS: com.atproto.repo.createRecord (document)
     PDS-->>Opake: { uri, cid }
 
+    Opake->>PDS: add_entry (append {uri, cid} to target directory's listing)
+    PDS-->>Opake: { uri, cid }
+
     Note over Opake: #[signoff] auto-persists session if refreshed
 
     CLI->>User: Uploaded: at://did/at.opake.document/<tid>
 ```
+
+A cabinet upload is two writes: the document record, then the target directory's listing (root's `directory/self` singleton by default) gets the new entry appended. The PDS assigns the document CID, so the two cannot batch into one `applyWrites` without losing the back-reference. A partial failure leaves a document record with no directory entry — safe to retry the same upload, since the TID changes and nothing collides. Workspace uploads instead register the entry through a directory supersede cascade — see [keyrings.md](keyrings.md#upload-to-a-workspace).
 
 ## Download (Own Files)
 
@@ -78,7 +83,7 @@ sequenceDiagram
 
 ## Download (Shared Files — Cross-PDS)
 
-Downloads a file shared with you by another user. Requires the grant URI (auto-discovery via `inbox` is not yet implemented).
+Downloads a file shared with you by another user, given the grant URI. Incoming grants are discovered through the indexer's inbox — the recipient does not poll every possible owner's PDS. The indexer fans a `grant:upsert` out to the recipient's personal topic, and the client's `InboxKeeper` tracks them; the CLI can also list them via the indexer's `/api/inbox` endpoint (`spec:sharing-grants § The recipient discovers shares through the indexer, not by polling PDSes`). The download itself then fetches everything directly from the owner's PDS.
 
 ```mermaid
 sequenceDiagram

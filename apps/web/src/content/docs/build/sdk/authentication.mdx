@@ -116,6 +116,8 @@ Passing an explicit DID overrides that for this instance.
 
 To sign an account out without removing its identity from storage, clear the session:
 `await storage.clearSession(did)`. To forget the account entirely (identity, session, cached
-records), call `opake.removeAccount(did)` on an instance that currently holds it.
+records),
+{/* update-needed(#25): there is no `opake.removeAccount` on the Opake class — full account removal is `storage.removeAccount(did)` on the Storage impl. */}
+call `opake.removeAccount(did)` on an instance that currently holds it.
 
 <DocsNext slug="authentication" />

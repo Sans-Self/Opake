@@ -68,6 +68,7 @@ with a fresh content key, then re-grant to the people who should still have acce
 
 ## Receiving shares
 
+{/* update-needed(#25): the `listInboxSnippet` comment names `ownerDid` — InboxGrant has no such field; the sharer's DID is `authorDid` (types.ts), which the snippet's own log line already uses. */}
 <CodeBlock language="typescript" title="inbox.ts" code={listInboxSnippet} />
 
 `listInbox` returns all grants visible to you via the indexer. Pair it with a subscription so

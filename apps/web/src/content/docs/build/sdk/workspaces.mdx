@@ -33,6 +33,7 @@ working files, a writing group's drafts.
 
 ## Create a workspace
 
+{/* update-needed(#25): the `createWorkspace` snippet ends with `opake.workspaceByUri(keyringUri)` — the public method is `opake.workspace(keyringUri)`. */}
 <CodeBlock language="typescript" title="create.ts" code={createWorkspace} />
 
 `createWorkspace` generates a fresh group key inside WASM, wraps it to the caller's public
@@ -44,6 +45,7 @@ operation.
 
 ## List and watch workspaces
 
+{/* update-needed(#25): the `listAndWatchWorkspaces` snippet reads `ws.role` and `ws.keyringUri` — WorkspaceEntry has neither; role is `ws.myRole`, and identity is `ws.workspaceId` (genesis) / `ws.headUri` (current head) (types.ts). */}
 <CodeBlock language="typescript" title="list.ts" code={listAndWatchWorkspaces} />
 
 `listWorkspaces` fetches from the indexer and decrypts workspace names inline. It also
@@ -58,7 +60,9 @@ See [React bindings](/docs/react/overview) when those pages land.
 
 <CodeBlock language="typescript" title="add-member.ts" code={addWorkspaceMember} />
 
-The invitee needs an Opake public key published on their PDS. If `resolveHandleAndPublicKey`
+The invitee needs an Opake public key published on their PDS.
+{/* update-needed(#25): no `resolveHandleAndPublicKey` method — public-key resolution is `opake.resolveIdentity(handleOrDid)`, which is what the snippet above uses. */}
+If `resolveHandleAndPublicKey`
 fails with `RecipientNotReady`, it means the target has a valid atproto identity but hasn't
 logged into Opake yet and therefore has no `at.opake.publicKey/self` record. You can queue a
 pending invite and wait for them to sign up; see [Sharing](/docs/sdk/sharing) for the

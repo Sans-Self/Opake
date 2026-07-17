@@ -185,7 +185,7 @@ Nonce is 12 bytes, generated fresh per encryption. The PDS blob is the raw ciphe
 ### Hybrid asymmetric key wrapping (`key_wrapping.rs`)
 
 ```
-wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, rng)
+wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, context, rng)
   ── Classical half ──────────────────────────────────────────────
   → ephemeral_secret = X25519 random
   → ephemeral_pubkey = X25519 public from ephemeral_secret
@@ -196,13 +196,13 @@ wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, rng)
   → (mlkem_ct, mlkem_shared) = ML-KEM-768 Encaps(recipient.ml_kem,
                                                  encap_randomness)
   ── Combiner ──────────────────────────────────────────────────
-  → salt = ephemeral_pubkey ‖ recipient.x25519 ‖ mlkem_ct
+  → salt = ephemeral_pubkey ‖ recipient.x25519 ‖ recipient.ml_kem ‖ mlkem_ct
   → ikm  = x25519_shared ‖ mlkem_shared              [64 bytes]
   → wrapping_key = HKDF-SHA256(
        extract_salt = salt,
        ikm          = ikm,
        expand_info  = transcript("opake-wrap-info",
-                        [version_le32, algo, context_tag, context_uri,
+                        [version_le32, algo, context.tag, context.uri,
                          recipient_did]),
        length       = 32
      )
@@ -212,21 +212,25 @@ wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, rng)
   → WrappedKey { did, ciphertext, algo = "x25519-mlkem768-hkdf-a256kw-v2" }
 ```
 
-The HKDF salt commits to both the recipient's published X25519 pubkey and the ML-KEM ciphertext. An attacker who can flip or substitute the post-quantum half breaks the AES-KW integrity check at the recipient — the construction is "splice-resistant" in the sense of [Bindel et al., "Hybrid Key Encapsulation Mechanisms and Authenticated Key Exchange" (PQCrypto 2019)](https://eprint.iacr.org/2018/903).
+The salt is a transcript of the whole key-agreement context: the ephemeral X25519 pubkey, the recipient's published X25519 pubkey, the recipient's ML-KEM pubkey, and the ML-KEM ciphertext — four fields, concatenated in that fixed order (`salt = 32 ‖ 32 ‖ 1184 ‖ 1088` bytes). An attacker who flips or substitutes the post-quantum half changes the salt and breaks the AES-KW integrity check at the recipient. The construction is "splice-resistant" in the sense of [Bindel et al., "Hybrid Key Encapsulation Mechanisms and Authenticated Key Exchange" (PQCrypto 2019)](https://eprint.iacr.org/2018/903).
+
+The HKDF `info` binds the wrap to its **record context** via a `WrapContext` the caller supplies — a `(tag, uri)` pair naming the record kind and its AT-URI: `Keyring { uri }`, `Document { uri }`, `PairResponse`, or `Cabinet`. Because the context feeds the derivation, a `WrappedKey` lifted out of one record and re-published in another (a keyring member key pasted into a document grant, or a wrap from keyring A into keyring B) derives a different wrapping key on unwrap, and the AES-KW check rejects it. The two URI-less contexts use fixed sentinels (`self:pair-response`, `self:cabinet`) that can never collide with a real `at://` URI.
 
 ```
-unwrap_key(wrapped_key, keys: &PrivateKeyBundle)
+unwrap_key(wrapped_key, keys: &PrivateKeyBundle, context, declared_version)
   → reject if wrapped_key.algo != "x25519-mlkem768-hkdf-a256kw-v2"
   → split ciphertext: eph_pub [0..32], mlkem_ct [32..1120], wrapped [1120..1160]
-  → x25519_shared = ECDH(keys.x25519, eph_pub)
-  → mlkem_shared  = ML-KEM-768 Decaps(keys.ml_kem, mlkem_ct)
-  → recipient_pub = X25519::from(keys.x25519)         [for transcript]
-  → salt = eph_pub ‖ recipient_pub ‖ mlkem_ct
-  → wrapping_key = HKDF-SHA256(same params as wrap)
+  → x25519_shared    = ECDH(keys.x25519, eph_pub)
+  → mlkem_shared     = ML-KEM-768 Decaps(keys.ml_kem, mlkem_ct)
+  → recipient_x25519 = X25519::from(keys.x25519)      [for transcript]
+  → recipient_ml_kem = keys.ml_kem[1152..2336]        [encaps key inside the dk, FIPS-203 layout]
+  → salt = eph_pub ‖ recipient_x25519 ‖ recipient_ml_kem ‖ mlkem_ct
+  → wrapping_key = HKDF-SHA256(info = transcript(..., context.tag, context.uri, wrapped.did),
+                               declared_version folded in)
   → content_key = AES-256-KW unwrap(wrapping_key, wrapped)
 ```
 
-The recipient derives its own X25519 public key from its private key rather than trusting the envelope to carry it redundantly. That keeps the salt's integrity tied to the recipient's identity, not to whatever bytes the envelope happens to contain.
+Unwrapping reconstructs the salt from the recipient's own key material, never from the envelope: the X25519 half is derived from the private key, and the ML-KEM public half is read out of the decapsulation key at its FIPS-203 offset (`dk = dk_PKE ‖ ek ‖ H(ek) ‖ z`, so `ek` sits at byte 1152). Tying the salt to the recipient's identity rather than to envelope bytes is what makes the splice check meaningful. The caller must pass the same `context` the wrap used and the enclosing record's own declared `opakeVersion` — never this crate's compile-time `SCHEMA_VERSION` — so a record that declares an older, still-supported version derives under the version it declares.
 
 ### Symmetric key wrapping (`keyring_wrapping.rs`)
 
@@ -245,14 +249,15 @@ No HKDF, no ephemeral keys — pure symmetric wrapping. The group key IS the KEK
 ### Group key creation (`key_wrapping.rs`)
 
 ```
-create_group_key(members: &[DidMember], rng)
+create_group_key(members: &[DidMember], keyring_uri, rng)
   → group_key = random 256 bits
+  → context   = WrapContext::Keyring { uri: keyring_uri }
   → for each member:
-      wrap_key(group_key, member.public_keys(), member.did, rng)
+      wrap_key(group_key, member.keys, member.did, context, rng)
   → (group_key, Vec<WrappedKey>)
 ```
 
-`DidMember` carries both halves of the recipient's public key alongside their DID; `public_keys()` returns the matching `PublicKeyBundle` view for `wrap_key`. Callers pair the returned `WrappedKey`s with roles to build `KeyringMember` entries — the crypto layer doesn't know about roles.
+`DidMember` carries both halves of the recipient's public key alongside their DID. Every member wrap is bound to the keyring's own URI through `WrapContext::Keyring`, so a member key cannot be replayed into any other record. Callers pair the returned `WrappedKey`s with roles to build `KeyringMember` entries — the crypto layer doesn't know about roles.
 
 ### Metadata encryption (`metadata.rs`)
 
@@ -278,7 +283,7 @@ Same AES-256-GCM as blob encryption but with JSON serialization. The key depends
 | Record | Metadata type | Key used | Fields |
 |--------|--------------|----------|--------|
 | Document | `DocumentMetadata` | Content key | name, mimeType?, size?, tags[], description? |
-| Keyring | `KeyringMetadata` | Group key | name, description? |
+| Keyring | `KeyringMetadata` | Group key | name, description?, icon? (base64 128×128) |
 | Grant | `GrantMetadata` | Content key | permissions?, note? |
 | Directory | `DirectoryMetadata` | Content key | name, description? |
 
@@ -339,7 +344,7 @@ keyringKeyWrapping:
   keyringRef.rotation = integer           ← which generation of the group key
 ```
 
-The content key encrypts `encryptedMetadata` (which carries its own nonce internally). Decryption: unwrap content key → `decrypt_metadata(key, encrypted_metadata)`.
+The content key encrypts `encryptedMetadata` (which carries its own nonce internally). Decryption: unwrap content key → `decrypt_metadata(key, encrypted_metadata, seal_context)`.
 
 Personal directories use `directKeyWrapping`. Workspace directories use `keyringKeyWrapping` — all workspace members who can unwrap the group key can read and propose changes to the directory structure.
 

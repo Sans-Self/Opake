@@ -91,6 +91,7 @@ update your UI. It applies a local patch to the directory-tree snapshot, synchro
 Components subscribed via `useDirectory` re-render with the moved entry in its new
 location within the same render tick.
 
+{/* update-needed(#25): overlay release is echo-driven — a patch releases when the SSE echo folds the change into the base snapshot (settle-predicate), NOT when "the mutation resolves, whichever is first"; mutation resolution is explicitly not the release signal (optimistic-overlay.ts, use-tree-mutation.ts). */}
 When the real event arrives from SSE (or the mutation resolves, whichever is first), the
 overlay dedups the patch against the real state and drops it. If the mutation fails, the
 overlay rolls back.

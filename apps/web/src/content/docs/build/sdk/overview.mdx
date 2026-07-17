@@ -17,6 +17,7 @@ import {
 You interact with the SDK through a small set of classes. `Opake` is the root. You get one from
 `Opake.init({ storage })`, and it owns the session, the identity keypair, and the authenticated
 client to your PDS. `FileManager` handles uploads, downloads, directory operations, and
+{/* update-needed(#25): no public `opake.workspaceByUri(uri)` — the SDK method is `opake.workspace(keyringUri)` (opake.ts); `workspaceByUri` is only the internal WASM binding. */}
 metadata; `opake.cabinet()` returns one for your personal files, and `opake.workspaceByUri(uri)`
 returns one for a shared workspace. The `Storage` interface is yours to implement, though for
 browsers you almost certainly want the built-in `IndexedDbStorage`.
@@ -40,10 +41,13 @@ AGPL-3.0. If you bundle it into a web app, that app becomes a derivative work. S
 
 The minimum it takes to upload and read back one encrypted file:
 
+{/* update-needed(#25): the `helloCabinet` snippet (_snippets.ts) calls `fm.uploadAt`/`fm.downloadAt("/path")` and destructures `{ plaintext }` — none exist; methods are `fm.upload(bytes, name, mime)` and `fm.download(uri)`, and DownloadResult is `{ filename, data }`. */}
 <CodeBlock language="typescript" title="example.ts" code={helloCabinet} />
 
 Under those calls: `IndexedDbStorage` persisted the session and the identity keypair, so the
-next page load starts from `Opake.init` without redoing OAuth. `FileManager.uploadAt` generated
+next page load starts from `Opake.init` without redoing OAuth.
+{/* update-needed(#25): method is `FileManager.upload`, not `uploadAt`. */}
+`FileManager.uploadAt` generated
 a random AES-256-GCM content key, encrypted the bytes, wrapped the key to your X25519 public
 key, and wrote three records to the PDS (document metadata, blob, and the wrapped-key envelope).
 And if the access token was within 30 seconds of expiring, the SDK refreshed it first,
@@ -57,6 +61,7 @@ once an identity is loaded.
 
 ### Static surface
 
+{/* update-needed(#25): the `staticSurface` snippet lists `Opake.generateMnemonic()` — the public static method is `Opake.generateSeedPhrase()` (generateMnemonic is the internal WASM fn). */}
 <CodeBlock language="typescript" title="before init" code={staticSurface} />
 
 So much of the API is static because those three flows run before any identity exists on a
@@ -65,6 +70,7 @@ device. They can't live on an instance because you haven't got one. Once any of 
 
 ### Instance surface
 
+{/* update-needed(#25): the `instanceSurface` snippet lists `opake.workspaceByUri(uri)` — the public method is `opake.workspace(keyringUri)`. */}
 <CodeBlock language="typescript" title="after init" code={instanceSurface} />
 
 The `did` field is the caller's DID, set during `init` and constant for the life of the

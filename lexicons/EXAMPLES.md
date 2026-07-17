@@ -1,8 +1,14 @@
 # Example Records
 
+Every record below is a real instance of an `at.opake.*` lexicon, annotated with what
+the PDS sees versus what only a keyholder can read. The `$bytes` values are placeholders
+for base64-encoded binary; lengths are called out where they matter.
+
 ## 0. Public key record (published on login)
 
-Every Opake user publishes their hybrid encryption public key as a singleton record — both halves of the X25519 + ML-KEM-768 KEM. This is how other users discover your key when sharing files with you.
+Every Opake user publishes their hybrid encryption public key as a singleton — both
+halves of the X25519 + ML-KEM-768 KEM. This is how another user discovers your key when
+sharing a file with you.
 
 ```json
 {
@@ -12,15 +18,23 @@ Every Opake user publishes their hybrid encryption public key as a singleton rec
   "x25519Algo": "x25519",
   "mlKemPublicKey": { "$bytes": "base64-encoded-1184-byte-ml-kem-768-public-key" },
   "mlKemAlgo": "ml-kem-768",
+  "signingKey": { "$bytes": "base64-encoded-32-byte-ed25519-public-key" },
+  "signingAlgo": "ed25519",
   "createdAt": "2026-03-01T10:00:00.000Z"
 }
 ```
 
-This record uses rkey `self` (like `app.bsky.actor.profile`) — there's only one per account. All fields are required: a record missing either half fails lexicon validation. The keys are published automatically on `opake login`.
+The record uses rkey `self` — one per account. The two KEM halves and their algorithm
+identifiers are required; a record missing either half fails lexicon validation. The
+`signingKey`/`signingAlgo` pair is optional: it carries the Ed25519 public key the
+indexer uses to authenticate DID-scoped calls, so a client that never talks to an indexer
+can omit it. The keys are published automatically on `opake login`.
 
 ## 1. Root directory (created on first `opake mkdir`)
 
-The root directory is a singleton at rkey `self`. Directory names are always encrypted in `encryptedMetadata` — the PDS never sees real folder names. `keyWrapping` tells clients how to unwrap the content key.
+The root directory of a personal cabinet is a singleton at rkey `self`. Directory names
+are always encrypted in `encryptedMetadata` — the PDS never sees a real folder name.
+`keyWrapping` tells a client how to unwrap the content key that protects that metadata.
 
 ```json
 {
@@ -39,14 +53,21 @@ The root directory is a singleton at rkey `self`. Directory names are always enc
     "nonce": { "$bytes": "rNpK...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/at.opake.directory/3k..."
+    {
+      "target": "at://did:plc:alice123/at.opake.directory/3kphotos",
+      "targetCid": "bafyreib2...cid-of-photos-directory"
+    }
   ],
   "createdAt": "2026-03-01T10:00:00.000Z",
   "modifiedAt": "2026-03-01T10:00:00.000Z"
 }
 ```
 
-The `entries` array is an ordered list of AT-URIs pointing to documents or other directories (children-on-parent model). Directories use `KeyWrapping` (not `Encryption`) because they have no blob — only `encryptedMetadata`.
+Each entry pins an AT-URI plus the CID of the target record at the moment this directory
+was written. Targets are documents or other directories; for a nested directory the
+`targetCid` is the head of that child path's chain at write time. Directories use
+`KeyWrapping` (not the full encryption envelope) because they carry no blob — only
+`encryptedMetadata` needs a key.
 
 ## 2. A named directory
 
@@ -67,20 +88,32 @@ The `entries` array is an ordered list of AT-URIs pointing to documents or other
     "nonce": { "$bytes": "T7kR...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/at.opake.document/3kabcd",
-    "at://did:plc:alice123/at.opake.document/3kefgh",
-    "at://did:plc:alice123/at.opake.directory/3kijkl"
+    {
+      "target": "at://did:plc:alice123/at.opake.document/3kabcd",
+      "targetCid": "bafyreic1...cid-of-doc-1"
+    },
+    {
+      "target": "at://did:plc:alice123/at.opake.document/3kefgh",
+      "targetCid": "bafyreic2...cid-of-doc-2"
+    },
+    {
+      "target": "at://did:plc:alice123/at.opake.directory/3kijkl",
+      "targetCid": "bafyreic3...cid-of-subdirectory-head"
+    }
   ],
   "createdAt": "2026-03-01T10:05:00.000Z",
   "modifiedAt": "2026-03-01T11:30:00.000Z"
 }
 ```
 
-This directory contains two documents and a subdirectory. Non-root directories use TID rkeys (created via `createRecord`). The decrypted `encryptedMetadata` contains `{ "name": "Photos" }`.
+This directory holds two documents and a subdirectory. Non-root cabinet directories use
+TID rkeys. The decrypted `encryptedMetadata` is `{ "name": "Photos" }`.
 
-## 2a. Workspace directory (encrypted under keyring)
+## 2a. Workspace directory (encrypted under a keyring)
 
-A workspace directory uses `keyringKeyWrapping` — the content key is wrapped under the workspace's group key instead of an individual DID's public key. All workspace members who can unwrap the group key can read the directory name.
+A workspace directory uses `keyringKeyWrapping`: the content key is wrapped under the
+workspace's group key instead of an individual DID's public key, so every member who can
+unwrap the group key can read the directory name.
 
 ```json
 {
@@ -89,7 +122,7 @@ A workspace directory uses `keyringKeyWrapping` — the content key is wrapped u
   "keyWrapping": {
     "$type": "at.opake.defs#keyringKeyWrapping",
     "keyringRef": {
-      "keyring": "at://did:plc:alice123/at.opake.keyring/3kabc",
+      "keyring": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
       "wrappedContentKey": { "$bytes": "Qw9f...40 bytes (AES-KW)..." },
       "rotation": 0
     }
@@ -99,32 +132,82 @@ A workspace directory uses `keyringKeyWrapping` — the content key is wrapped u
     "nonce": { "$bytes": "Hk7a...12 bytes..." }
   },
   "entries": [
-    "at://did:plc:alice123/at.opake.document/3kdoc1",
-    "at://did:plc:bob456/at.opake.document/3kdoc2"
+    {
+      "target": "at://did:plc:alice123/at.opake.document/3kdoc1",
+      "targetCid": "bafyreid1...cid-of-doc-1"
+    },
+    {
+      "target": "at://did:plc:bob456/at.opake.document/3kdoc2",
+      "targetCid": "bafyreid2...cid-of-doc-2"
+    }
   ],
+  "workspaceId": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
+  "isWorkspaceRoot": true,
   "createdAt": "2026-03-21T10:00:00.000Z"
 }
 ```
 
-Note: `entries` can contain cross-PDS AT-URIs — workspace documents live on each member's PDS. The workspace root directory uses a deterministic rkey `ws-{keyring_rkey}`.
+`entries` can point at cross-PDS AT-URIs — workspace documents live on each member's own
+PDS. `workspaceId` names the genesis keyring so any reader resolves the workspace without
+walking the keyring chain. `isWorkspaceRoot: true` marks this directory as part of the
+workspace-root chain; the indexer enforces that only a manager may set it, that the flag
+never flips across a supersede, and that a workspace has at most one active root chain
+(`spec:tree-chains § The workspace root is a flag-marked chain, forward-walked from
+genesis`). The root is an ordinary TID-rkeyed record, forward-walked from genesis — there
+is no reserved or derived root rkey.
 
-## 2b. Directory update (member proposing structural change)
+## 2b. Workspace directory supersede (reorganizing a shared folder)
 
-Non-owner workspace members can't directly modify the owner's directory records. Instead they write `directoryUpdate` proposals to their own PDS. The owner's daemon picks them up via the Indexer and applies them.
+A workspace directory at a given path is the head of a supersede chain: the canonical
+state is whichever record has no successor pointing at it (`spec:tree-chains § A path's
+canonical state is the head of a supersede chain`). A member reorganizing the folder
+writes a new directory record on their own PDS that supersedes the current head — no
+proposal, no owner round-trip.
 
 ```json
 {
-  "$type": "at.opake.directoryUpdate",
+  "$type": "at.opake.directory",
   "opakeVersion": 1,
-  "keyring": "at://did:plc:alice123/at.opake.keyring/3kabc",
-  "actionType": "addEntry",
-  "directory": "at://did:plc:alice123/at.opake.directory/ws-3kabc",
-  "entry": "at://did:plc:bob456/at.opake.document/3knewdoc",
+  "keyWrapping": {
+    "$type": "at.opake.defs#keyringKeyWrapping",
+    "keyringRef": {
+      "keyring": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
+      "wrappedContentKey": { "$bytes": "Qw9f...40 bytes (AES-KW)..." },
+      "rotation": 0
+    }
+  },
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "mNp3...encrypted {name:'Projects'}..." },
+    "nonce": { "$bytes": "Hk7a...12 bytes..." }
+  },
+  "entries": [
+    {
+      "target": "at://did:plc:alice123/at.opake.document/3kdoc1",
+      "targetCid": "bafyreid1...cid-of-doc-1"
+    },
+    {
+      "target": "at://did:plc:bob456/at.opake.document/3knewdoc",
+      "targetCid": "bafyreid9...cid-of-new-doc"
+    }
+  ],
+  "workspaceId": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
+  "isWorkspaceRoot": true,
+  "supersedes": "at://did:plc:alice123/at.opake.directory/3kprevroot",
+  "supersedesCid": "bafyreid0...cid-of-the-superseded-directory",
+  "lineage": "at://did:plc:alice123/at.opake.directory/3kgenesisroot",
   "createdAt": "2026-03-21T12:00:00.000Z"
 }
 ```
 
-Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `targetDirectory`), `createDirectory` (with `parentDirectory` + `encryptedMetadata`), `deleteDirectory`, `renameDirectory` (with `encryptedMetadata`).
+`supersedes` names the prior head; `supersedesCid` pins that predecessor's CID and is
+required whenever `supersedes` is present (`spec:lineage § Supersede references carry a
+content pin`); `lineage` carries the chain's genesis URI unchanged — the directory's stable
+object identity, which never moves across a supersede (`spec:lineage § Lineage never flips
+across a supersede`). The metadata ciphertext is AEAD-bound to that genesis anchor, which
+is why a ciphertext copied verbatim across a supersede still authenticates. The indexer
+validates authority at write time: an editor's supersede must be additive, a manager's is
+unrestricted (`spec:tree-chains § Editor supersedes are additive; managers are
+unrestricted`).
 
 ## 3. Alice creates a private encrypted document
 
@@ -160,13 +243,17 @@ Action types: `addEntry`, `removeEntry`, `moveEntry` (with `sourceDirectory` + `
 }
 ```
 
-**What the PDS sees:** a record with an opaque blob and opaque encrypted metadata.
-The real filename ("tax-return-2025.pdf"), MIME type, size, and tags are all inside
-`encryptedMetadata`, encrypted with the same content key as the blob. The `keys`
-array only contains Alice's wrapped key — only she can decrypt.
-
+**What the PDS sees:** a record with an opaque blob and opaque encrypted metadata. The
+real filename (`tax-return-2025.pdf`), MIME type, size, and tags all live inside
+`encryptedMetadata`, encrypted with the same content key as the blob
+(`spec:document-crypto § All document metadata is encrypted`). The `keys` array holds only
+Alice's wrapped key — only she can decrypt.
 
 ## 4. Alice shares the document with Bob via a grant
+
+A grant is a standalone record, not inline document state — it can be created and revoked
+without rewriting the document (`spec:sharing-grants § A grant is a standalone record, not
+inline document state`).
 
 ```json
 {
@@ -179,36 +266,48 @@ array only contains Alice's wrapped key — only she can decrypt.
     "ciphertext": { "$bytes": "base64-wrapped-content-key-for-bob" },
     "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
-  "permissions": "read",
-  "note": "Here's the tax doc you asked about",
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-encrypted {permissions:'read', note:'...'}..." },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "createdAt": "2026-02-27T11:00:00.000Z"
 }
 ```
 
+The grant's own metadata — the permission level and any note — lives inside
+`encryptedMetadata`, encrypted with the document's content key so both grantor and
+recipient can read it and the PDS cannot. The record-level fields carry only what the
+network legitimately needs to route the share: the document URI and the recipient DID.
+
 **How Bob decrypts:**
-1. His client/Indexer discovers this grant (firehose, query, or notification)
-2. Fetches the document record via the `document` AT URI
-3. Uses his private key to decrypt `wrappedKey.ciphertext` → gets AES-256 content key
-4. Fetches the blob via `com.atproto.sync.getBlob`
-5. Decrypts the blob using the content key + nonce from the document's encryption envelope
+1. His indexer surfaces the grant (`spec:sharing-grants § The recipient discovers shares
+   through the indexer, not by polling PDSes`).
+2. He fetches the document record via the `document` AT-URI.
+3. He unwraps `wrappedKey.ciphertext` with his private key → the AES-256 content key.
+4. He fetches the blob via `com.atproto.sync.getBlob`.
+5. He decrypts the blob with the content key and the nonce from the document's envelope.
 
-**To revoke:** Alice deletes the grant record. Bob's copy of the wrapped key is gone
-from the network (eventually). For true forward secrecy, Alice would also re-encrypt
-the document with a fresh content key.
-
+**To revoke:** Alice deletes the grant. Bob stops discovering it, but a copy he already
+unwrapped is beyond recall — revocation stops future discovery, not historical access
+(`spec:sharing-grants § Revocation stops future discovery but not historical access`). For
+true forward secrecy Alice re-encrypts the document under a fresh content key.
 
 ## 5. Workspace (keyring-based group sharing)
 
-### The keyring record:
+### The keyring record
 
-The `owner` field identifies the canonical owner (Alice). Each member has a `role`: manager (full control), editor (upload/edit), or viewer (read-only). The keyring name and description are inside `encryptedMetadata`, encrypted with the group key.
+A keyring holds a group symmetric key wrapped to each member, paired with that member's
+role. There is no owner field: authority is the chain itself, and every member carries one
+of three roles — manager (full control), editor (upload and edit), or viewer (read-only)
+(`spec:workspace-membership § Three roles, no owner`). Role is plaintext because the
+indexer needs it for authorization; the keyring name and description are encrypted under
+the group key in `encryptedMetadata`.
 
 ```json
 {
   "$type": "at.opake.keyring",
   "opakeVersion": 1,
   "algo": "aes-256-gcm",
-  "owner": "did:plc:alice123",
   "members": [
     {
       "wrappedKey": {
@@ -244,7 +343,13 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 }
 ```
 
-### Then, a document using the keyring:
+The genesis keyring's rkey is not a TID — it is a derived tag computed from the genesis
+(rotation-0) group key and the founding member's DID, so the genesis URI (which *is* the
+workspace identity) commits to key material only members hold (`spec:workspace-identity §
+Genesis URI is the workspace identity`). See [§ 5a](#5a-keyring-supersede-rotation-after-removing-a-member)
+for the derivation and an example rkey.
+
+### A document under the keyring
 
 ```json
 {
@@ -259,7 +364,7 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
   "encryption": {
     "$type": "at.opake.document#keyringEncryption",
     "keyringRef": {
-      "keyring": "at://did:plc:alice123/at.opake.keyring/3k...",
+      "keyring": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
       "wrappedContentKey": { "$bytes": "base64-content-key-encrypted-with-group-key" },
       "rotation": 0
     },
@@ -270,42 +375,58 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
+  "workspaceId": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
   "createdAt": "2026-02-20T16:45:00.000Z"
 }
 ```
 
-**How any family member decrypts:**
-1. Fetch the keyring record from the `keyring` AT URI
-2. Find their own entry in `members`, decrypt with their private key → get group key GK
-3. Decrypt `wrappedContentKey` with GK → get the per-document content key
-4. Fetch + decrypt the blob with content key + nonce
+**How any member decrypts:**
+1. Fetch the keyring record from the `keyring` AT-URI.
+2. Find their own entry in `members`, unwrap it with their private key → the group key GK.
+3. Decrypt `wrappedContentKey` with GK → the per-document content key.
+4. Fetch and decrypt the blob with the content key and nonce.
 
-**Adding a new member (did:plc:dave as editor):**
-- Wrap GK to Dave's pubkey with `"role": "editor"`
-- Update the keyring record to add Dave to `members`
-- Dave can now decrypt *all* documents under this keyring. No per-document changes needed.
-- The Indexer enforces Dave's role — he can propose edits via `documentUpdate` but can't add/remove members.
+The `rotation` on `keyringRef` selects which generation of the group key to use, so a
+reader admitted after several rotations still resolves the right key for an old document
+(`spec:document-crypto § Keyring reads select the group key by the document's rotation`).
 
-**Removing a member:**
-- Archive the current rotation's remaining member entries into `keyHistory`
-- Increment `rotation`, generate new GK, re-wrap to remaining members
-- New documents use the new GK
-- Old documents remain readable: the client looks up the document's rotation in `keyHistory` to find the old wrapped group key
-- Removed members' wrapped keys are excluded from history, so they can't recover old GK from the record
-- Forward secrecy is automatic (removed member can't decrypt new content). For historical access revocation, see background re-encryption.
+**Adding a member.** A manager writes a keyring supersede whose `members` array includes
+the new member's wrapped group key (`spec:workspace-membership § Adding a member is a
+manager-authored supersede`). No per-document rewrapping is needed — the new member can now
+decrypt every document under the keyring. The indexer enforces the author's manager role
+at write time.
 
+**Removing a member.** A manager writes a supersede that rotates the group key and re-wraps
+it to the remaining members, archiving the prior rotation's members into `keyHistory`
+(§ 5a). The removed member is excluded from every re-wrap, so they cannot read anything
+encrypted under the new key — forward secrecy is automatic. Historical documents stay
+readable to remaining members through `keyHistory`; revoking that historical access
+requires background re-encryption under a fresh content key.
 
 ## 5a. Keyring supersede (rotation after removing a member)
 
-A keyring is the head of a supersede chain. The **genesis** keyring's rkey is not a TID — it is a *derived tag* computed from the genesis (rotation-0) group key and the owner DID, so the genesis URI (which is the workspace identity) commits to key material only members hold. Here the genesis lives at:
+A keyring is the head of a supersede chain. The **genesis** keyring's rkey is a derived
+tag — 26 lowercase-base32 characters — computed as
+`base32-lower(SHA-256(Ed25519_pubkey(HKDF(K₀, transcript("opake-workspace-identity",
+owner_did))))[..16])`, where `K₀` is the rotation-0 group key. Because the genesis URI is
+the workspace identity, that identity commits to key material only members hold: a party
+cannot mint a genesis keyring for a workspace whose rotation-0 key it lacks. Any adopting
+client re-derives the tag from the record's rotation-0 key and rejects a mismatch, offline
+and members-only — the indexer cannot, as it holds no group key
+(`spec:workspace-identity § Identity adoption verifies by derivation`). The construction is
+pinned as a wire-frozen KAT; see [CRYPTO.md](../docs/CRYPTO.md#workspace-identity). The
+genesis URI used throughout these examples is the real derivation for a rotation-0 key of
+`0x42` repeated 32 times under `did:plc:alice123` — reproducible against
+`derive_workspace_identity_tag` (crates/opake-crypto):
 
 ```
-at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm
+at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq
 ```
 
-That 26-character lowercase-base32 rkey is `base32-lower(SHA-256(Ed25519_pubkey(HKDF(K₀, transcript("opake-workspace-identity", "did:plc:alice123"))))[..16])` — see [CRYPTO.md](../docs/CRYPTO.md#workspace-identity). Any adopting client re-derives it from the record's rotation-0 key and rejects a mismatch.
-
-When manager Bob removes Carol and rotates the group key, he writes a **supersede** on his own PDS. It uses an ordinary TID rkey; `supersedes` points at the prior canonical keyring, `supersedesCid` pins that predecessor's CID, and `lineage` carries the genesis URI unchanged (the workspace identity never moves across a supersede).
+When manager Bob removes Carol and rotates the group key, he writes a supersede on his own
+PDS. It uses an ordinary client-generated TID rkey; `supersedes` points at the prior
+canonical keyring, `supersedesCid` pins that predecessor's CID, and `lineage` carries the
+genesis URI unchanged — the workspace identity never moves across a supersede.
 
 ```json
 {
@@ -358,21 +479,34 @@ When manager Bob removes Carol and rotates the group key, he writes a **supersed
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "supersedes": "at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm",
+  "supersedes": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
   "supersedesCid": "bafyreib2xyz...cid-of-the-genesis-keyring",
-  "lineage": "at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm",
+  "lineage": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
   "createdAt": "2026-03-22T09:00:00.000Z"
 }
 ```
 
-**Notes:**
-- `keyHistory` retains rotation 0's members (minus removed Carol) so surviving members can still decrypt documents uploaded before the rotation. Carol's wrapped key is excluded — she cannot recover the old group key from this record.
-- `supersedesCid` is required whenever `supersedes` is present. At v1 it is compared against the CID a serving host *reports* for the fetched predecessor (not a hash recomputed from bytes), so it catches CID disagreement between honest hosts but is not, yet, a defense against a host serving tampered bytes under the true CID — that is deferred to replication-tier work.
-- The same `supersedes` + `supersedesCid` pair rides every directory and document supersede, with identical v1 semantics; the pin always names the immediate predecessor and is never copied through a cascade.
+- `keyHistory` retains rotation 0's members (minus Carol) so surviving members can still
+  decrypt documents uploaded before the rotation. Carol's wrapped key is excluded — she
+  cannot recover the old group key from this record (`spec:key-rotation § New members can
+  read the full history they are admitted to` states the admission side of the same
+  boundary).
+- `supersedesCid` is required whenever `supersedes` is present. At v1 it is compared
+  against the CID a serving host *reports* for the fetched predecessor — not a hash
+  recomputed from bytes — so it catches CID disagreement between honest, non-colluding
+  hosts (stale cache, accidental substitution) but is not yet a defense against a host
+  serving tampered bytes under the true CID. Byte-level tamper-evidence is deferred to
+  replication-tier work; the field is present now so that binding lands later without a
+  wire migration.
+- The same `supersedes` + `supersedesCid` pair rides every directory and document
+  supersede with identical semantics: the pin always names the immediate predecessor and
+  is never copied through a cascade.
 
 ## 6. Pair request (new device requesting identity)
 
-A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and publishes both public halves. The X25519 fingerprint is displayed for visual comparison on both devices.
+A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and publishes
+both public halves. The X25519 fingerprint is displayed on both devices for out-of-band
+comparison.
 
 ```json
 {
@@ -385,11 +519,16 @@ A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and pub
 }
 ```
 
-This record uses a TID rkey (multiple pending requests are possible). The existing device lists these to show pending requests. Both devices display the X25519 key fingerprint for out-of-band verification — short enough to read aloud or compare on screen, long enough to make collision search infeasible.
+The record uses a TID rkey — several pending requests can coexist. The existing device
+lists these to show what is waiting. The fingerprint is short enough to read aloud, long
+enough to make collision search infeasible.
 
 ## 7. Pair response (existing device sending identity)
 
-The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 keypairs) and wraps the content key to the ephemeral hybrid bundle from the request, using the same hybrid construction as everywhere else.
+The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 keypairs)
+and wraps the content key to the ephemeral hybrid bundle from the request, using the same
+hybrid construction as everywhere else (`spec:auth-pairing § Pairing wraps the full
+identity to a device-held ephemeral keypair`).
 
 ```json
 {
@@ -408,19 +547,30 @@ The existing device encrypts the full identity (X25519 + ML-KEM-768 + Ed25519 ke
 }
 ```
 
-**How the new device decrypts:**
-1. Loads the ephemeral private bundle from local `Storage` (32 + 2400 bytes concatenated, keyed by DID + request rkey)
-2. Unwraps the content key via the hybrid construction (X25519 ECDH + ML-KEM-768 Decaps + HKDF combiner)
-3. Decrypts the ciphertext with the content key + nonce → identity JSON
-4. Verifies the embedded X25519 public key matches the sender's published `publicKey/self` record
-5. Saves the identity to disk and wipes the pair state entry
+**How the new device completes:**
+1. Loads the ephemeral private bundle from local `Storage` (32 + 2400 bytes concatenated,
+   keyed by DID + request rkey).
+2. Unwraps the content key via the hybrid construction (X25519 ECDH + ML-KEM-768 Decaps +
+   HKDF combiner).
+3. Decrypts the ciphertext with the content key and nonce → identity JSON.
+4. Verifies the embedded X25519 public key matches the sender's published `publicKey/self`
+   record — the received identity is authenticated against the published key, not trusted
+   on arrival (`spec:auth-pairing § Completion authenticates the received identity against
+   the published key`).
+5. Saves the identity to disk and wipes the pair state entry.
 
-Both PDS records are deleted after successful transfer. The ephemeral private bundle is persisted in `Storage` only between `create_pair_request` and `try_complete_pair` — it has to survive a CLI restart or browser reload while the user walks to the other device, so in-memory alone isn't sufficient. It never crosses the WASM/JS boundary.
-
+Both PDS records are deleted after a successful transfer (`spec:auth-pairing § Pair records
+are relay ephemera, torn down after use`). The ephemeral private bundle is persisted in
+`Storage` only between `create_pair_request` and `try_complete_pair` — it must survive a
+CLI restart or browser reload while the user walks to the other device, so in-memory alone
+will not do. It never crosses the WASM/JS boundary.
 
 ## 8. Pending share (recipient hasn't set up Opake yet)
 
-When sharing with someone who hasn't logged into Opake, a `pendingShare` record is created instead of a grant. The daemon retries periodically until the recipient publishes their public key.
+Sharing with someone who has not published a public key writes a `pendingShare` instead of
+a grant. The daemon retries until the recipient publishes their key, then promotes it to a
+grant (`spec:sharing-grants § A share to a not-yet-ready recipient is queued, not
+dropped`).
 
 ```json
 {
@@ -436,104 +586,129 @@ When sharing with someone who hasn't logged into Opake, a `pendingShare` record 
 }
 ```
 
-**Key points:**
-- `recipient` stores the handle or DID as the user entered it (not necessarily a DID)
-- `encryptedMetadata` contains `{ permissions: "read", note: "..." }` encrypted with the document's content key — same format as a grant's metadata
-- No `wrappedKey` — the content key can't be wrapped until the recipient publishes their public key
-- The daemon re-derives the content key from the document at retry time using the owner's identity
-- Records expire after 7 days and are automatically deleted by the daemon
-- Cross-device: created from any device, retried by any device with the daemon running
+- `recipient` stores the handle or DID exactly as the user entered it — it need not be a
+  resolved DID yet.
+- `encryptedMetadata` holds `{ permissions, note }` encrypted with the document's content
+  key — the same shape as a grant's metadata.
+- There is no `wrappedKey`: the content key cannot be wrapped until the recipient publishes
+  a public key. The daemon re-derives the content key from the document at retry time using
+  the owner's identity.
+- The daemon deletes the record after 7 days if the recipient never appears. Any device
+  running the daemon can create or retry it.
 
-## 9. Document update (collaborative editing)
+## 9. Document supersede (collaborative editing)
 
-An editor proposes an update to a document owned by another workspace member. The update lives on the editor's PDS until the owner applies it.
+An editor updates a document owned by another workspace member by writing a new
+`at.opake.document` on their own PDS that supersedes the current one — there is no separate
+update record and no owner round-trip. The indexer validates the supersede's authority at
+write time and repoints the workspace snapshot at the new head.
 
 ```json
 {
-  "$type": "at.opake.documentUpdate",
+  "$type": "at.opake.document",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/at.opake.document/3kabcd",
   "blob": {
     "$type": "blob",
     "ref": { "$link": "bafkrei..." },
     "mimeType": "application/octet-stream",
     "size": 294912
   },
+  "encryption": {
+    "$type": "at.opake.document#keyringEncryption",
+    "keyringRef": {
+      "keyring": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
+      "wrappedContentKey": { "$bytes": "base64-content-key-encrypted-with-group-key" },
+      "rotation": 0
+    },
+    "algo": "aes-256-gcm",
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "encryptedMetadata": {
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
+  "workspaceId": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
+  "supersedes": "at://did:plc:alice123/at.opake.document/3kabcd",
+  "supersedesCid": "bafyreie7...cid-of-the-superseded-document",
+  "lineage": "at://did:plc:alice123/at.opake.document/3kgenesisdoc",
   "createdAt": "2026-03-21T10:00:00.000Z"
 }
 ```
 
-**How the owner applies it:**
-1. Indexer surfaces pending updates via `GET /api/workspace/updates`
-2. Owner's client fetches the update blob from the editor's PDS
-3. Owner re-uploads the blob to their own PDS and updates their document record
-4. Editor's client deletes the `documentUpdate` record after confirmation
+`supersedes` feeds the indexer's additive-advance authority check: an editor may advance a
+chain but not fork or truncate it, while a manager is unrestricted (`spec:tree-chains §
+Editor supersedes are additive; managers are unrestricted`). `supersedesCid` pins the
+predecessor and `lineage` names the chain's genesis — the document's stable identity, to
+which its content and metadata ciphertexts are AEAD-bound (`spec:document-crypto §
+Ciphertexts are AAD-bound to their lineage anchor and type`). The same shape carries
+document *adoption* when a member is removed: the substitute document supersedes the
+departed member's original by URI.
 
-For document adoption (when a member is removed), the `supersedes` field points to the original document URI being replaced:
+## 10. Leaving a workspace
+
+A member leaves by writing a keyring supersede on their own PDS that drops themselves from
+`members`, carrying `lineage` unchanged. Leave is self-removal, permitted without manager
+authority (`spec:workspace-membership § Keyring supersede authority is manager-only, except
+pure self-removal`).
 
 ```json
 {
-  "$type": "at.opake.documentUpdate",
+  "$type": "at.opake.keyring",
   "opakeVersion": 1,
-  "document": "at://did:plc:alice123/at.opake.document/3kabcd",
-  "blob": {
-    "$type": "blob",
-    "ref": { "$link": "bafkrei..." },
-    "mimeType": "application/octet-stream",
-    "size": 294912
-  },
+  "algo": "aes-256-gcm",
+  "members": [
+    {
+      "wrappedKey": {
+        "did": "did:plc:alice123",
+        "ciphertext": { "$bytes": "base64-rotation-0-group-key-for-alice" },
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+      },
+      "role": "manager"
+    }
+  ],
+  "rotation": 0,
   "encryptedMetadata": {
     "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
     "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
   },
-  "supersedes": "at://did:plc:removed-member/at.opake.document/3koriginal",
-  "createdAt": "2026-03-21T10:30:00.000Z"
-}
-```
-
-## 10. Leaving a workspace
-
-A member opts out of a workspace by writing a `keyringUpdate` record with action `leave` to their own PDS. The indexer removes them from the workspace's member list.
-
-```json
-{
-  "$type": "at.opake.keyringUpdate",
-  "opakeVersion": 1,
-  "keyring": "at://did:plc:alice123/at.opake.keyring/3k...",
-  "actionType": "leave",
+  "supersedes": "at://did:plc:alice123/at.opake.keyring/3kpriorhead",
+  "supersedesCid": "bafyreif0...cid-of-the-prior-head",
+  "lineage": "at://did:plc:alice123/at.opake.keyring/6ywb55pjvb2xuzdbsy7udewfrq",
   "createdAt": "2026-03-21T11:00:00.000Z"
 }
 ```
 
-**Key points:**
-- `leave` is one of the action types on the unified `keyringUpdate` record (alongside `addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`).
-- This is a visibility opt-out, not a key revocation — the member's wrapped key still exists on the keyring record until the owner processes the proposal and rotates the group key.
-- The workspace disappears from the member's sidebar once the indexer processes the record.
-- Used for both voluntary leave and cleaning up stale/forked workspace membership.
+- Leaving deliberately does **not** rotate the group key: the leaver already holds it, so
+  rotating buys no forward secrecy. Removal by a manager rotates; leave does not
+  (`spec:workspace-membership § Removal rotates the group key; leave does not`). Forward
+  secrecy against a departed member arrives with the next manager-authored rotation.
+- Because the leaver's wrapped key is simply absent from the new head's `members`, they
+  drop out of the workspace's member list once the indexer processes the supersede, and
+  the workspace disappears from their sidebar.
+- The last member cannot leave, and the only manager cannot leave without first promoting
+  another member — the chain must never be orphaned (`spec:workspace-membership § Leave
+  guards — no orphaned workspaces`).
 
-## Design Decisions & Notes
+## Design decisions
 
 ### Why encrypted metadata?
-All document metadata — name, MIME type, size, tags, description — is encrypted
-inside `encryptedMetadata` using the same content key as the blob. The PDS never
-sees real filenames or tags. This means server-side search and indexing require
-client-side decryption, but no metadata is ever leaked to the storage layer.
+
+All document metadata — name, MIME type, size, tags, description — is encrypted inside
+`encryptedMetadata` under the same content key as the blob. The PDS never sees a real
+filename or tag. The cost is that server-side search and indexing would require
+client-side decryption; the benefit is that no metadata leaks to the storage layer.
 
 ### Why separate grant records?
-Instead of adding recipients directly to the document record (like adding to the
-`keys` array), grants are separate records because:
-- The document owner might not want to update the document record every time they share
-- Grants can be deleted independently (for revocation)
-- An Indexer can efficiently query "what's shared with me?" across all documents
-- It matches the atproto pattern of small, independent records
+
+Recipients are not added to the document's `keys` array; each share is its own record.
+That keeps the document untouched when sharing, lets a grant be deleted independently for
+revocation, lets an indexer answer "what is shared with me?" across every document with one
+query, and matches the atproto pattern of small, independent records.
 
 ### Why the two-layer key for keyrings?
-Documents under a keyring still have their own per-document content key, just
-wrapped under the group key instead of individual pubkeys. This means:
-- Rotating the group key doesn't require re-encrypting every document's content
-- Individual documents can be selectively re-encrypted without touching the keyring
-- The content key acts as a per-document nonce for the group key
+
+A document under a keyring still has its own per-document content key, wrapped under the
+group key rather than individual public keys. Rotating the group key therefore never
+requires re-encrypting a single document's content, individual documents can be selectively
+re-encrypted without touching the keyring, and the content key doubles as a per-document
+domain separator for the group key.

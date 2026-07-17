@@ -25,14 +25,16 @@ sequenceDiagram
     PLC-->>CLI: { alsoKnownAs, service: [#atproto_pds → pds-url] }
 
     CLI->>TargetPDS: com.atproto.repo.getRecord (publicKey/self)
-    TargetPDS-->>CLI: PublicKeyRecord { publicKey, algo }
+    TargetPDS-->>CLI: PublicKeyRecord { x25519 + ml_kem halves, algos }
 
-    CLI->>User: DID, handle, PDS URL, public key, algorithm
+    CLI->>User: DID, handle, PDS URL, hybrid public keys, algorithms
 ```
+
+Resolution rejects a public-key record whose declared algorithm is not `x25519` / `ml-kem-768` before decoding any key bytes, so a corrupt or mislabelled key fails here with a clear reason rather than deep inside a wrap call (`spec:sharing-grants § The recipient's keys are discovered from their published public-key record`).
 
 ## Share
 
-Grants another user access to a document by wrapping the content key to their public key.
+Grants another user access to a document by wrapping the content key to their public key. Sharing is **cabinet-only**: a share hands out one document's content key to one recipient as a standalone grant record. Workspace documents are reached through group keys, not grants, so `share` from a workspace context is refused (`spec:sharing-grants § Sharing is cabinet-only`).
 
 ```mermaid
 sequenceDiagram
@@ -96,7 +98,7 @@ For true forward secrecy, the document should also be re-encrypted with a new co
 
 ## Pending Share (recipient not ready)
 
-When the recipient hasn't set up Opake yet (no `publicKey/self`), the share is queued as a `pendingShare` record on the PDS. The daemon retries periodically.
+A recipient who exists but has not published a `publicKey/self` record cannot receive a share yet. Resolution distinguishes this case — a valid DID with no key surfaces as `RecipientNotReady`, not `NotFound`, so a typo'd handle still fails outright. The client does **not** queue automatically: it warns that the recipient exists but has not set up Opake, and queues a `pendingShare` only on the user's explicit confirmation (`spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped`). The pending record carries the document, the recipient as entered, and the grant metadata encrypted under the document's content key — no plaintext, and enough to reconstruct the grant later.
 
 ```mermaid
 sequenceDiagram
@@ -108,35 +110,30 @@ sequenceDiagram
 
     User->>CLI: opake share photo.jpg bob.test
 
-    CLI->>CLI: Resolve filename → AT-URI
     CLI->>PLC: DID document for recipient
     PLC-->>CLI: { pds_url }
     CLI->>RecipientPDS: getRecord (publicKey/self)
-    RecipientPDS-->>CLI: 404 Not Found
+    RecipientPDS-->>CLI: 404 → RecipientNotReady
 
-    Note over CLI,PDS: Recipient hasn't set up Opake — queue for retry
+    CLI->>User: bob.test exists but hasn't set up Opake. Queue the share? [y/N]
+    User-->>CLI: y
+
+    CLI->>CLI: fetch document content key, encrypt grant metadata under it
     CLI->>PDS: createRecord (pendingShare)
     PDS-->>CLI: { uri }
-    CLI->>User: Share queued — will complete when they log in
+    CLI->>User: Share queued — will complete when they publish a key
 
     Note over CLI: Later, daemon tick...
     CLI->>PDS: listRecords (pendingShare)
     PDS-->>CLI: [ pendingShare record ]
 
-    CLI->>PLC: DID document for recipient
-    PLC-->>CLI: { pds_url }
     CLI->>RecipientPDS: getRecord (publicKey/self)
-    RecipientPDS-->>CLI: PublicKeyRecord { publicKey }
+    RecipientPDS-->>CLI: PublicKeyRecord (now published)
 
     Note over CLI: Recipient is ready — complete the share
-    CLI->>PDS: getRecord (document)
-    PDS-->>CLI: Document with owner's wrappedKey
-    CLI->>CLI: unwrap content key, wrap to recipient
-
+    CLI->>PDS: getRecord (document) → unwrap content key, wrap to recipient
     CLI->>PDS: putRecord (grant @ pendingShare rkey)
-    PDS-->>CLI: { uri }
     CLI->>PDS: deleteRecord (pendingShare)
-    PDS-->>CLI: 200 OK
 ```
 
 Completion writes the grant at the **pending share's own rkey** via an idempotent `putRecord`, not at a fresh rkey via `createRecord`. That is what keeps the retry runner exactly-once when more than one runner is live — a daemon and an open tab, say. Both derive the same grant rkey from the same pending record and upsert there, so the repo converges on one grant instead of one per runner. The `deleteRecord` that follows is idempotent cleanup: a runner that finds the pending record already gone treats that as done. See [Background maintenance](../FLOWS.md#background-maintenance--multi-runner-coordination) for the full race walkthrough and [docs/BACKGROUND_WORK.md](../BACKGROUND_WORK.md) for the contract.

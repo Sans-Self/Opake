@@ -127,45 +127,37 @@ Future optimization: a local URI to name cache (#155) would eliminate repeated `
 
 ## Workspace Directories
 
-Workspace directories use `keyringKeyWrapping` instead of `directKeyWrapping`. They live on the workspace owner's PDS. All members can read them via unauthenticated public fetches.
+A cabinet directory is edited in place on its owner's PDS. A workspace directory cannot be — the tree is shared and no single PDS holds it. Instead each workspace directory *path* is a supersede chain: the canonical directory at that path is whichever record has no successor pointing at it, and any member advances the path by writing a new record on **their own** PDS that supersedes the prior head. Workspace directories carry `keyringKeyWrapping` (the metadata content key is wrapped under the group key, not to a single DID), a `workspaceId` back to the genesis keyring, and a `lineage` anchor to the chain's genesis. There is no owner-only write path and no proposal-then-apply step: the indexer validates authority at write time and repoints the head.
 
-### Create Workspace Directory (Owner)
+Because a listing entry pins the child's `targetCid`, superseding a nested directory changes its URI and CID, which invalidates its parent's entry — so a change never stops at one record. It **cascades**: the edited directory is rewritten, then every ancestor up to the workspace root is rewritten to pin its rewritten child, each new record superseding the prior head at its level (`execute_cascade`, `build_deep_cascade_levels`). All the new records land on the author's PDS.
 
-```mermaid
-sequenceDiagram
-    participant Owner
-    participant PDS as Owner's PDS
+### Workspace root chain
 
-    Owner->>Owner: encrypt_keyring_directory_envelope(name, keyring_uri, group_key)
-    Owner->>PDS: getRecord(directory/ws-{keyring_rkey})
-    alt root exists
-        PDS-->>Owner: existing root URI
-    else 404
-        Owner->>PDS: putRecord(directory/ws-{keyring_rkey}, root)
-    end
-    Owner->>PDS: createRecord(directory, keyringKeyWrapping)
-    Owner->>PDS: putRecord(parent, entries += new_dir_uri)
-```
-
-### Propose Directory Change (Non-Owner Member)
+A workspace has no directory until its first contributor writes one. That first write is a **genesis** root: a TID-rkeyed directory stamped `isWorkspaceRoot: true`, with no `supersedes`. The flag — not a rkey convention — is what marks the root chain; the indexer enforces that only managers may set it, that it never flips across a supersede, and that a workspace has at most one active root chain (`spec:tree-chains § The workspace root is a flag-marked chain, forward-walked from genesis`). Concurrent first writers each stamp the flag; the indexer's `chain_heads` compare-and-set picks one winner and the losers self-heal on retry.
 
 ```mermaid
 sequenceDiagram
     participant Member
-    participant MemberPDS as Member's PDS
-    participant Indexer
-    participant OwnerDaemon as Owner's Daemon
-    participant OwnerPDS as Owner's PDS
+    participant IX as Indexer
+    participant PDS as Member's PDS
 
-    Member->>MemberPDS: createRecord(directoryUpdate, { actionType, keyring, ... })
-    MemberPDS->>Indexer: firehose event
-    Indexer->>Indexer: index in directory_updates
+    Note over Member: mkdir Photos in a workspace
+    Member->>IX: workspace_chain_heads(workspace_id)
+    IX-->>Member: keyring head + root head (or none)
 
-    OwnerDaemon->>Indexer: GET /api/workspace/directory-updates
-    Indexer-->>OwnerDaemon: pending directoryUpdate records
-    OwnerDaemon->>OwnerPDS: apply changes (applyWrites for moves)
+    alt No indexed root yet
+        Member->>Member: build genesis root (TID rkey, isWorkspaceRoot: true)
+        Member->>Member: build Photos directory (supersedes: none, lineage: self)
+        Member->>PDS: execute_cascade (root genesis + child, both on member's PDS)
+    else Root head known
+        Member->>Member: rewrite root: entries += Photos, supersedes = root head, supersedesCid pinned
+        Member->>PDS: execute_cascade (new root record on member's PDS)
+    end
+    PDS-->>IX: firehose → directory records, authority checked, heads repointed
 ```
 
-### Workspace Root Convention
+### Authority at write time
 
-Each workspace has its own root directory at a deterministic rkey: `ws-{keyring_rkey}`. This allows idempotent `putRecord` creation without discovery. The workspace root is separate from the owner's personal root (`directory/self`).
+The indexer authorizes each directory supersede against the workspace's live keyring head. A manager may add, remove, substitute, or reorder entries freely. An editor's supersede must be **additive**: every entry present in the prior canonical directory is still present, unless it has been advanced — replaced by an entry whose target supersedes the dropped one (a document edit or a rename). A viewer may not author directory records at all. This is the wiki-authority contract (`spec:tree-chains § Editor supersedes are additive; managers are unrestricted`); clients re-check it before writing for a fast, clear error, but the indexer's check is authoritative.
+
+Reads federate. The root's `entries` hold AT-URIs that may resolve to records on any member's PDS; a reader (the indexer, or a client doing public XRPC) walks the listing and fetches each target from whichever PDS hosts it. Storage and egress land on the contributor who wrote each record, not on any central owner.

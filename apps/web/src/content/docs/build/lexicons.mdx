@@ -109,6 +109,7 @@ already decryptable by the sharer's content key.
 
 ### `at.opake.keyring`
 
+{/* update-needed(#25): keyring `members` is an ARRAY of at.opake.defs#keyringMember (each member's DID lives in its wrappedKey.did) and `keyHistory` is an ARRAY of {rotation, members} — not the DID-keyed / rotation-keyed objects shown here and in the "members is keyed by DID" prose below. Also undocumented: the chain fields supersedes/supersedesCid/lineage (lexicons/at.opake.keyring.json). */}
 <CodeBlock language="json" title="keyring" code={keyringRecordShape} />
 
 A workspace. `members` is keyed by DID, with each entry carrying a wrapped copy of

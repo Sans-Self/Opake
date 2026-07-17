@@ -88,13 +88,11 @@ The construction follows BSI TR-02102 (Germany) and ANSSI (France) guidance for 
 
 **Direct encryption** — the content key is wrapped individually to each authorized DID's hybrid public-key bundle. The `keys` array in the document's encryption envelope holds one entry per authorized user. Good for ad-hoc sharing of individual files.
 
-**Keyring encryption (workspaces)** — a named group has a shared group key (GK), hybrid-wrapped to each member's `PublicKeyBundle` with a role (manager, editor, viewer). The keyring has a canonical `owner` DID. Documents have their content key wrapped under GK (AES-256-KW, no post-quantum needed — symmetric) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members.
+**Keyring encryption (workspaces)** — a named group has a shared group key (GK), hybrid-wrapped to each member's `PublicKeyBundle` with a role (manager, editor, viewer). The DID that authored the genesis keyring is the workspace creator, but that is a fact of the URI, not a stored owner field or an ongoing privilege level: after genesis the creator is simply a manager, and the keyring carries no `owner`. Documents have their content key wrapped under GK (AES-256-KW, no post-quantum needed — symmetric) instead of individual public keys. Adding a member gives them access to all documents without per-document changes. Removing a member rotates GK and re-wraps to remaining members.
 
-**Federated workspace documents** — workspace docs federate across members' PDSes. Each member uploads files to their own PDS, encrypted under the shared group key. The directory records (which hold the `entries` list) and the keyring (which holds the wrapped group key) live on the workspace owner's PDS — that's the coordinator pattern, the same shape as a Bluesky thread root. Reads walk the directory's at-URIs and fetch each doc from whichever PDS hosts it. Storage and egress costs land on the contributor that wrote the file, not the workspace owner.
+**Federated workspace documents** — workspace content federates across members' PDSes. Each member writes their own files to their own PDS, encrypted under the shared group key, so storage and egress land on the contributor who wrote the file rather than on the workspace creator. The two coordinative record kinds — the keyring (membership, wrapped group keys, rotation) and the directory listing for each path — are single supersede chains, not per-member records: at any moment a path has exactly one canonical directory, the head of its chain, and each curatorial write advances that chain on the writer's own PDS. Authority is enforced at write time — managers write the keyring and may edit any directory freely; editors may only extend a directory's entries, never remove or reorder. There is no proposal channel and no owner daemon applying changes on members' behalf: members write supersedes directly, and the indexer validates authority as it follows the chain. Reads walk the canonical directory listings and fetch each document from whichever PDS hosts it. The full model — chains, cascades, fork resolution, snapshots — is in [FEDERATION.md](FEDERATION.md).
 
-Member contributions register with the workspace via proposal records: `documentUpdate` proposals propose changes to existing documents (`updateContent` / `updateMetadata`); `directoryUpdate` proposals propose structural changes (`addEntry`, `removeEntry`, `moveEntry`, `createDirectory`, `deleteDirectory`, `renameDirectory`); `keyringUpdate` proposals propose membership changes (`addMember`, `removeMember`, `updateRole`, `rename`, `updateDescription`, `leave`). Each proposal lives on the proposer's PDS. The owner's daemon applies them by mutating the canonical record on the owner's PDS. After apply, editor-side cleanup deletes the proposal once the target record's `modifiedAt` advances past the proposal's `createdAt` — caught by SSE for online editors, by sync-time bootstrap reconciliation otherwise.
-
-**Workspace directories** — workspace folder hierarchies reuse `at.opake.directory` with `keyringKeyWrapping` (content key wrapped under the group key). Directories live on the owner's PDS only — members read them via public fetches. The workspace root uses a deterministic rkey (`ws-{keyring_rkey}`). Directories use `KeyWrapping` instead of the document `Encryption` type — no `algo`/`nonce` since directories have no blob.
+**Workspace directories** reuse the `at.opake.directory` record with `keyringKeyWrapping` (the directory's own metadata wrapped under the group key), carrying `entries`, `supersedes`, and `lineage` but no blob — so no content `algo`/`nonce`. The workspace root is an ordinary directory record flagged `isWorkspaceRoot: true`; it has no deterministic address, and clients find the current root by asking the indexer for the workspace-root chain head (`spec:tree-chains § The workspace root is a flag-marked chain, forward-walked from genesis`).
 
 ### Revocation
 
@@ -126,7 +124,7 @@ Identity keypairs are deterministically derived from a BIP-39 mnemonic (24 words
 
 The PBKDF2 salt is `"mnemonic"` per the [BIP-39 specification](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#from-mnemonic-to-seed) — security comes from the 256-bit entropy, not the salt. Each HKDF info string carries the schema version for domain separation, so a future version bump produces different keys from the same mnemonic without touching the BIP-39 layer.
 
-ML-KEM-768 KeyGen is itself deterministic given a 64-byte randomness seed, so the entire identity (all three keypairs) is reproducible from the mnemonic alone — verified by the `derive_kat_pinned` regression test in `crypto/mnemonic_tests.rs`.
+ML-KEM-768 KeyGen is itself deterministic given a 64-byte randomness seed, so the entire identity (all three keypairs) is reproducible from the mnemonic alone — pinned by the `golden_vector_all_zero_entropy` and `derivation_is_deterministic` regression tests in `mnemonic_tests.rs`.
 
 The mnemonic is shown once at first login and never stored. Recovery is via `opake recover` (CLI) or the "Use your recovery phrase" flow (web). See [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) for sequence diagrams.
 
@@ -134,7 +132,11 @@ The mnemonic is shown once at first login and never stored. Recovery is via `opa
 
 A workspace is identified by its genesis keyring's at-uri, and that URI is not an address the creator picks — its rkey is **derived** from the genesis (rotation-0) group key and the creator's DID. The key and DID seed an Ed25519 keypair, and the rkey is a 26-character base32 tag over the hash of that public key. The identity therefore commits to key material only members hold: an outsider cannot mint a keyring claiming a workspace whose rotation-0 key it lacks, because forging the rkey would be a preimage of the victim's tag. Every client re-derives the tag when it adopts a workspace under a declared identity and rejects a mismatch — a members-only, offline check the indexer cannot run, since it holds no group key. The full construction and threat model are in [CRYPTO.md](CRYPTO.md#workspace-identity); the record-shape and adoption paths are in [FEDERATION.md](FEDERATION.md).
 
-Superseding records (keyring, directory, document) also carry `supersedesCid` — the CID of the immediate predecessor the supersede was written against. At v1 this compares the CID a host *reports*, not a hash recomputed from bytes, so it detects disagreement between honest hosts but is not, yet, a defense against a host serving tampered bytes under the true CID. Byte-level binding is deferred to the replication tier.
+Superseding records (keyring, directory, document) also carry `supersedesCid` — the CID of the immediate predecessor the supersede was written against (`spec:lineage § Supersede references carry a content pin`). At v1 this compares the CID a host *reports*, not a hash recomputed from bytes, so it detects disagreement between honest hosts but is not, yet, a defense against a host serving tampered bytes under the true CID. Byte-level binding is deferred to the replication tier.
+
+## Lineage
+
+[Sable writes this]
 
 ## Data Model
 
@@ -172,49 +174,54 @@ erDiagram
         blob encrypted_content
         union encryption "direct or keyring"
         ref encryptedMetadata "name, type, size, tags, description"
-        string visibility
+        at-uri workspaceId "genesis keyring uri (workspace docs)"
+        at-uri lineage "chain genesis uri (supersedes only)"
     }
 
     GRANT {
         at-uri document
         did recipient
         wrappedKey key "content key wrapped to recipient"
-        string permissions
+        ref encryptedMetadata "permissions, note"
     }
 
     KEYRING {
-        did owner "canonical keyring owner"
+        at-uri lineage "genesis uri = workspace identity"
         keyringMember[] members "wrappedKey + role per member"
         int rotation
         keyHistoryEntry[] keyHistory "previous rotation snapshots"
     }
 ```
 
-### Workspaces and Proposals
+### Workspace supersede chains
+
+A workspace has no update or proposal records. Every membership change, rotation, rename, and structural edit is a *supersede*: a new record of the same kind, carrying `supersedes` (the predecessor URI), `supersedesCid` (its content pin), and `lineage` (the chain's genesis URI). The keyring chain captures workspace-level state; a per-path directory chain captures each folder's listing. [FEDERATION.md](FEDERATION.md) is the authority on how these chains fork, resolve, and cascade.
 
 ```mermaid
 erDiagram
-    DOCUMENT ||--o{ DOCUMENT_UPDATE : "updated via"
-    KEYRING ||--o{ KEYRING_UPDATE : "member proposals via"
-    DIRECTORY ||--o{ DIRECTORY_UPDATE : "structure proposals via"
+    KEYRING ||--o{ KEYRING : "superseded by (manager writes)"
+    DIRECTORY ||--o{ DIRECTORY : "superseded by (curatorial writes)"
+    DOCUMENT ||--o{ DOCUMENT : "superseded by (editor writes)"
+    KEYRING ||--o{ DIRECTORY : "workspaceId reference"
+    DIRECTORY ||--o{ DOCUMENT : "entries reference"
 
-    DOCUMENT_UPDATE {
-        at-uri document "target document"
-        blob encrypted_content
-        ref encryptedMetadata
-        at-uri supersedes "for adoption"
+    KEYRING {
+        at-uri lineage "genesis uri = workspace identity"
+        at-uri supersedes "prior head (non-genesis)"
+        cid supersedesCid "content pin on predecessor"
     }
 
-    KEYRING_UPDATE {
-        at-uri keyring "target workspace"
-        string actionType "addMember|removeMember|updateRole|rename|updateDescription|leave"
-        did memberDid "for member actions"
+    DIRECTORY {
+        at-uri workspaceId "genesis keyring uri"
+        at-uri lineage "this path chain's genesis"
+        entry[] entries "target at-uri + cid per child"
+        bool isWorkspaceRoot "root chain marker"
     }
 
-    DIRECTORY_UPDATE {
-        at-uri keyring "target workspace"
-        at-uri directory "target directory"
-        string actionType "addEntry|removeEntry|moveEntry|createDirectory|deleteDirectory|renameDirectory"
+    DOCUMENT {
+        at-uri workspaceId "genesis keyring uri"
+        at-uri lineage "this document chain's genesis"
+        at-uri supersedes "prior version (edits)"
     }
 ```
 
@@ -262,7 +269,7 @@ mgr.upload_at(&plaintext, "photo.jpg", "image/jpeg", None, None).await?;
 
 Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` proc-macro attribute (from opake-derive). This generates a wrapper + inner method split: the wrapper calls the inner method, then calls `signoff(result).await` to persist the session if it was refreshed during the call. Two variants: `#[signoff]` (FileManager — routes through `self.opake.signoff()`) and `#[signoff(self)]` (Opake — calls `self.signoff()` directly). If the operation itself failed, signoff is best-effort — the original error is preserved.
 
-`Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. `Workspace::from_keyring` is `pub(crate)`, so the only way to produce a `Workspace` outside opake-core is through the resolution methods (`resolve_workspace`, `file_context`, `workspaceByUri`) — this keeps the invariant that the URI, owner, group key, and rotation all came from the same verified keyring record. The WASM layer uses `WasmFileManagerHandle`, which shares an `Rc<Mutex<WasmOpake>>` with the parent `WasmOpakeHandle` and creates short-lived `FileManager` borrows inside each JS method (wasm_bindgen can't carry lifetimes across the boundary). The shared `Mutex` queues concurrent async operations instead of panicking on aliased `&mut self`. WASM persistence goes through `JsStorage`, a `Storage` impl that calls back into a JS-side `IndexedDbStorage`; `NoopStorage` is tests only. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
+`Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. `Workspace::from_keyring` is `pub(crate)`, so the only way to produce a `Workspace` outside opake-core is through the resolution methods (`resolve_workspace`, `file_context`, `resolve_workspace_by_uri`) — this keeps the invariant that the URI, owner, group key, and rotation all came from the same verified keyring record. The WASM layer uses `WasmFileManagerHandle`, which shares an `Rc<Mutex<WasmOpake>>` with the parent `WasmOpakeHandle` and creates short-lived `FileManager` borrows inside each JS method (wasm_bindgen can't carry lifetimes across the boundary). The shared `Mutex` queues concurrent async operations instead of panicking on aliased `&mut self`. WASM persistence goes through `JsStorage`, a `Storage` impl that calls back into a JS-side `IndexedDbStorage`; `NoopStorage` is tests only. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
 
 ## Background Work
 
