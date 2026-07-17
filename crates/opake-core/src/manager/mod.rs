@@ -21,8 +21,8 @@ mod upload;
 
 pub use admin::WorkspaceAdmin;
 pub use types::{
-    DownloadResult, FileContext, MutationOutcome, ResolvedDocumentMetadata, UploadRequest,
-    UploadResult,
+    DocumentMetadataResolution, DownloadResult, FileContext, MutationOutcome,
+    ResolvedDocumentMetadata, UploadRequest, UploadResult,
 };
 
 use crate::client::Transport;

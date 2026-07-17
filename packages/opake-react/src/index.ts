@@ -23,7 +23,11 @@ export { useStartSseConsumer } from "./hooks/use-start-sse-consumer";
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional re-export for legacy consumers
 export { useTree } from "./hooks/use-tree";
 export { useWorkspaces } from "./hooks/use-workspaces";
-export { useDirectoryMetadata } from "./hooks/use-directory-metadata";
+export {
+  useDirectoryMetadata,
+  type NameHydrationState,
+  type DirectoryMetadataResult,
+} from "./hooks/use-directory-metadata";
 export { useDownload } from "./hooks/use-download";
 
 // Mutation hooks

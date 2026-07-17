@@ -3,7 +3,7 @@ import { LockIcon } from "@phosphor-icons/react";
 import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
 import { fileIconElement, fileIconColors } from "./FileIcons";
-import { isActionable, type FileItem } from "./types";
+import { isActionable, hydrationPresentation, type FileItem } from "./types";
 
 interface FileGridCardProps {
   readonly item: FileItem;
@@ -12,6 +12,7 @@ interface FileGridCardProps {
   readonly onDoubleClick?: () => void;
   readonly renderActions?: () => ReactNode;
   readonly hideStatus?: boolean;
+  readonly onRetryHydration?: () => void;
   readonly onPreview?: () => void;
   readonly onEdit?: () => void;
   readonly onEditMetadata?: () => void;
@@ -32,6 +33,7 @@ export function FileGridCard({
   onDoubleClick,
   renderActions,
   hideStatus,
+  onRetryHydration,
   onPreview,
   onEdit,
   onEditMetadata,
@@ -49,6 +51,9 @@ export function FileGridCard({
   // indexer-visible record to open. `isActionable` folds that in.
   const isClickable = isActionable(item);
   const displayName = item.pending && !item.decrypted ? "Uploading…" : item.name;
+  // Name-hydration presentation for an undecrypted (non-pending) file card.
+  const hydration =
+    !item.pending && !item.decrypted ? hydrationPresentation(item) : null;
 
   const cardClassName = [
     "card border-base-300/50 bg-base-100 shadow-panel-sm hover:border-base-300 hover:shadow-panel-md border p-4 transition-all",
@@ -72,13 +77,13 @@ export function FileGridCard({
       }
       role={isClickable ? "button" : "article"}
       tabIndex={isClickable ? 0 : undefined}
-      aria-busy={item.pending ? true : undefined}
+      aria-busy={item.pending || hydration?.busy ? true : undefined}
       aria-label={
         item.pending
           ? `${displayName}, pending`
           : item.decrypted
             ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
-            : "Decrypting…"
+            : (hydration?.label ?? "Decrypting…")
       }
       className={cardClassName}
     >
@@ -124,6 +129,19 @@ export function FileGridCard({
         </div>
       ) : item.decrypted ? (
         <div className="text-base-content mb-0.5 truncate text-xs">{item.name}</div>
+      ) : hydration?.retryable ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetryHydration?.();
+          }}
+          className="text-caption text-text-faint hover:text-base-content mb-0.5 flex items-center underline decoration-dotted underline-offset-2"
+        >
+          Name unavailable — retry
+        </button>
+      ) : hydration && !hydration.busy ? (
+        <div className="text-caption text-text-faint mb-0.5 truncate">{hydration.label}</div>
       ) : (
         <div className="skeleton mb-0.5 h-4 w-24 rounded" />
       )}

@@ -181,6 +181,27 @@ export const documentMetadataSchema = z
 
 export type DocumentMetadata = z.output<typeof documentMetadataSchema>;
 
+/**
+ * Per-URI outcome of a name-hydration resolve. Mirrors the Rust
+ * `DocumentMetadataResolution` (`#[serde(tag = "status")]`): a healthy
+ * resolve carries the decrypted metadata; a transient miss (`retryable`)
+ * means the record isn't visible yet and the caller should poll again; a
+ * definitive failure (`undecryptable`) means this caller can never decrypt
+ * it and should stop retrying.
+ */
+export const documentMetadataResolutionSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("resolved"), metadata: documentMetadataSchema }),
+  z.object({ status: z.literal("retryable") }),
+  z.object({ status: z.literal("undecryptable") }),
+]);
+
+export type DocumentMetadataResolution = z.output<typeof documentMetadataResolutionSchema>;
+
+export const documentMetadataResolutionsSchema = z.record(
+  z.string(),
+  documentMetadataResolutionSchema,
+);
+
 // ---------------------------------------------------------------------------
 // Directory tree
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import type {
   DeleteRecursiveResult,
   GrantEntry,
 } from "./types";
+import type { DocumentMetadataResolution } from "./schemas";
 import { parseWasmError, wrapWasmErrors } from "./errors";
 import { registerCleanup, unregisterCleanup } from "./finalizer";
 import {
@@ -20,6 +21,7 @@ import {
   deleteRecursiveResultSchema,
   directoryTreeSnapshotSchema,
   documentMetadataSchema,
+  documentMetadataResolutionsSchema,
   grantEntriesSchema,
   treeWithMetadataSchema,
 } from "./schemas";
@@ -43,6 +45,7 @@ type WasmFileManager = {
   loadTreeWithMetadata(metadataForDir: string | null): Promise<unknown>;
   syncAndLoadTree(metadataForDir: string | null): Promise<unknown>;
   getDocumentMetadata(documentUri: string): Promise<unknown>;
+  resolveDocumentMetadataFor(documentUris: string[]): Promise<unknown>;
   renameDirectory(directoryUri: string, newName: string): Promise<unknown>;
   updateMetadata(
     documentUri: string,
@@ -464,6 +467,30 @@ export class FileManager {
   getDocumentMetadata(documentUri: string): Promise<DocumentMetadata> {
     return this.track(() =>
       this.requireHandle().getDocumentMetadata(documentUri).then(documentMetadataSchema.parse),
+    );
+  }
+
+  /**
+   * Resolve name-hydration status for an explicit list of document URIs.
+   *
+   * Unlike {@link loadTreeWithMetadata}, this resolves the exact URIs passed
+   * rather than re-deriving a tree and iterating its entries — so a document
+   * a live projection (the SSE tree keeper) already lists still resolves even
+   * when a `loadTree`-derived tree hasn't caught up to it yet. Each URI comes
+   * back tagged: `resolved` with metadata, `retryable` (not visible yet —
+   * poll again), or `undecryptable` (definitive; this caller can't decrypt
+   * it). URIs the resolver couldn't classify are simply absent from the map.
+   *
+   * @param documentUris - Document AT URIs to resolve.
+   */
+  @wrapWasmErrors
+  resolveDocumentMetadataFor(
+    documentUris: readonly string[],
+  ): Promise<Readonly<Record<string, DocumentMetadataResolution>>> {
+    return this.track(() =>
+      this.requireHandle()
+        .resolveDocumentMetadataFor([...documentUris])
+        .then((raw) => documentMetadataResolutionsSchema.parse(raw)),
     );
   }
 

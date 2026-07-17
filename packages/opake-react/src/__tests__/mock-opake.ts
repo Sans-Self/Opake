@@ -11,6 +11,7 @@ import type {
   ChainForkWatcher,
   DirectoryTreeSnapshot,
   DirectoryWatcher,
+  DocumentMetadataResolution,
   FileManager,
   Opake,
 } from "@opake/sdk";
@@ -39,6 +40,9 @@ export interface MockFileManager {
       directoryUri: string,
       handler: (snapshot: DirectoryTreeSnapshot | null) => void,
     ) => MockDirectoryWatcher
+  >;
+  resolveDocumentMetadataFor: Mock<
+    (uris: readonly string[]) => Promise<Readonly<Record<string, DocumentMetadataResolution>>>
   >;
   dispose: Mock<() => void>;
   /** Fire the most recently installed watcher with a new snapshot. */
@@ -84,6 +88,7 @@ export function createMockFileManager(initialTree?: DirectoryTreeSnapshot): Mock
   const state: MockFileManager = {
     loadTree: vi.fn(async () => tree),
     watchDirectory: vi.fn(),
+    resolveDocumentMetadataFor: vi.fn(async () => ({})),
     dispose: vi.fn(() => {
       disposed = true;
     }),

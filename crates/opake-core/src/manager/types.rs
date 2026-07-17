@@ -91,6 +91,24 @@ pub struct ResolvedDocumentMetadata {
     pub modified_at: Option<String>,
 }
 
+/// Outcome of resolving one document's decrypted metadata.
+///
+/// A name-hydration attempt lands in one of three states, and the client
+/// renders and retries each differently: a healthy resolve, a transient
+/// miss worth retrying (the record isn't visible yet — a `getRecord` 404
+/// or indexer/PDS lag), and a definitive failure the caller can never
+/// decrypt (no content-key wrap for this DID, or the envelope won't
+/// decrypt). Collapsing the latter two into a single "absent" — as the
+/// bare `Option` resolver does — is what left a healthy-but-not-yet-visible
+/// document stuck on a permanent "Decrypting…" placeholder with no retry.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum DocumentMetadataResolution {
+    Resolved { metadata: ResolvedDocumentMetadata },
+    Retryable,
+    Undecryptable,
+}
+
 impl ResolvedDocumentMetadata {
     /// Build from decrypted metadata + record timestamps.
     pub fn from_parts(

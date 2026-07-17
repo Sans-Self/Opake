@@ -343,3 +343,88 @@ async fn bug__additivity_rejects_editor_drop_without_document_supersede() {
         .expect_err("a drop with no superseding document must be rejected");
     assert!(matches!(err, Error::ChainAdditivityViolation { .. }));
 }
+
+/// Regression: name hydration must distinguish a *transient* miss (the
+/// record isn't visible yet — a `getRecord` 404 under indexer/PDS lag) from
+/// a *definitive* one (no content-key wrap for this caller). Collapsing both
+/// into a bare "absent", as the old `Option`-returning resolver did, is what
+/// stranded a healthy freshly-created cabinet row on a permanent
+/// "Decrypting…" placeholder with no retry: the client couldn't tell the
+/// stuck-but-retryable case from a give-up case, so it did neither.
+#[tokio::test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+async fn bug__resolve_status_splits_retryable_from_undecryptable() {
+    use crate::atproto::{AtBytes, BlobRef, CidLink};
+    use crate::cabinet::Cabinet;
+    use crate::manager::DocumentMetadataResolution;
+    use crate::records::{DirectEncryption, Document, EncryptionEnvelope, Encryption};
+
+    const DOC_MISSING: &str = "at://did:plc:bob/at.opake.document/missing";
+    const DOC_NOKEY: &str = "at://did:plc:bob/at.opake.document/nokey";
+
+    let mock = MockTransport::new();
+    // Slice order drives call order: DOC_MISSING resolves first and 404s.
+    mock.enqueue(not_found());
+    // DOC_NOKEY is a well-formed record, but its only wrapped key targets
+    // someone else — bob can never unwrap it.
+    let doc = Document {
+        opake_version: SCHEMA_VERSION,
+        blob: BlobRef {
+            blob_type: "blob".into(),
+            reference: CidLink {
+                cid: "bafyblob".into(),
+            },
+            mime_type: "application/octet-stream".into(),
+            size: 1,
+        },
+        encryption: Encryption::Direct(DirectEncryption {
+            envelope: EncryptionEnvelope {
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: "AAAA".into(),
+                },
+                keys: vec![WrappedKey {
+                    did: "did:plc:someone-else".into(),
+                    ciphertext: AtBytes {
+                        encoded: "AAAA".into(),
+                    },
+                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
+                }],
+            },
+        }),
+        encrypted_metadata: dummy_encrypted_metadata(),
+        supersedes: None,
+        workspace_id: None,
+        created_at: "2026-03-01T00:00:00Z".into(),
+        modified_at: None,
+    };
+    mock.enqueue(ok(record_entry(DOC_NOKEY, "bafydoc", &doc)));
+
+    let identity = Identity::generate(BOB, &mut OsRng);
+    let cabinet = Cabinet::from_identity(&identity).unwrap();
+    let mut opake = opake_for_bob(mock.clone());
+    let ctx = FileContext::Cabinet(cabinet);
+    let mut mgr = opake.file_manager(&ctx);
+
+    let statuses = mgr
+        .resolve_document_metadata_status_for(&[DOC_MISSING, DOC_NOKEY])
+        .await
+        .expect("status resolution must not hard-error on 404 / no-key");
+
+    assert!(
+        matches!(
+            statuses.get(DOC_MISSING),
+            Some(DocumentMetadataResolution::Retryable)
+        ),
+        "a getRecord 404 (healthy record not visible yet) must be retryable, got {:?}",
+        statuses.get(DOC_MISSING),
+    );
+    assert!(
+        matches!(
+            statuses.get(DOC_NOKEY),
+            Some(DocumentMetadataResolution::Undecryptable)
+        ),
+        "a record with no wrapped key for this DID must be undecryptable, got {:?}",
+        statuses.get(DOC_NOKEY),
+    );
+}

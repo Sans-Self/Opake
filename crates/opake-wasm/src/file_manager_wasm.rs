@@ -395,6 +395,29 @@ impl WasmFileManagerHandle {
         to_js(&metadata)
     }
 
+    /// Resolve reason-carrying metadata status for an explicit list of
+    /// document URIs.
+    ///
+    /// Decouples name hydration from any single tree projection: the client
+    /// passes the exact document URIs its rendered snapshot lists and gets
+    /// back, per URI, `{ status: "resolved", metadata }`, `{ status:
+    /// "retryable" }` (not visible yet — poll again), or `{ status:
+    /// "undecryptable" }` (this caller can never decrypt it).
+    #[wasm_bindgen(js_name = resolveDocumentMetadataFor)]
+    pub async fn resolve_document_metadata_for(
+        &self,
+        document_uris: Vec<String>,
+    ) -> Result<JsValue, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
+        let mut mgr = opake.file_manager(ctx);
+        let uri_refs: Vec<&str> = document_uris.iter().map(String::as_str).collect();
+        let statuses = mgr
+            .resolve_document_metadata_status_for(&uri_refs)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&statuses)
+    }
+
     /// Fetch and decrypt metadata for a single document by URI.
     #[wasm_bindgen(js_name = getDocumentMetadata)]
     pub async fn get_document_metadata(&self, document_uri: &str) -> Result<JsValue, JsError> {
