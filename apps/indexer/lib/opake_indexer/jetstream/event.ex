@@ -120,17 +120,19 @@ defmodule OpakeIndexer.Jetstream.Event do
 
   # -- Workspace ID derivation ----------------------------------------
   #
-  # Workspace identity is pulled from the record's own `workspaceId`
-  # field for non-genesis records. The genesis keyring carries no
-  # `workspaceId` (its own URI is the workspace ID) — we substitute its
-  # own URI so downstream code never has to special-case this. Cabinet
-  # records lack `workspaceId` entirely → nil.
+  # For keyrings the workspace identity IS the chain's genesis URI, carried
+  # on every supersede in the record's own `lineage` field. The genesis
+  # keyring carries no `lineage` (its own URI is the workspace ID) — we
+  # substitute its own URI so downstream code never has to special-case
+  # this. For documents and directories the workspace they belong to is
+  # carried in `workspaceId` (distinct from their own `lineage`, which
+  # names their own chain's genesis). Cabinet records carry neither → nil.
 
-  defp derive_workspace_id(_uri, @keyring_collection, %{"workspaceId" => ws}) when is_binary(ws),
+  defp derive_workspace_id(_uri, @keyring_collection, %{"lineage" => ws}) when is_binary(ws),
     do: ws
 
   defp derive_workspace_id(_uri, @keyring_collection, %{"supersedes" => prior}) when is_binary(prior) do
-    # Supersede keyring with no explicit workspaceId — try to resolve
+    # Supersede keyring with no explicit lineage — try to resolve
     # via prior. Falls back to nil if the predecessor isn't indexed
     # yet; the dispatch handles `nil workspace_id` records as orphans.
     case OpakeIndexer.Queries.RecordQueries.lookup(prior) do

@@ -65,7 +65,8 @@ fn create_keyring_fixture(plaintext: &[u8]) -> KeyringFixture {
     let rng = &mut OsRng;
     let group_key = crypto::generate_content_key(rng);
     let content_key = crypto::generate_content_key(rng);
-    let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
+    let blob_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&content_key, plaintext, &blob_context, rng).unwrap();
     let wrapped_content_key_bytes =
         crypto::wrap_content_key_for_keyring(&content_key, &group_key).unwrap();
 
@@ -86,8 +87,10 @@ fn keyring_document_at_rotation(fixture: &KeyringFixture, rotation: u64) -> Docu
         tags: vec![],
         description: None,
     };
+    let meta_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentMetadata);
     let encrypted_metadata =
-        crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
+        crypto::encrypt_metadata(&fixture.content_key, &metadata, &meta_context, &mut OsRng)
+            .unwrap();
 
     Document::new(
         BlobRef {
@@ -185,7 +188,8 @@ async fn rejects_direct_encrypted_document() {
     let member = TestKeys::generate(MEMBER_DID);
 
     let content_key = crypto::generate_content_key(&mut OsRng);
-    let payload = crypto::encrypt_blob(&content_key, b"data", &mut OsRng).unwrap();
+    let blob_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&content_key, b"data", &blob_context, &mut OsRng).unwrap();
     let wrapped = crypto::wrap_key(
         &content_key,
         &member.public_keys(),
@@ -202,7 +206,9 @@ async fn rejects_direct_encrypted_document() {
         tags: vec![],
         description: None,
     };
-    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &mut OsRng).unwrap();
+    let meta_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentMetadata);
+    let encrypted_metadata =
+        crypto::encrypt_metadata(&content_key, &metadata, &meta_context, &mut OsRng).unwrap();
 
     let doc = Document::new(
         BlobRef {

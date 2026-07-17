@@ -16,6 +16,8 @@ On a keyring record delete, the indexer SHALL resolve exactly one outcome from t
 
 `workspace_id` is the genesis URI from the deleted record's row; for an orphan row (predecessor never indexed, `workspace_id` nil) the payload SHALL carry the tombstone's own URI and `outcome: unchanged` — no tracked chain exists for an orphan, so nothing can be dropped.
 
+Payload `workspace_id` is the indexer's row field, a *reference* to the workspace, and keeps that name; it is not the keyring record's own chain-identity field, which is `lineage` (`spec:workspace-identity § Genesis URI is the workspace identity`). The two carry the same value — the genesis URI — but renaming the wire field does not rename the payload.
+
 #### Scenario: genesis record of a living workspace is deleted
 
 - **GIVEN** a workspace whose keyring chain has superseded past genesis

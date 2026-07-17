@@ -32,7 +32,7 @@ impl WorkspaceId {
     /// Mint a `WorkspaceId` from an already-resolved genesis URI.
     ///
     /// `pub(crate)` — every call site inside opake-core has derived the
-    /// value via `wrap_anchor` or an equivalent chain-genesis resolution,
+    /// value via `lineage_anchor` or an equivalent chain-genesis resolution,
     /// never a raw caller-supplied string.
     pub(crate) fn from_resolved(uri: impl Into<String>) -> Self {
         Self(uri.into())
@@ -237,7 +237,7 @@ pub(crate) fn derive_historical_keys(
     // to the workspace's stable (genesis) URI just like the live members.
     // `keyring_uri` is whatever URI the caller fetched the record at; the
     // record resolves its own anchor.
-    let anchor = keyring.wrap_anchor(keyring_uri);
+    let anchor = keyring.lineage_anchor(keyring_uri);
     keyring
         .key_history
         .iter()

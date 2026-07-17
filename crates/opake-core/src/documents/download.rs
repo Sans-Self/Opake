@@ -2,17 +2,19 @@ use log::trace;
 
 use crate::atproto::{self, AtBytes};
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, PrivateKeyBundle};
+use crate::crypto::{self, ContentKey, PrivateKeyBundle, SealContext, SealType};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption, EncryptionEnvelope};
 
-/// Decode an AtBytes nonce and decrypt ciphertext with a content key.
+/// Decode an AtBytes nonce and decrypt a blob ciphertext, binding the AAD to
+/// the document's lineage `anchor`.
 ///
 /// Shared by direct, keyring, and cross-PDS download paths.
 pub(super) fn decrypt_with_nonce(
     content_key: &ContentKey,
     nonce_field: &AtBytes,
     ciphertext: Vec<u8>,
+    anchor: &str,
 ) -> Result<Vec<u8>, Error> {
     let nonce_bytes = nonce_field
         .decode()
@@ -22,20 +24,24 @@ pub(super) fn decrypt_with_nonce(
     })?;
 
     trace!("decrypting {} bytes", ciphertext.len());
+    let context = SealContext::new(anchor, SealType::DocumentBlob);
     Ok(crypto::decrypt_blob(
         content_key,
         &crypto::EncryptedPayload { ciphertext, nonce },
+        &context,
     )?)
 }
 
-/// Resolve a document's name from encrypted metadata if present, falling
-/// back to the plaintext `name` field for pre-encryption records.
+/// Resolve a document's name from encrypted metadata, reconstructing the AAD
+/// from the document's lineage `anchor`.
 pub(super) fn resolve_document_name(
     doc: &Document,
     content_key: &ContentKey,
+    anchor: &str,
 ) -> Result<String, Error> {
+    let context = SealContext::new(anchor, SealType::DocumentMetadata);
     let metadata: crypto::DocumentMetadata =
-        crypto::decrypt_metadata(content_key, &doc.encrypted_metadata)?;
+        crypto::decrypt_metadata(content_key, &doc.encrypted_metadata, &context)?;
     Ok(metadata.name)
 }
 
@@ -44,8 +50,9 @@ pub(super) fn decrypt_with_envelope(
     content_key: &ContentKey,
     envelope: &EncryptionEnvelope,
     ciphertext: Vec<u8>,
+    anchor: &str,
 ) -> Result<Vec<u8>, Error> {
-    decrypt_with_nonce(content_key, &envelope.nonce, ciphertext)
+    decrypt_with_nonce(content_key, &envelope.nonce, ciphertext, anchor)
 }
 
 /// Unwrap a content key from a document's encryption metadata.
@@ -207,8 +214,9 @@ pub async fn download_with_group_key(
         .get_blob(&at_uri.authority, &doc.blob.reference.cid)
         .await?;
 
-    let plaintext = decrypt_with_nonce(&content_key, nonce, ciphertext)?;
-    let name = resolve_document_name(&doc, &content_key)?;
+    let anchor = doc.lineage_anchor(uri);
+    let plaintext = decrypt_with_nonce(&content_key, nonce, ciphertext, anchor)?;
+    let name = resolve_document_name(&doc, &content_key, anchor)?;
     Ok((name, plaintext))
 }
 
@@ -233,7 +241,8 @@ mod tests {
     fn encrypt_for_download(plaintext: &[u8], keys: &TestKeys) -> EncryptedFixture {
         let rng = &mut OsRng;
         let content_key = crypto::generate_content_key(rng);
-        let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
+        let blob_context = crypto::SealContext::new(TEST_URI, crypto::SealType::DocumentBlob);
+        let payload = crypto::encrypt_blob(&content_key, plaintext, &blob_context, rng).unwrap();
         // Test fixture wraps in the Document context bound to the test
         // document's URI — same context the production download path
         // expects when it unwraps.
@@ -261,8 +270,10 @@ mod tests {
             tags: vec![],
             description: None,
         };
+        let meta_context = crypto::SealContext::new(TEST_URI, crypto::SealType::DocumentMetadata);
         let encrypted_metadata =
-            crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
+            crypto::encrypt_metadata(&fixture.content_key, &metadata, &meta_context, &mut OsRng)
+                .unwrap();
 
         Document::new(
             BlobRef {

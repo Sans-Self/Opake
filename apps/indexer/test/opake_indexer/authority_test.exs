@@ -188,4 +188,49 @@ defmodule OpakeIndexer.AuthorityTest do
                {:rejected, :workspace_root_flip}
     end
   end
+
+  describe "check_lineage/2 — never-flips" do
+    # Pure function, no DB — the anchor rule is derived from the passed
+    # prior record. Genesis (nil prior) and unindexed-prior both skip.
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "genesis (no prior record) passes with no declared lineage" do
+      assert Authority.check_lineage(nil, nil) == :ok
+    end
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "unindexed predecessor is unverifiable and skipped" do
+      assert Authority.check_lineage(nil, "at://a/at.opake.document/genesis") == :ok
+    end
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "predecessor is genesis — supersede must declare the predecessor's own URI" do
+      genesis = "at://a/at.opake.document/genesis"
+      prior = %{uri: genesis, record_jsonb: %{}}
+      assert Authority.check_lineage(prior, genesis) == :ok
+    end
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "predecessor carries lineage — supersede must declare the same lineage" do
+      genesis = "at://a/at.opake.document/genesis"
+      intermediate = "at://a/at.opake.document/mid"
+      prior = %{uri: intermediate, record_jsonb: %{"lineage" => genesis}}
+      assert Authority.check_lineage(prior, genesis) == :ok
+    end
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "flipped lineage is rejected" do
+      genesis = "at://a/at.opake.document/genesis"
+      prior = %{uri: genesis, record_jsonb: %{}}
+      assert Authority.check_lineage(prior, "at://evil/at.opake.document/other") ==
+               {:rejected, :lineage_flip}
+    end
+
+    # spec:lineage § Lineage never flips across a supersede
+    test "supersede that carries no lineage against a real predecessor is rejected" do
+      genesis = "at://a/at.opake.document/genesis"
+      prior = %{uri: genesis, record_jsonb: %{}}
+      assert Authority.check_lineage(prior, nil) == {:rejected, :lineage_flip}
+    end
+  end
 end

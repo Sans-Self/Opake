@@ -150,7 +150,8 @@ async fn bug__pair_response_with_pds_unpadded_base64_decrypts() {
     let mut rng = OsRng;
     let content_key = generate_content_key(&mut rng);
     let identity_json = serde_json::to_vec(&sender.identity).unwrap();
-    let payload = encrypt_blob(&content_key, &identity_json, &mut rng).unwrap();
+    let seal_context = crate::crypto::SealContext::pair_identity();
+    let payload = encrypt_blob(&content_key, &identity_json, &seal_context, &mut rng).unwrap();
     let wrapped = wrap_key(
         &content_key,
         &device.public_keys(),

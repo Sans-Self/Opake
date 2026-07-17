@@ -42,7 +42,9 @@ fn build_grant(
         permissions: Some(params.permissions.to_string()),
         note: params.note.map(|n| n.to_string()),
     };
-    let encrypted_metadata = crypto::encrypt_metadata(params.content_key, &metadata, rng)?;
+    let context = crypto::SealContext::new(params.document_uri, crypto::SealType::GrantMetadata);
+    let encrypted_metadata =
+        crypto::encrypt_metadata(params.content_key, &metadata, &context, rng)?;
 
     Ok(Grant::new(
         params.document_uri.to_string(),

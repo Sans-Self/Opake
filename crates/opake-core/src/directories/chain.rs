@@ -34,17 +34,36 @@ use crate::records::{Directory, Keyring};
 /// handles both types.
 pub trait Superseding {
     fn supersedes_uri(&self) -> Option<&str>;
+
+    /// The chain's genesis URI this record declares, if any. Absent on a
+    /// genesis record, which identifies itself.
+    fn declared_lineage(&self) -> Option<&str>;
+
+    /// The record's lineage anchor: its declared lineage, or its own URI when
+    /// it is genesis
+    /// (`spec:lineage § Lineage is the chain's genesis URI, carried on every supersede`).
+    fn lineage_anchor<'a>(&'a self, own_uri: &'a str) -> &'a str {
+        self.declared_lineage().unwrap_or(own_uri)
+    }
 }
 
 impl Superseding for Directory {
     fn supersedes_uri(&self) -> Option<&str> {
         self.supersedes.as_deref()
     }
+
+    fn declared_lineage(&self) -> Option<&str> {
+        self.lineage.as_deref()
+    }
 }
 
 impl Superseding for Keyring {
     fn supersedes_uri(&self) -> Option<&str> {
         self.supersedes.as_deref()
+    }
+
+    fn declared_lineage(&self) -> Option<&str> {
+        self.lineage.as_deref()
     }
 }
 
@@ -216,6 +235,20 @@ where
         }
 
         let node = fetch_with_cache::<R>(transport, &uri, &mut pds_cache).await?;
+
+        // Never-flips (client mirror): the child we just followed a back-edge
+        // from must have declared THIS node's anchor as its lineage. A record
+        // that flips is outside the chain, so we stop the walk read-leniently
+        // rather than error the snapshot — the child becomes the walk's tail
+        // and downstream genesis-matching rejects the flipped head
+        // (`spec:lineage § Lineage never flips across a supersede`).
+        if let Some(child) = nodes.last() {
+            let node_anchor = node.record.lineage_anchor(&node.uri);
+            if child.record.lineage_anchor(&child.uri) != node_anchor {
+                break;
+            }
+        }
+
         next = node.record.supersedes_uri().map(String::from);
         nodes.push(node);
     }

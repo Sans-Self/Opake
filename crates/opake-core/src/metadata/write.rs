@@ -30,7 +30,9 @@ pub async fn update_document_metadata(
     mutator(&mut metadata);
 
     trace!("re-encrypting metadata for {}", uri);
-    let encrypted = crypto::encrypt_metadata(&result.content_key, &metadata, rng)?;
+    let anchor = doc.lineage_anchor(uri);
+    let context = crypto::SealContext::new(anchor, crypto::SealType::DocumentMetadata);
+    let encrypted = crypto::encrypt_metadata(&result.content_key, &metadata, &context, rng)?;
     doc.encrypted_metadata = encrypted;
 
     client

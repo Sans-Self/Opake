@@ -459,6 +459,34 @@ fn bug__find_parent_skips_superseded_parent() {
     );
 }
 
+/// A superseding record whose declared lineage disagrees with its
+/// predecessor's anchor is outside the chain. Its supersede edge is dropped
+/// read-leniently, so the prior workspace-root head it names stays canonical
+/// instead of being retired by a flipped record.
+// spec:lineage § Lineage never flips across a supersede
+#[test]
+fn flipped_lineage_supersede_leaves_prior_head_canonical() {
+    const ROOT0: &str = "at://did:plc:test/at.opake.directory/root0";
+    const FLIPPED: &str = "at://did:plc:test/at.opake.directory/flipped";
+
+    // Genesis workspace root: identifies itself (no lineage).
+    let mut root0 = dummy_directory_with_entries("/", vec![]);
+    root0.lineage = None;
+    root0.is_workspace_root = true;
+
+    // A record that supersedes the root but declares a foreign lineage.
+    let mut flipped = dummy_directory_with_entries("/", vec![]);
+    flipped.supersedes = Some(ROOT0.into());
+    flipped.lineage = Some("at://did:plc:attacker/at.opake.directory/other".into());
+
+    let records = vec![(ROOT0.to_owned(), root0), (FLIPPED.to_owned(), flipped)];
+    let tree = DirectoryTree::from_records(records);
+
+    // The flip is rejected: the root chain does not advance to the flipped
+    // record, so the genesis root remains the canonical head.
+    assert_eq!(tree.root_uri(), Some(ROOT0));
+}
+
 // -- public getters --
 
 #[tokio::test]
@@ -525,6 +553,7 @@ fn keyring_directory(
         keyring_uri,
         group_key,
         0,
+        super::super::tests::TEST_DIR_ANCHOR,
         &mut crypto_mod::OsRng,
     )
     .unwrap();
@@ -540,6 +569,7 @@ fn keyring_directory(
             encrypted_metadata,
             "2026-03-21T00:00:00Z".into(),
         )
+        .with_lineage(super::super::tests::TEST_DIR_ANCHOR)
     }
 }
 

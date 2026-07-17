@@ -39,6 +39,11 @@ pub enum LevelMode {
         prior_head_uri: String,
         key_wrapping: KeyWrapping,
         encrypted_metadata: EncryptedMetadata,
+        /// The chain's lineage anchor (genesis URI). Stamped onto the new
+        /// record so the verbatim-copied `encrypted_metadata` still
+        /// authenticates under the same AAD
+        /// (`spec:lineage § Lineage never flips across a supersede`).
+        lineage: String,
     },
     /// Create a fresh genesis record at this level. No `supersedes`
     /// field. If `rkey` is `Some`, the record is written via
@@ -197,7 +202,7 @@ async fn write_level<T: Transport>(
     is_workspace_root: bool,
     modified_at: &str,
 ) -> Result<CascadeStep, Error> {
-    let (key_wrapping, encrypted_metadata, supersedes, rkey) = unpack_mode(mode);
+    let (key_wrapping, encrypted_metadata, supersedes, rkey, lineage) = unpack_mode(mode);
 
     let record = Directory {
         opake_version: SCHEMA_VERSION,
@@ -205,6 +210,7 @@ async fn write_level<T: Transport>(
         encrypted_metadata,
         entries,
         supersedes: supersedes.clone(),
+        lineage,
         workspace_id: Some(workspace_id.to_owned()),
         is_workspace_root,
         created_at: modified_at.to_owned(),
@@ -313,11 +319,13 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
     // ancestors (root-only supersede); deep cascades have a subdirectory
     // leaf.
     let leaf_node = records.pop().expect("non-empty chain");
+    let leaf_lineage = leaf_node.record.lineage_anchor(&leaf_node.uri).to_owned();
     let leaf = LeafLevel {
         mode: LevelMode::Supersede {
             prior_head_uri: leaf_node.uri,
             key_wrapping: leaf_node.record.key_wrapping,
             encrypted_metadata: leaf_node.record.encrypted_metadata,
+            lineage: leaf_lineage,
         },
         entries: new_leaf_entries,
         is_workspace_root: leaf_node.record.is_workspace_root,
@@ -339,11 +347,16 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
     }
 
     for (ancestor_node, child_uri) in records.into_iter().zip(child_uris) {
+        let ancestor_lineage = ancestor_node
+            .record
+            .lineage_anchor(&ancestor_node.uri)
+            .to_owned();
         ancestors.push(AncestorLevel {
             mode: LevelMode::Supersede {
                 prior_head_uri: ancestor_node.uri,
                 key_wrapping: ancestor_node.record.key_wrapping,
                 encrypted_metadata: ancestor_node.record.encrypted_metadata,
+                lineage: ancestor_lineage,
             },
             linkage: AncestorLinkage::Replace {
                 prior_child_uri: child_uri,
@@ -359,11 +372,13 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
     Ok((ancestors, leaf))
 }
 
+#[allow(clippy::type_complexity)]
 fn unpack_mode(
     mode: LevelMode,
 ) -> (
     KeyWrapping,
     EncryptedMetadata,
+    Option<String>,
     Option<String>,
     Option<String>,
 ) {
@@ -372,12 +387,20 @@ fn unpack_mode(
             prior_head_uri,
             key_wrapping,
             encrypted_metadata,
-        } => (key_wrapping, encrypted_metadata, Some(prior_head_uri), None),
+            lineage,
+        } => (
+            key_wrapping,
+            encrypted_metadata,
+            Some(prior_head_uri),
+            None,
+            Some(lineage),
+        ),
+        // Genesis records identify themselves — no lineage.
         LevelMode::Genesis {
             key_wrapping,
             encrypted_metadata,
             rkey,
-        } => (key_wrapping, encrypted_metadata, None, rkey),
+        } => (key_wrapping, encrypted_metadata, None, rkey, None),
     }
 }
 

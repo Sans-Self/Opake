@@ -277,7 +277,7 @@ fn make_keyring_envelope(
                 },
             },
             supersedes: None,
-            workspace_id: None,
+            lineage: None,
             created_at: "2026-04-17T00:00:00Z".into(),
             modified_at: None,
         },
@@ -357,7 +357,9 @@ fn make_superseded_envelope_with_name(
         description: None,
         icon: None,
     };
-    let encrypted_metadata = encrypt_metadata(&gk, &metadata, rng).unwrap();
+    let meta_context =
+        crate::crypto::SealContext::new(genesis_uri, crate::crypto::SealType::KeyringMetadata);
+    let encrypted_metadata = encrypt_metadata(&gk, &metadata, &meta_context, rng).unwrap();
 
     crate::indexer::types::IndexerEnvelope {
         uri: head_uri.to_string(),
@@ -372,7 +374,7 @@ fn make_superseded_envelope_with_name(
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: Some(genesis_uri.to_string()),
-            workspace_id: Some(genesis_uri.to_string()),
+            lineage: Some(genesis_uri.to_string()),
             created_at: "2026-04-17T00:00:00Z".into(),
             modified_at: Some("2026-04-17T00:01:00Z".into()),
         },
@@ -384,7 +386,7 @@ fn make_superseded_envelope_with_name(
 /// Regression: adding a member supersedes the keyring, so the head URI no
 /// longer equals the genesis URI the member wraps are anchored to. Unwrapping
 /// against the head (the old bug) fails the AEAD check → name decodes to None
-/// → the workspace renders "unnamed". `wrap_anchor` must resolve the genesis
+/// → the workspace renders "unnamed". `lineage_anchor` must resolve the genesis
 /// URI from the record so the name still decrypts.
 #[test]
 #[allow(non_snake_case)] // bug__ regression-naming convention

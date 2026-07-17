@@ -30,7 +30,9 @@ mod key_wrapping;
 mod keyring_wrapping;
 mod metadata;
 mod mnemonic;
+mod seal_context;
 mod secrets;
+mod transcript;
 mod wire;
 
 /// Re-export so callers don't need direct rand_core / x25519_dalek / ed25519_dalek dependencies.
@@ -47,6 +49,7 @@ pub use at_bytes::AtBytes;
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
 pub use error::Error;
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
+pub use seal_context::{SealContext, SealType};
 // `WrapContext` is part of the public wrap/unwrap surface — callers must
 // pass one to scope their wrap to a record context.
 pub use keyring_wrapping::{unwrap_content_key_from_keyring, wrap_content_key_for_keyring};
@@ -354,6 +357,16 @@ pub enum WrapContext<'a> {
     Cabinet,
 }
 
+/// Sentinel anchor for the pair-flow, which has no scoping record URI by
+/// design. Shared by the wrap layer (`WrapContext::PairResponse`) and the
+/// seal layer (`SealContext::pair_identity`) — one wire value, one name.
+pub const PAIR_RESPONSE_SENTINEL: &str = "self:pair-response";
+
+/// Sentinel anchor for cabinet content-key wraps (one cabinet per identity,
+/// no URI to disambiguate against). Wrap-layer only: cabinet *records* have
+/// real URIs and seal their ciphertexts to them.
+pub const CABINET_SENTINEL: &str = "self:cabinet";
+
 impl WrapContext<'_> {
     pub(crate) fn tag(&self) -> &'static str {
         match self {
@@ -370,8 +383,8 @@ impl WrapContext<'_> {
             // Static sentinel for contexts that don't carry a URI; gives
             // a stable string for the info transcript without conflating
             // with any real AT-URI (which always start with `at://`).
-            WrapContext::PairResponse => "self:pair-response",
-            WrapContext::Cabinet => "self:cabinet",
+            WrapContext::PairResponse => PAIR_RESPONSE_SENTINEL,
+            WrapContext::Cabinet => CABINET_SENTINEL,
         }
     }
 }
@@ -393,12 +406,17 @@ impl WrapContext<'_> {
 /// forging a transcript over content you do not hold fails the AES-KW
 /// integrity check.
 fn hkdf_info(version: u32, algo: &str, context: &WrapContext<'_>, recipient_did: &str) -> Vec<u8> {
-    format!(
-        "opake-v{version}-{algo}-{tag}-{uri}-{recipient_did}",
-        tag = context.tag(),
-        uri = context.uri(),
+    // spec: document-crypto § Wraps are AEAD-bound to their record context
+    transcript::context_transcript(
+        transcript::WRAP_INFO_LABEL,
+        &[
+            &version.to_le_bytes(),
+            algo.as_bytes(),
+            context.tag().as_bytes(),
+            context.uri().as_bytes(),
+            recipient_did.as_bytes(),
+        ],
     )
-    .into_bytes()
 }
 
 #[cfg(test)]

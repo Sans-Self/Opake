@@ -53,7 +53,7 @@ defmodule OpakeIndexer.Jetstream.EventTest do
   end
 
   describe "upsert_record — keyring workspace_id derivation" do
-    test "genesis keyring (no workspaceId, no supersedes) uses its own uri" do
+    test "genesis keyring (no lineage, no supersedes) uses its own uri" do
       uri = "at://#{@alice}/at.opake.keyring/genesis"
 
       json =
@@ -65,12 +65,12 @@ defmodule OpakeIndexer.Jetstream.EventTest do
       assert attrs.supersedes_uri == nil
     end
 
-    test "keyring with an explicit workspaceId uses it verbatim" do
+    test "keyring with an explicit lineage uses it verbatim" do
       ws = "at://#{@alice}/at.opake.keyring/genesis"
 
       json =
         commit_json(@alice, "create", "at.opake.keyring", "head",
-          record: %{"workspaceId" => ws, "supersedes" => ws}
+          record: %{"lineage" => ws, "supersedes" => ws}
         )
 
       assert {123, "at.opake.keyring", {:upsert_record, attrs}} = Event.parse(json)
@@ -78,7 +78,7 @@ defmodule OpakeIndexer.Jetstream.EventTest do
       assert attrs.supersedes_uri == ws
     end
 
-    test "keyring supersede with no workspaceId resolves via the indexed predecessor" do
+    test "keyring supersede with no lineage resolves via the indexed predecessor" do
       genesis = "at://#{@alice}/at.opake.keyring/genesis"
 
       {:ok, _} =

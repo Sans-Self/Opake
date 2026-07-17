@@ -338,28 +338,29 @@ mod workspace_upload_cascade {
             .url
             .contains(&format!("workspace_id={KEYRING_URI}")));
 
-        // Genesis is now TID-rkeyed via createRecord; the writer stamps
-        // `isWorkspaceRoot: true` on the record so the indexer can claim
-        // the chain head via compare-and-set.
+        // Genesis is now TID-rkeyed via putRecord — the root seals its
+        // metadata to its own URI, so the rkey is chosen before the write.
+        // The writer stamps `isWorkspaceRoot: true` on the record so the
+        // indexer can claim the chain head via compare-and-set.
         let create_root_idx = reqs
             .iter()
             .enumerate()
             .filter_map(|(idx, r)| {
-                if !r.url.contains("createRecord") {
+                if !r.url.contains("putRecord") {
                     return None;
                 }
                 let body = match &r.body {
                     Some(RequestBody::Json(v)) => v,
                     _ => return None,
                 };
-                if body["collection"] == "at.opake.directory" {
-                    Some(idx)
-                } else {
-                    None
+                if body["collection"] != "at.opake.directory" {
+                    return None;
                 }
+                let dir: Directory = serde_json::from_value(body["record"].clone()).ok()?;
+                dir.is_workspace_root.then_some(idx)
             })
             .next()
-            .expect("genesis root must use createRecord with isWorkspaceRoot");
+            .expect("genesis root must use putRecord with isWorkspaceRoot");
 
         match &reqs[create_root_idx].body {
             Some(RequestBody::Json(v)) => {
@@ -430,7 +431,7 @@ mod workspace_upload_cascade {
         let genesis_root = reqs
             .iter()
             .filter_map(|r| {
-                if !r.url.contains("createRecord") {
+                if !r.url.contains("putRecord") {
                     return None;
                 }
                 let RequestBody::Json(v) = r.body.as_ref()? else {

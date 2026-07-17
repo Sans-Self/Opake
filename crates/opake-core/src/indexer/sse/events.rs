@@ -311,7 +311,7 @@ impl SseEvent {
             Self::DocumentUpsert(env) => env.record.workspace_id.as_deref(),
             Self::KeyringUpsert(env) => env
                 .record
-                .workspace_id
+                .lineage
                 .as_deref()
                 .or(Some(env.uri.as_str())),
             Self::ChainForked(f) => Some(f.workspace_id.as_str()),

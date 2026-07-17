@@ -34,7 +34,8 @@ pub async fn respond_to_pair_request(
     // spec:document-crypto § Key-carrying types zeroize on drop
     let mut identity_json = Zeroizing::new(Vec::with_capacity(IDENTITY_JSON_CAPACITY));
     serde_json::to_writer(&mut *identity_json, identity)?;
-    let payload = encrypt_blob(&content_key, &identity_json, rng)?;
+    let context = crate::crypto::SealContext::pair_identity();
+    let payload = encrypt_blob(&content_key, &identity_json, &context, rng)?;
 
     // Wrap the content key to the ephemeral hybrid keypair. The `did` field
     // on the resulting WrappedKey is the identity's DID — it identifies who

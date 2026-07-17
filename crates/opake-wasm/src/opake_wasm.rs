@@ -337,7 +337,7 @@ impl WasmOpakeHandle {
         // The web hands us the chain-head URI; the core role-change op keys
         // the indexer chain-head lookup and the keyring wrap anchor on the
         // stable genesis URI. `resolve_workspace_by_uri` walks head→genesis
-        // via `wrap_anchor`, so `ws.uri` is the genesis URI the op expects.
+        // via `lineage_anchor`, so `ws.uri` is the genesis URI the op expects.
         let ws = opake
             .resolve_workspace_by_uri(keyring_uri)
             .await

@@ -14,11 +14,18 @@ use super::DIRECTORY_COLLECTION;
 ///
 /// `workspace_id` is the genesis keyring URI of the owning workspace. Pass
 /// `None` for cabinet directories.
+///
+/// `rkey` is a client-generated TID: the directory's metadata seals to its
+/// own URI, so the URI — and therefore the rkey — must be known before the
+/// caller encrypted the metadata
+/// (`spec:lineage § Records that seal ciphertexts to their own URI choose their own rkey`).
+/// Creating at the exact rkey also makes retries idempotent.
 pub async fn create_directory(
     client: &mut XrpcClient<impl Transport>,
     key_wrapping: KeyWrapping,
     encrypted_metadata: EncryptedMetadata,
     workspace_id: Option<&str>,
+    rkey: &str,
     created_at: &str,
 ) -> Result<RecordRef, Error> {
     let mut directory = Directory::new(key_wrapping, encrypted_metadata, created_at.to_string());
@@ -26,9 +33,9 @@ pub async fn create_directory(
         directory = directory.with_workspace_id(wid);
     }
 
-    trace!("creating directory");
+    trace!("creating directory at {rkey}");
     client
-        .create_record(DIRECTORY_COLLECTION, None, &directory)
+        .create_record(DIRECTORY_COLLECTION, Some(rkey), &directory)
         .await
 }
 
@@ -54,6 +61,7 @@ mod tests {
             dir.key_wrapping,
             dir.encrypted_metadata,
             None,
+            "tid123",
             "2026-03-01T00:00:00Z",
         )
         .await
@@ -92,6 +100,7 @@ mod tests {
             dir.key_wrapping,
             dir.encrypted_metadata,
             None,
+            "tid-broken",
             "2026-03-01T00:00:00Z",
         )
         .await

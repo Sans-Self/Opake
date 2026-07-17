@@ -129,6 +129,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let prior =
             fetch_chain_node::<Directory>(self.opake.client.transport(), root_head_uri).await?;
 
+        let lineage = prior.record.lineage_anchor(&prior.uri).to_owned();
         let original_len = prior.record.entries.len();
         let new_entries: Vec<ListingEntry> = prior
             .record
@@ -148,6 +149,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: prior.record.encrypted_metadata,
             entries: new_entries,
             supersedes: Some(prior.uri),
+            lineage: Some(lineage),
             workspace_id: Some(workspace_uri.to_owned()),
             // Root-atomic delete: this supersede targets the workspace root,
             // so the new record stays in the root chain.
@@ -233,6 +235,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: parent_record.record.encrypted_metadata.clone(),
             entries: new_parent_entries,
             supersedes: Some(parent_record.uri.clone()),
+            lineage: Some(
+                parent_record
+                    .record
+                    .lineage_anchor(&parent_record.uri)
+                    .to_owned(),
+            ),
             workspace_id: Some(workspace_uri.to_owned()),
             // Deep cascade leaf supersedes the parent directory directly above
             // the doc — workspace-root status carries over from the prior
@@ -290,6 +298,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 encrypted_metadata: ancestor.record.encrypted_metadata.clone(),
                 entries: new_entries,
                 supersedes: Some(ancestor.uri.clone()),
+                lineage: Some(ancestor.record.lineage_anchor(&ancestor.uri).to_owned()),
                 workspace_id: Some(workspace_uri.to_owned()),
                 // Inherit so the topmost ancestor (the workspace root) stays
                 // flagged across the supersede.

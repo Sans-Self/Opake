@@ -4,7 +4,7 @@ use crate::atproto;
 use crate::client::{
     get_blob_public, get_record_public, pds_from_did_document, resolve_did_document, Transport,
 };
-use crate::crypto::{self, ContentKey, DocumentMetadata};
+use crate::crypto::{self, ContentKey, DocumentMetadata, SealContext, SealType};
 use crate::error::Error;
 use crate::records::{self, Document, Encryption};
 use crate::workspace::GroupKeys;
@@ -92,13 +92,13 @@ pub async fn fetch_keyring_document_metadata(
     transport: &impl Transport,
     group_keys: GroupKeys<'_>,
     document_uri: &str,
-) -> Result<DocumentMetadata, Error> {
+) -> Result<(DocumentMetadata, String), Error> {
     let (doc, content_key, _pds) =
         fetch_keyring_document(transport, group_keys, document_uri).await?;
-    Ok(crypto::decrypt_metadata(
-        &content_key,
-        &doc.encrypted_metadata,
-    )?)
+    let anchor = doc.lineage_anchor(document_uri).to_string();
+    let context = SealContext::new(&anchor, SealType::DocumentMetadata);
+    let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata, &context)?;
+    Ok((metadata, anchor))
 }
 
 /// Download and decrypt a keyring-encrypted document using already-resolved
@@ -196,8 +196,9 @@ pub async fn download_keyring_document(
     )
     .await?;
 
-    let plaintext = decrypt_with_nonce(&content_key, &kr_enc.nonce, ciphertext)?;
-    let filename = resolve_document_name(&doc, &content_key)?;
+    let anchor = doc.lineage_anchor(document_uri);
+    let plaintext = decrypt_with_nonce(&content_key, &kr_enc.nonce, ciphertext, anchor)?;
+    let filename = resolve_document_name(&doc, &content_key, anchor)?;
 
     Ok((filename, plaintext))
 }

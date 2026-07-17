@@ -187,8 +187,11 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         };
 
         // Carry the original's metadata onto the superseding record. The
-        // original lives on its author's PDS, so this reads cross-PDS.
-        let metadata = {
+        // original lives on its author's PDS, so this reads cross-PDS. The
+        // original's lineage anchor is threaded onto the new record so its
+        // blob and metadata seal under the object's identity, not the new
+        // record's own URI.
+        let (metadata, original_anchor) = {
             let group_keys = GroupKeys {
                 current_rotation: rotation,
                 current: &group_key,
@@ -212,6 +215,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     .mime_type
                     .as_deref()
                     .unwrap_or("application/octet-stream"),
+                owner_did: &self.opake.did,
                 keyring_uri: &workspace_uri,
                 workspace_id: &workspace_uri,
                 group_key: &group_key,
@@ -220,6 +224,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tags: &metadata.tags,
                 created_at: now,
                 supersedes: Some(document_uri),
+                lineage: Some(&original_anchor),
             },
             &mut self.opake.rng,
             &tid,

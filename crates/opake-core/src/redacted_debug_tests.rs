@@ -110,7 +110,8 @@ fn encrypted_payload_uses_standard_debug() {
     // EncryptedPayload uses normal Debug (not RedactedDebug) because
     // ciphertext and nonces are not secret — they're sent to the PDS.
     let key = generate_content_key(&mut OsRng);
-    let payload = encrypt_blob(&key, b"test", &mut OsRng).unwrap();
+    let context = crate::crypto::SealContext::pair_identity();
+    let payload = encrypt_blob(&key, b"test", &context, &mut OsRng).unwrap();
     let out = format!("{payload:?}");
     assert!(
         out.contains("EncryptedPayload"),

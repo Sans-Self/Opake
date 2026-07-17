@@ -38,6 +38,11 @@
             "format": "at-uri",
             "description": "AT-URI of an earlier document this record supersedes, if any. History annotation only — non-load-bearing for read paths; indexers may surface it for lineage queries. Absent on a fresh document."
           },
+          "lineage": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of this document chain's genesis record — the document's stable object identity. Absent on a genesis document, which identifies itself. Present on every supersede, and never changing across one. Content and metadata ciphertexts are AEAD-bound to this anchor."
+          },
           "workspaceId": {
             "type": "string",
             "format": "at-uri",

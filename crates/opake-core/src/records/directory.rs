@@ -105,6 +105,15 @@ pub struct Directory {
     /// prior URI).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// This directory chain's genesis URI — the directory's stable object
+    /// identity. Absent on a genesis directory (and always absent on
+    /// cabinet directories, which never supersede), present and never
+    /// changing on every supersede. Metadata ciphertexts are AEAD-bound to
+    /// the anchor this resolves to, which is how a ciphertext copied
+    /// verbatim through a cascade still authenticates.
+    // spec: lineage § Lineage is the chain's genesis URI, carried on every supersede
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<String>,
     /// Genesis keyring URI of the workspace this directory belongs to.
     /// Absent for cabinet directories. Carried explicitly so any reader
     /// can resolve workspace identity without walking the keyring chain.
@@ -142,6 +151,7 @@ impl Directory {
             encrypted_metadata,
             entries: Vec::new(),
             supersedes: None,
+            lineage: None,
             workspace_id: None,
             is_workspace_root: false,
             created_at,
@@ -162,6 +172,22 @@ impl Directory {
     pub fn as_workspace_root(mut self) -> Self {
         self.is_workspace_root = true;
         self
+    }
+
+    /// Stamp the directory chain's genesis URI onto a supersede record.
+    /// Genesis records leave `lineage` absent — they identify themselves.
+    pub fn with_lineage(mut self, lineage: impl Into<String>) -> Self {
+        self.lineage = Some(lineage.into());
+        self
+    }
+
+    /// The lineage anchor: the chain's genesis URI, which this directory's
+    /// metadata ciphertext is AEAD-bound to. The declared `lineage` once
+    /// the directory has been superseded at least once, or the record's
+    /// own URI on a genesis (or cabinet) directory.
+    // spec: lineage § Lineage is the chain's genesis URI, carried on every supersede
+    pub fn lineage_anchor<'a>(&'a self, self_uri: &'a str) -> &'a str {
+        self.lineage.as_deref().unwrap_or(self_uri)
     }
 }
 
