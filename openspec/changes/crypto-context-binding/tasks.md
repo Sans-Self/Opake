@@ -8,8 +8,8 @@
 
 ## 2. Lineage (lexicons, records, chains)
 
-- [ ] 2.1 Lexicons: rename `workspaceId` → `lineage` on `at.opake.keyring`; add optional `lineage` to `at.opake.document` and `at.opake.directory`
-- [ ] 2.2 Rust records: rename the keyring field; add `lineage` to `Document` and `Directory` with the shared anchor rule (`lineage.unwrap_or(own_uri)`); generalize/rename `Keyring::wrap_anchor` per design Q3 decision
+- [x] 2.1 Lexicons: rename `workspaceId` → `lineage` on `at.opake.keyring`; add optional `lineage` to `at.opake.document` and `at.opake.directory`
+- [x] 2.2 Rust records: rename the keyring field; add `lineage` to `Document` and `Directory` with the shared anchor rule (`lineage.unwrap_or(own_uri)`); generalize/rename `Keyring::wrap_anchor` per design Q3 decision
 - [x] 2.3 Writers stamp lineage on every supersede path: document edit-supersedes (manager/editor.rs), directory cascades/rename/delete (manager/, directories/cascade.rs), keyring advances (opake.rs)
 - [x] 2.4 Client chain walks verify never-flips read-leniently (directories/chain.rs, chain.rs) — flipped-lineage record treated as outside the chain (spec `lineage § Lineage never flips across a supersede`, client scenario)
 - [x] 2.5 Indexer: field rename in consumer + authority checks; new write-time never-flips validation on document and directory supersedes (spec `lineage § Lineage never flips across a supersede`, indexer scenario); indexer test coverage for accept/reject
@@ -38,6 +38,6 @@
 ## 6. Environment, e2e, docs
 
 - [x] 6.1 Reset dev environment (old ciphertexts unreadable by design); refresh e2e auth snapshots (`E2E_REAUTH=1`)
-- [ ] 6.2 Full e2e gate green, including federation flows (edit-supersede, cascade, membership advance — the verbatim-copy paths the AAD must survive)
+- [x] 6.2 Full e2e gate green, including federation flows (edit-supersede, cascade, membership advance — the verbatim-copy paths the AAD must survive)
 - [x] 6.3 Update docs/CRYPTO.md (transcript encoding, AAD table, lineage), docs/ARCHITECTURE.md and FEDERATION.md (lineage field), lexicons/README.md + EXAMPLES.md (renamed/added fields)
 - [ ] 6.4 `just spec-lint` green; close #49 and #50 with pointers to the spec deltas (closing needs explicit approval)
