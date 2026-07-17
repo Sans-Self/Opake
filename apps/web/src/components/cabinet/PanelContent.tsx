@@ -70,6 +70,11 @@ interface PanelContentProps {
   /** Sharing is only supported from the cabinet — hide share actions in workspace context. */
   readonly allowSharing?: boolean;
   /**
+   * Re-run name hydration for the directory. Wired to the retry affordance a
+   * row shows when its name resolve exhausted its automatic retry budget.
+   */
+  readonly onRetryHydration?: () => void;
+  /**
    * FileManager for the current context. Threaded down so DirectoryReadme
    * (Suspense-cached) has access without reaching into a singleton.
    */
@@ -92,6 +97,7 @@ export function PanelContent({
   rootLabel,
   allowSharing = true,
   fileManager,
+  onRetryHydration,
 }: PanelContentProps) {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const deleteFolderDialogRef = useRef<DeleteFolderDialogHandle>(null);
@@ -159,6 +165,7 @@ export function PanelContent({
       item={item}
       isActive={item.uri === activeUri}
       onClick={() => handleItemClick(item)}
+      onRetryHydration={onRetryHydration}
       onEdit={editHandler(item)}
       onDoubleClick={editHandler(item)}
       onPreview={previewHandler(item)}

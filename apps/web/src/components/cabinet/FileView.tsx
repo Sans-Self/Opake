@@ -234,7 +234,25 @@ export function FileView({
   }, [snapshot, pathSegments.join("/")]);
 
   const currentDirectoryUri = resolvedDirectoryUri;
-  const { data: metadata } = useDirectoryMetadata(keyringUri, currentDirectoryUri);
+
+  // Resolve names for exactly the document URIs the rendered (keeper) snapshot
+  // lists for this directory — not whatever a separate loadTree happens to
+  // include. This is what keeps a freshly created row from sticking on
+  // "Decrypting…": the resolve tracks the same live projection the row came
+  // from, and self-heals transient misses.
+  const expectedDocumentUris = useMemo(() => {
+    if (!snapshot || !currentDirectoryUri) return undefined;
+    const dir = snapshot.directories[currentDirectoryUri];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard: Record lookup
+    if (!dir) return undefined;
+    return dir.entries.filter((e) => e.type === "document").map((e) => e.uri);
+  }, [snapshot, currentDirectoryUri]);
+
+  const {
+    data: metadata,
+    statuses: hydrationStatuses,
+    retry: retryHydration,
+  } = useDirectoryMetadata(keyringUri, currentDirectoryUri, expectedDocumentUris);
 
   // Workspace sharing is keyring-based, not grant-based — only fetch the
   // outgoing-grants list in cabinet contexts. The hook gates internally
@@ -248,8 +266,14 @@ export function FileView({
 
   const items = useMemo(() => {
     if (!snapshot || !currentDirectoryUri) return [];
-    return snapshotToFileItems(currentDirectoryUri, snapshot, metadata ?? {}, sharedUris);
-  }, [snapshot, currentDirectoryUri, metadata, sharedUris]);
+    return snapshotToFileItems(
+      currentDirectoryUri,
+      snapshot,
+      metadata ?? {},
+      sharedUris,
+      hydrationStatuses,
+    );
+  }, [snapshot, currentDirectoryUri, metadata, sharedUris, hydrationStatuses]);
 
   const ancestors = useMemo(
     () => (snapshot ? ancestorsOf(snapshot, currentDirectoryUri) : []),
@@ -1071,6 +1095,7 @@ export function FileView({
             rootLabel={rootLabel}
             allowSharing={context.kind === "cabinet"}
             fileManager={fileManager}
+            onRetryHydration={retryHydration}
           />
         )}
       </PanelShell>

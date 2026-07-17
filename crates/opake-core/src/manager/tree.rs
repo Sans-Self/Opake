@@ -849,6 +849,42 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         uri: &str,
         keys: &super::editor::DecryptionKeys,
     ) -> Result<Option<super::types::ResolvedDocumentMetadata>, Error> {
+        // Thin wrapper over the reason-carrying resolver: existing callers
+        // (CLI `ls`/`find`, tree name resolution) only care about the name,
+        // so collapse both no-name outcomes back to `None`. The reason lives
+        // on for the client-facing status resolver below.
+        match self.resolve_single_document_resolution(uri, keys).await? {
+            super::types::DocumentMetadataResolution::Resolved { metadata } => Ok(Some(metadata)),
+            super::types::DocumentMetadataResolution::Retryable
+            | super::types::DocumentMetadataResolution::Undecryptable => Ok(None),
+        }
+    }
+
+    /// Resolve one document's metadata, keeping *why* a resolve produced no
+    /// name so the caller can retry the transient case and give up on the
+    /// definitive one.
+    ///
+    /// Classification:
+    /// - `getRecord` 404 → [`Retryable`]: the record isn't visible yet
+    ///   (indexer/PDS lag, a just-created document mid-propagation).
+    /// - no content-key wrap for this DID, a version/parse mismatch, or a
+    ///   decrypt/key-unwrap failure → [`Undecryptable`]: this caller will
+    ///   never turn this record into a name.
+    /// - `Resolved` on success.
+    ///
+    /// Storage and non-404 transport errors bubble as `Err` — the batch
+    /// resolver folds those into `Retryable` (they're transient), while
+    /// single-name callers keep their existing warn-and-skip behavior.
+    ///
+    /// [`Retryable`]: super::types::DocumentMetadataResolution::Retryable
+    /// [`Undecryptable`]: super::types::DocumentMetadataResolution::Undecryptable
+    async fn resolve_single_document_resolution(
+        &mut self,
+        uri: &str,
+        keys: &super::editor::DecryptionKeys,
+    ) -> Result<super::types::DocumentMetadataResolution, Error> {
+        use super::types::DocumentMetadataResolution as Resolution;
+
         let did = keys.did.as_str();
         let private_keys = &keys.private_keys();
         // Cache-first: check local document cache before hitting PDS
@@ -863,7 +899,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             cached_record.value
         } else {
             // Cache miss — fall back to PDS getRecord
-            let at_uri = atproto::parse_at_uri(uri)?;
+            let at_uri = match atproto::parse_at_uri(uri) {
+                Ok(parsed) => parsed,
+                // A malformed URI can never resolve — definitive, not a
+                // transient the client should keep polling.
+                Err(_) => return Ok(Resolution::Undecryptable),
+            };
             let record = match self
                 .opake
                 .client
@@ -887,53 +928,99 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         .await;
                     r
                 }
-                Err(Error::Xrpc { status: 404, .. }) => return Ok(None),
+                Err(Error::Xrpc { status: 404, .. }) => return Ok(Resolution::Retryable),
                 Err(e) => return Err(e),
             };
             record.value
         };
 
-        let doc: Document = serde_json::from_value(record_value)?;
-        crate::records::check_version(doc.opake_version)?;
+        let doc: Document = match serde_json::from_value(record_value) {
+            Ok(doc) => doc,
+            Err(_) => return Ok(Resolution::Undecryptable),
+        };
+        if crate::records::check_version(doc.opake_version).is_err() {
+            return Ok(Resolution::Undecryptable);
+        }
 
         let content_key = match &doc.encryption {
             Encryption::Direct(direct) => {
                 let wrapped = direct.envelope.keys.iter().find(|k| k.did == did);
                 match wrapped {
-                    Some(w) => crypto::unwrap_key(
+                    Some(w) => match crypto::unwrap_key(
                         w,
                         private_keys,
                         &crypto::WrapContext::Document { uri },
                         doc.opake_version,
-                    )?,
-                    None => return Ok(None),
+                    ) {
+                        Ok(key) => key,
+                        Err(_) => return Ok(Resolution::Undecryptable),
+                    },
+                    None => return Ok(Resolution::Undecryptable),
                 }
             }
             Encryption::Keyring(kr_enc) => {
                 let doc_rotation = kr_enc.keyring_ref.rotation;
-                let gk = keys.group_key_for_rotation(doc_rotation).ok_or_else(|| {
-                    Error::KeyWrap(format!(
-                        "no group key for keyring-encrypted document at rotation {doc_rotation}"
-                    ))
-                })?;
-                let wrapped_bytes = kr_enc
-                    .keyring_ref
-                    .wrapped_content_key
-                    .decode()
-                    .map_err(|e| Error::Decryption(e.to_string()))?;
-                crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk)?
+                let gk = match keys.group_key_for_rotation(doc_rotation) {
+                    Some(gk) => gk,
+                    None => return Ok(Resolution::Undecryptable),
+                };
+                let wrapped_bytes = match kr_enc.keyring_ref.wrapped_content_key.decode() {
+                    Ok(bytes) => bytes,
+                    Err(_) => return Ok(Resolution::Undecryptable),
+                };
+                match crypto::unwrap_content_key_from_keyring(&wrapped_bytes, gk) {
+                    Ok(key) => key,
+                    Err(_) => return Ok(Resolution::Undecryptable),
+                }
             }
         };
 
-        let metadata = crypto::decrypt_metadata::<crypto::DocumentMetadata>(
+        let metadata = match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
             &content_key,
             &doc.encrypted_metadata,
-        )?;
-        Ok(Some(super::types::ResolvedDocumentMetadata::from_parts(
-            metadata,
-            doc.created_at,
-            doc.modified_at,
-        )))
+        ) {
+            Ok(metadata) => metadata,
+            Err(_) => return Ok(Resolution::Undecryptable),
+        };
+        Ok(Resolution::Resolved {
+            metadata: super::types::ResolvedDocumentMetadata::from_parts(
+                metadata,
+                doc.created_at,
+                doc.modified_at,
+            ),
+        })
+    }
+
+    /// Resolve reason-carrying metadata status for an explicit list of
+    /// document URIs — the client-facing entry point that decouples name
+    /// hydration from any single tree projection.
+    ///
+    /// The web renders cabinet rows from the SSE-driven `TreeKeeper` while
+    /// hydrating names through this resolver: passing the exact URIs the
+    /// rendered snapshot lists means a document that reached the keeper but
+    /// not yet a `load_tree`-derived tree still gets resolved (cache-first,
+    /// PDS `getRecord` on miss) instead of being silently absent. A record
+    /// that isn't visible yet comes back `Retryable` so the client can poll;
+    /// one that can't be decrypted comes back `Undecryptable` so it doesn't.
+    pub async fn resolve_document_metadata_status_for(
+        &mut self,
+        uris: &[&str],
+    ) -> Result<HashMap<String, super::types::DocumentMetadataResolution>, Error> {
+        let keys = self.decryption_keys()?;
+        let mut result = HashMap::new();
+        for uri in uris {
+            let resolution = match self.resolve_single_document_resolution(uri, &keys).await {
+                Ok(resolution) => resolution,
+                Err(e) => {
+                    // Storage / non-404 transport error — transient, so the
+                    // client should keep polling rather than give up.
+                    warn!("metadata status resolution errored for {uri}: {e}");
+                    super::types::DocumentMetadataResolution::Retryable
+                }
+            };
+            result.insert((*uri).to_owned(), resolution);
+        }
+        Ok(result)
     }
 }
 

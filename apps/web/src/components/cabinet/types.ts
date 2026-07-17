@@ -1,3 +1,5 @@
+import type { NameHydrationState } from "@opake/react";
+
 export type EncStatus = "private" | "shared" | "public";
 
 export type FileType = "document" | "spreadsheet" | "pdf" | "image" | "code" | "note" | "archive";
@@ -28,6 +30,15 @@ export interface FileItem {
    * shape or missing metadata.
    */
   pending?: boolean;
+  /**
+   * Name-hydration state for an undecrypted file row. Only meaningful when
+   * `decrypted` is false and `pending` is unset: it splits the single
+   * "Decrypting…" placeholder into `resolving` (in progress), `retryable`
+   * (transient resolve failure, a manual retry may help), and `undecryptable`
+   * (definitive — this caller has no key). Absent for folders and resolved
+   * files, which are always `resolved`.
+   */
+  hydration?: NameHydrationState;
 }
 
 const PREVIEWABLE_FILE_TYPES: ReadonlySet<FileType> = new Set(["image", "note"]);
@@ -46,6 +57,34 @@ export function isPreviewable(item: FileItem): boolean {
 /** Whether a file item can be opened in the markdown editor. */
 export function isEditable(item: FileItem): boolean {
   return !item.pending && item.kind === "file" && item.decrypted && item.fileType === "note";
+}
+
+/** How an undecrypted file row presents its name-hydration state. */
+export interface HydrationPresentation {
+  /** Accessible label / tooltip for the row while the name is unresolved. */
+  readonly label: string;
+  /** Whether the row should advertise `aria-busy` (resolve in progress). */
+  readonly busy: boolean;
+  /** Whether to offer a manual retry affordance (retryable failure). */
+  readonly retryable: boolean;
+}
+
+/**
+ * Map an undecrypted file's hydration state to its row presentation. Splits
+ * the former single "Decrypting…" placeholder into distinct, accessible
+ * states so a stuck name reads as a retryable failure — not a permanent,
+ * unexplained spinner — and a no-key document reads as definitive.
+ */
+export function hydrationPresentation(item: FileItem): HydrationPresentation {
+  switch (item.hydration ?? "resolving") {
+    case "retryable":
+      return { label: "Name unavailable — retry", busy: false, retryable: true };
+    case "undecryptable":
+      return { label: "Encrypted — no access", busy: false, retryable: false };
+    case "resolving":
+    case "resolved":
+      return { label: "Decrypting…", busy: true, retryable: false };
+  }
 }
 
 /**

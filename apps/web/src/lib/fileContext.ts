@@ -3,6 +3,7 @@
 // EditorView so they can pick the right FileManager + mutation hooks.
 
 import type { DirectoryTreeSnapshot, DocumentMetadata } from "@opake/sdk";
+import type { NameHydrationState } from "@opake/react";
 import type { FileItem } from "@/components/cabinet/types";
 import { mimeTypeToFileType, formatFileSize, formatRelativeDate } from "@/lib/format";
 
@@ -45,6 +46,7 @@ export function snapshotToFileItems(
   snapshot: DirectoryTreeSnapshot,
   metadata: Readonly<Record<string, DocumentMetadata>>,
   sharedUris: ReadonlySet<string> = new Set(),
+  hydration: Readonly<Record<string, NameHydrationState>> = {},
 ): readonly FileItem[] {
   const dir = snapshot.directories[directoryUri];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime guard
@@ -96,8 +98,10 @@ export function snapshotToFileItems(
       };
     }
 
-    // Metadata not loaded yet — show a decrypt-pending placeholder so the
-    // directory structure is visible before the metadata round-trip lands.
+    // Name not resolved — render a placeholder that reflects *why*. A
+    // document the snapshot lists but whose resolve hasn't been requested yet
+    // defaults to `resolving` (the round-trip is in flight); once requested,
+    // the hydration map carries the real state.
     return {
       id: entry.uri,
       uri: entry.uri,
@@ -109,6 +113,7 @@ export function snapshotToFileItems(
       decrypted: false,
       tags: [],
       pending: entry.pending,
+      hydration: hydration[entry.uri] ?? "resolving",
     };
   });
 

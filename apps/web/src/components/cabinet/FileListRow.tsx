@@ -3,7 +3,7 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import { FileActionMenu } from "./FileActionMenu";
 import { StatusBadge } from "./StatusBadge";
 import { fileIconElement, fileIconColors } from "./FileIcons";
-import { isActionable, type FileItem } from "./types";
+import { isActionable, hydrationPresentation, type FileItem } from "./types";
 
 interface FileListRowProps {
   readonly item: FileItem;
@@ -12,6 +12,7 @@ interface FileListRowProps {
   readonly onDoubleClick?: () => void;
   readonly renderActions?: () => ReactNode;
   readonly hideStatus?: boolean;
+  readonly onRetryHydration?: () => void;
   readonly onPreview?: () => void;
   readonly onEdit?: () => void;
   readonly onEditMetadata?: () => void;
@@ -32,6 +33,7 @@ export function FileListRow({
   onDoubleClick,
   renderActions,
   hideStatus,
+  onRetryHydration,
   onPreview,
   onEdit,
   onEditMetadata,
@@ -49,6 +51,9 @@ export function FileListRow({
   // indexer-visible record to open. `isActionable` folds that in.
   const isClickable = isActionable(item);
   const displayName = item.pending && !item.decrypted ? "Uploading…" : item.name;
+  // Name-hydration presentation for an undecrypted (non-pending) file row.
+  const hydration =
+    !item.pending && !item.decrypted ? hydrationPresentation(item) : null;
 
   const rowClassName = [
     "hover:bg-bg-hover flex items-center gap-3 rounded-xl px-3 py-2.25 transition-colors",
@@ -72,13 +77,13 @@ export function FileListRow({
       }
       role={isClickable ? "button" : "row"}
       tabIndex={isClickable ? 0 : undefined}
-      aria-busy={item.pending ? true : undefined}
+      aria-busy={item.pending || hydration?.busy ? true : undefined}
       aria-label={
         item.pending
           ? `${displayName}, pending`
           : item.decrypted
             ? `${item.name}${isFolder ? ", folder" : `, ${item.fileType ?? "file"}`}`
-            : "Decrypting…"
+            : (hydration?.label ?? "Decrypting…")
       }
       className={rowClassName}
     >
@@ -123,6 +128,19 @@ export function FileListRow({
             {item.name}&nbsp;&nbsp;
             {isFolder && <CaretRightIcon size={13} className="text-text-faint" />}
           </div>
+        ) : hydration?.retryable ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetryHydration?.();
+            }}
+            className="text-caption text-text-faint hover:text-base-content flex items-center gap-1.5 underline decoration-dotted underline-offset-2"
+          >
+            Name unavailable — retry
+          </button>
+        ) : hydration && !hydration.busy ? (
+          <div className="text-caption text-text-faint truncate">{hydration.label}</div>
         ) : (
           <div className="skeleton h-4 w-36 rounded" />
         )}
