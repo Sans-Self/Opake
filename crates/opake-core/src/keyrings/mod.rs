@@ -179,6 +179,7 @@ mod indexer_workspace_tests {
                 key_history: Vec::new(),
                 encrypted_metadata: encrypted,
                 supersedes: None,
+                supersedes_cid: None,
                 lineage: None,
                 created_at: "2026-04-14T00:00:00Z".into(),
                 modified_at: None,

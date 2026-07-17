@@ -105,6 +105,13 @@ pub struct Directory {
     /// prior URI).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// CID of the exact predecessor record named by `supersedes`. Present
+    /// whenever `supersedes` is; readers verify a fetched predecessor's bytes
+    /// against it. Each cascade level pins its own predecessor, never copied
+    /// through.
+    // spec: lineage § Supersede references carry a content pin
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes_cid: Option<String>,
     /// This directory chain's genesis URI — the directory's stable object
     /// identity. Absent on a genesis directory (and always absent on
     /// cabinet directories, which never supersede), present and never
@@ -151,6 +158,7 @@ impl Directory {
             encrypted_metadata,
             entries: Vec::new(),
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             workspace_id: None,
             is_workspace_root: false,
@@ -178,6 +186,12 @@ impl Directory {
     /// Genesis records leave `lineage` absent — they identify themselves.
     pub fn with_lineage(mut self, lineage: impl Into<String>) -> Self {
         self.lineage = Some(lineage.into());
+        self
+    }
+
+    /// Pin the CID of the immediate predecessor this record supersedes.
+    pub fn with_supersedes_cid(mut self, cid: impl Into<String>) -> Self {
+        self.supersedes_cid = Some(cid.into());
         self
     }
 

@@ -295,6 +295,81 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
 - Forward secrecy is automatic (removed member can't decrypt new content). For historical access revocation, see background re-encryption.
 
 
+## 5a. Keyring supersede (rotation after removing a member)
+
+A keyring is the head of a supersede chain. The **genesis** keyring's rkey is not a TID — it is a *derived tag* computed from the genesis (rotation-0) group key and the owner DID, so the genesis URI (which is the workspace identity) commits to key material only members hold. Here the genesis lives at:
+
+```
+at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm
+```
+
+That 26-character lowercase-base32 rkey is `base32-lower(SHA-256(Ed25519_pubkey(HKDF(K₀, transcript("opake-workspace-identity", "did:plc:alice123"))))[..16])` — see [CRYPTO.md](../docs/CRYPTO.md#workspace-identity). Any adopting client re-derives it from the record's rotation-0 key and rejects a mismatch.
+
+When manager Bob removes Carol and rotates the group key, he writes a **supersede** on his own PDS. It uses an ordinary TID rkey; `supersedes` points at the prior canonical keyring, `supersedesCid` pins that predecessor's CID, and `lineage` carries the genesis URI unchanged (the workspace identity never moves across a supersede).
+
+```json
+{
+  "$type": "at.opake.keyring",
+  "opakeVersion": 1,
+  "algo": "aes-256-gcm",
+  "members": [
+    {
+      "wrappedKey": {
+        "did": "did:plc:alice123",
+        "ciphertext": { "$bytes": "base64-rotation-1-group-key-for-alice" },
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+      },
+      "role": "manager"
+    },
+    {
+      "wrappedKey": {
+        "did": "did:plc:bob456",
+        "ciphertext": { "$bytes": "base64-rotation-1-group-key-for-bob" },
+        "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+      },
+      "role": "manager"
+    }
+  ],
+  "rotation": 1,
+  "keyHistory": [
+    {
+      "rotation": 0,
+      "members": [
+        {
+          "wrappedKey": {
+            "did": "did:plc:alice123",
+            "ciphertext": { "$bytes": "base64-rotation-0-group-key-for-alice" },
+            "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+          },
+          "role": "manager"
+        },
+        {
+          "wrappedKey": {
+            "did": "did:plc:bob456",
+            "ciphertext": { "$bytes": "base64-rotation-0-group-key-for-bob" },
+            "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+          },
+          "role": "manager"
+        }
+      ]
+    }
+  ],
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-metadata-json" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
+  "supersedes": "at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm",
+  "supersedesCid": "bafyreib2xyz...cid-of-the-genesis-keyring",
+  "lineage": "at://did:plc:alice123/at.opake.keyring/452upqgt6ql7ci462dvsfcv6bm",
+  "createdAt": "2026-03-22T09:00:00.000Z"
+}
+```
+
+**Notes:**
+- `keyHistory` retains rotation 0's members (minus removed Carol) so surviving members can still decrypt documents uploaded before the rotation. Carol's wrapped key is excluded — she cannot recover the old group key from this record.
+- `supersedesCid` is required whenever `supersedes` is present. At v1 it is compared against the CID a serving host *reports* for the fetched predecessor (not a hash recomputed from bytes), so it catches CID disagreement between honest hosts but is not, yet, a defense against a host serving tampered bytes under the true CID — that is deferred to replication-tier work.
+- The same `supersedes` + `supersedesCid` pair rides every directory and document supersede, with identical v1 semantics; the pin always names the immediate predecessor and is never copied through a cascade.
+
 ## 6. Pair request (new device requesting identity)
 
 A new device generates an ephemeral hybrid keypair (X25519 + ML-KEM-768) and publishes both public halves. The X25519 fingerprint is displayed for visual comparison on both devices.

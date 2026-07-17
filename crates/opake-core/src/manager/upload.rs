@@ -172,6 +172,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tags: req.tags,
                 created_at: now,
                 supersedes: None,
+                supersedes_cid: None,
                 lineage: None,
             },
             &mut self.opake.rng,
@@ -207,6 +208,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let leaf = LeafLevel {
                     mode: LevelMode::Supersede {
                         prior_head_uri: root_head_uri,
+                        prior_head_cid: prior.cid,
                         key_wrapping: prior.record.key_wrapping,
                         encrypted_metadata: prior.record.encrypted_metadata,
                         lineage,

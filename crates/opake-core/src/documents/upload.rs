@@ -187,6 +187,7 @@ pub async fn prepare_upload_keyring(
     .with_workspace_id(params.workspace_id);
 
     document.supersedes = params.supersedes.map(Into::into);
+    document.supersedes_cid = params.supersedes_cid.map(Into::into);
     // Declare the lineage so readers reconstruct the same anchor the blob and
     // metadata were sealed under. Fresh (genesis) uploads leave it absent and
     // identify themselves by their own URI.
@@ -220,6 +221,11 @@ pub struct KeyringUploadParams<'a> {
     /// listing at this record relies on the indexer reading this field to
     /// authorize the editor's otherwise non-additive entry swap.
     pub supersedes: Option<&'a str>,
+    /// CID of the exact predecessor named by `supersedes`. Set alongside it on
+    /// the editor supersede path; stamped onto the record as `supersedesCid` so
+    /// readers can verify the predecessor's bytes.
+    // spec: lineage § Supersede references carry a content pin
+    pub supersedes_cid: Option<&'a str>,
     /// Lineage anchor to seal the blob and metadata under, and to stamp on
     /// the record. `None` for a fresh (genesis) upload — the record seals to
     /// its own URI and carries no lineage. `Some(anchor)` for an editor
@@ -630,6 +636,7 @@ mod tests {
                 tags: &[],
                 created_at: "2026-06-06T00:00:00Z",
                 supersedes: Some(prior),
+                supersedes_cid: Some("bafyprior"),
                 lineage: Some(prior),
             },
             &mut OsRng,
@@ -640,6 +647,8 @@ mod tests {
 
         let doc: Document = serde_json::from_value(record_value).unwrap();
         assert_eq!(doc.supersedes.as_deref(), Some(prior));
+        // spec: lineage § Supersede references carry a content pin
+        assert_eq!(doc.supersedes_cid.as_deref(), Some("bafyprior"));
         // The record must declare the lineage it sealed under so readers
         // reconstruct the same AAD anchor.
         assert_eq!(doc.lineage.as_deref(), Some(prior));
@@ -669,6 +678,7 @@ mod tests {
                 tags: &[],
                 created_at: "2026-06-06T00:00:00Z",
                 supersedes: None,
+                supersedes_cid: None,
                 lineage: None,
             },
             &mut OsRng,
@@ -679,5 +689,6 @@ mod tests {
 
         let doc: Document = serde_json::from_value(record_value).unwrap();
         assert!(doc.supersedes.is_none());
+        assert!(doc.supersedes_cid.is_none());
     }
 }

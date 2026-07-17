@@ -19,6 +19,7 @@ pub fn wasm_err(e: opake_core::error::Error) -> JsError {
         Error::Xrpc { .. } => "Xrpc",
         Error::Indexer { .. } => "Indexer",
         Error::WorkspaceNotIndexed { .. } => "WorkspaceNotIndexed",
+        Error::WorkspaceIdentityMismatch { .. } => "WorkspaceIdentityMismatch",
         Error::NotWorkspaceMember { .. } => "NotWorkspaceMember",
         Error::NotFound(_) => "NotFound",
         Error::IdentityMissing => "IdentityMissing",

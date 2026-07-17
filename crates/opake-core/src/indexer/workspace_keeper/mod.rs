@@ -23,11 +23,13 @@
 //!
 //! When an `SseEvent::KeyringUpsert` arrives for a keyring this client
 //! is no longer a member of (DID absent from the member list),
-//! [`try_build_entry`] returns `None` and the consumer deletes the
-//! workspace from the keeper. Transient key-unwrap failures return
-//! `Some(entry)` with `name = None` rather than a delete — the
-//! workspace stays visible and self-corrects on the next event.
-//! See [`apply_keyring_record`] for the canonical dispatch logic.
+//! [`try_build_entry`] returns [`EntryOutcome::NotMember`] and the
+//! consumer deletes the workspace from the keeper. Transient key-unwrap
+//! failures return an entry with `name = None` rather than a delete —
+//! the workspace stays visible and self-corrects on the next event. A
+//! record whose declared identity fails the derivation check returns
+//! [`EntryOutcome::IdentityMismatch`], which maps to no keeper operation
+//! at all. See [`apply_keyring_record`] for the canonical dispatch logic.
 //!
 //! [`TreeKeeper`]: crate::indexer::tree_keeper::TreeKeeper
 //! [`SseEvent::KeyringUpsert`]: crate::indexer::sse::events::SseEvent::KeyringUpsert
@@ -276,10 +278,12 @@ impl WorkspaceKeeper {
     /// record event. `None` means the caller isn't a member (e.g.
     /// they were just rotated out) — we `delete` in that case so the
     /// sidebar drops the workspace.
-    pub fn apply_keyring_record(&mut self, workspace_id: &str, entry: Option<WorkspaceEntry>) {
-        match entry {
-            Some(e) => self.upsert(e),
-            None => self.delete(workspace_id),
+    pub fn apply_keyring_record(&mut self, workspace_id: &str, outcome: EntryOutcome) {
+        match outcome {
+            EntryOutcome::Entry(e) => self.upsert(e),
+            EntryOutcome::NotMember => self.delete(workspace_id),
+            // spec: workspace-identity § Identity adoption verifies by derivation
+            EntryOutcome::IdentityMismatch => {}
         }
     }
 
@@ -362,17 +366,57 @@ impl Default for WorkspaceKeeper {
 // Entry builder
 // ---------------------------------------------------------------------------
 
+/// What a keyring record means for the keeper.
+///
+/// The three outcomes drive three different keeper operations, and the
+/// distinction is load-bearing: `NotMember` maps to a delete (a removal
+/// supersede must drop the sidebar entry), while `IdentityMismatch` maps
+/// to *no operation at all* — a forged record must not be able to delete
+/// or replace the real entry stored under the identity it declares.
+// spec: workspace-identity § Identity adoption verifies by derivation
+pub enum EntryOutcome {
+    /// A verified, adoptable entry — insert or replace under its id.
+    Entry(WorkspaceEntry),
+    /// The caller's DID is absent from the member list — keeper delete.
+    ///
+    /// This outcome cannot carry a derivation check: verifying identity
+    /// requires unwrapping the group key, which a non-member cannot do. The
+    /// resulting delete is therefore guarded only by the indexer's write-time
+    /// authority (a removal supersede must be manager-authored) plus the
+    /// keeper's own no-op-on-untracked-id property — a forged `keyring:upsert`
+    /// declaring a lineage the keeper does not already track deletes nothing.
+    /// A direct-PDS keeper hydration path (none today) would need to
+    /// re-establish that authority corroboration before honoring a delete.
+    NotMember,
+    /// The declared lineage anchor failed the identity derivation check.
+    /// The record is dropped silently: no keeper operation, no rendered
+    /// artifact, trace-level logging only.
+    IdentityMismatch,
+}
+
+impl EntryOutcome {
+    /// The adoptable entry, if any. Collapses `NotMember` and
+    /// `IdentityMismatch` — correct only for bootstrap-style contexts
+    /// where absence and drop coincide; event dispatch must match on the
+    /// full outcome so the three keeper operations stay distinct.
+    pub fn entry(self) -> Option<WorkspaceEntry> {
+        match self {
+            EntryOutcome::Entry(e) => Some(e),
+            EntryOutcome::NotMember | EntryOutcome::IdentityMismatch => None,
+        }
+    }
+}
+
 /// Construct a [`WorkspaceEntry`] from raw keyring fields.
 ///
-/// Returns `None` only when the caller is provably not a member — their
-/// DID is absent from the member list. Callers map `None` to a keeper
-/// delete so the sidebar drops the workspace.
-///
-/// Key-unwrap failures (corrupt data, key material mismatch) return
-/// `Some(entry)` with `name`/`description`/`icon` as `None`. The workspace
+/// Key-unwrap failures (corrupt data, key material mismatch) return an
+/// `Entry` with `name`/`description`/`icon` as `None`. The workspace
 /// stays visible in the sidebar, just unnamed — matches the pre-refactor
 /// `list_workspaces` behavior. A later SSE event or full bootstrap will
-/// reconcile once the underlying issue resolves.
+/// reconcile once the underlying issue resolves. An unverifiable-but-
+/// locked entry is acceptable there because the identity check below
+/// requires unwrapped key material to run at all; what it can never do
+/// is displace a verified entry with decrypted state.
 ///
 /// The metadata-decrypt step is independently best-effort: if the member
 /// list unwraps but the encrypted metadata blob can't be decoded, the
@@ -381,13 +425,14 @@ pub fn try_build_entry(
     envelope: &crate::indexer::types::IndexerEnvelope<crate::records::Keyring>,
     my_did: &str,
     private_keys: &PrivateKeyBundle<'_>,
-) -> Option<WorkspaceEntry> {
+) -> EntryOutcome {
     let keyring = &envelope.record;
     let head_uri = envelope.uri.as_str();
     let workspace_id = envelope.workspace_id();
 
-    // Locate our member entry. If not found, we're not a member.
-    let my_member = keyring.members.iter().find(|m| m.did() == my_did)?;
+    let Some(my_member) = keyring.members.iter().find(|m| m.did() == my_did) else {
+        return EntryOutcome::NotMember;
+    };
     let my_role = my_member.role.clone();
     let member_count = keyring.members.len();
 
@@ -405,7 +450,7 @@ pub fn try_build_entry(
     ) {
         Ok(k) => k,
         Err(_) => {
-            return Some(WorkspaceEntry {
+            return EntryOutcome::Entry(WorkspaceEntry {
                 workspace_id: workspace_id.to_string(),
                 head_uri: head_uri.to_string(),
                 rotation: keyring.rotation,
@@ -418,6 +463,15 @@ pub fn try_build_entry(
             });
         }
     };
+
+    let anchor = keyring.lineage_anchor(head_uri);
+    let historical =
+        crate::workspace::derive_historical_keys(keyring, my_did, head_uri, private_keys);
+    // spec: workspace-identity § Identity adoption verifies by derivation
+    if !crate::workspace::verify_workspace_identity(keyring, anchor, &group_key, &historical) {
+        log::trace!("keyring at {head_uri} failed identity derivation for {anchor}; dropped");
+        return EntryOutcome::IdentityMismatch;
+    }
 
     let metadata_context = crypto::SealContext::new(
         keyring.lineage_anchor(head_uri),
@@ -432,7 +486,7 @@ pub fn try_build_entry(
         Err(_) => (None, None, None),
     };
 
-    Some(WorkspaceEntry {
+    EntryOutcome::Entry(WorkspaceEntry {
         workspace_id: workspace_id.to_string(),
         head_uri: head_uri.to_string(),
         rotation: keyring.rotation,

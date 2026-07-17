@@ -218,6 +218,40 @@ impl<'a> GroupKeys<'a> {
     }
 }
 
+/// Verify a keyring's declared lineage anchor against its key material.
+///
+/// The genesis rkey is derived from the rotation-0 group key and the
+/// genesis authority's DID, so any member can check — offline, with the
+/// keys they were handed — that the anchor really belongs to this key
+/// material. A forged rkey fails on the key; a forged owner attribution
+/// fails on the DID; a keyring whose rotation-0 key the caller cannot
+/// resolve is unverifiable as that workspace for that caller.
+// spec: workspace-identity § Identity adoption verifies by derivation
+pub(crate) fn verify_workspace_identity(
+    keyring: &Keyring,
+    anchor: &str,
+    current_key: &ContentKey,
+    historical: &[HistoricalKey],
+) -> bool {
+    // spec: lineage § Lineage never flips across a supersede
+    if keyring.lineage.is_some() && keyring.supersedes.is_none() {
+        return false;
+    }
+    let Ok(at_uri) = crate::atproto::parse_at_uri(anchor) else {
+        return false;
+    };
+    let keys = GroupKeys {
+        current_rotation: keyring.rotation,
+        current: current_key,
+        historical,
+    };
+    let Some(rotation_zero) = keys.for_rotation(0) else {
+        return false;
+    };
+    let expected = crypto::derive_workspace_identity_tag(rotation_zero, &at_uri.authority);
+    expected == at_uri.rkey
+}
+
 /// Unwrap each entry in the keyring's `keyHistory` for the caller and
 /// return the resulting list of `(rotation, key)` pairs.
 ///

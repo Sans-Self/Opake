@@ -36,7 +36,11 @@
           "supersedes": {
             "type": "string",
             "format": "at-uri",
-            "description": "AT-URI of an earlier document this record supersedes, if any. History annotation only — non-load-bearing for read paths; indexers may surface it for lineage queries. Absent on a fresh document."
+            "description": "AT-URI of an earlier document this record supersedes, if any. Load-bearing: it feeds the indexer's additive-advance authority check for editor swaps and carries a verified content pin (`supersedesCid`). Absent on a fresh document."
+          },
+          "supersedesCid": {
+            "type": "string",
+            "description": "CID of the exact predecessor record named by `supersedes` — the immediate prior document this record supersedes. Required whenever `supersedes` is present (enforced at the app layer pre-v1). Names the immediate predecessor only and is never copied through. At v1, readers compare it against the CID a host reports for the fetched predecessor (not a hash recomputed from bytes), so it detects CID disagreement between honest hosts; true byte-level tamper-evidence is deferred to replication-tier work."
           },
           "lineage": {
             "type": "string",

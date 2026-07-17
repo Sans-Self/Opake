@@ -20,6 +20,9 @@ pub(crate) const WRAP_INFO_LABEL: &[u8] = b"opake-wrap-info";
 /// Label for AEAD associated-data transcripts (content/metadata sealing).
 pub(crate) const SEAL_AAD_LABEL: &[u8] = b"opake-seal-aad";
 
+/// Label for the workspace identity derivation (genesis rkey tag).
+pub(crate) const WORKSPACE_IDENTITY_LABEL: &[u8] = b"opake-workspace-identity";
+
 /// Encode `fields` under `label` as an injective byte transcript.
 pub(crate) fn context_transcript(label: &[u8], fields: &[&[u8]]) -> Vec<u8> {
     let payload_len: usize = fields.iter().map(|f| 4 + f.len()).sum();

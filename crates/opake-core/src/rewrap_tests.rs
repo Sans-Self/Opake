@@ -70,6 +70,7 @@ fn keyring_document(
             },
         },
         supersedes: None,
+        supersedes_cid: None,
         lineage: None,
         workspace_id: Some(workspace_id.into()),
         created_at: "2026-04-17T00:00:00Z".into(),

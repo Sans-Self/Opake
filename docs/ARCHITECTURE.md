@@ -130,6 +130,12 @@ ML-KEM-768 KeyGen is itself deterministic given a 64-byte randomness seed, so th
 
 The mnemonic is shown once at first login and never stored. Recovery is via `opake recover` (CLI) or the "Use your recovery phrase" flow (web). See [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) for sequence diagrams.
 
+## Workspace Identity
+
+A workspace is identified by its genesis keyring's at-uri, and that URI is not an address the creator picks — its rkey is **derived** from the genesis (rotation-0) group key and the creator's DID. The key and DID seed an Ed25519 keypair, and the rkey is a 26-character base32 tag over the hash of that public key. The identity therefore commits to key material only members hold: an outsider cannot mint a keyring claiming a workspace whose rotation-0 key it lacks, because forging the rkey would be a preimage of the victim's tag. Every client re-derives the tag when it adopts a workspace under a declared identity and rejects a mismatch — a members-only, offline check the indexer cannot run, since it holds no group key. The full construction and threat model are in [CRYPTO.md](CRYPTO.md#workspace-identity); the record-shape and adoption paths are in [FEDERATION.md](FEDERATION.md).
+
+Superseding records (keyring, directory, document) also carry `supersedesCid` — the CID of the immediate predecessor the supersede was written against. At v1 this compares the CID a host *reports*, not a hash recomputed from bytes, so it detects disagreement between honest hosts but is not, yet, a defense against a host serving tampered bytes under the true CID. Byte-level binding is deferred to the replication tier.
+
 ## Data Model
 
 All records live under the `at.opake.*` NSID namespace. See [lexicons/README.md](../lexicons/README.md) for the schema reference and [lexicons/EXAMPLES.md](../lexicons/EXAMPLES.md) for annotated example records.

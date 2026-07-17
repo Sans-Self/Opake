@@ -39,18 +39,22 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // the caller's own PDS (authenticated read). Workspace directories may
         // live on another member's PDS, so resolve the host and read from its
         // public endpoint — the same cross-PDS fetch the cascade uses.
-        let directory: records::Directory = if self.context.is_cabinet() {
-            let entry = self
-                .opake
-                .client
-                .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+        let (directory, prior_cid): (records::Directory, Option<String>) =
+            if self.context.is_cabinet() {
+                let entry = self
+                    .opake
+                    .client
+                    .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
+                    .await?;
+                (serde_json::from_value(entry.value)?, None)
+            } else {
+                let node = directories::fetch_chain_node::<Directory>(
+                    self.opake.client.transport(),
+                    directory_uri,
+                )
                 .await?;
-            serde_json::from_value(entry.value)?
-        } else {
-            directories::fetch_chain_node::<Directory>(self.opake.client.transport(), directory_uri)
-                .await?
-                .record
-        };
+                (node.record, Some(node.cid))
+            };
         records::check_version(directory.opake_version)?;
 
         let content_key = match &directory.key_wrapping {
@@ -139,6 +143,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: new_encrypted_metadata,
             entries: directory.entries,
             supersedes: Some(directory_uri.to_owned()),
+            supersedes_cid: prior_cid,
             lineage: Some(anchor),
             workspace_id: Some(workspace_id),
             // Inherit from the prior record so the "never flip" invariant holds.

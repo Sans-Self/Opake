@@ -149,6 +149,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: prior.record.encrypted_metadata,
             entries: new_entries,
             supersedes: Some(prior.uri),
+            supersedes_cid: Some(prior.cid),
             lineage: Some(lineage),
             workspace_id: Some(workspace_uri.to_owned()),
             // Root-atomic delete: this supersede targets the workspace root,
@@ -235,6 +236,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: parent_record.record.encrypted_metadata.clone(),
             entries: new_parent_entries,
             supersedes: Some(parent_record.uri.clone()),
+            supersedes_cid: Some(parent_record.cid.clone()),
             lineage: Some(
                 parent_record
                     .record
@@ -298,6 +300,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 encrypted_metadata: ancestor.record.encrypted_metadata.clone(),
                 entries: new_entries,
                 supersedes: Some(ancestor.uri.clone()),
+                supersedes_cid: Some(ancestor.cid.clone()),
                 lineage: Some(ancestor.record.lineage_anchor(&ancestor.uri).to_owned()),
                 workspace_id: Some(workspace_uri.to_owned()),
                 // Inherit so the topmost ancestor (the workspace root) stays
