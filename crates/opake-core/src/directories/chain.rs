@@ -40,7 +40,8 @@ pub trait Superseding {
     fn declared_lineage(&self) -> Option<&str>;
 
     /// The record's lineage anchor: its declared lineage, or its own URI when
-    /// it is genesis (`spec:lineage § Lineage is the chain's genesis URI`).
+    /// it is genesis
+    /// (`spec:lineage § Lineage is the chain's genesis URI, carried on every supersede`).
     fn lineage_anchor<'a>(&'a self, own_uri: &'a str) -> &'a str {
         self.declared_lineage().unwrap_or(own_uri)
     }

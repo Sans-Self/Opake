@@ -128,8 +128,8 @@ pub(crate) fn encrypt_keyring_directory_envelope(
         description: description.map(String::from),
     };
     // Genesis directory: the metadata AAD binds its own URI, chosen by the
-    // caller before encryption (`spec:lineage § Records that seal ciphertexts
-    // to their own URI choose their own rkey`).
+    // caller before encryption
+    // (`spec:lineage § Records that seal ciphertexts to their own URI choose their own rkey`).
     let context = SealContext::new(directory_uri, SealType::DirectoryMetadata);
     let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &context, rng)?;
     let wrapped_content_key = crypto::wrap_content_key_for_keyring(&content_key, group_key)?;
@@ -217,8 +217,14 @@ pub(crate) mod tests {
     /// Build a dummy encrypted directory for tests.
     fn encrypt_dummy_directory(name: &str) -> (KeyWrapping, crate::records::EncryptedMetadata) {
         let kp = test_keypair();
-        encrypt_directory_envelope(name, TEST_DID, &kp.public_keys(), TEST_DIR_ANCHOR, &mut OsRng)
-            .unwrap()
+        encrypt_directory_envelope(
+            name,
+            TEST_DID,
+            &kp.public_keys(),
+            TEST_DIR_ANCHOR,
+            &mut OsRng,
+        )
+        .unwrap()
     }
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {

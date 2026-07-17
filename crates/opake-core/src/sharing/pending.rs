@@ -313,7 +313,8 @@ pub async fn retry_pending_shares(
         let grant_context =
             crypto::SealContext::new(&entry.document, crypto::SealType::GrantMetadata);
         let metadata: GrantMetadata =
-            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata, &grant_context) {
+            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata, &grant_context)
+            {
                 Ok(m) => m,
                 Err(e) => {
                     warn!(

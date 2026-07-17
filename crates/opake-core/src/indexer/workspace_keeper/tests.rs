@@ -357,10 +357,8 @@ fn make_superseded_envelope_with_name(
         description: None,
         icon: None,
     };
-    let meta_context = crate::crypto::SealContext::new(
-        genesis_uri,
-        crate::crypto::SealType::KeyringMetadata,
-    );
+    let meta_context =
+        crate::crypto::SealContext::new(genesis_uri, crate::crypto::SealType::KeyringMetadata);
     let encrypted_metadata = encrypt_metadata(&gk, &metadata, &meta_context, rng).unwrap();
 
     crate::indexer::types::IndexerEnvelope {

@@ -282,7 +282,11 @@ async fn walk_back_stops_at_a_flipped_lineage() {
 
     let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
 
-    assert_eq!(chain.len(), 1, "flipped head is not linked to the prior chain");
+    assert_eq!(
+        chain.len(),
+        1,
+        "flipped head is not linked to the prior chain"
+    );
     assert_eq!(chain[0].uri, URI_HEAD);
 
     // And the integrity wrapper rejects the flipped head against the real

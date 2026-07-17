@@ -13,7 +13,6 @@ fn blob_seal() -> SealContext<'static> {
     SealContext::new(TEST_DOC_URI, SealType::DocumentBlob)
 }
 
-
 #[test]
 fn roundtrip_encrypt_decrypt() {
     let key = generate_content_key(&mut OsRng);

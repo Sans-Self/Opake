@@ -236,8 +236,8 @@ impl DirectoryTree {
         // A supersede edge only counts when the superseding record's declared
         // lineage equals its predecessor's anchor. A flipped-lineage record is
         // outside the chain, so its edge is dropped read-leniently and the
-        // prior it names stays a head (`spec:lineage § Lineage never flips
-        // across a supersede`).
+        // prior it names stays a head
+        // (`spec:lineage § Lineage never flips across a supersede`).
         let superseded_uris: std::collections::HashSet<&str> = directories
             .iter()
             .filter_map(|(uri, info)| {
@@ -660,8 +660,8 @@ impl DirectoryTree {
     /// record set. A back-edge only counts when the superseding record's
     /// declared lineage equals its predecessor's anchor; a flipped-lineage
     /// record is outside the chain, so its edge is dropped read-leniently and
-    /// the prior it names stays canonical (`spec:lineage § Lineage never flips
-    /// across a supersede`).
+    /// the prior it names stays canonical
+    /// (`spec:lineage § Lineage never flips across a supersede`).
     fn superseded_uris(&self) -> std::collections::HashSet<&str> {
         self.directories
             .iter()

@@ -39,8 +39,8 @@ impl SealType {
 /// AAD context: which object a ciphertext belongs to, and which field it
 /// seals. `anchor` is the record's lineage anchor — the chain's genesis
 /// URI, which is the record's own URI when the record is genesis or never
-/// chains (`spec:lineage § Lineage is the chain's genesis URI, carried on
-/// every supersede`).
+/// chains
+/// (`spec:lineage § Lineage is the chain's genesis URI, carried on every supersede`).
 #[derive(Debug, Clone, Copy)]
 pub struct SealContext<'a> {
     anchor: &'a str,

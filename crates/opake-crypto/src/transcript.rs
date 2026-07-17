@@ -25,7 +25,11 @@ pub(crate) fn context_transcript(label: &[u8], fields: &[&[u8]]) -> Vec<u8> {
     let payload_len: usize = fields.iter().map(|f| 4 + f.len()).sum();
     let mut out = Vec::with_capacity(label.len() + 4 + payload_len);
     out.extend_from_slice(label);
-    out.extend_from_slice(&u32::try_from(fields.len()).expect("field count fits u32").to_le_bytes());
+    out.extend_from_slice(
+        &u32::try_from(fields.len())
+            .expect("field count fits u32")
+            .to_le_bytes(),
+    );
     for field in fields {
         let len = u32::try_from(field.len()).expect("field length fits u32");
         out.extend_from_slice(&len.to_le_bytes());

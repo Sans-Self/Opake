@@ -41,8 +41,8 @@ pub enum LevelMode {
         encrypted_metadata: EncryptedMetadata,
         /// The chain's lineage anchor (genesis URI). Stamped onto the new
         /// record so the verbatim-copied `encrypted_metadata` still
-        /// authenticates under the same AAD (`spec:lineage § Lineage never
-        /// flips across a supersede`).
+        /// authenticates under the same AAD
+        /// (`spec:lineage § Lineage never flips across a supersede`).
         lineage: String,
     },
     /// Create a fresh genesis record at this level. No `supersedes`

@@ -49,8 +49,8 @@ impl<T> IndexerEnvelope<T> {
 impl IndexerEnvelope<Keyring> {
     /// The stable workspace identity this keyring event belongs to.
     ///
-    /// Derived as `record.workspace_id` falling back to the envelope URI:
-    /// a record without `workspace_id` is the genesis keyring, whose own
+    /// Derived as `record.lineage` falling back to the envelope URI:
+    /// a record without `lineage` is the genesis keyring, whose own
     /// URI *is* the workspace ID. The envelope URI alone is the chain
     /// head — never use it to key workspace-scoped state, or every event
     /// on a superseded chain silently misses (see `Keyring::lineage_anchor`,

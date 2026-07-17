@@ -294,14 +294,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     ) -> Result<LeafLevel, Error> {
         // Client-chosen TID: the genesis root's metadata seals to its own
         // URI, so the URI (and rkey) must be fixed before encryption
-        // (`spec:lineage § Records that seal ciphertexts to their own URI
-        // choose their own rkey`).
+        // (`spec:lineage § Records that seal ciphertexts to their own URI choose their own rkey`).
         let tid = self.opake.generate_tid();
-        let root_uri = crate::tid::uri_with_tid(
-            &self.opake.did,
-            directories::DIRECTORY_COLLECTION,
-            &tid,
-        );
+        let root_uri =
+            crate::tid::uri_with_tid(&self.opake.did, directories::DIRECTORY_COLLECTION, &tid);
         let (kw, meta) = directories::encrypt_keyring_directory_envelope(
             directories::ROOT_DIRECTORY_NAME,
             None,

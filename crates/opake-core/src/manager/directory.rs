@@ -88,8 +88,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 // Client-chosen TID so the directory's URI is known before its
                 // metadata is sealed to it.
                 let tid = self.opake.generate_tid();
-                let dir_uri =
-                    crate::tid::uri_with_tid(&cabinet.did, DIRECTORY_COLLECTION, &tid);
+                let dir_uri = crate::tid::uri_with_tid(&cabinet.did, DIRECTORY_COLLECTION, &tid);
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     name,
                     &cabinet.did,

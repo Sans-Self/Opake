@@ -975,10 +975,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
-        let doc_context = crypto::SealContext::new(
-            doc.lineage_anchor(uri),
-            crypto::SealType::DocumentMetadata,
-        );
+        let doc_context =
+            crypto::SealContext::new(doc.lineage_anchor(uri), crypto::SealType::DocumentMetadata);
         let metadata = match crypto::decrypt_metadata::<crypto::DocumentMetadata>(
             &content_key,
             &doc.encrypted_metadata,

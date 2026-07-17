@@ -10,15 +10,18 @@ Terms:
 
 - Genesis URI: the AT-URI of the first keyring record in the chain. Stable for the workspace's lifetime.
 - Head URI: the AT-URI of the current (most recently superseding) keyring record. Changes on every supersede.
-- `workspace_id`: field on every non-genesis keyring record, holding the genesis URI. Absent on genesis itself.
+- `lineage`: field on every non-genesis keyring record, holding the genesis URI. Absent on genesis itself (`spec:lineage § Lineage is the chain's genesis URI, carried on every supersede`).
+- `workspace_id`: the indexer-side reference to a workspace (row columns, API parameters, SSE payloads) and the `workspaceId` reference field on documents and directories. Always holds the genesis URI; never the name of the keyring's own identity field.
 
 ## Requirements
 
 ### Requirement: Genesis URI is the workspace identity
 
-The genesis keyring URI SHALL be the sole stable identifier of a workspace. Every keyring record after genesis SHALL carry `workspace_id` set to the genesis URI. Any component holding a keyring record SHALL derive the workspace identity as `workspace_id.unwrap_or(record_uri)` — a record without `workspace_id` is genesis and identifies itself.
+The genesis keyring URI SHALL be the sole stable identifier of a workspace. Every keyring record after genesis SHALL carry `lineage` set to the genesis URI — the workspace is the keyring chain's object, and its identity field is the universal chain-identity field (`spec:lineage § Lineage is the chain's genesis URI, carried on every supersede`), not a keyring-specific one. Any component holding a keyring record SHALL derive the workspace identity as `lineage.unwrap_or(record_uri)` — a record without `lineage` is genesis and identifies itself.
 
 The resolved `Workspace.uri` SHALL be the genesis URI, regardless of which chain record the resolution started from.
+
+Records that *reference* a workspace from outside the keyring chain (documents, directories) continue to do so via their `workspaceId` field; that field's value is the keyring chain's lineage. `lineage` always answers "which object am I"; `workspaceId` always answers "which workspace do I belong to".
 
 #### Scenario: identity survives a supersede
 
@@ -30,11 +33,13 @@ The resolved `Workspace.uri` SHALL be the genesis URI, regardless of which chain
 
 - **GIVEN** any keyring record in the chain (genesis, superseded intermediate, or head)
 - **WHEN** a component derives the workspace identity from it
-- **THEN** the result is `workspace_id.unwrap_or(record_uri)` and equals the genesis URI
+- **THEN** the result is `lineage.unwrap_or(record_uri)` and equals the genesis URI
 
 ### Requirement: Group-key wraps are AEAD-bound to genesis
 
-Every member group-key wrap SHALL bind its AEAD context to the genesis URI, via `Keyring::wrap_anchor(self_uri)` (crates/opake-core/src/records/keyring.rs). Every unwrap SHALL reconstruct the context the same way. Wrapping or unwrapping against a head URI is a context mismatch and SHALL NOT occur.
+Every member group-key wrap SHALL bind its AEAD context to the genesis URI, via `Keyring::lineage_anchor(self_uri)` (crates/opake-core/src/records/keyring.rs) — the keyring's lineage anchor. Every unwrap SHALL reconstruct the context the same way. Wrapping or unwrapping against a head URI is a context mismatch and SHALL NOT occur.
+
+The same genesis binding SHALL extend one layer down to the keyring's `encryptedMetadata`: its AES-256-GCM AAD names the lineage anchor with the `keyring-metadata` type (`spec:document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type`), never a head URI. Chain advances copy the metadata ciphertext verbatim into new head records (crates/opake-core/src/opake.rs), so a head-URI binding would break every advance; the anchor is the identity the ciphertext travels under for its whole life.
 
 #### Scenario: decrypt after supersede
 
@@ -42,6 +47,12 @@ Every member group-key wrap SHALL bind its AEAD context to the genesis URI, via 
 - **WHEN** that member unwraps their group key from the current head
 - **THEN** the unwrap succeeds using the genesis URI as AEAD context
 - Regression: `bug__superseded_keyring_decrypts_name_via_genesis_anchor` (shipped fix `2c9b32d`)
+
+#### Scenario: keyring metadata decrypts from any head in the chain
+
+- **GIVEN** a workspace whose keyring metadata ciphertext has been carried verbatim across one or more supersedes
+- **WHEN** a member decrypts the workspace name from the current head record
+- **THEN** the AAD reconstructed from the head's lineage anchor matches the AAD it was sealed under and decryption succeeds
 
 ### Requirement: Workspace-scoped indexer calls pass genesis
 
@@ -104,7 +115,7 @@ The typed boundary ends where `WorkspaceId` would have to cross into opake-crypt
 
 ### Requirement: SSE keyring dispatch keys on derived genesis
 
-The SSE dispatch layer SHALL derive the workspace identity from the event's record (`record.workspace_id.unwrap_or(envelope.uri)`) before invoking any keeper operation. Keeper entries are keyed on genesis; passing the envelope URI is correct only for genesis events and silently wrong for every event on a superseded chain.
+The SSE dispatch layer SHALL derive the workspace identity from the event's record (`record.lineage.unwrap_or(envelope.uri)` — the lineage anchor) before invoking any keeper operation. Keeper entries are keyed on genesis; passing the envelope URI is correct only for genesis events and silently wrong for every event on a superseded chain.
 
 For keyring delete events the record is gone, so the identity SHALL come from the payload's `workspace_id`, and whether any keeper operation runs at all is governed by the payload's outcome (`spec:keyring-tombstones § Clients act on the outcome, never on URI matching`): only `torn_down` removes an entry, keyed by the payload's `workspace_id` — never by the deleted `uri`.
 

@@ -253,8 +253,8 @@ mod tests {
     fn encrypt_and_wrap(plaintext: &[u8], recipient_keys: &TestKeys) -> GrantFixture {
         let content_key = crypto::generate_content_key(&mut OsRng);
         let blob_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentBlob);
-        let payload = crypto::encrypt_blob(&content_key, plaintext, &blob_context, &mut OsRng)
-            .unwrap();
+        let payload =
+            crypto::encrypt_blob(&content_key, plaintext, &blob_context, &mut OsRng).unwrap();
 
         // Owner-side wrap uses an opaque bundle the test never unwraps with.
         // The grant flow ignores the document's own envelope, only its nonce.

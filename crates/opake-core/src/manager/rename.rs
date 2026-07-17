@@ -99,8 +99,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // must bind the CHAIN's lineage anchor — not the superseding record's
         // own URI — or the new head fails to authenticate on read.
         let anchor = directory.lineage_anchor(directory_uri).to_string();
-        let seal_context =
-            crypto::SealContext::new(&anchor, crypto::SealType::DirectoryMetadata);
+        let seal_context = crypto::SealContext::new(&anchor, crypto::SealType::DirectoryMetadata);
         let mut metadata: DirectoryMetadata =
             crypto::decrypt_metadata(&content_key, &directory.encrypted_metadata, &seal_context)?;
         metadata.name = new_name.to_string();

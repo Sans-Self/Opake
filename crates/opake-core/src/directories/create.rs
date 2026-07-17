@@ -17,9 +17,9 @@ use super::DIRECTORY_COLLECTION;
 ///
 /// `rkey` is a client-generated TID: the directory's metadata seals to its
 /// own URI, so the URI — and therefore the rkey — must be known before the
-/// caller encrypted the metadata (`spec:lineage § Records that seal
-/// ciphertexts to their own URI choose their own rkey`). Creating at the
-/// exact rkey also makes retries idempotent.
+/// caller encrypted the metadata
+/// (`spec:lineage § Records that seal ciphertexts to their own URI choose their own rkey`).
+/// Creating at the exact rkey also makes retries idempotent.
 pub async fn create_directory(
     client: &mut XrpcClient<impl Transport>,
     key_wrapping: KeyWrapping,

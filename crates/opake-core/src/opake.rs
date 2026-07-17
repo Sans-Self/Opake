@@ -519,9 +519,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         )?;
 
         // Decrypt metadata for the workspace name
-        let name =
-            keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
-                .unwrap_or_default();
+        let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
+            .unwrap_or_default();
 
         let historical_keys = crate::workspace::derive_historical_keys(
             &keyring,
@@ -1127,8 +1126,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             rotation: prior.rotation,
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
-            supersedes: None,   // filled by write_keyring_supersede
-            lineage: None, // filled by write_keyring_supersede
+            supersedes: None, // filled by write_keyring_supersede
+            lineage: None,    // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1221,8 +1220,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             rotation: new_rotation,
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
-            supersedes: None,   // filled by write_keyring_supersede
-            lineage: None, // filled by write_keyring_supersede
+            supersedes: None, // filled by write_keyring_supersede
+            lineage: None,    // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1386,7 +1385,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(crate::crypto::unwrap_key(
             &member.wrapped_key,
             private_keys,
-            &crate::crypto::WrapContext::Keyring { uri: lineage_anchor },
+            &crate::crypto::WrapContext::Keyring {
+                uri: lineage_anchor,
+            },
             // Transcript derives from the keyring's own declared version.
             declared_version,
         )?)

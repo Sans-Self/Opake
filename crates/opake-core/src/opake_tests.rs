@@ -837,8 +837,10 @@ mod workspace_resolution {
             &mut OsRng,
         )
         .unwrap();
-        let meta_context =
-            crate::crypto::SealContext::new(WORKSPACE_URI, crate::crypto::SealType::KeyringMetadata);
+        let meta_context = crate::crypto::SealContext::new(
+            WORKSPACE_URI,
+            crate::crypto::SealType::KeyringMetadata,
+        );
         let encrypted_metadata = encrypt_metadata(
             &group_key,
             &KeyringMetadata {

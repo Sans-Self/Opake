@@ -33,7 +33,12 @@ fn build_encrypted_metadata(
         description: description.map(Into::into),
     };
     let context = SealContext::new(anchor, SealType::DocumentMetadata);
-    Ok(crypto::encrypt_metadata(content_key, &metadata, &context, rng)?)
+    Ok(crypto::encrypt_metadata(
+        content_key,
+        &metadata,
+        &context,
+        rng,
+    )?)
 }
 
 /// Everything needed to encrypt and upload a document, minus the transport

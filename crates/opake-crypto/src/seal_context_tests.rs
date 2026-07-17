@@ -17,7 +17,12 @@ fn aad_differs_by_anchor_under_one_type() {
 
 #[test]
 fn aad_is_deterministic() {
-    let make = || SealContext::new("at://did:plc:x/at.opake.keyring/g", SealType::KeyringMetadata);
+    let make = || {
+        SealContext::new(
+            "at://did:plc:x/at.opake.keyring/g",
+            SealType::KeyringMetadata,
+        )
+    };
     assert_eq!(make().aad(), make().aad());
 }
 

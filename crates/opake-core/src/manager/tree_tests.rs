@@ -358,7 +358,7 @@ async fn bug__resolve_status_splits_retryable_from_undecryptable() {
     use crate::atproto::{AtBytes, BlobRef, CidLink};
     use crate::cabinet::Cabinet;
     use crate::manager::DocumentMetadataResolution;
-    use crate::records::{DirectEncryption, Document, EncryptionEnvelope, Encryption};
+    use crate::records::{DirectEncryption, Document, Encryption, EncryptionEnvelope};
 
     const DOC_MISSING: &str = "at://did:plc:bob/at.opake.document/missing";
     const DOC_NOKEY: &str = "at://did:plc:bob/at.opake.document/nokey";
