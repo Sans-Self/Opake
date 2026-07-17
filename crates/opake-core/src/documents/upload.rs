@@ -1,7 +1,9 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::client::{Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, DocumentMetadata, PublicKeyBundle, RngCore};
+use crate::crypto::{
+    self, ContentKey, CryptoRng, DocumentMetadata, PublicKeyBundle, RngCore, SealContext, SealType,
+};
 use crate::error::Error;
 use crate::records::{
     AtBytes, DirectEncryption, Document, Encryption, EncryptionEnvelope, KeyringEncryption,
@@ -12,6 +14,7 @@ use crate::records::{
 pub(super) const MAX_BLOB_SIZE: usize = 50 * 1024 * 1024;
 
 /// Build a `DocumentMetadata` from upload parameters and encrypt it.
+#[allow(clippy::too_many_arguments)]
 fn build_encrypted_metadata(
     content_key: &crypto::ContentKey,
     filename: &str,
@@ -19,6 +22,7 @@ fn build_encrypted_metadata(
     size: u64,
     description: Option<&str>,
     tags: &[String],
+    anchor: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<crate::records::EncryptedMetadata, Error> {
     let metadata = DocumentMetadata {
@@ -28,7 +32,8 @@ fn build_encrypted_metadata(
         tags: tags.to_vec(),
         description: description.map(Into::into),
     };
-    Ok(crypto::encrypt_metadata(content_key, &metadata, rng)?)
+    let context = SealContext::new(anchor, SealType::DocumentMetadata);
+    Ok(crypto::encrypt_metadata(content_key, &metadata, &context, rng)?)
 }
 
 /// Everything needed to encrypt and upload a document, minus the transport
@@ -63,18 +68,20 @@ pub async fn prepare_upload(
         )));
     }
 
+    // Bind the wrap and the ciphertexts to the document's own URI. A fresh
+    // upload is genesis, so its lineage anchor is its own URI (the owner's
+    // envelope, any grants, blob, and metadata all share the one tag). The
+    // download / metadata-read paths reconstruct the same anchor.
+    let document_uri = crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
+
     let content_key = crypto::generate_content_key(rng);
-    let payload = crypto::encrypt_blob(&content_key, params.plaintext, rng)?;
+    let blob_context = SealContext::new(&document_uri, SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&content_key, params.plaintext, &blob_context, rng)?;
 
     let blob_ref = client
         .upload_blob(payload.ciphertext, "application/octet-stream")
         .await?;
 
-    // Bind the wrap to the document's URI so the owner's own envelope and
-    // any grants wrapped to the same content key share one consistent
-    // context tag (`Document { uri }`). The download / metadata-read
-    // paths unwrap with the same context.
-    let document_uri = crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
     let wrapped_key = crypto::wrap_key(
         &content_key,
         &params.owner_public_keys,
@@ -89,6 +96,7 @@ pub async fn prepare_upload(
         params.plaintext.len() as u64,
         params.description,
         params.tags,
+        &document_uri,
         rng,
     )?;
 
@@ -126,8 +134,16 @@ pub async fn prepare_upload_keyring(
         )));
     }
 
+    // A fresh upload (supersedes: None) is genesis: seal to its own URI and
+    // carry no lineage. An editor supersede (supersedes: Some) seals to the
+    // ORIGINAL document's lineage anchor — supplied as `params.lineage` —
+    // and the new record declares that anchor so readers reconstruct it.
+    let own_uri = crate::tid::uri_with_tid(params.owner_did, super::DOCUMENT_COLLECTION, tid);
+    let anchor = params.lineage.unwrap_or(&own_uri);
+
     let content_key = crypto::generate_content_key(rng);
-    let payload = crypto::encrypt_blob(&content_key, params.plaintext, rng)?;
+    let blob_context = SealContext::new(anchor, SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&content_key, params.plaintext, &blob_context, rng)?;
 
     let blob_ref = client
         .upload_blob(payload.ciphertext, "application/octet-stream")
@@ -141,6 +157,7 @@ pub async fn prepare_upload_keyring(
         params.plaintext.len() as u64,
         params.description,
         params.tags,
+        anchor,
         rng,
     )?;
 
@@ -165,6 +182,10 @@ pub async fn prepare_upload_keyring(
     .with_workspace_id(params.workspace_id);
 
     document.supersedes = params.supersedes.map(Into::into);
+    // Declare the lineage so readers reconstruct the same anchor the blob and
+    // metadata were sealed under. Fresh (genesis) uploads leave it absent and
+    // identify themselves by their own URI.
+    document.lineage = params.lineage.map(Into::into);
 
     Ok((serde_json::to_value(&document)?, tid.to_string()))
 }
@@ -174,6 +195,9 @@ pub struct KeyringUploadParams<'a> {
     pub plaintext: &'a [u8],
     pub filename: &'a str,
     pub mime_type: &'a str,
+    /// DID that will own the new document record (the caller's PDS). Used
+    /// to compute the record's own URI for the genesis lineage anchor.
+    pub owner_did: &'a str,
     /// AT-URI of the keyring whose group key wraps the content key. May
     /// be the chain head or any rotation member — distinct from `workspace_id`.
     pub keyring_uri: &'a str,
@@ -191,6 +215,12 @@ pub struct KeyringUploadParams<'a> {
     /// listing at this record relies on the indexer reading this field to
     /// authorize the editor's otherwise non-additive entry swap.
     pub supersedes: Option<&'a str>,
+    /// Lineage anchor to seal the blob and metadata under, and to stamp on
+    /// the record. `None` for a fresh (genesis) upload — the record seals to
+    /// its own URI and carries no lineage. `Some(anchor)` for an editor
+    /// supersede — the ORIGINAL document's lineage anchor, so the copied
+    /// content authenticates and readers reconstruct the same AAD.
+    pub lineage: Option<&'a str>,
 }
 
 /// Non-atomic upload for tests — creates the record directly via createRecord.
@@ -370,8 +400,9 @@ mod tests {
         .unwrap();
 
         // Decrypt metadata
+        let meta_context = crypto::SealContext::new(&test_uri, crypto::SealType::DocumentMetadata);
         let metadata: crypto::DocumentMetadata =
-            crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata).unwrap();
+            crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata, &meta_context).unwrap();
 
         assert_eq!(metadata.name, "report.pdf");
         assert_eq!(metadata.mime_type.as_deref(), Some("application/pdf"));
@@ -555,9 +586,11 @@ mod tests {
         let nonce_bytes = BASE64.decode(&envelope.nonce.encoded).unwrap();
         let nonce: [u8; 12] = nonce_bytes.try_into().unwrap();
 
+        let blob_context = crypto::SealContext::new(&test_uri, crypto::SealType::DocumentBlob);
         let decrypted = crypto::decrypt_blob(
             &content_key,
             &crypto::EncryptedPayload { ciphertext, nonce },
+            &blob_context,
         )
         .unwrap();
 
@@ -583,6 +616,7 @@ mod tests {
                 plaintext: b"edited content",
                 filename: "note.txt",
                 mime_type: "text/plain",
+                owner_did: "did:plc:alice",
                 keyring_uri: "at://did:plc:alice/at.opake.keyring/ws1",
                 workspace_id: "at://did:plc:alice/at.opake.keyring/ws1",
                 group_key: &group_key,
@@ -591,6 +625,7 @@ mod tests {
                 tags: &[],
                 created_at: "2026-06-06T00:00:00Z",
                 supersedes: Some(prior),
+                lineage: Some(prior),
             },
             &mut OsRng,
             "test-tid",
@@ -600,6 +635,9 @@ mod tests {
 
         let doc: Document = serde_json::from_value(record_value).unwrap();
         assert_eq!(doc.supersedes.as_deref(), Some(prior));
+        // The record must declare the lineage it sealed under so readers
+        // reconstruct the same AAD anchor.
+        assert_eq!(doc.lineage.as_deref(), Some(prior));
     }
 
     /// A plain upload (no edit) leaves `supersedes` unset.
@@ -617,6 +655,7 @@ mod tests {
                 plaintext: b"fresh content",
                 filename: "note.txt",
                 mime_type: "text/plain",
+                owner_did: "did:plc:alice",
                 keyring_uri: "at://did:plc:alice/at.opake.keyring/ws1",
                 workspace_id: "at://did:plc:alice/at.opake.keyring/ws1",
                 group_key: &group_key,
@@ -625,6 +664,7 @@ mod tests {
                 tags: &[],
                 created_at: "2026-06-06T00:00:00Z",
                 supersedes: None,
+                lineage: None,
             },
             &mut OsRng,
             "test-tid",

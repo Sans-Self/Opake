@@ -106,8 +106,9 @@ pub async fn download_from_grant(
     )
     .await?;
 
-    let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext)?;
-    let name = resolve_document_name(&doc, &content_key)?;
+    let anchor = doc.lineage_anchor(&grant.document);
+    let plaintext = decrypt_with_envelope(&content_key, envelope, ciphertext, anchor)?;
+    let name = resolve_document_name(&doc, &content_key, anchor)?;
     Ok((name, plaintext))
 }
 
@@ -164,8 +165,10 @@ pub(crate) async fn resolve_grant_metadata(
     let doc: Document = serde_json::from_value(doc_entry.value)?;
     records::check_version(doc.opake_version)?;
 
-    let name = resolve_document_name(&doc, &content_key)?;
-    let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata)?;
+    let anchor = doc.lineage_anchor(&grant.document);
+    let name = resolve_document_name(&doc, &content_key, anchor)?;
+    let context = crypto::SealContext::new(anchor, crypto::SealType::DocumentMetadata);
+    let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata, &context)?;
     Ok((name, metadata, doc.created_at, doc.modified_at))
 }
 
@@ -249,7 +252,9 @@ mod tests {
     /// and a real wrapped copy for the recipient.
     fn encrypt_and_wrap(plaintext: &[u8], recipient_keys: &TestKeys) -> GrantFixture {
         let content_key = crypto::generate_content_key(&mut OsRng);
-        let payload = crypto::encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
+        let blob_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentBlob);
+        let payload = crypto::encrypt_blob(&content_key, plaintext, &blob_context, &mut OsRng)
+            .unwrap();
 
         // Owner-side wrap uses an opaque bundle the test never unwraps with.
         // The grant flow ignores the document's own envelope, only its nonce.
@@ -296,8 +301,9 @@ mod tests {
             tags: vec![],
             description: None,
         };
+        let meta_context = crypto::SealContext::new(DOC_URI, crypto::SealType::DocumentMetadata);
         let encrypted_metadata =
-            crypto::encrypt_metadata(content_key, &metadata, &mut OsRng).unwrap();
+            crypto::encrypt_metadata(content_key, &metadata, &meta_context, &mut OsRng).unwrap();
 
         Document::new(
             BlobRef {

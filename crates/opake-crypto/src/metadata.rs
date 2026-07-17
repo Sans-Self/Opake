@@ -5,8 +5,10 @@ use aes_gcm::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use aes_gcm::aead::Payload;
+
 use crate::error::Error;
-use crate::{AtBytes, ContentKey, CryptoRng, EncryptedMetadata, RngCore};
+use crate::{AtBytes, ContentKey, CryptoRng, EncryptedMetadata, RngCore, SealContext};
 
 // ---------------------------------------------------------------------------
 // Metadata types — one per record kind
@@ -64,14 +66,17 @@ pub struct DirectoryMetadata {
 // Generic encrypt / decrypt
 // ---------------------------------------------------------------------------
 
-/// Encrypt a metadata value with AES-256-GCM using a fresh nonce.
+/// Encrypt a metadata value with AES-256-GCM using a fresh nonce, bound to
+/// the seal context as associated data.
 ///
 /// Works for any `Serialize` type — the value is JSON-serialized before
 /// encryption. Use the same symmetric key that protects the parent record
 /// (content key for documents/grants, group key for keyrings).
+// spec: document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type
 pub fn encrypt_metadata<T: Serialize>(
     key: &ContentKey,
     metadata: &T,
+    context: &SealContext<'_>,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<EncryptedMetadata, Error> {
     let plaintext = serde_json::to_vec(metadata)
@@ -80,7 +85,13 @@ pub fn encrypt_metadata<T: Serialize>(
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key.0));
     let nonce = Aes256Gcm::generate_nonce(rng);
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext.as_ref())
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext.as_ref(),
+                aad: &context.aad(),
+            },
+        )
         .map_err(|e| Error::Encryption(e.to_string()))?;
 
     Ok(EncryptedMetadata {
@@ -100,6 +111,7 @@ pub fn encrypt_metadata<T: Serialize>(
 pub fn decrypt_metadata<T: DeserializeOwned>(
     key: &ContentKey,
     encrypted: &EncryptedMetadata,
+    context: &SealContext<'_>,
 ) -> Result<T, Error> {
     let ciphertext = encrypted
         .ciphertext
@@ -115,7 +127,13 @@ pub fn decrypt_metadata<T: DeserializeOwned>(
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key.0));
     let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext.as_ref(),
+                aad: &context.aad(),
+            },
+        )
         .map_err(|e| Error::Decryption(e.to_string()))?;
 
     serde_json::from_slice(&plaintext)

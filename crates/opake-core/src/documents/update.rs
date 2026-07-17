@@ -42,12 +42,17 @@ pub async fn update_content(
     let mut doc = result.document;
     let mut metadata = result.metadata;
 
+    // In-place content replacement keeps the record's rkey and its lineage
+    // anchor; the fresh ciphertexts seal under the same anchor.
+    let anchor = doc.lineage_anchor(uri).to_string();
+
     trace!(
         "re-encrypting blob for {} ({} bytes)",
         uri,
         new_plaintext.len()
     );
-    let payload = crypto::encrypt_blob(&result.content_key, new_plaintext, rng)?;
+    let blob_context = crypto::SealContext::new(&anchor, crypto::SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&result.content_key, new_plaintext, &blob_context, rng)?;
 
     trace!(
         "uploading new encrypted blob ({} bytes)",
@@ -76,7 +81,9 @@ pub async fn update_content(
 
     // Update metadata size to match new content.
     metadata.size = Some(new_plaintext.len() as u64);
-    let encrypted_metadata = crypto::encrypt_metadata(&result.content_key, &metadata, rng)?;
+    let meta_context = crypto::SealContext::new(&anchor, crypto::SealType::DocumentMetadata);
+    let encrypted_metadata =
+        crypto::encrypt_metadata(&result.content_key, &metadata, &meta_context, rng)?;
     doc.encrypted_metadata = encrypted_metadata;
 
     doc.modified_at = Some(modified_at.to_string());

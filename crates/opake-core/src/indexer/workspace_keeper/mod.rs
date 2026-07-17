@@ -393,13 +393,13 @@ pub fn try_build_entry(
 
     // Member wraps are anchored to the workspace's stable (genesis) URI, not
     // the head — unwrapping with `head_uri` breaks the moment the workspace
-    // supersedes (add/remove member). `wrap_anchor` resolves the right URI
+    // supersedes (add/remove member). `lineage_anchor` resolves the right URI
     // from the record itself.
     let group_key = match crypto::unwrap_key(
         &my_member.wrapped_key,
         private_keys,
         &crypto::WrapContext::Keyring {
-            uri: keyring.wrap_anchor(head_uri),
+            uri: keyring.lineage_anchor(head_uri),
         },
         keyring.opake_version,
     ) {
@@ -419,9 +419,14 @@ pub fn try_build_entry(
         }
     };
 
+    let metadata_context = crypto::SealContext::new(
+        keyring.lineage_anchor(head_uri),
+        crypto::SealType::KeyringMetadata,
+    );
     let (name, description, icon) = match crypto::decrypt_metadata::<KeyringMetadata>(
         &group_key,
         &keyring.encrypted_metadata,
+        &metadata_context,
     ) {
         Ok(meta) => (Some(meta.name), meta.description, meta.icon),
         Err(_) => (None, None, None),

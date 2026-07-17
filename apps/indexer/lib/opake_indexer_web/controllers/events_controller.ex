@@ -154,17 +154,17 @@ defmodule OpakeIndexerWeb.EventsController do
     record = record_from_envelope(payload)
     # workspace_id resolution for keyring records:
     #
-    #   * Superseded keyrings carry `workspaceId` in their record body
+    #   * Superseded keyrings carry `lineage` in their record body
     #     (the genesis URI of the workspace they belong to).
     #
-    #   * Genesis keyrings have NO `workspaceId` field — they ARE the
+    #   * Genesis keyrings have NO `lineage` field — they ARE the
     #     workspace_id. Their own AT URI is the genesis URI, which lives
     #     on the envelope's top-level `uri`, NOT in the record body
     #     (records don't carry their own URI). Reading `record["uri"]`
     #     here was always nil and silently dropped genesis subscriptions
     #     for the creator's open SSE session — uploads to a freshly-
     #     created workspace wouldn't surface until reconnect.
-    workspace_id = record["workspaceId"] || envelope_uri(payload)
+    workspace_id = record["lineage"] || envelope_uri(payload)
 
     member_dids =
       (record["members"] || [])

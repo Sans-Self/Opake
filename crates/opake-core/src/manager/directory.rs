@@ -25,10 +25,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         match &self.context {
             FileContext::Cabinet(cabinet) => {
+                // The cabinet root has a fixed `self` rkey, so its URI is
+                // known without a TID.
+                let root_uri = directories::root_directory_uri(&cabinet.did);
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     directories::ROOT_DIRECTORY_NAME,
                     &cabinet.did,
                     &cabinet.public_keys(),
+                    &root_uri,
                     &mut self.opake.rng,
                 )?;
                 directories::get_or_create_root(
@@ -81,15 +85,27 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                     Some(uri) => uri.to_string(),
                     None => self.ensure_root().await?,
                 };
+                // Client-chosen TID so the directory's URI is known before its
+                // metadata is sealed to it.
+                let tid = self.opake.generate_tid();
+                let dir_uri =
+                    crate::tid::uri_with_tid(&cabinet.did, DIRECTORY_COLLECTION, &tid);
                 let (kw, meta) = directories::encrypt_directory_envelope(
                     name,
                     &cabinet.did,
                     &cabinet.public_keys(),
+                    &dir_uri,
                     &mut self.opake.rng,
                 )?;
-                let dir_ref =
-                    directories::create_directory(&mut self.opake.client, kw, meta, None, &now)
-                        .await?;
+                let dir_ref = directories::create_directory(
+                    &mut self.opake.client,
+                    kw,
+                    meta,
+                    None,
+                    &tid,
+                    &now,
+                )
+                .await?;
 
                 directories::add_entry(
                     &mut self.opake.client,
@@ -149,13 +165,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             provider.workspace_chain_heads(&workspace_id).await?
         };
 
-        // 1. Write the new directory record.
+        // 1. Write the new directory record. Client-chosen TID so the
+        //    metadata seals to the directory's own URI.
+        let tid = self.opake.generate_tid();
+        let dir_uri = crate::tid::uri_with_tid(&self.opake.did, DIRECTORY_COLLECTION, &tid);
         let (kw, meta) = directories::encrypt_keyring_directory_envelope(
             name,
             None,
             &workspace_uri,
             &ws.key,
             ws.rotation,
+            &dir_uri,
             &mut self.opake.rng,
         )?;
         let dir_ref = directories::create_directory(
@@ -163,6 +183,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             kw,
             meta,
             Some(&workspace_uri),
+            &tid,
             now,
         )
         .await?;
@@ -200,6 +221,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         &root_head.uri,
                     )
                     .await?;
+                    let lineage = prior.record.lineage_anchor(&prior.uri).to_owned();
                     let mut entries = prior.record.entries;
                     entries.push(new_entry);
                     let new_root = Directory {
@@ -208,6 +230,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         encrypted_metadata: prior.record.encrypted_metadata,
                         entries,
                         supersedes: Some(prior.uri),
+                        lineage: Some(lineage),
                         workspace_id: Some(workspace_uri.clone()),
                         // Root-targeted supersede stays in the root chain.
                         is_workspace_root: true,
@@ -402,6 +425,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 &root_head.uri,
             )
             .await?;
+            let lineage = prior.record.lineage_anchor(&prior.uri).to_owned();
             let original_len = prior.record.entries.len();
             let new_entries: Vec<ListingEntry> = prior
                 .record
@@ -420,6 +444,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 encrypted_metadata: prior.record.encrypted_metadata,
                 entries: new_entries,
                 supersedes: Some(prior.uri),
+                lineage: Some(lineage),
                 workspace_id: Some(workspace_uri),
                 // Root-targeted directory delete: this supersede stays in
                 // the root chain.
@@ -501,6 +526,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: parent_record.record.encrypted_metadata.clone(),
             entries: new_parent_entries,
             supersedes: Some(parent_record.uri.clone()),
+            lineage: Some(
+                parent_record
+                    .record
+                    .lineage_anchor(&parent_record.uri)
+                    .to_owned(),
+            ),
             workspace_id: Some(workspace_uri.to_owned()),
             // Deep cascade leaf — inherit so the indexer's "never flip"
             // invariant holds. Typically false (leaf is a subdirectory).
@@ -552,6 +583,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 encrypted_metadata: ancestor.record.encrypted_metadata.clone(),
                 entries: new_entries,
                 supersedes: Some(ancestor.uri.clone()),
+                lineage: Some(ancestor.record.lineage_anchor(&ancestor.uri).to_owned()),
                 workspace_id: Some(workspace_uri.to_owned()),
                 // Topmost ancestor is the workspace root; inherit.
                 is_workspace_root: ancestor.record.is_workspace_root,

@@ -92,19 +92,51 @@ Group key (per-keyring, random)
 
 ## Operations
 
+### Context transcripts (`transcript.rs`)
+
+Every byte string that commits to a tuple of context fields — the HKDF `info` for key wraps and the AAD for content/metadata encryption — is produced by one injective encoder:
+
+```
+transcript(label, fields)
+  → label ‖ u32le(field_count) ‖ (u32le(len) ‖ bytes) per field
+```
+
+Length-prefixing makes the encoding injective by construction: no arrangement of field contents can imitate another arrangement. (Delimiter-joining is not injective when a field may contain the delimiter — `did:web` identifiers legally contain hyphens.) The two consumers use distinct labels (`opake-wrap-info`, `opake-seal-aad`), so a wrap transcript can never collide with an AAD.
+
+### Seal contexts — AAD (`seal_context.rs`)
+
+Every AES-256-GCM ciphertext is bound to a `SealContext` as associated data: the **lineage anchor** of the record it belongs to (the chain's genesis URI — the record's own URI when it is genesis or never chains) and the **seal type** of the field it seals.
+
+```
+SealContext { anchor, seal_type }
+  → AAD = transcript("opake-seal-aad", [anchor, seal_type])
+```
+
+| Ciphertext | Anchor | Seal type |
+|---|---|---|
+| Document blob | document's lineage anchor | `document-blob` |
+| Document metadata | document's lineage anchor | `document-metadata` |
+| Keyring metadata | workspace genesis (keyring lineage anchor) | `keyring-metadata` |
+| Directory metadata | directory's lineage anchor | `directory-metadata` |
+| Pending-share metadata | *target document's* URI | `grant-metadata` |
+| Pairing identity blob | `self:pair-response` sentinel | `pair-identity` |
+
+The type tag matters because one content key seals both a document's blob and its metadata: without AAD, swapping those ciphertexts inside a record decrypts cleanly and only fails if the bytes don't parse. The anchor is chain-constant, so a ciphertext copied verbatim into a superseding record (keyring metadata on an advance, directory metadata through a cascade) still authenticates — the binding names the object, not the record.
+
 ### Content encryption (`content.rs`)
 
 ```
-encrypt_blob(content_key, plaintext, rng)
-  → AES-256-GCM(key=content_key, nonce=random_96bit, plaintext)
+encrypt_blob(content_key, plaintext, seal_context, rng)
+  → AES-256-GCM(key=content_key, nonce=random_96bit, plaintext,
+                aad=seal_context.aad())
   → { ciphertext, nonce }
 
-decrypt_blob(content_key, { ciphertext, nonce })
-  → AES-256-GCM decrypt
+decrypt_blob(content_key, { ciphertext, nonce }, seal_context)
+  → AES-256-GCM decrypt with the same AAD
   → plaintext
 ```
 
-Nonce is 12 bytes, generated fresh per encryption. The PDS blob is the raw ciphertext — no framing or headers.
+Nonce is 12 bytes, generated fresh per encryption. The PDS blob is the raw ciphertext — no framing or headers; the AAD travels nowhere, the reader reconstructs it from the record it fetched.
 
 ### Hybrid asymmetric key wrapping (`key_wrapping.rs`)
 
@@ -125,7 +157,9 @@ wrap_key(content_key, recipient: &PublicKeyBundle, recipient_did, rng)
   → wrapping_key = HKDF-SHA256(
        extract_salt = salt,
        ikm          = ikm,
-       expand_info  = "opake-v{SCHEMA_VERSION}-x25519-mlkem768-hkdf-a256kw-v2-{recipient_did}",
+       expand_info  = transcript("opake-wrap-info",
+                        [version_le32, algo, context_tag, context_uri,
+                         recipient_did]),
        length       = 32
      )
   ── AES-KW around the content key ─────────────────────────────
@@ -179,14 +213,14 @@ create_group_key(members: &[DidMember], rng)
 ### Metadata encryption (`metadata.rs`)
 
 ```
-encrypt_metadata<T: Serialize>(key, metadata, rng)
+encrypt_metadata<T: Serialize>(key, metadata, seal_context, rng)
   → json = serde_json::to_vec(metadata)
-  → AES-256-GCM(key, json, random_nonce)
+  → AES-256-GCM(key, json, random_nonce, aad=seal_context.aad())
   → EncryptedMetadata { ciphertext: base64, nonce: base64 }
 
-decrypt_metadata<T: DeserializeOwned>(key, encrypted)
+decrypt_metadata<T: DeserializeOwned>(key, encrypted, seal_context)
   → decode base64 ciphertext + nonce
-  → AES-256-GCM decrypt
+  → AES-256-GCM decrypt with the same AAD
   → serde_json::from_slice → T
 ```
 

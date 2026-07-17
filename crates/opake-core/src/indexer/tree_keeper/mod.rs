@@ -366,7 +366,7 @@ impl TreeKeeper {
                 let did = self.did.clone();
                 let keyring_uri = envelope
                     .record
-                    .workspace_id
+                    .lineage
                     .as_deref()
                     .unwrap_or(envelope.uri.as_str())
                     .to_string();
@@ -442,7 +442,7 @@ impl TreeKeeper {
         }
 
         let record = &envelope.record;
-        let anchor = record.wrap_anchor(envelope.uri.as_str());
+        let anchor = record.lineage_anchor(envelope.uri.as_str());
         let bundle = crate::crypto::PrivateKeyBundle {
             x25519: &keys.x25519,
             ml_kem: &keys.ml_kem,

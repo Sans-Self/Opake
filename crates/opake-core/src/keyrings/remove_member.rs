@@ -104,10 +104,16 @@ pub async fn remove_member(
         .collect();
     let new_members = new_members?;
 
-    // Re-encrypt metadata: decrypt with old group key, encrypt with new one
+    // Re-encrypt metadata: decrypt with old group key, encrypt with new one.
+    // Both bind the keyring's lineage anchor (genesis URI), which the in-place
+    // rewrite preserves.
+    let anchor = crypto::SealContext::new(
+        keyring.lineage_anchor(keyring_uri),
+        crypto::SealType::KeyringMetadata,
+    );
     let metadata: KeyringMetadata =
-        crypto::decrypt_metadata(old_group_key, &keyring.encrypted_metadata)?;
-    keyring.encrypted_metadata = crypto::encrypt_metadata(&new_group_key, &metadata, rng)?;
+        crypto::decrypt_metadata(old_group_key, &keyring.encrypted_metadata, &anchor)?;
+    keyring.encrypted_metadata = crypto::encrypt_metadata(&new_group_key, &metadata, &anchor, rng)?;
 
     keyring.members = new_members;
     keyring.rotation += 1;

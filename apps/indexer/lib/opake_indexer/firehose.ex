@@ -265,7 +265,10 @@ defmodule OpakeIndexer.Firehose do
           )
       end
 
+    lineage_check = Authority.check_lineage(prior_record, attrs.record_jsonb["lineage"])
+
     with :ok <- flag_check,
+         :ok <- lineage_check,
          :ok <- auth_check,
          {:ok, _} <- upsert_record(attrs, now) do
       chain_outcome =
@@ -321,10 +324,20 @@ defmodule OpakeIndexer.Firehose do
   defp dispatch_document_upsert(attrs, now) do
     Logger.info("[Indexer] document upsert: #{attrs.uri}")
 
-    case upsert_record(attrs, now) do
-      {:ok, _} ->
-        emit_event_telemetry(@document_collection, :upsert, :ok)
-        broadcast_record_envelope(attrs, now)
+    prior_uri = attrs.supersedes_uri
+    prior_record = if prior_uri, do: RecordQueries.lookup(prior_uri), else: nil
+
+    with :ok <- Authority.check_lineage(prior_record, attrs.record_jsonb["lineage"]),
+         {:ok, _} <- upsert_record(attrs, now) do
+      emit_event_telemetry(@document_collection, :upsert, :ok)
+      broadcast_record_envelope(attrs, now)
+    else
+      {:rejected, reason} ->
+        Logger.warning(
+          "[Indexer] document rejection (#{reason}): #{attrs.uri} by #{attrs.author_did}"
+        )
+
+        emit_event_telemetry(@document_collection, :upsert, :rejected)
 
       {:error, changeset} ->
         log_query_error({:error, changeset}, "document record upsert", attrs.uri)

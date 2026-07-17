@@ -125,7 +125,7 @@ mod tests {
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
             supersedes: None,
-            workspace_id: None,
+            lineage: None,
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }

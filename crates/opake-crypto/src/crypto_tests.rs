@@ -7,12 +7,19 @@ use zeroize::Zeroizing;
 
 // -- Content encryption tests (AES-256-GCM) --
 
+const TEST_DOC_URI: &str = "at://did:plc:test/at.opake.document/3seal";
+
+fn blob_seal() -> SealContext<'static> {
+    SealContext::new(TEST_DOC_URI, SealType::DocumentBlob)
+}
+
+
 #[test]
 fn roundtrip_encrypt_decrypt() {
     let key = generate_content_key(&mut OsRng);
     let plaintext = b"hello opake";
-    let payload = encrypt_blob(&key, plaintext, &mut OsRng).unwrap();
-    let decrypted = decrypt_blob(&key, &payload).unwrap();
+    let payload = encrypt_blob(&key, plaintext, &blob_seal(), &mut OsRng).unwrap();
+    let decrypted = decrypt_blob(&key, &payload, &blob_seal()).unwrap();
     assert_eq!(decrypted, plaintext);
 }
 
@@ -20,15 +27,15 @@ fn roundtrip_encrypt_decrypt() {
 fn wrong_key_fails_decryption() {
     let key = generate_content_key(&mut OsRng);
     let wrong_key = generate_content_key(&mut OsRng);
-    let payload = encrypt_blob(&key, b"secret", &mut OsRng).unwrap();
-    assert!(decrypt_blob(&wrong_key, &payload).is_err());
+    let payload = encrypt_blob(&key, b"secret", &blob_seal(), &mut OsRng).unwrap();
+    assert!(decrypt_blob(&wrong_key, &payload, &blob_seal()).is_err());
 }
 
 #[test]
 fn empty_plaintext_roundtrips() {
     let key = generate_content_key(&mut OsRng);
-    let payload = encrypt_blob(&key, b"", &mut OsRng).unwrap();
-    let decrypted = decrypt_blob(&key, &payload).unwrap();
+    let payload = encrypt_blob(&key, b"", &blob_seal(), &mut OsRng).unwrap();
+    let decrypted = decrypt_blob(&key, &payload, &blob_seal()).unwrap();
     assert!(decrypted.is_empty());
 }
 
@@ -36,41 +43,63 @@ fn empty_plaintext_roundtrips() {
 fn ciphertext_differs_from_plaintext() {
     let key = generate_content_key(&mut OsRng);
     let plaintext = b"not encrypted i promise";
-    let payload = encrypt_blob(&key, plaintext, &mut OsRng).unwrap();
+    let payload = encrypt_blob(&key, plaintext, &blob_seal(), &mut OsRng).unwrap();
     assert_ne!(payload.ciphertext, plaintext);
 }
 
 #[test]
 fn unique_nonces_per_encryption() {
     let key = generate_content_key(&mut OsRng);
-    let a = encrypt_blob(&key, b"same", &mut OsRng).unwrap();
-    let b = encrypt_blob(&key, b"same", &mut OsRng).unwrap();
+    let a = encrypt_blob(&key, b"same", &blob_seal(), &mut OsRng).unwrap();
+    let b = encrypt_blob(&key, b"same", &blob_seal(), &mut OsRng).unwrap();
     assert_ne!(a.nonce, b.nonce);
 }
 
 #[test]
 fn tampered_ciphertext_fails() {
     let key = generate_content_key(&mut OsRng);
-    let mut payload = encrypt_blob(&key, b"integrity", &mut OsRng).unwrap();
+    let mut payload = encrypt_blob(&key, b"integrity", &blob_seal(), &mut OsRng).unwrap();
     payload.ciphertext[0] ^= 0xff;
-    assert!(decrypt_blob(&key, &payload).is_err());
+    assert!(decrypt_blob(&key, &payload, &blob_seal()).is_err());
 }
 
 #[test]
 fn large_payload_roundtrips() {
     let key = generate_content_key(&mut OsRng);
     let plaintext = vec![0xAB_u8; 1_000_000];
-    let payload = encrypt_blob(&key, &plaintext, &mut OsRng).unwrap();
-    let decrypted = decrypt_blob(&key, &payload).unwrap();
+    let payload = encrypt_blob(&key, &plaintext, &blob_seal(), &mut OsRng).unwrap();
+    let decrypted = decrypt_blob(&key, &payload, &blob_seal()).unwrap();
     assert_eq!(decrypted, plaintext);
 }
 
 #[test]
 fn tampered_nonce_fails() {
     let key = generate_content_key(&mut OsRng);
-    let mut payload = encrypt_blob(&key, b"nonce matters", &mut OsRng).unwrap();
+    let mut payload = encrypt_blob(&key, b"nonce matters", &blob_seal(), &mut OsRng).unwrap();
     payload.nonce[0] ^= 0xff;
-    assert!(decrypt_blob(&key, &payload).is_err());
+    assert!(decrypt_blob(&key, &payload, &blob_seal()).is_err());
+}
+
+// spec: document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type
+#[test]
+fn wrong_seal_type_fails_decryption() {
+    let key = generate_content_key(&mut OsRng);
+    let payload = encrypt_blob(&key, b"typed", &blob_seal(), &mut OsRng).unwrap();
+    let wrong_type = SealContext::new(TEST_DOC_URI, SealType::DocumentMetadata);
+    assert!(decrypt_blob(&key, &payload, &wrong_type).is_err());
+}
+
+// spec: document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type
+// (scenario: a ciphertext moved to another object fails authentication)
+#[test]
+fn wrong_anchor_fails_decryption() {
+    let key = generate_content_key(&mut OsRng);
+    let payload = encrypt_blob(&key, b"anchored", &blob_seal(), &mut OsRng).unwrap();
+    let other_doc = SealContext::new(
+        "at://did:plc:test/at.opake.document/3other",
+        SealType::DocumentBlob,
+    );
+    assert!(decrypt_blob(&key, &payload, &other_doc).is_err());
 }
 
 // -- Hybrid key wrapping tests (x25519-mlkem768-hkdf-a256kw-v2) --

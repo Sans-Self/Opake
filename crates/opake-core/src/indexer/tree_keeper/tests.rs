@@ -407,6 +407,7 @@ fn sse_doc_upsert(uri: &str, keyring_uri: Option<&str>) -> SseEvent {
             },
         },
         supersedes: None,
+        lineage: None,
         workspace_id: keyring_uri.map(str::to_owned),
         created_at: "2026-04-17T00:00:00Z".into(),
         modified_at: None,
@@ -604,7 +605,7 @@ fn keyring_record(
             },
         },
         supersedes: None,
-        workspace_id: Some(workspace_id.into()),
+        lineage: Some(workspace_id.into()),
         created_at: "2026-04-17T00:00:00Z".into(),
         modified_at: None,
     }
@@ -622,6 +623,7 @@ fn keyring_upsert_of(record: crate::records::Keyring, uri: &str) -> SseEvent {
 /// A keyring-encrypted directory at a specific rotation, tagged with its
 /// workspace id so keeper scope-routing lands it in the right tree.
 fn keyring_dir(
+    dir_uri: &str,
     name: &str,
     keyring_uri: &str,
     group_key: &ContentKey,
@@ -636,6 +638,7 @@ fn keyring_dir(
             keyring_uri,
             group_key,
             rotation,
+            dir_uri,
             &mut OsRng,
         )
         .unwrap();
@@ -683,8 +686,8 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
     // Rotation-0 tree: root + a "Reports" subdir, both wrapped under key0.
     let tree = {
-        let root = keyring_dir("/", WS_URI, &key0, 0, vec![SUB_URI.into()]);
-        let sub = keyring_dir("Reports", WS_URI, &key0, 0, vec![]);
+        let root = keyring_dir(ROOT_URI2, "/", WS_URI, &key0, 0, vec![SUB_URI.into()]);
+        let sub = keyring_dir(SUB_URI, "Reports", WS_URI, &key0, 0, vec![]);
         let mut tree = DirectoryTree::from_records(vec![
             (ROOT_URI2.to_string(), root),
             (SUB_URI.to_string(), sub),
@@ -738,7 +741,7 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
     // A directory written under rotation 1 decrypts via the adopted key,
     // with no re-bootstrap (post-rotation upload readable by a live peer).
-    let new_dir = keyring_dir("Q3", WS_URI, &key1, 1, vec![]);
+    let new_dir = keyring_dir(NEW_URI, "Q3", WS_URI, &key1, 1, vec![]);
     keeper
         .apply_event(&dir_upsert_of(new_dir, NEW_URI))
         .unwrap();

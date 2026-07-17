@@ -42,7 +42,8 @@ pub async fn create_pending_share(
         permissions: Some(permissions.to_string()),
         note: note.map(str::to_string),
     };
-    let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, rng)?;
+    let context = crypto::SealContext::new(document_uri, crypto::SealType::GrantMetadata);
+    let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, &context, rng)?;
     let record = PendingShare::new(
         document_uri.to_string(),
         recipient.to_string(),
@@ -309,8 +310,10 @@ pub async fn retry_pending_shares(
         };
 
         // Decrypt the original grant metadata (permissions + note) from the pending share
+        let grant_context =
+            crypto::SealContext::new(&entry.document, crypto::SealType::GrantMetadata);
         let metadata: GrantMetadata =
-            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata) {
+            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata, &grant_context) {
                 Ok(m) => m,
                 Err(e) => {
                     warn!(

@@ -59,13 +59,14 @@ Single-canonical chain per path. Each curatorial write produces a new directory 
 at://{author-did}/at.opake.directory/{rkey}
 ```
 
-Every directory record uses a PDS-assigned `tid` rkey, including the workspace-root chain. There are no deterministic URIs anywhere in the model. Records in the workspace-root chain are marked by an explicit `isWorkspaceRoot: true` flag (see [The workspace root](#the-workspace-root)).
+Every directory record uses a client-generated `tid` rkey, including the workspace-root chain — the writer must know the record's URI before encryption, because the metadata ciphertext is AEAD-bound to it at genesis. There are no deterministic URIs anywhere in the model. Records in the workspace-root chain are marked by an explicit `isWorkspaceRoot: true` flag (see [The workspace root](#the-workspace-root)).
 
 The directory record carries:
 
 ```
 {
   opakeVersion,
+  lineage: <this chain's genesis at-uri>, // omitted for genesis and cabinet records
   workspaceId: <genesis keyring at-uri>,  // omitted for cabinet records
   keyWrapping: { keyringKeyWrapping: { keyringRef } },
   encryptedMetadata: <directory's own name, encrypted under group key>,
@@ -75,6 +76,8 @@ The directory record carries:
   createdAt,
 }
 ```
+
+`lineage` is the chain's stable object identity: minted implicitly at genesis (the genesis record's own URI), declared on every supersede, and never changing across one — the indexer rejects a flipped lineage at write time and clients mirror the check when walking chains. `encryptedMetadata` is AEAD-bound to this anchor, which is how a ciphertext copied verbatim through a cascade still authenticates on the new record. The two carried URIs answer different questions: `lineage` is "which object am I", `workspaceId` is "which workspace do I belong to".
 
 Listings carry only the at-uri and CID of each entry. No name, no type. Names live in the target record's `encryptedMetadata`. File-vs-folder distinction is inherent in the target's collection (`at.opake.document` vs `at.opake.directory`).
 
@@ -86,11 +89,11 @@ Per-member, on the writing member's PDS. The doc record carries the encrypted bl
 at://{member-did}/at.opake.document/{rkey}
 ```
 
-Documents may carry an optional `supersedes` field for history annotation (e.g., "this was renamed from X by manager Y"). The field is non-load-bearing — directory curatorial supersedes do the actual rename mechanics.
+A superseding document (an editor's wiki-style edit) carries `supersedes: <original uri>` and `lineage: <the chain's genesis uri>`; its blob and metadata are re-encrypted under a fresh content key but sealed to the same lineage anchor, so the document keeps one object identity across edits. Genesis documents carry neither field and identify themselves.
 
 ## The workspace root
 
-The workspace-root has no anchor URI. Every record in the workspace-root chain — genesis and every subsequent supersede — is an ordinary directory record with a PDS-assigned `tid` rkey, carrying `isWorkspaceRoot: true` and `workspaceId: <genesis keyring at-uri>`. The chain alternates PDSes as different members take curatorial turns.
+The workspace-root has no deterministic URI. Every record in the workspace-root chain — genesis and every subsequent supersede — is an ordinary directory record with a client-generated `tid` rkey, carrying `isWorkspaceRoot: true`, `workspaceId: <genesis keyring at-uri>`, and (after genesis) `lineage: <root chain's genesis at-uri>`. The chain alternates PDSes as different members take curatorial turns.
 
 Genesis creation is an ordinary directory write: the workspace creator writes a directory record on their PDS with empty `entries`, `isWorkspaceRoot: true`, no `supersedes`, and the genesis keyring's at-uri as `workspaceId`. The indexer recognizes it as the workspace-root genesis purely from the flag.
 
@@ -184,6 +187,7 @@ new_keyring {
   keyHistory: [...],         // extended if rotating
   encryptedMetadata: ...,    // workspace name, possibly updated
   supersedes: <prior keyring uri>,
+  lineage: <genesis keyring uri>,  // the workspace identity, never changing
   createdAt,
 }
 ```

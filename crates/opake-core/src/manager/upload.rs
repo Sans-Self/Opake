@@ -163,6 +163,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 plaintext: req.plaintext,
                 filename: req.filename,
                 mime_type: req.mime_type,
+                owner_did: &self.opake.did,
                 keyring_uri: &workspace_uri,
                 workspace_id: &workspace_uri,
                 group_key: &ws.key,
@@ -171,6 +172,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tags: req.tags,
                 created_at: now,
                 supersedes: None,
+                lineage: None,
             },
             &mut self.opake.rng,
             &tid,
@@ -199,6 +201,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 let prior =
                     fetch_chain_node::<Directory>(self.opake.client.transport(), &root_head_uri)
                         .await?;
+                let lineage = prior.record.lineage_anchor(&root_head_uri).to_owned();
                 let mut entries = prior.record.entries;
                 entries.push(new_entry);
                 let leaf = LeafLevel {
@@ -206,6 +209,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                         prior_head_uri: root_head_uri,
                         key_wrapping: prior.record.key_wrapping,
                         encrypted_metadata: prior.record.encrypted_metadata,
+                        lineage,
                     },
                     entries,
                     is_workspace_root: true,
@@ -288,19 +292,30 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         ws: &Workspace,
         entries: Vec<ListingEntry>,
     ) -> Result<LeafLevel, Error> {
+        // Client-chosen TID: the genesis root's metadata seals to its own
+        // URI, so the URI (and rkey) must be fixed before encryption
+        // (`spec:lineage § Records that seal ciphertexts to their own URI
+        // choose their own rkey`).
+        let tid = self.opake.generate_tid();
+        let root_uri = crate::tid::uri_with_tid(
+            &self.opake.did,
+            directories::DIRECTORY_COLLECTION,
+            &tid,
+        );
         let (kw, meta) = directories::encrypt_keyring_directory_envelope(
             directories::ROOT_DIRECTORY_NAME,
             None,
             &ws.uri,
             &ws.key,
             ws.rotation,
+            &root_uri,
             &mut self.opake.rng,
         )?;
         Ok(LeafLevel {
             mode: LevelMode::Genesis {
                 key_wrapping: kw,
                 encrypted_metadata: meta,
-                rkey: None,
+                rkey: Some(tid),
             },
             entries,
             is_workspace_root: true,

@@ -75,7 +75,7 @@ plaintext file
 
 1. Ephemeral X25519 ECDH between sender and recipient → `x25519_shared` (32 bytes)
 2. ML-KEM-768 Encaps to recipient's KEM public key → `(ml_kem_ct, ml_kem_shared)` (1088 + 32 bytes)
-3. HKDF-SHA256 combiner: `salt = eph_pub ‖ recipient_x25519_pub ‖ ml_kem_ct`, `ikm = x25519_shared ‖ ml_kem_shared`, `info = "opake-v1-x25519-mlkem768-hkdf-a256kw-v2-{recipient_did}"` → 32-byte AES-KW key
+3. HKDF-SHA256 combiner: `salt = eph_pub ‖ recipient_x25519_pub ‖ ml_kem_ct`, `ikm = x25519_shared ‖ ml_kem_shared`, `info` = the length-prefixed context transcript over (schema version, algo, wrap-context tag, scoping URI, recipient DID) — see [CRYPTO.md](CRYPTO.md), "Context transcripts" → 32-byte AES-KW key
 4. AES-256-KW wraps the content key → 40 bytes
 
 The wire envelope is `[X25519 ephemeral pubkey (32) ‖ ML-KEM-768 ciphertext (1088) ‖ AES-KW wrapped (40)]` = 1160 bytes total.

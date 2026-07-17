@@ -28,6 +28,7 @@ fn dir_uri(rkey: &str) -> String {
 fn supersede_mode(prior_uri: &str, seed: &Directory) -> LevelMode {
     LevelMode::Supersede {
         prior_head_uri: prior_uri.to_owned(),
+        lineage: prior_uri.to_owned(),
         key_wrapping: seed.key_wrapping.clone(),
         encrypted_metadata: seed.encrypted_metadata.clone(),
     }
@@ -39,6 +40,63 @@ fn genesis_mode(seed: &Directory, rkey: Option<String>) -> LevelMode {
         encrypted_metadata: seed.encrypted_metadata.clone(),
         rkey,
     }
+}
+
+/// A cascade copies a directory's `encryptedMetadata` ciphertext verbatim into
+/// the superseding record, which declares the chain's genesis as its lineage.
+/// A reader reconstructs the AAD from that declared lineage — the genesis
+/// anchor the ciphertext was sealed under, not the new record's own URI — so
+/// decryption still succeeds. Binding to the head URI (the natural mistake)
+/// breaks the moment metadata is carried forward.
+// spec:document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type
+#[test]
+fn cascade_copied_directory_metadata_still_decrypts() {
+    use crate::crypto::{
+        self, generate_content_key, DirectoryMetadata, OsRng, SealContext, SealType,
+    };
+
+    let genesis_uri = "at://did:plc:test/at.opake.directory/genesis";
+    let head_uri = "at://did:plc:test/at.opake.directory/head";
+
+    let content_key = generate_content_key(&mut OsRng);
+    let genesis_context = SealContext::new(genesis_uri, SealType::DirectoryMetadata);
+    let encrypted = crypto::encrypt_metadata(
+        &content_key,
+        &DirectoryMetadata {
+            name: "Reports".into(),
+            description: None,
+        },
+        &genesis_context,
+        &mut OsRng,
+    )
+    .unwrap();
+
+    // The superseding head carries the ciphertext verbatim and declares the
+    // genesis as its lineage.
+    let mut head = dummy_directory("ignored");
+    head.encrypted_metadata = encrypted;
+    head.supersedes = Some(genesis_uri.to_owned());
+    head.lineage = Some(genesis_uri.to_owned());
+
+    // Reader reconstructs the anchor from the head record: its declared
+    // lineage, which is the genesis URI.
+    let anchor = head.lineage_anchor(head_uri);
+    assert_eq!(anchor, genesis_uri);
+    let decrypted: DirectoryMetadata = crypto::decrypt_metadata(
+        &content_key,
+        &head.encrypted_metadata,
+        &SealContext::new(anchor, SealType::DirectoryMetadata),
+    )
+    .unwrap();
+    assert_eq!(decrypted.name, "Reports");
+
+    // Binding to the head's own URI instead fails GCM authentication.
+    let wrong = crypto::decrypt_metadata::<DirectoryMetadata>(
+        &content_key,
+        &head.encrypted_metadata,
+        &SealContext::new(head_uri, SealType::DirectoryMetadata),
+    );
+    assert!(wrong.is_err());
 }
 
 #[tokio::test]

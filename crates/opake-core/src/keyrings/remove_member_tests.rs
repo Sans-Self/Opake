@@ -25,7 +25,9 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
         description: None,
         icon: None,
     };
-    let encrypted_metadata = crypto::encrypt_metadata(&group_key, &metadata, &mut OsRng).unwrap();
+    let meta_context = crypto::SealContext::new(KEYRING_URI, crypto::SealType::KeyringMetadata);
+    let encrypted_metadata =
+        crypto::encrypt_metadata(&group_key, &metadata, &meta_context, &mut OsRng).unwrap();
 
     let members = vec![
         KeyringMember {

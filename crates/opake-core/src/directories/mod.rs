@@ -57,6 +57,7 @@ pub(crate) fn encrypt_directory_envelope(
     name: &str,
     owner_did: &str,
     owner_public_keys: &crate::crypto::PublicKeyBundle<'_>,
+    directory_uri: &str,
     rng: &mut (impl crate::crypto::CryptoRng + crate::crypto::RngCore),
 ) -> Result<
     (
@@ -65,7 +66,7 @@ pub(crate) fn encrypt_directory_envelope(
     ),
     crate::error::Error,
 > {
-    use crate::crypto::{self, DirectoryMetadata};
+    use crate::crypto::{self, DirectoryMetadata, SealContext, SealType};
     use crate::records::{DirectKeyWrapping, KeyWrapping};
 
     let content_key = crypto::generate_content_key(rng);
@@ -74,7 +75,11 @@ pub(crate) fn encrypt_directory_envelope(
         name: name.into(),
         description: None,
     };
-    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, rng)?;
+    // A directory (cabinet or genesis workspace) is its own genesis: the
+    // metadata AAD binds its own URI, known here because the caller chose
+    // the rkey before encryption.
+    let context = SealContext::new(directory_uri, SealType::DirectoryMetadata);
+    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &context, rng)?;
     // Cabinet directories wrap to the owner's own key — `Cabinet` context
     // tag, no per-directory URI scoping. Workspace directories take the
     // keyring path below and never reach this branch.
@@ -104,6 +109,7 @@ pub(crate) fn encrypt_keyring_directory_envelope(
     keyring_uri: &str,
     group_key: &crate::crypto::ContentKey,
     rotation: u64,
+    directory_uri: &str,
     rng: &mut (impl crate::crypto::CryptoRng + crate::crypto::RngCore),
 ) -> Result<
     (
@@ -112,7 +118,7 @@ pub(crate) fn encrypt_keyring_directory_envelope(
     ),
     crate::error::Error,
 > {
-    use crate::crypto::{self, DirectoryMetadata};
+    use crate::crypto::{self, DirectoryMetadata, SealContext, SealType};
     use crate::records::{AtBytes, KeyWrapping, KeyringKeyWrapping, KeyringRef};
 
     let content_key = crypto::generate_content_key(rng);
@@ -121,7 +127,11 @@ pub(crate) fn encrypt_keyring_directory_envelope(
         name: name.into(),
         description: description.map(String::from),
     };
-    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, rng)?;
+    // Genesis directory: the metadata AAD binds its own URI, chosen by the
+    // caller before encryption (`spec:lineage § Records that seal ciphertexts
+    // to their own URI choose their own rkey`).
+    let context = SealContext::new(directory_uri, SealType::DirectoryMetadata);
+    let encrypted_metadata = crypto::encrypt_metadata(&content_key, &metadata, &context, rng)?;
     let wrapped_content_key = crypto::wrap_content_key_for_keyring(&content_key, group_key)?;
 
     let key_wrapping = KeyWrapping::Keyring(KeyringKeyWrapping {
@@ -145,6 +155,8 @@ pub(crate) mod tests {
     use super::*;
 
     pub const TEST_DID: &str = "did:plc:test";
+
+    pub const TEST_DIR_ANCHOR: &str = "at://did:plc:test/at.opake.directory/dummy-anchor";
 
     /// A fixed hybrid keypair for deterministic test encryption.
     ///
@@ -205,7 +217,8 @@ pub(crate) mod tests {
     /// Build a dummy encrypted directory for tests.
     fn encrypt_dummy_directory(name: &str) -> (KeyWrapping, crate::records::EncryptedMetadata) {
         let kp = test_keypair();
-        encrypt_directory_envelope(name, TEST_DID, &kp.public_keys(), &mut OsRng).unwrap()
+        encrypt_directory_envelope(name, TEST_DID, &kp.public_keys(), TEST_DIR_ANCHOR, &mut OsRng)
+            .unwrap()
     }
 
     pub fn mock_client(mock: MockTransport) -> XrpcClient<MockTransport> {
@@ -225,6 +238,7 @@ pub(crate) mod tests {
             encrypted_metadata,
             "2026-03-01T00:00:00Z".into(),
         )
+        .with_lineage(TEST_DIR_ANCHOR)
     }
 
     pub fn dummy_directory_with_entries(name: &str, entries: Vec<String>) -> Directory {
@@ -325,6 +339,7 @@ pub(crate) mod tests {
             keyring_uri,
             &group_key,
             0,
+            TEST_DIR_ANCHOR,
             &mut OsRng,
         )
         .unwrap();
@@ -349,6 +364,7 @@ pub(crate) mod tests {
             keyring_uri,
             &group_key,
             0,
+            TEST_DIR_ANCHOR,
             &mut OsRng,
         )
         .unwrap();
@@ -361,8 +377,10 @@ pub(crate) mod tests {
         let content_key =
             crypto::unwrap_content_key_from_keyring(&wrapped_bytes, &group_key).unwrap();
 
+        let context =
+            crypto::SealContext::new(TEST_DIR_ANCHOR, crypto::SealType::DirectoryMetadata);
         let metadata: crypto::DirectoryMetadata =
-            crypto::decrypt_metadata(&content_key, &encrypted_metadata).unwrap();
+            crypto::decrypt_metadata(&content_key, &encrypted_metadata, &context).unwrap();
 
         assert_eq!(metadata.name, "Docs");
         assert_eq!(metadata.description.as_deref(), Some("Documentation"));
@@ -380,6 +398,7 @@ pub(crate) mod tests {
             keyring_uri,
             &group_key,
             0,
+            TEST_DIR_ANCHOR,
             &mut OsRng,
         )
         .unwrap();

@@ -259,6 +259,44 @@ async fn walk_back_traverses_chain_in_head_to_genesis_order() {
     );
 }
 
+/// A record whose declared lineage disagrees with its predecessor's anchor is
+/// outside the chain. The back-walk stops at the flipped edge read-leniently:
+/// it returns the flipped head alone rather than following its illegitimate
+/// back-edge into the prior chain, so genesis-matching downstream rejects it.
+// spec:lineage § Lineage never flips across a supersede
+#[tokio::test]
+async fn walk_back_stops_at_a_flipped_lineage() {
+    let mock = MockTransport::new();
+
+    // A well-formed genesis, and a head that supersedes it but declares a
+    // lineage pointing at a foreign chain.
+    let genesis = dummy_directory("/");
+    let mut head = dir_superseding("/", URI_GENESIS);
+    head.lineage = Some("at://did:plc:attacker/at.opake.directory/other".into());
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    // The genesis record is available, but the walk must not treat it as part
+    // of this chain once the flip is detected.
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
+
+    assert_eq!(chain.len(), 1, "flipped head is not linked to the prior chain");
+    assert_eq!(chain[0].uri, URI_HEAD);
+
+    // And the integrity wrapper rejects the flipped head against the real
+    // genesis rather than silently accepting a foreign chain.
+    let mock2 = MockTransport::new();
+    mock2.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock2.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock2.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+    let err = verify_and_walk_chain::<Directory>(&mock2, URI_HEAD, URI_GENESIS)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::ChainGenesisMismatch { .. }));
+}
+
 // spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_rejects_cycle() {
@@ -449,7 +487,7 @@ mod keyring_authority {
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
             supersedes: supersedes.map(String::from),
-            workspace_id: supersedes.map(|_| KEYRING_GENESIS.to_string()),
+            lineage: supersedes.map(|_| KEYRING_GENESIS.to_string()),
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }
@@ -657,6 +695,7 @@ mod directory_additivity {
             encrypted_metadata: crate::test_utils::dummy_encrypted_metadata(),
             entries: entries.into_iter().map(entry).collect(),
             supersedes: supersedes.map(String::from),
+            lineage: supersedes.map(|_| DIR_GENESIS.to_string()),
             workspace_id: None,
             is_workspace_root: false,
             created_at: "2026-03-01T00:00:00Z".into(),

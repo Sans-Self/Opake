@@ -19,7 +19,8 @@ struct EncryptedFixture {
 fn encrypt_fixture(plaintext: &[u8], keys: &TestKeys) -> EncryptedFixture {
     let rng = &mut OsRng;
     let content_key = crypto::generate_content_key(rng);
-    let payload = crypto::encrypt_blob(&content_key, plaintext, rng).unwrap();
+    let blob_context = crypto::SealContext::new(TEST_URI, crypto::SealType::DocumentBlob);
+    let payload = crypto::encrypt_blob(&content_key, plaintext, &blob_context, rng).unwrap();
     let wrapped_key = crypto::wrap_key(
         &content_key,
         &keys.public_keys(),
@@ -44,8 +45,10 @@ fn document_from_fixture(fixture: &EncryptedFixture, name: &str) -> Document {
         tags: vec![],
         description: None,
     };
+    let meta_context = crypto::SealContext::new(TEST_URI, crypto::SealType::DocumentMetadata);
     let encrypted_metadata =
-        crypto::encrypt_metadata(&fixture.content_key, &metadata, &mut OsRng).unwrap();
+        crypto::encrypt_metadata(&fixture.content_key, &metadata, &meta_context, &mut OsRng)
+            .unwrap();
 
     Document::new(
         BlobRef {
@@ -250,8 +253,14 @@ async fn updates_metadata_size() {
     match &requests[2].body {
         Some(RequestBody::Json(v)) => {
             let record: Document = serde_json::from_value(v["record"].clone()).unwrap();
-            let metadata: crypto::DocumentMetadata =
-                crypto::decrypt_metadata(&fixture.content_key, &record.encrypted_metadata).unwrap();
+            let meta_context =
+                crypto::SealContext::new(TEST_URI, crypto::SealType::DocumentMetadata);
+            let metadata: crypto::DocumentMetadata = crypto::decrypt_metadata(
+                &fixture.content_key,
+                &record.encrypted_metadata,
+                &meta_context,
+            )
+            .unwrap();
             assert_eq!(metadata.size, Some(new_content.len() as u64));
             // Name should be preserved.
             assert_eq!(metadata.name, "size-test.md");

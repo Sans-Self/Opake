@@ -105,13 +105,20 @@ mod tests {
     // spec:sharing-grants § Revocation stops future discovery but not historical access
     #[tokio::test]
     async fn revocation_does_not_reach_a_cached_content_key() {
-        use crate::crypto::{decrypt_blob, encrypt_blob, generate_content_key, OsRng};
+        use crate::crypto::{
+            decrypt_blob, encrypt_blob, generate_content_key, OsRng, SealContext, SealType,
+        };
 
         // The recipient already downloaded: they cache the content key and the
         // ciphertext they fetched from the owner's PDS.
         let content_key = generate_content_key(&mut OsRng);
         let plaintext = b"the secret document body";
-        let cached_ciphertext = encrypt_blob(&content_key, plaintext, &mut OsRng).unwrap();
+        let blob_context = SealContext::new(
+            "at://did:plc:owner/at.opake.document/doc1",
+            SealType::DocumentBlob,
+        );
+        let cached_ciphertext =
+            encrypt_blob(&content_key, plaintext, &blob_context, &mut OsRng).unwrap();
 
         // The owner revokes — a single successful grant deletion.
         let mock = MockTransport::new();
@@ -135,7 +142,7 @@ mod tests {
         assert!(reqs[0].url.contains("deleteRecord"));
 
         // The cached key still decrypts the unchanged ciphertext.
-        let recovered = decrypt_blob(&content_key, &cached_ciphertext).unwrap();
+        let recovered = decrypt_blob(&content_key, &cached_ciphertext, &blob_context).unwrap();
         assert_eq!(
             recovered, plaintext,
             "revocation must not invalidate a cached key"

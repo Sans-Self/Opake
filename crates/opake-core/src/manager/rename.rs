@@ -95,11 +95,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             }
         };
 
+        // Rename re-encrypts under the SAME content key, so the metadata AAD
+        // must bind the CHAIN's lineage anchor — not the superseding record's
+        // own URI — or the new head fails to authenticate on read.
+        let anchor = directory.lineage_anchor(directory_uri).to_string();
+        let seal_context =
+            crypto::SealContext::new(&anchor, crypto::SealType::DirectoryMetadata);
         let mut metadata: DirectoryMetadata =
-            crypto::decrypt_metadata(&content_key, &directory.encrypted_metadata)?;
+            crypto::decrypt_metadata(&content_key, &directory.encrypted_metadata, &seal_context)?;
         metadata.name = new_name.to_string();
         let new_encrypted_metadata =
-            crypto::encrypt_metadata(&content_key, &metadata, &mut self.opake.rng)?;
+            crypto::encrypt_metadata(&content_key, &metadata, &seal_context, &mut self.opake.rng)?;
 
         let now = self.opake.now();
 
@@ -134,6 +140,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             encrypted_metadata: new_encrypted_metadata,
             entries: directory.entries,
             supersedes: Some(directory_uri.to_owned()),
+            lineage: Some(anchor),
             workspace_id: Some(workspace_id),
             // Inherit from the prior record so the "never flip" invariant holds.
             is_workspace_root: is_root,

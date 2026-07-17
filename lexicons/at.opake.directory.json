@@ -38,6 +38,11 @@
             "format": "at-uri",
             "description": "AT-URI of the prior canonical directory at this path, if any. Absent on the genesis record of a chain. Indexers walk this back-edge to verify the chain and detect forks (two records superseding the same prior URI)."
           },
+          "lineage": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of this directory chain's genesis record — the directory's stable object identity. Absent on a genesis directory (and always absent on cabinet directories, which never supersede), present and never changing across every supersede. Metadata ciphertexts are AEAD-bound to this anchor, which is how a ciphertext copied verbatim through a cascade still authenticates."
+          },
           "workspaceId": {
             "type": "string",
             "format": "at-uri",

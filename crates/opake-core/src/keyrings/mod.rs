@@ -45,13 +45,17 @@ pub(crate) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(),
     Ok(())
 }
 
-/// Decrypt a keyring name from a raw Keyring record using an already-unwrapped group key.
+/// Decrypt a keyring name from a raw Keyring record using an already-unwrapped
+/// group key. `anchor` is the keyring's lineage anchor (the genesis URI), which
+/// the metadata AAD binds — never a head URI.
 pub fn decrypt_keyring_name_from_record(
     keyring: &crate::records::Keyring,
     group_key: &crypto::ContentKey,
+    anchor: &str,
 ) -> Option<String> {
+    let context = crypto::SealContext::new(anchor, crypto::SealType::KeyringMetadata);
     let metadata: KeyringMetadata =
-        crypto::decrypt_metadata(group_key, &keyring.encrypted_metadata).ok()?;
+        crypto::decrypt_metadata(group_key, &keyring.encrypted_metadata, &context).ok()?;
     Some(metadata.name)
 }
 
@@ -100,13 +104,17 @@ pub fn decrypt_indexer_workspace_name(
         // Member wraps are anchored to the workspace's stable (genesis) URI,
         // which survives supersedes — not the head URI in `envelope.uri`.
         &crypto::WrapContext::Keyring {
-            uri: keyring.wrap_anchor(&envelope.uri),
+            uri: keyring.lineage_anchor(&envelope.uri),
         },
         keyring.opake_version,
     )
     .ok()?;
+    let context = crypto::SealContext::new(
+        keyring.lineage_anchor(&envelope.uri),
+        crypto::SealType::KeyringMetadata,
+    );
     let metadata: KeyringMetadata =
-        crypto::decrypt_metadata(&group_key, &keyring.encrypted_metadata).ok()?;
+        crypto::decrypt_metadata(&group_key, &keyring.encrypted_metadata, &context).ok()?;
     Some(metadata.name)
 }
 
@@ -142,6 +150,8 @@ mod indexer_workspace_tests {
             &mut OsRng,
         )
         .expect("wrap_key");
+        let meta_context =
+            crate::crypto::SealContext::new(uri, crate::crypto::SealType::KeyringMetadata);
         let encrypted = crypto::encrypt_metadata(
             &group_key,
             &KeyringMetadata {
@@ -149,6 +159,7 @@ mod indexer_workspace_tests {
                 description: None,
                 icon: None,
             },
+            &meta_context,
             &mut OsRng,
         )
         .expect("encrypt_metadata");
@@ -168,7 +179,7 @@ mod indexer_workspace_tests {
                 key_history: Vec::new(),
                 encrypted_metadata: encrypted,
                 supersedes: None,
-                workspace_id: None,
+                lineage: None,
                 created_at: "2026-04-14T00:00:00Z".into(),
                 modified_at: None,
             },
@@ -190,6 +201,33 @@ mod indexer_workspace_tests {
 
         let name = decrypt_indexer_workspace_name(&keyring, member_did, &member.private_keys());
         assert_eq!(name.as_deref(), Some("family-photos"));
+    }
+
+    /// A membership advance copies the genesis metadata ciphertext verbatim
+    /// into a new head record that declares the genesis as its lineage. A
+    /// member decrypting from that head reconstructs the anchor-bound AAD
+    /// (genesis URI, not the head URI) and still recovers the name.
+    // spec:workspace-identity § Group-key wraps are AEAD-bound to genesis
+    #[test]
+    #[allow(non_snake_case)]
+    fn bug__superseded_keyring_metadata_decrypts_via_genesis_anchor() {
+        let member_did = "did:plc:member";
+        let member = TestKeys::generate(member_did);
+        let genesis_uri = "at://did:plc:owner/at.opake.keyring/genesis";
+        let head_uri = "at://did:plc:owner/at.opake.keyring/head";
+
+        // Genesis: wraps + metadata are sealed to the genesis URI.
+        let genesis = fixture("shared-space", &member, member_did, genesis_uri);
+
+        // Head: same wraps and same metadata ciphertext, carried verbatim,
+        // declaring the genesis as its lineage.
+        let mut head = genesis;
+        head.uri = head_uri.into();
+        head.record.supersedes = Some(genesis_uri.into());
+        head.record.lineage = Some(genesis_uri.into());
+
+        let name = decrypt_indexer_workspace_name(&head, member_did, &member.private_keys());
+        assert_eq!(name.as_deref(), Some("shared-space"));
     }
 
     #[test]

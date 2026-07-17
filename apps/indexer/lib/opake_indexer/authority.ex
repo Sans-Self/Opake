@@ -279,6 +279,44 @@ defmodule OpakeIndexer.Authority do
     end
   end
 
+  # -- Lineage never-flips --
+
+  @doc """
+  Validate that a superseding record does not flip its lineage.
+
+  A supersede's declared `lineage` MUST equal its predecessor's lineage
+  anchor — the predecessor's own `lineage` if it carries one, otherwise
+  the predecessor's own URI (the anchor rule, `spec:lineage § Lineage is
+  the chain's genesis URI, carried on every supersede`). This holds the
+  whole chain to a single genesis identity: a record that names a
+  different lineage is not part of this chain and must not advance it.
+
+  Applies to documents and directories, whose ciphertexts are copied
+  verbatim across supersedes; keyrings enforce the same identity through
+  the genesis-URI derivation (`derive_workspace_id`).
+
+    * `prior_record` — the `RecordQueries.lookup/1` result for the
+      supersedes target, or `nil`. `nil` covers two cases that both skip
+      the check: a genesis write (no predecessor) and a supersede whose
+      predecessor isn't indexed yet (unverifiable; heals on reprocess,
+      same posture as the additivity `:prior_not_indexed` path).
+    * `declared_lineage` — the new record's `record_jsonb["lineage"]`
+      (`nil` when the field is absent, as on genesis).
+  """
+  @spec check_lineage(map() | nil, String.t() | nil) :: result()
+  def check_lineage(nil, _declared_lineage), do: :ok
+
+  def check_lineage(%{uri: prior_uri, record_jsonb: prior_jsonb}, declared_lineage) do
+    if declared_lineage == lineage_anchor(prior_jsonb, prior_uri) do
+      :ok
+    else
+      {:rejected, :lineage_flip}
+    end
+  end
+
+  defp lineage_anchor(%{"lineage" => lineage}, _uri) when is_binary(lineage), do: lineage
+  defp lineage_anchor(_jsonb, uri), do: uri
+
   # -- Workspace-root marker --
 
   @doc """

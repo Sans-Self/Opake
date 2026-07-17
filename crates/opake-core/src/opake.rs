@@ -421,7 +421,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             // workspace identity (genesis URI) is what wraps anchor to and
             // what every downstream consumer — chain lookups, doc refs,
             // cache keys — must key on.
-            let workspace_id = keyring.wrap_anchor(keyring_uri).to_string();
+            let workspace_id = keyring.lineage_anchor(keyring_uri).to_string();
             let group_key = Self::unwrap_workspace_key(
                 &keyring.members,
                 &self.did,
@@ -429,8 +429,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 &private_keys.bundle(),
                 keyring.opake_version,
             )?;
-            let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key)
-                .unwrap_or_default();
+            let name =
+                keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
+                    .unwrap_or_default();
             let historical_keys = crate::workspace::derive_historical_keys(
                 &keyring,
                 &self.did,
@@ -508,7 +509,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let keyring: crate::records::Keyring = serde_json::from_value(entry.value)?;
         // Stable (genesis) identity — the wrap anchor and the id every
         // downstream consumer keys on. See resolve_workspace_by_uri.
-        let workspace_id = keyring.wrap_anchor(keyring_uri).to_string();
+        let workspace_id = keyring.lineage_anchor(keyring_uri).to_string();
         let group_key = Self::unwrap_workspace_key(
             &keyring.members,
             &self.did,
@@ -519,7 +520,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         // Decrypt metadata for the workspace name
         let name =
-            keyrings::decrypt_keyring_name_from_record(&keyring, &group_key).unwrap_or_default();
+            keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
+                .unwrap_or_default();
 
         let historical_keys = crate::workspace::derive_historical_keys(
             &keyring,
@@ -745,7 +747,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let head_uri = envelope.uri.clone();
         let workspace_id = envelope
             .record
-            .workspace_id
+            .lineage
             .clone()
             .unwrap_or_else(|| head_uri.clone());
 
@@ -963,7 +965,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<MutationOutcome, Error> {
         let now = self.now();
         record.supersedes = Some(prior_uri);
-        record.workspace_id = Some(workspace_id.as_str().to_owned());
+        record.lineage = Some(workspace_id.as_str().to_owned());
         record.created_at = now.clone();
         record.modified_at = Some(now);
 
@@ -1126,7 +1128,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
             supersedes: None,   // filled by write_keyring_supersede
-            workspace_id: None, // filled by write_keyring_supersede
+            lineage: None, // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1220,7 +1222,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
             supersedes: None,   // filled by write_keyring_supersede
-            workspace_id: None, // filled by write_keyring_supersede
+            lineage: None, // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1234,10 +1236,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         // Re-encrypt metadata under new group key so old wrap is not
         // referenced after rotation.
+        let anchor = crate::crypto::SealContext::new(
+            workspace_id.as_str(),
+            crate::crypto::SealType::KeyringMetadata,
+        );
         let metadata: crate::crypto::KeyringMetadata =
-            crate::crypto::decrypt_metadata(group_key, &prior.encrypted_metadata)?;
+            crate::crypto::decrypt_metadata(group_key, &prior.encrypted_metadata, &anchor)?;
         new_record.encrypted_metadata =
-            crate::crypto::encrypt_metadata(&new_group_key, &metadata, &mut self.rng)?;
+            crate::crypto::encrypt_metadata(&new_group_key, &metadata, &anchor, &mut self.rng)?;
 
         self.write_keyring_supersede(workspace_id, prior_uri, new_record)
             .await?;
@@ -1263,8 +1269,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
 
+        let anchor =
+            crypto::SealContext::new(workspace_id.as_str(), crypto::SealType::KeyringMetadata);
         let mut metadata: KeyringMetadata =
-            crypto::decrypt_metadata(group_key, &prior.encrypted_metadata)?;
+            crypto::decrypt_metadata(group_key, &prior.encrypted_metadata, &anchor)?;
         if let Some(n) = name {
             metadata.name = n.to_string();
         }
@@ -1283,7 +1291,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             };
         }
 
-        let new_encrypted = crypto::encrypt_metadata(group_key, &metadata, &mut self.rng)?;
+        let new_encrypted = crypto::encrypt_metadata(group_key, &metadata, &anchor, &mut self.rng)?;
 
         let mut new_record = prior;
         new_record.encrypted_metadata = new_encrypted;
@@ -1361,13 +1369,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     /// Unwrap a workspace key from keyring member data (pure crypto, no network).
     ///
-    /// `wrap_anchor` is the URI the member wraps were bound to — the
-    /// workspace's stable genesis URI, resolved via [`Keyring::wrap_anchor`].
+    /// `lineage_anchor` is the URI the member wraps were bound to — the
+    /// workspace's stable genesis URI, resolved via [`Keyring::lineage_anchor`].
     /// Passing the head URI of a superseded keyring fails the AEAD check.
     pub fn unwrap_workspace_key(
         members: &[crate::records::KeyringMember],
         did: &str,
-        wrap_anchor: &str,
+        lineage_anchor: &str,
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
         declared_version: u32,
     ) -> Result<ContentKey, Error> {
@@ -1378,7 +1386,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(crate::crypto::unwrap_key(
             &member.wrapped_key,
             private_keys,
-            &crate::crypto::WrapContext::Keyring { uri: wrap_anchor },
+            &crate::crypto::WrapContext::Keyring { uri: lineage_anchor },
             // Transcript derives from the keyring's own declared version.
             declared_version,
         )?)

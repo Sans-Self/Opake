@@ -130,6 +130,10 @@ struct DirectoryInfo {
     entries: Vec<String>,
     /// AT-URI of the directory this record supersedes, if any.
     supersedes_uri: Option<String>,
+    /// This chain's genesis URI, if the record declared one. Absent on a
+    /// genesis (or cabinet) record. The metadata AAD binds the lineage
+    /// anchor `lineage.unwrap_or(own_uri)`.
+    lineage: Option<String>,
     /// `true` iff this record is part of a workspace-root chain. Stamped
     /// by writers; the indexer enforces the flag never flips across a
     /// supersede. Used to detect the workspace root at bootstrap (the
@@ -215,6 +219,7 @@ impl DirectoryTree {
                         encrypted_metadata: dir.encrypted_metadata,
                         entries: dir.entries.into_iter().map(|e| e.target).collect(),
                         supersedes_uri: dir.supersedes,
+                        lineage: dir.lineage,
                         is_workspace_root: dir.is_workspace_root,
                     },
                 )
@@ -228,9 +233,23 @@ impl DirectoryTree {
         //     by finding records whose URI doesn't appear as anyone
         //     else's `supersedes_uri`, then keep the one with
         //     `is_workspace_root: true`.
+        // A supersede edge only counts when the superseding record's declared
+        // lineage equals its predecessor's anchor. A flipped-lineage record is
+        // outside the chain, so its edge is dropped read-leniently and the
+        // prior it names stays a head (`spec:lineage § Lineage never flips
+        // across a supersede`).
         let superseded_uris: std::collections::HashSet<&str> = directories
-            .values()
-            .filter_map(|d| d.supersedes_uri.as_deref())
+            .iter()
+            .filter_map(|(uri, info)| {
+                let prior_uri = info.supersedes_uri.as_deref()?;
+                if let Some(prior) = directories.get(prior_uri) {
+                    let prior_anchor = prior.lineage.as_deref().unwrap_or(prior_uri);
+                    if info.lineage.as_deref().unwrap_or(uri) != prior_anchor {
+                        return None;
+                    }
+                }
+                Some(prior_uri)
+            })
             .collect();
 
         let root_uri = directories
@@ -286,10 +305,21 @@ impl DirectoryTree {
         let mut current = uri.to_owned();
         let bound = self.directories.len().saturating_add(1);
         for _ in 0..bound {
+            // Anchor of the current record — a successor must declare it as its
+            // lineage, or it is outside the chain and the walk stops here
+            // (`spec:lineage § Lineage never flips across a supersede`).
+            let current_anchor = self
+                .directories
+                .get(&current)
+                .and_then(|info| info.lineage.clone())
+                .unwrap_or_else(|| current.clone());
             let next = self
                 .directories
                 .iter()
-                .find(|(_, info)| info.supersedes_uri.as_deref() == Some(current.as_str()))
+                .find(|(succ_uri, info)| {
+                    info.supersedes_uri.as_deref() == Some(current.as_str())
+                        && info.lineage.as_deref().unwrap_or(succ_uri) == current_anchor
+                })
                 .map(|(succ_uri, _)| succ_uri.clone());
             match next {
                 Some(succ) => current = succ,
@@ -341,7 +371,8 @@ impl DirectoryTree {
         private_keys: &PrivateKeyBundle<'_>,
         group_keys: &HashMap<String, crate::workspace::GroupKeys<'_>>,
     ) {
-        for info in self.directories.values_mut() {
+        for (uri, info) in self.directories.iter_mut() {
+            let anchor = info.lineage.clone().unwrap_or_else(|| uri.clone());
             let content_key = match &info.key_wrapping {
                 KeyWrapping::Direct(direct) => {
                     // Direct-wrapped directories live in the cabinet (workspace
@@ -371,9 +402,13 @@ impl DirectoryTree {
             };
 
             if let Some(key) = content_key {
-                if let Ok(metadata) =
-                    crypto::decrypt_metadata::<DirectoryMetadata>(&key, &info.encrypted_metadata)
-                {
+                let context =
+                    crypto::SealContext::new(&anchor, crypto::SealType::DirectoryMetadata);
+                if let Ok(metadata) = crypto::decrypt_metadata::<DirectoryMetadata>(
+                    &key,
+                    &info.encrypted_metadata,
+                    &context,
+                ) {
                     info.name = metadata.name;
                     continue;
                 }
@@ -622,11 +657,24 @@ impl DirectoryTree {
 
     /// URIs that some other directory record supersedes — i.e. the stale
     /// predecessors. Computed from the `supersedes` back-edges present in the
-    /// record set.
+    /// record set. A back-edge only counts when the superseding record's
+    /// declared lineage equals its predecessor's anchor; a flipped-lineage
+    /// record is outside the chain, so its edge is dropped read-leniently and
+    /// the prior it names stays canonical (`spec:lineage § Lineage never flips
+    /// across a supersede`).
     fn superseded_uris(&self) -> std::collections::HashSet<&str> {
         self.directories
-            .values()
-            .filter_map(|info| info.supersedes_uri.as_deref())
+            .iter()
+            .filter_map(|(uri, info)| {
+                let prior_uri = info.supersedes_uri.as_deref()?;
+                if let Some(prior) = self.directories.get(prior_uri) {
+                    let prior_anchor = prior.lineage.as_deref().unwrap_or(prior_uri);
+                    if info.lineage.as_deref().unwrap_or(uri) != prior_anchor {
+                        return None;
+                    }
+                }
+                Some(prior_uri)
+            })
             .collect()
     }
 
@@ -1173,10 +1221,11 @@ impl DirectoryTree {
             encrypted_metadata: dir.encrypted_metadata.clone(),
             entries,
             supersedes_uri: dir.supersedes.clone(),
+            lineage: dir.lineage.clone(),
             is_workspace_root: dir.is_workspace_root,
         };
 
-        info.name = decrypt_directory_name(&info, ctx).unwrap_or_else(|| "?".into());
+        info.name = decrypt_directory_name(uri, &info, ctx).unwrap_or_else(|| "?".into());
 
         // A readable record supersedes any placeholder that stood in for this
         // URI — the record is understood now, so the stand-in is gone.
@@ -1286,7 +1335,11 @@ impl DirectoryTree {
 /// Mirrors the logic in `decrypt_names_with_group_keys` but operates on
 /// one directory at a time. Returns `None` if the key can't be unwrapped
 /// or the metadata can't be decrypted — the caller falls back to `"?"`.
-fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Option<String> {
+fn decrypt_directory_name(
+    uri: &str,
+    info: &DirectoryInfo,
+    ctx: &DecryptionCtx<'_>,
+) -> Option<String> {
     let content_key = match &info.key_wrapping {
         KeyWrapping::Direct(direct) => {
             let wrapped = direct.keys.iter().find(|k| k.did == ctx.did)?;
@@ -1309,7 +1362,9 @@ fn decrypt_directory_name(info: &DirectoryInfo, ctx: &DecryptionCtx<'_>) -> Opti
         }
     };
 
-    crypto::decrypt_metadata::<DirectoryMetadata>(&content_key, &info.encrypted_metadata)
+    let anchor = info.lineage.as_deref().unwrap_or(uri);
+    let context = crypto::SealContext::new(anchor, crypto::SealType::DirectoryMetadata);
+    crypto::decrypt_metadata::<DirectoryMetadata>(&content_key, &info.encrypted_metadata, &context)
         .ok()
         .map(|meta| meta.name)
 }

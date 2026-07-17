@@ -209,7 +209,7 @@ mod keyring_supersede {
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
             supersedes: None,
-            workspace_id: None,
+            lineage: None,
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
         }
@@ -222,7 +222,7 @@ mod keyring_supersede {
     /// walk in `fetch_keyring_chain_head` can verify the genesis.
     fn as_supersede(mut k: Keyring) -> Keyring {
         k.supersedes = Some(WORKSPACE_ID.to_string());
-        k.workspace_id = Some(WORKSPACE_ID.to_string());
+        k.lineage = Some(WORKSPACE_ID.to_string());
         k
     }
 
@@ -307,7 +307,7 @@ mod keyring_supersede {
                 let written: Keyring =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert_eq!(written.supersedes.as_deref(), Some(prior_head_uri.as_str()));
-                assert_eq!(written.workspace_id.as_deref(), Some(WORKSPACE_ID));
+                assert_eq!(written.lineage.as_deref(), Some(WORKSPACE_ID));
                 assert_eq!(written.members.len(), 2);
                 // Bob promoted from Editor to Manager.
                 let bob = written.members.iter().find(|m| m.did() == BOB_DID).unwrap();
@@ -482,7 +482,7 @@ mod keyring_supersede {
                 let written: Keyring =
                     serde_json::from_value(v["record"].clone()).expect("record body");
                 assert_eq!(written.supersedes.as_deref(), Some(prior_head_uri.as_str()));
-                assert_eq!(written.workspace_id.as_deref(), Some(WORKSPACE_ID));
+                assert_eq!(written.lineage.as_deref(), Some(WORKSPACE_ID));
                 // Bob gone, alice + carol carried verbatim with roles intact.
                 assert_eq!(written.members.len(), 2);
                 assert!(written.members.iter().all(|m| m.did() != BOB_DID));
@@ -837,6 +837,8 @@ mod workspace_resolution {
             &mut OsRng,
         )
         .unwrap();
+        let meta_context =
+            crate::crypto::SealContext::new(WORKSPACE_URI, crate::crypto::SealType::KeyringMetadata);
         let encrypted_metadata = encrypt_metadata(
             &group_key,
             &KeyringMetadata {
@@ -844,6 +846,7 @@ mod workspace_resolution {
                 description: None,
                 icon: None,
             },
+            &meta_context,
             &mut OsRng,
         )
         .unwrap();
@@ -859,7 +862,7 @@ mod workspace_resolution {
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: None,
-            workspace_id: None,
+            lineage: None,
             created_at: "2026-07-14T00:00:00Z".into(),
             modified_at: None,
         };
