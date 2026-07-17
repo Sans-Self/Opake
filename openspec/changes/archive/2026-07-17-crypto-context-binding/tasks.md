@@ -40,4 +40,4 @@
 - [x] 6.1 Reset dev environment (old ciphertexts unreadable by design); refresh e2e auth snapshots (`E2E_REAUTH=1`)
 - [x] 6.2 Full e2e gate green, including federation flows (edit-supersede, cascade, membership advance — the verbatim-copy paths the AAD must survive)
 - [x] 6.3 Update docs/CRYPTO.md (transcript encoding, AAD table, lineage), docs/ARCHITECTURE.md and FEDERATION.md (lineage field), lexicons/README.md + EXAMPLES.md (renamed/added fields)
-- [ ] 6.4 `just spec-lint` green; close #49 and #50 with pointers to the spec deltas (closing needs explicit approval)
+- [x] 6.4 `just spec-lint` green; close #49 and #50 with pointers to the spec deltas (closing needs explicit approval)
