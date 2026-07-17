@@ -9,7 +9,7 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 | `load_config` / `save_config`                   | Read/write the global config (accounts map, default DID)               |
 | `load_identity` / `save_identity`               | Read/write per-account encryption keypairs                             |
 | `load_session` / `save_session`                 | Read/write per-account JWT tokens                                      |
-| `save_pair_state` / `load_pair_state` / `delete_pair_state` | Persist the ephemeral X25519 private key between `create_pair_request` and `try_complete_pair`. Keyed by `(did, rkey)`. Storage-owned so the key never crosses the WASM/JS boundary — it is written and read exclusively from inside WASM. |
+| `save_pair_state` / `load_pair_state` / `delete_pair_state` | Persist the ephemeral hybrid (X25519 + ML-KEM-768) private halves as a versioned pair-state blob between `create_pair_request` and `try_complete_pair`. Keyed by `(did, rkey)`. Storage-owned so the material never crosses the WASM/JS boundary — it is written and read exclusively from inside WASM. |
 | `remove_account`                                | Full cleanup: mutate config + delete identity/session data + persist   |
 | `cache_get_record` / `cache_put_records`        | Record-level cache: look up or upsert individual PDS records           |
 | `cache_remove_record`                           | Remove a single cached record (e.g. after deletion or metadata update) |
@@ -19,7 +19,7 @@ Config, identity, and session types live in `opake-core/src/storage.rs` alongsid
 
 `Config` includes a `cache_enabled: bool` field (defaults `true`) for per-device cache control.
 
-**CLI (`FileStorage`)** — TOML config at `~/.config/opake/config.toml`, JSON files in per-account directories, unix permissions (0600/0700). Cache methods are no-ops (not yet implemented).
+**CLI (`FileStorage`)** — TOML config at `~/.config/opake/config.toml`, JSON files in per-account directories, unix permissions (0600/0700). The record cache is a directory of per-collection JSON files under `accounts/<did>/cache/`, written through the same sensitive-directory (0700) path as the rest of the account store.
 
 **Web (`IndexedDbStorage`)** — Dexie.js over IndexedDB (`packages/opake-sdk/src/storage/indexeddb.ts`). Schema includes `cacheRecords` (compound key `[did+collection+uri]`) and `cacheMeta` (compound key `[did+collection]`) tables. `removeAccount` clears cache as part of its atomic transaction. The JS side runs on the main thread; `JsStorage` (below) bridges WASM into this implementation.
 
@@ -57,7 +57,9 @@ Mutations invalidate affected caches so stale data isn't shown on the next cold 
 
 ## File Permissions
 
-All sensitive files (identity, session, config, keyring keys) are written with
-0600 permissions. Directories are created with 0700. Loading `identity.json`
+The secret-bearing files (identity, session, config, pair-state) are written with
+0600 permissions, and every account directory is created 0700. Loading `identity.json`
 checks permissions and bails with a `chmod 600` hint if the file is
-group- or world-readable, matching SSH's `StrictModes` behavior.
+group- or world-readable, matching SSH's `StrictModes` behavior. The record cache is
+ciphertext, so its per-collection files rely on the enclosing 0700 directory rather than
+a per-file mode — there is no plaintext to protect at the file level.

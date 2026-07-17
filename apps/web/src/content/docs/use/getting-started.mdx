@@ -41,6 +41,7 @@ Whether you use the Web App or the CLI, the process begins by authenticating wit
   </PlatformTab>
   <PlatformTab name="CLI">
     Run the following command in your terminal:
+    {/* update-needed(#25): stale command — login is not top-level; CLI is `opake account login <handle>` (apps/cli/src/main.rs Command::Account → AccountAction::Login). */}
     <CodeBlock language="sh">opake login you.bsky.social</CodeBlock>
     This will open a browser window for OAuth authorization. Your keys will be derived from a
     24-word seed phrase — write it down when prompted.

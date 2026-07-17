@@ -1,8 +1,12 @@
-# Keyrings
+# Workspaces
+
+A **workspace** is the domain concept: a named, shared space with a member list, a group key, and a federated directory tree. Its wire format is the `at.opake.keyring` record — a keyring holds the group key wrapped to each member and the role each member holds. The CLI speaks `opake workspace`; the lexicon stays `at.opake.keyring`.
+
+A workspace has no owner role. Whoever authored the genesis keyring is a manager like any other, and every capability attaches to a role, never to a DID's history (`spec:workspace-membership § Three roles, no owner`).
 
 ## Keyring Model
 
-Two-layer key wrapping for group access. Per-document content keys are wrapped under the group key (AES-KW), and the group key is wrapped to each member's X25519 public key.
+Two-layer key wrapping for group access. Per-document content keys are wrapped under the group key (AES-KW), and the group key is wrapped to each member's hybrid public-key bundle (X25519 + ML-KEM-768).
 
 ```mermaid
 flowchart TB
@@ -29,9 +33,9 @@ flowchart TB
     style Doc2 fill:#16213e,color:#eee
 ```
 
-## Create Keyring
+## Create Workspace
 
-Generates a group key, wraps it to the owner (with `role: manager`), creates the keyring record with the `owner` field set to the creator's DID, and stores the group key locally.
+The genesis keyring's identity is derived, not assigned. The rkey is a tag computed from the freshly-minted group key and the creator's DID (HKDF → Ed25519 public key → `base32(SHA-256[..16])`), so the record's full AT-URI is known *before* the group key is wrapped. That URI is the workspace identity for its entire lifetime, and it is bound into the wrap's AEAD context and the metadata seal — the record is `putRecord`d at that exact rkey rather than letting the PDS pick one (`spec:workspace-identity § Genesis URI is the workspace identity`).
 
 ```mermaid
 sequenceDiagram
@@ -43,115 +47,117 @@ sequenceDiagram
 
     User->>CLI: opake workspace create family-photos
 
-    CLI->>Crypto: create_group_key()
-    Crypto-->>CLI: group key GK + wrappedKey (GK → owner pubkey, role=manager)
+    CLI->>Crypto: generate_content_key() → group key GK
+    CLI->>Crypto: derive_workspace_identity_tag(GK, creator_did) → rkey
+    Note over CLI: keyring URI is now fixed: at://did/at.opake.keyring/{rkey}
 
-    CLI->>PDS: com.atproto.repo.createRecord (keyring, owner=self DID)
+    CLI->>Crypto: wrap GK to creator (AEAD-bound to the keyring URI, role=manager)
+    CLI->>Crypto: encrypt keyring metadata under GK (sealed to the URI)
+
+    CLI->>PDS: com.atproto.repo.putRecord (keyring @ derived rkey)
     PDS-->>CLI: { uri, cid }
 
-    CLI->>Disk: Save GK to ~/.config/opake/accounts/<did>/keyrings/<rkey>.json
+    CLI->>Disk: Save GK locally, keyed by rotation 0
 
-    CLI->>User: family-photos → at://did/.../keyring-tid
+    CLI->>User: family-photos → at://did/at.opake.keyring/{rkey}
 ```
 
-The group key is never stored in plaintext on the PDS — only the wrapped copies live in the keyring record. The `owner` field identifies the canonical keyring owner for Indexer authorization.
+The group key never appears in plaintext on the PDS — only the wrapped copies live in the record. Every adoption path (a member syncing, a device pairing) re-derives the tag from the group key it unwrapped and checks it against the URI, so a keyring that lies about its identity is caught (`spec:workspace-identity § Identity adoption verifies by derivation`). The keyring carries no `owner` field: authority flows from the DID in the genesis URI and from the member list, not from a stored owner.
 
-## List Keyrings
+## List Workspaces
+
+A workspace lives across every member's PDS, so `listRecords` on one repo would only surface the keyrings that repo happens to host. The membership truth is the indexer's: it consumes every PDS's firehose and knows every keyring chain head the caller is a member of, owned or joined. `workspace ls` therefore asks the indexer, not the local repo (`discover_member_workspaces`).
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
-    participant PDS
+    participant IX as Indexer
 
     User->>CLI: opake workspace ls --long
 
-    loop Paginate until no cursor
-        CLI->>PDS: com.atproto.repo.listRecords (keyring collection, cursor)
-        PDS-->>CLI: { records: [...], cursor? }
-    end
+    CLI->>IX: discover member keyring chain heads (Ed25519-signed request)
+    IX-->>CLI: chain-head keyring records for every workspace the caller belongs to
 
+    CLI->>CLI: unwrap group key per keyring, decrypt name from metadata
     CLI->>User: Display table (name, members, rotation, URI)
 ```
 
-## Add Member
+A freshly created workspace has a short visibility gap: the record exists on the creator's PDS immediately, but `ls` only surfaces it once Jetstream delivers the commit to the indexer's firehose consumer (`spec:indexer-consistency § Acceptance does not imply visibility`).
 
-Resolves the new member's identity, wraps the group key to their public key with the specified role, and appends them to the keyring record.
+## Membership is a keyring supersede
+
+Membership is not edited in place. Every change — add, remove, leave, re-role — is a new keyring record that **supersedes** the current chain head, written on the *author's* PDS. The head may sit on another member's PDS; the author fetches it (indexer-reported), builds the new member list, and writes a record carrying `supersedes` = the prior head URI, `supersedesCid` = its CID, and `lineage` = the genesis URI. The indexer validates the author's authority against the prior head and repoints the chain.
+
+The authority rule: a supersede is valid iff the author is currently a manager, *or* the author is a non-manager removing exactly themselves — the new list equals the head's minus the author, with everyone else's role and wrap carried verbatim. Anything else from a non-manager is rejected (`spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal`). The client re-checks this before writing for a fast error; the indexer's check is authoritative.
+
+### Add Member
+
+A manager wraps the current group key to the recipient's published hybrid keys, appends the wrap with the assigned role, and — for each retained `keyHistory` rotation the manager can still unwrap — wraps that historical key to the joiner too, so a post-rotation joiner reads pre-rotation documents (`spec:key-rotation § New members can read the full history they are admitted to`). Adding a DID already in the list is rejected before any write. Direct manager add is the only admission channel: no invitation or request-to-join exists.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
-    participant PDS as Own PDS
+    participant IX as Indexer
     participant PLC as PLC Directory
-    participant MemberPDS as Member's PDS
-    participant Crypto
-    participant Disk as Local Storage
+    participant MemberPDS as Alice's PDS
+    participant PDS as Author's PDS
 
     User->>CLI: opake workspace add-member family-photos alice.example.com --role editor
 
-    CLI->>PDS: listRecords → resolve "family-photos" to keyring URI
-    PDS-->>CLI: keyring URI + rkey
+    CLI->>IX: fetch keyring chain head for workspace
+    IX-->>CLI: head keyring record (+ CID) — author must be a manager
 
-    CLI->>Disk: Load group key GK for this keyring
-    Disk-->>CLI: GK
-
-    Note over CLI,MemberPDS: Resolve new member identity
     CLI->>PLC: DID document for alice
     PLC-->>CLI: { pds_url }
     CLI->>MemberPDS: getRecord (publicKey/self)
-    MemberPDS-->>CLI: Alice's X25519 public key
+    MemberPDS-->>CLI: Alice's hybrid public keys
 
-    CLI->>Crypto: wrap_key(GK, alice_pubkey, alice_did)
-    Crypto-->>CLI: wrappedKey for Alice (role=editor)
-
-    CLI->>PDS: getRecord (keyring) → append Alice with role → putRecord
-    PDS-->>CLI: 200 OK
+    CLI->>CLI: wrap GK (+ each keyHistory key) to Alice, role=editor
+    CLI->>PDS: createRecord (keyring supersede: supersedes=head, supersedesCid, lineage)
+    PDS-->>CLI: { uri, cid }
 
     CLI->>User: added alice.example.com to family-photos (editor)
 ```
 
-## Remove Member
+### Remove Member
 
-Removes the member, generates a new group key, re-wraps to all remaining members, and increments the rotation counter.
+Removal rotates. The authoring manager mints a new group key, re-wraps it for every *remaining* member, bumps `rotation`, and pushes the prior rotation's members into `keyHistory` before replacing them. The removed member holds no wrap for the new key — that is the forward-secrecy contract (`spec:workspace-membership § Removal rotates the group key; leave does not`). Documents written under earlier rotations stay readable to remaining members via `keyHistory`; the removed member keeps whatever they already had (no historical revocation).
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI
-    participant PDS as Own PDS
+    participant IX as Indexer
     participant PLC as PLC Directory
-    participant Crypto
-    participant Disk as Local Storage
+    participant PDS as Author's PDS
 
     User->>CLI: opake workspace remove-member family-photos bob.example.com
 
-    CLI->>PDS: Resolve keyring URI + fetch keyring record
-    PDS-->>CLI: Keyring with members [Alice, Bob, Carol]
+    CLI->>IX: fetch keyring chain head
+    IX-->>CLI: head with members [Alice, Bob, Carol]
 
     CLI->>User: Removing bob will rotate the group key. Continue? [y/N]
     User-->>CLI: y
 
     Note over CLI,PLC: Resolve remaining members' public keys
     CLI->>PLC: DID documents for Alice, Carol
-    PLC-->>CLI: PDS URLs
-    CLI->>PDS: getRecord (publicKey/self) for each
-    PDS-->>CLI: Public keys for Alice, Carol
+    PLC-->>CLI: PDS URLs → hybrid public keys
 
-    CLI->>Crypto: create_group_key() → new GK'
-    Crypto-->>CLI: GK' + wrappedKeys for [Alice, Carol]
-
-    CLI->>PDS: putRecord (keyring: members=[Alice, Carol], rotation++, keyHistory appended)
-    PDS-->>CLI: 200 OK
-
-    CLI->>Disk: Save new GK' alongside old GK (keyed by rotation)
+    CLI->>CLI: mint GK', re-wrap to [Alice, Carol], rotation++, push prior members to keyHistory
+    CLI->>CLI: re-encrypt keyring metadata under GK'
+    CLI->>PDS: createRecord (keyring supersede)
+    PDS-->>CLI: { uri, cid }
 
     CLI->>User: removed bob from family-photos (key rotated)
 ```
 
-Before replacing the group key, the old rotation's remaining member entries are archived into the keyring's `keyHistory` array. This lets remaining members still decrypt documents uploaded under previous rotations — even on a new device, the old wrapped group keys are preserved in the record.
+### Leave and role change
 
-Existing documents encrypted under the old group key stay as-is. New uploads use the new group key. Removed members' wrapped keys are excluded from history, so they cannot recover old group keys from the record.
+**Leave** is a self-removal supersede that does *not* rotate: the leaver authors it, so any key they minted is a key they already know — rotating buys no forward secrecy. The record carries the prior rotation, the prior key history, and every other member's wrap and role unchanged, dropping only the author. Two guards apply: the last member cannot leave (an empty workspace is destruction, which is unsupported), and the only manager cannot leave while others remain (a manager-less workspace can never mutate membership again) — they must promote someone first (`spec:workspace-membership § Leave guards — no orphaned workspaces`).
+
+**Role change** is a manager-authored supersede carrying the prior member list with only the targeted member's role changed; untargeted members' roles carry forward unchanged (`spec:workspace-membership § Role changes are manager-authored supersedes`).
 
 ## Keyring Record Deletion
 
@@ -192,54 +198,41 @@ Note that a head delete *undoes* whatever that head changed: deleting the supers
 
 See the keyring-tombstones spec (`openspec/specs/keyring-tombstones/spec.md`) for the normative contract.
 
-## Upload with Workspace
+## Upload to a Workspace
 
-Workspace uploads split by caller role, but both write the canonical `at.opake.document` record to the **caller's** PDS — federated, atproto-shaped. The keyring (which holds the group key wrapped to each member) and the directory record (which holds the entry list) stay on the workspace owner's PDS.
-
-- **Owner uploads** are atomic on the owner's PDS: blob + document + directory entry update in a single `applyWrites`.
-- **Member uploads** are atomic on the member's PDS: blob + document + a `directoryUpdate.addEntry` proposal in a single `applyWrites`. The owner's daemon applies the proposal to register the entry in the workspace directory.
-
-The encryption surface is identical in both cases: a per-document content key, AES-256-GCM blob, content key wrapped under the workspace group key (AES-KW). The difference is only the second write op (directory entry vs. directoryUpdate proposal).
+Every workspace upload is the same shape regardless of the caller's role: the document record lands on the **caller's own** PDS, then a directory supersede cascade registers it in the tree. There is no owner-only path and no proposal-then-apply step. The blob is encrypted under a fresh per-document content key (AES-256-GCM); that content key is wrapped under the workspace group key (AES-KW). The caller then advances the directory chain — a genesis root if the workspace has none yet, a single-level root supersede for a root-level upload, or a deep cascade root → target subdirectory — with the new records written on the caller's PDS. The indexer authorizes the supersede (additive for editors, unrestricted for managers) and repoints the heads.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Web as Caller's Browser
     participant Opake as Opake + FileManager
-    participant Crypto
+    participant IX as Indexer
     participant CallerPDS as Caller's PDS
 
     User->>Web: Upload photo.jpg to family-photos
 
-    Web->>Opake: ctx.opake() + file_context(Some("family-photos"))
-    Note over Opake: resolve_workspace: keyring lookup + group key unwrap
+    Web->>Opake: file_context(Some("family-photos")) → keyring lookup + group-key unwrap
 
-    Opake->>Crypto: generate_content_key() → K
-    Opake->>Crypto: encrypt_blob(K, plaintext)
-    Crypto-->>Opake: { ciphertext, nonce }
+    Opake->>IX: workspace_chain_heads(workspace_id)
+    IX-->>Opake: keyring head + root directory head (or none)
 
-    Opake->>CallerPDS: com.atproto.repo.uploadBlob (ciphertext)
+    Opake->>Opake: generate content key K, encrypt blob (AES-256-GCM)
+    Opake->>CallerPDS: uploadBlob (ciphertext)
     CallerPDS-->>Opake: blob ref
 
-    Opake->>Crypto: wrap_content_key_for_keyring(K, GK)
-    Crypto-->>Opake: AES-KW wrapped content key
+    Opake->>Opake: wrap K under group key (AES-KW), build document record
+    Opake->>CallerPDS: createRecord (document, on caller's PDS)
+    CallerPDS-->>Opake: { uri, cid }
 
-    alt Caller is workspace owner
-        Opake->>CallerPDS: applyWrites (createDocument + updateDirectory)
-        Note right of CallerPDS: Document and directory both on owner's PDS<br/>Directory entries updated atomically
-        CallerPDS-->>Opake: { uri, cid }
-        Opake->>User: Uploaded
-    else Caller is workspace member
-        Opake->>CallerPDS: applyWrites (createDocument + createDirectoryUpdate)
-        Note right of CallerPDS: Document on member's PDS<br/>directoryUpdate.addEntry proposal alongside it
-        CallerPDS-->>Opake: { uri, cid }
-        Opake->>User: Uploaded — pending owner review
-    end
+    Opake->>Opake: build directory cascade (leaf + ancestors → root), each superseding its prior head
+    Opake->>CallerPDS: execute_cascade (new directory records on caller's PDS)
+    CallerPDS-->>IX: firehose → authority checked, chain heads repointed
+
+    Opake->>User: Uploaded
 ```
 
-The directory entry list on the owner's PDS holds at-URIs that may resolve to records on any member's PDS. Reads federate: the indexer (or a client doing public XRPC) walks `entries` and fetches each document from whichever PDS hosts it. Storage and egress costs land on the contributor that wrote the file, not the workspace owner.
-
-After the owner's daemon applies the `directoryUpdate.addEntry` proposal, the directory's `modifiedAt` advances and the editor's cleanup module deletes the proposal record (see [revisions.md](revisions.md#editor-side-cleanup)).
+The directory listings hold AT-URIs that may resolve to records on any member's PDS. Reads federate: the indexer (or a client doing public XRPC) walks `entries` and fetches each document from whichever PDS hosts it. Storage and egress land on the contributor that wrote each file, not on any central owner. See [directories.md](directories.md#workspace-directories) for the cascade mechanics.
 
 ## Download Workspace Document
 

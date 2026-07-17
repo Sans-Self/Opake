@@ -16,8 +16,8 @@ This document has been split into per-topic files for maintainability. See [flow
 | [flows/directories.md](flows/directories.md) | Create, delete, recursive delete, path resolution |
 | [flows/sharing.md](flows/sharing.md) | Resolve, share, revoke |
 | [flows/crypto.md](flows/crypto.md) | Key wrapping, content encryption primitives |
-| [flows/keyrings.md](flows/keyrings.md) | Create, list, add/remove member, keyring upload/download |
-| [flows/revisions.md](flows/revisions.md) | Collaborative editing via revision records (planned) |
+| [flows/keyrings.md](flows/keyrings.md) | Workspace create, list, membership supersedes, workspace upload/download |
+| [flows/revisions.md](flows/revisions.md) | Cross-author editing via superseding records and substitute cascades |
 | [flows/pairing.md](flows/pairing.md) | Device-to-device identity transfer via PDS relay |
 | [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) | Seed phrase derivation, identity recovery |
 
@@ -43,9 +43,7 @@ SSE `keyring:upsert` events route to `apply_keyring_to_workspace_keeper`:
 
 SSE `keyring:delete` events skip step 1–3 and call `keeper.apply_keyring_delete(payload)`, which dispatches on the indexer-resolved chain outcome carried in the payload (`unchanged` / `rolled_back` / `torn_down` — see [flows/keyrings.md](flows/keyrings.md)). Only `torn_down` removes the entry, keyed by the payload's `workspace_id`; the keeper never matches the deleted URI against tracked keys, so deleting a living workspace's genesis record leaves its sidebar entry alone. A `rolled_back` delete is followed by a `keyring:upsert` of the restored head, which rebuilds the entry through the normal upsert path above.
 
-**Optimistic insert**
-
-After `createWorkspace` succeeds, `opake_wasm.rs` synthesizes a `WorkspaceEntry` from the known-fresh data and calls `keeper.upsert` immediately. The sidebar reflects the new workspace within the current render cycle rather than waiting 1–4 s for the indexer cursor lag. The later SSE echo is a no-op (dedup short-circuits).
+A projection holds only indexer-confirmed state — the keeper is never seeded from the client's own unconfirmed write (`spec:indexer-consistency § Client projections contain only indexer-confirmed state`). After `createWorkspace` returns the keyring URI, the sidebar entry arrives when the indexer echoes the record back over SSE (or on the next bootstrap snapshot), so a freshly created workspace surfaces after the cursor catches up rather than the instant the write lands. The client shows a pending affordance in that window; it does not fabricate the entry.
 
 **Watcher teardown**
 

@@ -22,6 +22,7 @@ import {
 
 Two constructors on `Opake`, same return type:
 
+{/* update-needed(#25): the `getFileManager` snippet calls `opake.workspaceByUri(workspaceUri)` — the public method is `opake.workspace(keyringUri)`. */}
 <CodeBlock language="typescript" title="get-file-manager.ts" code={getFileManager} />
 
 Each `Opake` instance can hand out multiple `FileManager`s, one per context. They don't share

@@ -26,12 +26,9 @@ The encryption model follows the same hybrid pattern as git-crypt:
 | `at.opake.directory` | record | A directory containing an ordered list of child document/directory AT-URIs |
 | `at.opake.document` | record | An encrypted file/document with metadata |
 | `at.opake.publicKey` | record | Singleton X25519 encryption public key (rkey: `self`) for key discovery |
-| `at.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role |
+| `at.opake.keyring` | record | A named group (workspace) with a shared symmetric key, wrapped to each member with a role; the head of a supersede chain whose genesis URI is the workspace identity |
 | `at.opake.grant` | record | A share grant — gives a DID access to a specific document's key |
-| `at.opake.documentUpdate` | record | A proposed update to another member's document — content, metadata, or adoption |
-| `at.opake.directoryUpdate` | record | A proposed structural change to a workspace directory (placement, move, create, rename, delete) |
-| `at.opake.pendingShare` | record | A queued share intent — retried by daemon until recipient signs up or expires (7 days) |
-| `at.opake.keyringUpdate` | record | A proposed update to a workspace keyring (member add/remove, metadata, role change) |
+| `at.opake.pendingShare` | record | A queued share intent — retried by the daemon until the recipient publishes a public key or the record expires (7 days) |
 | `at.opake.pairRequest` | record | Ephemeral public key from a new device requesting identity transfer |
 | `at.opake.pairResponse` | record | Encrypted identity payload sent in response to a pair request |
 | `at.opake.authFullAccess` | permission-set | OAuth permission set bundling all `at.opake.*` collections — for `include:` scopes |
@@ -114,44 +111,38 @@ sequenceDiagram
 
     Note over Alice,PDS: 3. Add new member (Dave)
     Alice->>Alice: Wrap GK to Dave's pubkey
-    Alice->>PDS: updateRecord(keyring, add Dave)
+    Alice->>PDS: createRecord(keyring supersede, members + Dave)
     Note right of PDS: Dave can now decrypt all<br/>documents under this keyring
 ```
 
-Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Removing a member archives the old rotation's member entries into `keyHistory`, then rotates GK and re-wraps to the remaining members — per-document content keys and blobs stay untouched. The history lets remaining members decrypt pre-rotation documents even on new devices.
+Any keyring member unwraps GK with their private key, then uses GK to unwrap each document's content key K. Membership is not edited in place: a manager advances the keyring by writing a supersede whose `members` array is the new roster, and the canonical keyring is the chain head (`spec:workspace-membership § Adding a member is a manager-authored supersede`). Removing a member is a supersede that archives the old rotation's member entries into `keyHistory`, rotates GK, and re-wraps to the remaining members — per-document content keys and blobs stay untouched (`spec:workspace-membership § Removal rotates the group key; leave does not`). The history lets remaining members decrypt pre-rotation documents even on new devices.
 
-## Flow: Collaborative editing via documentUpdate
+## Flow: Collaborative editing via document supersede
+
+There is no proposal record and no owner who alone may write the canonical document. An editor writes a new `at.opake.document` on their *own* PDS that supersedes the current one; the indexer validates the supersede's authority at write time and repoints the workspace snapshot at the new head.
 
 ```mermaid
 sequenceDiagram
     participant Editor
     participant EditorPDS as Editor's PDS
     participant Indexer
-    participant Owner
-    participant OwnerPDS as Owner's PDS
 
-    Note over Editor,EditorPDS: 1. Editor proposes an update
-    Editor->>OwnerPDS: getRecord(document) + getBlob(cid)
-    Editor->>Editor: Decrypt, edit, re-encrypt
+    Note over Editor,EditorPDS: 1. Editor fetches and re-encrypts
+    Editor->>Editor: Decrypt current head, edit, re-encrypt
     Editor->>EditorPDS: uploadBlob(new ciphertext)
-    Editor->>EditorPDS: createRecord(documentUpdate)
+
+    Note over Editor,EditorPDS: 2. Editor writes the supersede
+    Editor->>EditorPDS: createRecord(document, { supersedes, supersedesCid, lineage })
 
     EditorPDS->>Indexer: firehose event
-    Indexer->>Indexer: validate editor role, index update
-
-    Note over Owner,OwnerPDS: 2. Owner applies the update
-    Owner->>Indexer: GET /api/workspace/updates
-    Indexer-->>Owner: pending documentUpdate records
-    Owner->>EditorPDS: getBlob(update cid)
-    Owner->>OwnerPDS: uploadBlob + putRecord(document)
-
-    Note over Editor,EditorPDS: 3. Cleanup
-    Editor->>EditorPDS: deleteRecord(documentUpdate)
+    Indexer->>Indexer: validate additive advance, repoint chain head
 ```
 
-The owner's client is the only one that writes to the canonical document record. Editors propose changes; owners apply them. Last-write-wins by `createdAt` for conflict resolution.
+The canonical document at any path is the head of its supersede chain — the record no successor points at. The indexer's authority check is role-shaped: an editor's supersede must be *additive* (advance the chain, not fork or truncate it), while a manager is unrestricted (`spec:tree-chains § Editor supersedes are additive; managers are unrestricted`). Concurrent supersedes fork the chain, and the indexer picks a deterministic winner (`spec:tree-chains § Concurrent supersedes fork, and the indexer picks a deterministic winner`). Document adoption — substituting a departed member's document — rides the same shape: the substitute supersedes the original by URI.
 
 ## Flow: Leaving a workspace
+
+A member leaves by writing a keyring supersede on their own PDS that drops themselves from `members`. Self-removal is permitted without manager authority (`spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal`).
 
 ```mermaid
 sequenceDiagram
@@ -159,13 +150,13 @@ sequenceDiagram
     participant MemberPDS as Member's PDS
     participant Indexer
 
-    Member->>MemberPDS: createRecord(keyringUpdate, { keyring, actionType: "leave" })
+    Member->>MemberPDS: createRecord(keyring supersede, members − self)
     MemberPDS->>Indexer: firehose event
-    Indexer->>Indexer: remove member from workspace index
+    Indexer->>Indexer: resolve new chain head, drop member from index
     Note right of Indexer: Workspace disappears from<br/>member's sidebar
 ```
 
-The member's wrapped key still exists on the keyring record — they *could* still decrypt. This is a visibility opt-out, not a key revocation. The owner can follow up with a proper removal (key rotation) if needed.
+Leave deliberately does not rotate the group key: the leaver already holds it, so rotating buys no forward secrecy (`spec:workspace-membership § Removal rotates the group key; leave does not`). It is a cooperative departure — a visibility opt-out. Forward secrecy against a departed member arrives with the next manager-authored removal, which does rotate. The last member cannot leave, and the only manager must promote a successor first, so the chain is never orphaned (`spec:workspace-membership § Leave guards — no orphaned workspaces`).
 
 ## Flow: Device-to-device identity pairing
 

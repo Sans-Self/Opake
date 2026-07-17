@@ -225,6 +225,7 @@ identity the grant will actually target.
 
 ## 5. Background sync
 
+{/* update-needed(#25): daemon tasks are pending-share retry, pair-request cleanup, and grant-healing (plus the long-lived SSE consumer + token refresh) — there is no document "re-encryption pass after key rotation" task (apps/cli/src/commands/daemon/mod.rs). */}
 The daemon runs maintenance tasks that don't need to be interactive: the SSE subscription for
 live updates, proactive token refresh, and re-encryption passes after a key rotation. You
 don't strictly need it for day-to-day use — every interactive command triggers the minimum

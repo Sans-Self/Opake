@@ -162,10 +162,9 @@ Both records exist; both supersede the same target. Resolution:
 1. Indexer detects fork (a record's `supersedes` target already has a successor).
 2. Indexer picks winner by `createdAt`, with `(did, rkey)` tiebreak.
 3. Loser's record stays on its PDS but is marked "forked-out" — not part of the canonical chain.
-4. Indexer fires a `chain-forked` SSE event for the affected workspace.
-5. Loser's client receives the event, refetches new canonical, replays its intended change on top, writes a new supersede.
+4. Indexer fires a `chain:forked` SSE event scoped to the affected workspace and chain, carrying the loser's URI, the fork point, and the winning head's URI and CID.
 
-This is optimistic concurrency control with retry. In Opake's storage workload, races on the same directory are rare in practice. Pathological concurrency (many simultaneous writers on one path) is out of scope — true collaborative-editing primitives would layer on top later, with a CRDT/OT merge instead of last-write-wins.
+Detection and surfacing end at the client's doorstep. What a losing client does with the event — refetch the new canonical, replay its intended change on top, or simply surface the conflict — is deliberately left open, and no refetch-and-replay path is implemented today; a fork reaches the client and stops there. The intended shape is optimistic concurrency control with retry. In Opake's storage workload, races on the same directory are rare in practice. Pathological concurrency (many simultaneous writers on one path) is out of scope — true collaborative-editing primitives would layer on top later, with a CRDT/OT merge instead of last-write-wins.
 
 ## Snapshots
 
@@ -233,7 +232,7 @@ The indexer is load-bearing for correctness in this model:
 
 1. **Follow chains.** Maintain `chain_heads (workspace_id, kind) → (head_uri, head_cid)` for exactly two chains per workspace: the keyring chain (`kind='keyring'`) and the workspace-root directory chain (`kind='workspace_root'`). Updated in-transaction with each record insert via compare-and-set against the prior head. Nested directory chains are deliberately **not** tracked — see the note below.
 2. **Validate authority.** At each supersede write, validate against the keyring state at the supersede's `createdAt`. Editor writes must pass the additivity check.
-3. **Detect fork conflicts** and emit `chain-forked` events for client retry.
+3. **Detect fork conflicts** and emit `chain:forked` events for client retry.
 4. **Filter dangling at-uri references** in canonical listings (silent filter with a debug-flag for tooling).
 
 ### Why no per-path chain heads

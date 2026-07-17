@@ -137,6 +137,7 @@ Under the hood:
 - `useDirectory` reads `snapshot.project(scope, base)` — the base from the keeper, with
   overlay patches composed on top. The projection is a no-op when there are no patches,
   so there's no per-render cost when nothing is in flight.
+{/* update-needed(#25): patches don't release "2 seconds after settle" — release is echo-driven via a settle-predicate armed on success (fires when the SSE echo folds into the base snapshot); the timeout is only a fallback for a never-arriving echo (use-tree-mutation.ts, optimistic-overlay.ts). */}
 - Patches release 2 seconds after the mutation settles. The delay spans the typical
   PDS-write-to-SSE-echo round-trip; dropping the patch earlier would briefly reveal the
   pre-mutation tree between the SDK promise resolving and the echo arriving.

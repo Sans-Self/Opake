@@ -16,7 +16,7 @@ flowchart LR
         RecipML["Recipient<br/>ML-KEM-768 pubkey"] --> EphML
         MLSec["ML-KEM-768 shared secret"] --> HKDF
 
-        HKDF["HKDF-SHA256<br/>info = 'opake-v1-x25519-mlkem768-hkdf-a256kw-v2-{did}'"] --> KEK
+        HKDF["HKDF-SHA256<br/>info = transcript(version, algo,<br/>context tag + URI, recipient DID)"] --> KEK
         KEK["256-bit key<br/>encryption key"] --> AESKW
         ContentKey["Content key K<br/>(AES-256)"] --> AESKW
         AESKW["AES-256-KW"] --> Ciphertext
@@ -27,6 +27,8 @@ flowchart LR
     style Wrap fill:#1a1a2e,color:#eee
     style Ciphertext fill:#16213e,color:#eee
 ```
+
+The HKDF info is not a flat label but a structured transcript that binds the KEK to the exact context the wrap belongs to — the wrap version and algorithm, the context kind (keyring, document, cabinet, pair-response) and its URI, and the recipient DID (`spec:document-crypto § Wraps are AEAD-bound to their record context`). A group key wrapped for one workspace cannot be replayed as a wrap for another, and a member's wrap cannot be re-presented against a different DID: unwrapping recomputes the transcript, and a mismatch fails the AES-KW integrity check. Workspace group-key wraps use the *genesis* keyring URI as the context, so a wrap survives every future supersede (`spec:workspace-identity § Group-key wraps are AEAD-bound to genesis`).
 
 ## Keyring Key Wrapping (AES-256-KW)
 
@@ -56,6 +58,7 @@ flowchart LR
         direction TB
         K["Content key K"] --> GCM
         Nonce["Random 12-byte nonce"] --> GCM
+        AAD["AAD = transcript(lineage anchor, seal type)"] --> GCM
         Plaintext["File bytes"] --> GCM
         GCM["AES-256-GCM"]
     end
@@ -65,3 +68,5 @@ flowchart LR
 
     style Encrypt fill:#1a1a2e,color:#eee
 ```
+
+Every AES-256-GCM ciphertext — blob or metadata — is AAD-bound to a `SealContext`: the record's **lineage anchor** (the chain's genesis URI, or the record's own URI when it never chains) and a **seal type** naming the field (document blob, document metadata, keyring metadata, directory metadata, grant metadata, pair identity). The anchor is chain-constant, so a ciphertext copied verbatim into a superseding record still authenticates; the type tag is slot-specific, so a metadata ciphertext presented in the blob field fails even under the correct key (`spec:document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type`). One content key covers both a document's blob and its metadata — the type tag, not key uniqueness, is what stops a blob↔metadata swap within one record.

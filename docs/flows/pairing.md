@@ -16,13 +16,13 @@ sequenceDiagram
 
     CLI->>CLI: Verify no local identity exists
 
-    CLI->>Crypto: generate_ephemeral_keypair()
-    Crypto-->>CLI: { public_key, private_key }
+    CLI->>Crypto: generate_ephemeral_keypair() (hybrid: X25519 + ML-KEM-768)
+    Crypto-->>CLI: { x25519 pub/priv, ml_kem pub/priv }
 
-    CLI->>PDS: createRecord(pairRequest)<br/>{ ephemeralKey, algo: "x25519" }
+    CLI->>PDS: createRecord(pairRequest)<br/>{ x25519EphemeralKey, mlKemEphemeralKey, algo: "x25519-mlkem768" }
     PDS-->>CLI: { uri, cid }
 
-    CLI->>Storage: save_pair_state(did, rkey, private_key)
+    CLI->>Storage: save_pair_state(did, rkey, both private halves)
 
     CLI->>User: Fingerprint: a1:b2:c3:d4:e5:f6:g7:h8
     CLI->>User: Run `opake pair approve` on existing device
@@ -36,7 +36,7 @@ sequenceDiagram
     Note over CLI: Response found — see "Receive" below
 ```
 
-The ephemeral private key is persisted to `Storage` under `(did, rkey)` so it survives CLI restarts or a browser reload while the user walks to the other device — in-memory only isn't sufficient. On the web the bytes are written straight into IndexedDB through WASM's storage adapter and never become a JS `Uint8Array`. The fingerprint (first 8 bytes of the public key, hex-encoded) is displayed for out-of-band verification.
+The ephemeral keypair is the same hybrid post-quantum construction Opake uses everywhere else: both a classical X25519 and a post-quantum ML-KEM-768 encapsulation key are published in the request, so the responding device wraps the identity under the harvest-now-decrypt-later-resistant scheme (`spec:auth-pairing § Pairing wraps the full identity to a device-held ephemeral keypair`). Both ephemeral *private* halves are persisted to `Storage` under `(did, rkey)` so they survive a CLI restart or browser reload while the user walks to the other device — in-memory only isn't sufficient. On the web the bytes are written straight into IndexedDB through WASM's storage adapter and never become a JS `Uint8Array`. The fingerprint — first 8 bytes of the X25519 public key, colon-separated hex — is displayed for out-of-band comparison.
 
 ## Pair Approve (existing device)
 
@@ -65,7 +65,7 @@ sequenceDiagram
     CLI->>Crypto: encrypt_blob(K, identity_json)
     Crypto-->>CLI: { ciphertext, nonce }
 
-    CLI->>Crypto: wrap_key(K, ephemeral_pubkey, did)
+    CLI->>Crypto: wrap_key(K, ephemeral hybrid bundle, did)
     Crypto-->>CLI: wrappedKey
 
     CLI->>PDS: createRecord(pairResponse)<br/>{ request, wrappedKey, ciphertext, nonce }
@@ -112,7 +112,7 @@ sequenceDiagram
     CLI->>CLI: Pairing complete
 ```
 
-The verification step guards against a corrupted or tampered response — the derived public key must match what's already published on the PDS. Teardown is best-effort: the Identity is saved *before* the pair state and PDS record deletions, so a partial failure still leaves the user paired. Orphan records get swept by the daemon's `cleanup_expired_pair_requests`.
+The verification step guards against a corrupted or tampered response — the identity's derived public key must match what is already published on the PDS, so a received identity is authenticated against the account's own record before it is trusted (`spec:auth-pairing § Completion authenticates the received identity against the published key`). Teardown is best-effort: the Identity is saved *before* the pair state and PDS record deletions, so a partial failure still leaves the user paired. Both relay records are torn down after use, and stale requests (past their 15-minute TTL) are swept client-side by `cleanup_expired_pair_requests` (`spec:auth-pairing § Pair records are relay ephemera, torn down after use`).
 
 ## Login Detection
 
@@ -139,7 +139,7 @@ This prevents accidental key overwrites that would break encryption on the exist
 
 ## Security Properties
 
-- **Ephemeral key exchange** — the DH keypair exists only in memory during the pairing session. No long-term secret is exposed in the PDS records.
+- **Ephemeral key exchange** — the hybrid X25519 + ML-KEM-768 keypair exists only for the pairing session; its private halves live in `Storage` on the requesting device and never reach the PDS. No long-term secret is exposed in the relay records.
 - **Visual SAS** — key fingerprints are displayed for comparison but not programmatically enforced. True zero-trust verification is a follow-up.
 - **Same encryption as documents** — the identity payload uses AES-256-GCM + x25519-mlkem768-hkdf-a256kw-v2, the same primitives as file encryption. No new crypto.
-- **Record cleanup** — both pairing records are deleted after transfer. Stale request cleanup is tracked separately.
+- **Record cleanup** — both relay records are deleted after transfer, and expired requests are swept client-side. Nothing about correctness depends on the sweep running.

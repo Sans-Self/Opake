@@ -66,6 +66,7 @@ keypair, writes an `at.opake.pairRequest` record to the PDS containing both publ
 and stashes the private bundle in Storage for `awaitPairCompletion` to read back later. JS
 never sees the private halves.
 
+{/* update-needed(#25): the `createPairRequestNewDevice` snippet destructures `ephemeralPublicKey` — PairRequestResult has no such field; it's `x25519EphemeralPublicKey` + `mlKemEphemeralPublicKey` (types.ts). The prose below already names them correctly. */}
 <CodeBlock
   language="typescript"
   title="pair-start.ts"
