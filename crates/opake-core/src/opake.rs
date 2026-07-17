@@ -438,6 +438,17 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 &workspace_id,
                 &private_keys.bundle(),
             );
+            // spec: workspace-identity § Identity adoption verifies by derivation
+            if !crate::workspace::verify_workspace_identity(
+                &keyring,
+                &workspace_id,
+                &group_key,
+                &historical_keys,
+            ) {
+                return Err(Error::WorkspaceIdentityMismatch {
+                    anchor: workspace_id,
+                });
+            }
             let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
             Ok(Workspace::from_keyring(
                 workspace_id,
@@ -528,6 +539,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &workspace_id,
             &private_keys.bundle(),
         );
+
+        // spec: workspace-identity § Identity adoption verifies by derivation
+        if !crate::workspace::verify_workspace_identity(
+            &keyring,
+            &workspace_id,
+            &group_key,
+            &historical_keys,
+        ) {
+            return Err(Error::WorkspaceIdentityMismatch {
+                anchor: workspace_id,
+            });
+        }
 
         let manager_dids = crate::workspace::manager_dids_from_keyring(&keyring);
         Ok(Workspace::from_keyring(
@@ -655,7 +678,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let pubkey = identity.x25519_public_key_bytes()?;
         let mlkem_pubkey = identity.ml_kem_public_key_bytes()?;
         let now = self.now();
-        let rkey = self.generate_tid();
         let (keyring_uri, key) = keyrings::create_keyring(
             &mut self.client,
             &CreateKeyringParams {
@@ -664,7 +686,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 owner_did: &self.did,
                 owner_x25519_public_key: &pubkey,
                 owner_ml_kem_public_key: &mlkem_pubkey,
-                rkey: &rkey,
                 created_at: &now,
             },
             &mut self.rng,
@@ -778,6 +799,33 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             }
         };
 
+        let historical_keys = crate::workspace::derive_historical_keys(
+            &envelope.record,
+            &self.did,
+            &head_uri,
+            private_keys,
+        );
+
+        // The CLI has no keepers; this sync loop is its sole workspace-identity
+        // adoption surface, so the derivation check must run here too — an
+        // unverified adoption on this path would leave the forged-keyring
+        // vector open exactly where the keeper closes it.
+        // spec: workspace-identity § Identity adoption verifies by derivation
+        if !crate::workspace::verify_workspace_identity(
+            &envelope.record,
+            &workspace_id,
+            &group_key,
+            &historical_keys,
+        ) {
+            return WorkspaceSyncResult {
+                keyring_uri: head_uri,
+                is_owner,
+                error: Some(format!(
+                    "workspace identity could not be verified for {workspace_id}"
+                )),
+            };
+        }
+
         let manager_dids = crate::workspace::manager_dids_from_keyring(&envelope.record);
         let workspace = crate::workspace::Workspace::from_keyring(
             workspace_id,
@@ -786,7 +834,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             head_pds_did,
             group_key,
             envelope.record.rotation,
-            Vec::new(),
+            historical_keys,
             manager_dids,
         );
         let ctx = crate::manager::FileContext::Workspace(workspace);
@@ -850,7 +898,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     async fn fetch_keyring_chain_head(
         &mut self,
         workspace_id: &WorkspaceId,
-    ) -> Result<(String, crate::records::Keyring), Error> {
+    ) -> Result<(String, String, crate::records::Keyring), Error> {
         use crate::indexer::retry::{is_visibility_gap, VisibilityRetry};
 
         let start = (self.now_micros_fn)();
@@ -889,7 +937,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     async fn fetch_keyring_chain_head_once(
         &mut self,
         workspace_id: &WorkspaceId,
-    ) -> Result<(String, crate::records::Keyring), Error> {
+    ) -> Result<(String, String, crate::records::Keyring), Error> {
         let url = self.resolve_indexer_url();
         let signing_key = self.require_signing_key()?;
         let provider = crate::indexer::IndexerChainHeadProvider {
@@ -926,7 +974,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             Error::InvalidRecord("verified chain returned empty result".to_owned())
         })?;
         crate::records::check_version(head_node.record.opake_version)?;
-        Ok((head_node.uri, head_node.record))
+        Ok((head_node.uri, head_node.cid, head_node.record))
     }
 
     /// Fast local pre-write manager check. Not a security boundary: the
@@ -960,10 +1008,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         &mut self,
         workspace_id: &WorkspaceId,
         prior_uri: String,
+        prior_cid: String,
         mut record: crate::records::Keyring,
     ) -> Result<MutationOutcome, Error> {
         let now = self.now();
         record.supersedes = Some(prior_uri);
+        // spec: lineage § Supersede references carry a content pin
+        record.supersedes_cid = Some(prior_cid);
         record.lineage = Some(workspace_id.as_str().to_owned());
         record.created_at = now.clone();
         record.modified_at = Some(now);
@@ -997,7 +1048,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         member_did: &str,
         role: Role,
     ) -> Result<MutationOutcome, Error> {
-        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
 
         if prior.members.iter().any(|m| m.did() == member_did) {
@@ -1061,7 +1112,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             });
         }
 
-        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
             .await
     }
 
@@ -1084,7 +1135,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<MutationOutcome, Error> {
         use crate::records::KeyringMember;
 
-        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
 
         if !prior.members.iter().any(|m| m.did() == self.did) {
             return Err(Error::InvalidRecord(format!(
@@ -1126,13 +1177,14 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             rotation: prior.rotation,
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
-            supersedes: None, // filled by write_keyring_supersede
-            lineage: None,    // filled by write_keyring_supersede
+            supersedes: None,     // filled by write_keyring_supersede
+            supersedes_cid: None, // filled by write_keyring_supersede
+            lineage: None,        // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
 
-        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
             .await
     }
 
@@ -1156,7 +1208,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         use crate::crypto::{generate_content_key, wrap_key, WrapContext};
         use crate::records::{KeyHistoryEntry, KeyringMember};
 
-        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
 
         if !prior.members.iter().any(|m| m.did() == member_did) {
@@ -1220,8 +1272,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             rotation: new_rotation,
             key_history: prior.key_history.clone(),
             encrypted_metadata: prior.encrypted_metadata.clone(),
-            supersedes: None, // filled by write_keyring_supersede
-            lineage: None,    // filled by write_keyring_supersede
+            supersedes: None,     // filled by write_keyring_supersede
+            supersedes_cid: None, // filled by write_keyring_supersede
+            lineage: None,        // filled by write_keyring_supersede
             created_at: String::new(),
             modified_at: None,
         };
@@ -1244,7 +1297,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         new_record.encrypted_metadata =
             crate::crypto::encrypt_metadata(&new_group_key, &metadata, &anchor, &mut self.rng)?;
 
-        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
             .await?;
         Ok((new_group_key, new_rotation))
     }
@@ -1265,7 +1318,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<MutationOutcome, Error> {
         use crate::crypto::{self, KeyringMetadata};
 
-        let (prior_uri, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
 
         let anchor =
@@ -1295,7 +1348,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let mut new_record = prior;
         new_record.encrypted_metadata = new_encrypted;
 
-        self.write_keyring_supersede(workspace_id, prior_uri, new_record)
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
             .await
     }
 
@@ -1309,7 +1362,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         member_did: &str,
         new_role: Role,
     ) -> Result<MutationOutcome, Error> {
-        let (prior_uri, mut prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let (prior_uri, prior_cid, mut prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
 
         let member = prior
@@ -1321,7 +1374,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             })?;
         member.role = new_role;
 
-        self.write_keyring_supersede(workspace_id, prior_uri, prior)
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, prior)
             .await
     }
 
@@ -1636,7 +1689,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             crate::documents::fetch_document_keyring_ref(self.client.transport(), document_uri)
                 .await?;
         let workspace_id = WorkspaceId::from_resolved(workspace_id);
-        let (head_uri, _head) = self.fetch_keyring_chain_head(&workspace_id).await?;
+        let (head_uri, _, _head) = self.fetch_keyring_chain_head(&workspace_id).await?;
         let ws = self.resolve_workspace_by_uri(&head_uri).await?;
 
         let (filename, plaintext) = crate::documents::download_keyring_document(
@@ -1834,7 +1887,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// — walk to the head, then unwrap the head group key + history.
     async fn resolve_head_workspace(&mut self, workspace_id: &str) -> Result<Workspace, Error> {
         let id = WorkspaceId::from_resolved(workspace_id.to_string());
-        let (head_uri, _) = self.fetch_keyring_chain_head(&id).await?;
+        let (head_uri, _, _) = self.fetch_keyring_chain_head(&id).await?;
         self.resolve_workspace_by_uri(&head_uri).await
     }
 

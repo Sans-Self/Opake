@@ -48,6 +48,14 @@ The consequence for encryption agility: a new algorithm that fits the existing w
 
 Validation happens in three places, each trusting less than the last: the author's PDS rejects malformed writes when it can resolve the lexicons; the indexer refuses malformed or vocabulary-violating records at ingest; and the client treats every record as untrusted, degrading around anything it can't read rather than failing wholesale. Only the last is load-bearing — the others are hygiene.
 
+## Supersede chains: derived identity and the content pin
+
+Keyrings, directories, and documents each form a **supersede chain**: a record with no successor is the canonical head, and each non-genesis record names its predecessor via `supersedes`. Two chain-level fields sit outside the per-record crypto envelope and deserve calling out.
+
+**Derived genesis keyring rkey (`key: "any"`).** The `at.opake.keyring` record `key` is `any`, not `tid`. The genesis keyring's rkey is a *derived tag* — a 26-character lowercase-base32 string computed from the genesis (rotation-0) group key and the owner DID (`base32-lower(SHA-256(Ed25519_pubkey(HKDF(K₀, transcript("opake-workspace-identity", owner_did))))[..16])`; construction in [CRYPTO.md](../docs/CRYPTO.md#workspace-identity)). Because the genesis URI *is* the workspace identity, that identity commits to key material only members hold: a party cannot mint a keyring claiming a workspace whose rotation-0 key it lacks. Clients re-derive the tag and compare it to the declared anchor on every adoption path, members-only and offline — the indexer can't, as it holds no group key. Keyring supersedes use ordinary client-generated TIDs; the `any` key is what lets one collection hold both the derived-tag genesis and TID-keyed supersedes.
+
+**`supersedesCid` — the content pin.** Every superseding record (keyring, directory, document) carries `supersedesCid` alongside `supersedes`: the CID of the immediate predecessor named by `supersedes`. It is **required whenever `supersedes` is present** (enforced at the app layer pre-v1), names the immediate predecessor only, and is never copied through a cascade — each level pins its own predecessor. **At v1 the pin compares the CID a serving host *reports*, not a hash recomputed from bytes**: clients don't compute atproto CIDs yet, so it detects CID disagreement between honest, non-colluding hosts (stale cache, accidental substitution, indexer/PDS reporting inconsistent heads) but **not** a malicious host serving tampered bytes under the true CID. True byte-level tamper-evidence — recomputing the CID from fetched bytes — is deferred to replication-tier work. The field is present now as a pre-v1 wire reservation so byte-binding lands later as an already-present field rather than a post-freeze migration.
+
 ## Flow: Sharing a file with another DID
 
 ```mermaid

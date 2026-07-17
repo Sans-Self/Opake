@@ -35,6 +35,12 @@ use crate::records::{Directory, Keyring};
 pub trait Superseding {
     fn supersedes_uri(&self) -> Option<&str>;
 
+    /// The CID this record pins for its immediate predecessor, if any. Present
+    /// alongside `supersedes`; a fetched predecessor's CID that disagrees marks
+    /// the link unverifiable
+    /// (`spec:lineage § Supersede references carry a content pin`).
+    fn supersedes_cid(&self) -> Option<&str>;
+
     /// The chain's genesis URI this record declares, if any. Absent on a
     /// genesis record, which identifies itself.
     fn declared_lineage(&self) -> Option<&str>;
@@ -52,6 +58,10 @@ impl Superseding for Directory {
         self.supersedes.as_deref()
     }
 
+    fn supersedes_cid(&self) -> Option<&str> {
+        self.supersedes_cid.as_deref()
+    }
+
     fn declared_lineage(&self) -> Option<&str> {
         self.lineage.as_deref()
     }
@@ -60,6 +70,10 @@ impl Superseding for Directory {
 impl Superseding for Keyring {
     fn supersedes_uri(&self) -> Option<&str> {
         self.supersedes.as_deref()
+    }
+
+    fn supersedes_cid(&self) -> Option<&str> {
+        self.supersedes_cid.as_deref()
     }
 
     fn declared_lineage(&self) -> Option<&str> {
@@ -242,10 +256,23 @@ where
         // rather than error the snapshot — the child becomes the walk's tail
         // and downstream genesis-matching rejects the flipped head
         // (`spec:lineage § Lineage never flips across a supersede`).
+        //
+        // Content pin (same disposition): the child pins the CID of the exact
+        // predecessor it supersedes. Bytes served under this predecessor URI
+        // that hash to a different CID make the link unverifiable regardless of
+        // the serving host, so the walk stops here read-leniently — an authority
+        // walk then fails genesis-matching (head not accepted), a directory
+        // consumer keeps its last fully-verifiable head
+        // (`spec:lineage § Supersede references carry a content pin`).
         if let Some(child) = nodes.last() {
             let node_anchor = node.record.lineage_anchor(&node.uri);
             if child.record.lineage_anchor(&child.uri) != node_anchor {
                 break;
+            }
+            if let Some(pinned) = child.record.supersedes_cid() {
+                if pinned != node.cid {
+                    break;
+                }
             }
         }
 

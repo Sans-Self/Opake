@@ -301,6 +301,113 @@ async fn walk_back_stops_at_a_flipped_lineage() {
     assert!(matches!(err, Error::ChainGenesisMismatch { .. }));
 }
 
+/// A head that pins a predecessor CID which disagrees with the CID the host
+/// reports for the served record has an unverifiable link. The back-walk drops
+/// the edge read-leniently — the head stands alone as the walk's tail — so
+/// authority walks fail genesis-matching (head not accepted) exactly as a flip
+/// does. This is CID-field comparison; see the limitation test below.
+// spec: lineage § Supersede references carry a content pin
+#[tokio::test]
+async fn walk_back_stops_at_a_pin_mismatch() {
+    let mock = MockTransport::new();
+
+    let genesis = dummy_directory("/");
+    let mut head = dir_superseding("/", URI_GENESIS);
+    // The genesis record is served under CID "bafygenesis", but the head pins a
+    // different CID — the served predecessor bytes are not the ones the head
+    // committed to.
+    head.supersedes_cid = Some("bafytampered".into());
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
+
+    assert_eq!(chain.len(), 1, "pin-mismatched predecessor is dropped");
+    assert_eq!(chain[0].uri, URI_HEAD);
+
+    let mock2 = MockTransport::new();
+    mock2.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock2.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock2.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+    let err = verify_and_walk_chain::<Directory>(&mock2, URI_HEAD, URI_GENESIS)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::ChainGenesisMismatch { .. }));
+}
+
+/// A pin that matches the served predecessor CID does not obstruct the walk —
+/// the link verifies and the walk reaches genesis.
+// spec: lineage § Supersede references carry a content pin
+#[tokio::test]
+async fn walk_back_accepts_a_matching_pin() {
+    let mock = MockTransport::new();
+
+    let genesis = dummy_directory("/");
+    let mut head = dir_superseding("/", URI_GENESIS);
+    head.supersedes_cid = Some("bafygenesis".into());
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    mock.enqueue(ok(record_entry(URI_GENESIS, "bafygenesis", &genesis)));
+
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
+
+    assert_eq!(chain.len(), 2);
+    assert_eq!(chain[0].uri, URI_HEAD);
+    assert_eq!(chain[1].uri, URI_GENESIS);
+}
+
+/// Documents the v1 pin limitation: the check compares the pin against the CID
+/// the host *reports*, not a hash recomputed from the served bytes. A hostile
+/// host that serves tampered predecessor bytes while reporting the pinned CID
+/// is therefore NOT caught — the walk accepts the link. Real byte-level tamper
+/// evidence requires recomputing the CID from bytes and is deferred to
+/// replication-tier work; until then the pin defends only against honest-host
+/// CID disagreement. If a future change adds byte recompute, this test should
+/// flip to asserting the tampered bytes ARE rejected.
+// spec: lineage § Supersede references carry a content pin
+#[tokio::test]
+async fn walk_back_does_not_catch_tampered_bytes_under_a_matching_reported_cid() {
+    let mock = MockTransport::new();
+
+    // The head honestly pins the genesis CID. A hostile host serves *different*
+    // genesis bytes (a tampered "/" directory with an extra entry) but reports
+    // the pinned CID for them — the reported CID matches, the bytes do not.
+    let mut tampered_genesis = dummy_directory("/");
+    tampered_genesis.entries.push(crate::records::ListingEntry {
+        target: "at://did:plc:evil/at.opake.document/injected".into(),
+        target_cid: crate::atproto::CidLink {
+            cid: "bafyinjected".into(),
+        },
+    });
+    let mut head = dir_superseding("/", URI_GENESIS);
+    head.supersedes_cid = Some("bafygenesis".into());
+
+    mock.enqueue(ok(did_doc(DID_A, PDS_A)));
+    mock.enqueue(ok(record_entry(URI_HEAD, "bafyhead", &head)));
+    // Tampered bytes, but the host reports the pinned CID for them.
+    mock.enqueue(ok(record_entry(
+        URI_GENESIS,
+        "bafygenesis",
+        &tampered_genesis,
+    )));
+
+    let chain: Vec<ChainNode<Directory>> = walk_back_to_genesis(&mock, URI_HEAD).await.unwrap();
+
+    assert_eq!(
+        chain.len(),
+        2,
+        "v1 limitation: tampered bytes under a matching reported CID are not detected"
+    );
+    assert_eq!(
+        chain[1].record.entries.len(),
+        1,
+        "the tampered (injected) entry passed through unverified"
+    );
+}
+
 // spec:tree-chains § A path's canonical state is the head of a supersede chain
 #[tokio::test]
 async fn walk_back_rejects_cycle() {
@@ -491,6 +598,7 @@ mod keyring_authority {
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
             supersedes: supersedes.map(String::from),
+            supersedes_cid: None,
             lineage: supersedes.map(|_| KEYRING_GENESIS.to_string()),
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
@@ -699,6 +807,7 @@ mod directory_additivity {
             encrypted_metadata: crate::test_utils::dummy_encrypted_metadata(),
             entries: entries.into_iter().map(entry).collect(),
             supersedes: supersedes.map(String::from),
+            supersedes_cid: None,
             lineage: supersedes.map(|_| DIR_GENESIS.to_string()),
             workspace_id: None,
             is_workspace_root: false,

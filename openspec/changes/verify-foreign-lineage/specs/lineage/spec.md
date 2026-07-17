@@ -52,15 +52,21 @@ A record that declares `lineage` without `supersedes` claims chain membership wi
 
 Every superseding record SHALL carry, alongside `supersedes`, the CID of the exact predecessor record it supersedes (`supersedesCid`), stamped by the writer from the chain-head pointer it holds. The pin names the immediate predecessor and SHALL NOT be copied through verbatim-copy paths — each record in a cascade or advance pins its own predecessor.
 
-Readers SHALL verify a fetched predecessor's bytes against the pin when present, making chain records tamper-evident independent of the host that served them. A pin mismatch classifies the link as unverifiable; the consequence follows the owning chain's existing posture — degradation to the newest fully-verifiable head on directory chains (`spec:tree-chains § Consumers build the live tree from chain heads only`), non-acceptance of the proposed head on authority walks.
+Readers SHALL compare a fetched predecessor's reported CID against the pin when present. A disagreement classifies the link as unverifiable; the consequence follows the owning chain's existing posture — degradation to the newest fully-verifiable head on directory chains (`spec:tree-chains § Consumers build the live tree from chain heads only`), non-acceptance of the proposed head on authority walks.
 
-The pin is integrity, not trust bootstrap: pins root at the record under verification, not at a trusted anchor, and workspace identity adoption is guarded by key derivation (`spec:workspace-identity § Identity adoption verifies by derivation`), not by pins. What pins provide is that any host — a member cache, an archive, a replica — can serve chain history whose substitution is detectable.
+**What the pin does and does not guarantee (v1).** The reader compares the pin against the CID the serving host *reports* for the predecessor, not against a hash recomputed from the fetched bytes — clients do not compute atproto CIDs today. So the pin detects CID disagreement between honest, non-colluding hosts (an out-of-date cache, an accidental substitution, an indexer/PDS reporting mismatched heads); it does NOT detect a malicious host that serves tampered bytes while reporting the true CID, because that host controls both. True byte-level tamper-evidence requires recomputing the CID from the fetched bytes and is deferred to the work that needs it — replicated and archival chain serving, where records arrive from untrusted third parties (`spec:lineage` is the field's home; the byte-binding is tracked as replication-tier follow-up). Critically, this limitation does not touch #51: workspace identity adoption is guarded by key derivation (`spec:workspace-identity § Identity adoption verifies by derivation`), never by pins. The pin is defense-in-depth against honest-host inconsistency and a pre-v1 wire reservation so the field exists before the freeze; it is not, at v1, a trust boundary against a hostile host.
 
-#### Scenario: substituted chain record is detected
+#### Scenario: disagreeing predecessor CID is rejected
 
 - **GIVEN** a superseding record pinning its predecessor's CID
-- **WHEN** a walk fetches predecessor bytes that hash to a different CID
-- **THEN** the link is classified unverifiable, regardless of which host served the bytes
+- **WHEN** a walk fetches a predecessor whose reported CID differs from the pin
+- **THEN** the link is classified unverifiable
+
+#### Scenario: a hostile host reporting a matching CID is not caught at v1
+
+- **GIVEN** a host that serves tampered predecessor bytes while reporting the pinned CID
+- **WHEN** a walk fetches it
+- **THEN** the pin comparison passes — this is a known v1 limitation, closed only by recomputing the CID from bytes (deferred replication-tier work)
 
 #### Scenario: cascade pins per level
 

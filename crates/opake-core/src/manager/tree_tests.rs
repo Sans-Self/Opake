@@ -91,6 +91,7 @@ fn keyring(members: Vec<KeyringMember>, supersedes: Option<&str>) -> Keyring {
         key_history: Vec::new(),
         encrypted_metadata: dummy_encrypted_metadata(),
         supersedes: supersedes.map(String::from),
+        supersedes_cid: None,
         lineage: supersedes.map(|_| KEYRING_GENESIS.to_string()),
         created_at: "2026-03-01T00:00:00Z".into(),
         modified_at: None,
@@ -112,6 +113,7 @@ fn dir(entries: Vec<&str>, supersedes: Option<&str>) -> Directory {
             })
             .collect(),
         supersedes: supersedes.map(String::from),
+        supersedes_cid: None,
         lineage: supersedes.map(|_| DIR_GENESIS.to_string()),
         workspace_id: None,
         is_workspace_root: false,
@@ -395,6 +397,7 @@ async fn bug__resolve_status_splits_retryable_from_undecryptable() {
         }),
         encrypted_metadata: dummy_encrypted_metadata(),
         supersedes: None,
+        supersedes_cid: None,
         lineage: None,
         workspace_id: None,
         created_at: "2026-03-01T00:00:00Z".into(),

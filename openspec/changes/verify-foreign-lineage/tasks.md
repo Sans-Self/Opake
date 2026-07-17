@@ -33,7 +33,7 @@
 
 ## 5. Pin verification in walks
 
-- [ ] 5.1 Walk helpers (directories/chain.rs) verify fetched predecessor bytes against `supersedesCid` when present; mismatch classifies the link unverifiable
+- [x] 5.1 Walk helpers (directories/chain.rs) compare the predecessor's reported CID against `supersedesCid` when present; disagreement classifies the link unverifiable (v1: reported-CID comparison, not byte recompute — see design D6)
 - [ ] 5.2 Directory-chain posture: pin-mismatched proposed head degrades to newest verifiable head per tree-chains (test through tree building); authority-walk posture: unverifiable link → head not accepted
 
 ## 6. Verification & docs

@@ -28,10 +28,17 @@ fn dir_uri(rkey: &str) -> String {
 fn supersede_mode(prior_uri: &str, seed: &Directory) -> LevelMode {
     LevelMode::Supersede {
         prior_head_uri: prior_uri.to_owned(),
+        prior_head_cid: cid_of(prior_uri),
         lineage: prior_uri.to_owned(),
         key_wrapping: seed.key_wrapping.clone(),
         encrypted_metadata: seed.encrypted_metadata.clone(),
     }
+}
+
+/// Deterministic stand-in CID for a prior head URI, so a level's pin is
+/// distinguishable per predecessor in assertions.
+fn cid_of(prior_uri: &str) -> String {
+    format!("bafy-{}", prior_uri.rsplit('/').next().unwrap_or(prior_uri))
 }
 
 fn genesis_mode(seed: &Directory, rkey: Option<String>) -> LevelMode {
@@ -223,6 +230,67 @@ async fn two_level_supersede_threads_child_cid_into_parent() {
         }
         _ => panic!("expected JSON body"),
     }
+}
+
+// spec: lineage § Supersede references carry a content pin
+#[tokio::test]
+async fn cascade_pins_each_level_to_its_own_predecessor() {
+    let mock = MockTransport::new();
+    let prior_root_uri = dir_uri("rootOld");
+    let prior_leaf_uri = dir_uri("leafOld");
+    let new_root_uri = dir_uri("rootNew");
+    let new_leaf_uri = dir_uri("leafNew");
+
+    let prior_root = dummy_directory_with_entries("/", vec![prior_leaf_uri.clone()]);
+    let prior_leaf = dummy_directory_with_entries("subdir", vec![]);
+
+    mock.enqueue(ok_create(&new_leaf_uri, "bafyleafNew"));
+    mock.enqueue(ok_create(&new_root_uri, "bafyrootNew"));
+
+    let mut client = mock_client(mock.clone());
+    let ancestors = vec![AncestorLevel {
+        mode: supersede_mode(&prior_root_uri, &prior_root),
+        linkage: AncestorLinkage::Replace {
+            prior_child_uri: prior_leaf_uri.clone(),
+        },
+        entries: prior_root.entries.clone(),
+        is_workspace_root: false,
+    }];
+    let leaf = LeafLevel {
+        mode: supersede_mode(&prior_leaf_uri, &prior_leaf),
+        entries: vec![ListingEntry::new(DOC_URI, DOC_CID)],
+        is_workspace_root: false,
+    };
+
+    execute_cascade(
+        &mut client,
+        TEST_WORKSPACE_ID,
+        ancestors,
+        leaf,
+        "2026-03-01T12:00:00Z",
+    )
+    .await
+    .unwrap();
+
+    let reqs = mock.requests();
+    let leaf_written: Directory = match &reqs[0].body {
+        Some(RequestBody::Json(v)) => serde_json::from_value(v["record"].clone()).unwrap(),
+        _ => panic!("expected JSON body"),
+    };
+    let root_written: Directory = match &reqs[1].body {
+        Some(RequestBody::Json(v)) => serde_json::from_value(v["record"].clone()).unwrap(),
+        _ => panic!("expected JSON body"),
+    };
+
+    assert_eq!(
+        leaf_written.supersedes_cid.as_deref(),
+        Some(cid_of(&prior_leaf_uri).as_str())
+    );
+    assert_eq!(
+        root_written.supersedes_cid.as_deref(),
+        Some(cid_of(&prior_root_uri).as_str())
+    );
+    assert_ne!(leaf_written.supersedes_cid, root_written.supersedes_cid);
 }
 
 // spec:tree-chains § Cascades write leaf-first so the indexer resolves additivity in arrival order

@@ -11,22 +11,23 @@ use super::KEYRING_COLLECTION;
 
 /// Everything needed to create a keyring record.
 ///
-/// `rkey` is generated client-side (a TID) so we know the keyring's full
-/// AT-URI before wrapping the group key — the URI is bound into the
-/// HKDF info via `WrapContext::Keyring` for cross-context splice
-/// protection. The record is then `put_record`d at that exact rkey
-/// rather than letting the PDS pick one.
+/// The genesis rkey is not supplied: it is derived from the freshly
+/// generated group key and the owner DID, so the keyring's full AT-URI
+/// is known before wrapping — the URI is bound into the HKDF info via
+/// `WrapContext::Keyring` and into the metadata AAD. The record is then
+/// `put_record`d at that exact rkey rather than letting the PDS pick one.
+// spec: workspace-identity § Genesis URI is the workspace identity
 pub struct CreateKeyringParams<'a> {
     pub name: &'a str,
     pub description: Option<&'a str>,
     pub owner_did: &'a str,
     pub owner_x25519_public_key: &'a X25519PublicKey,
     pub owner_ml_kem_public_key: &'a MlKemPublicKey,
-    pub rkey: &'a str,
     pub created_at: &'a str,
 }
 
-/// Generate a group key, wrap it to the owner, create the keyring record.
+/// Generate a group key, derive the identity rkey from it, wrap the key
+/// to the owner, create the keyring record.
 ///
 /// Returns `(at_uri, raw_group_key)` — the caller must store the group key
 /// locally since it never appears in plaintext on the PDS.
@@ -36,7 +37,10 @@ pub async fn create_keyring(
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<(String, ContentKey), Error> {
     trace!("generating group key for keyring {:?}", params.name);
-    let keyring_uri = crate::tid::uri_with_tid(params.owner_did, KEYRING_COLLECTION, params.rkey);
+    let group_key = crypto::generate_content_key(rng);
+    // spec: lineage § Records that seal ciphertexts to their own URI choose their own rkey
+    let rkey = crypto::derive_workspace_identity_tag(&group_key, params.owner_did);
+    let keyring_uri = crate::tid::uri_with_tid(params.owner_did, KEYRING_COLLECTION, &rkey);
     let members = [crypto::DidMember {
         did: params.owner_did,
         keys: crypto::PublicKeyBundle {
@@ -44,7 +48,11 @@ pub async fn create_keyring(
             ml_kem: params.owner_ml_kem_public_key,
         },
     }];
-    let (group_key, wrapped_keys) = crypto::create_group_key(&members, &keyring_uri, rng)?;
+    let context = crypto::WrapContext::Keyring { uri: &keyring_uri };
+    let wrapped_keys: Vec<_> = members
+        .iter()
+        .map(|m| crypto::wrap_key(&group_key, &m.keys, m.did, &context, rng))
+        .collect::<Result<_, _>>()?;
 
     let keyring_members: Vec<KeyringMember> = wrapped_keys
         .into_iter()
@@ -70,7 +78,7 @@ pub async fn create_keyring(
 
     trace!("creating keyring record at {}", keyring_uri);
     client
-        .put_record(KEYRING_COLLECTION, params.rkey, &keyring)
+        .put_record(KEYRING_COLLECTION, &rkey, &keyring)
         .await?;
 
     Ok((keyring_uri, group_key))
@@ -112,9 +120,9 @@ mod tests {
     async fn happy_path() {
         let owner = TestKeys::generate(TEST_DID);
         let mock = MockTransport::new();
-        let rkey = "tid123";
-        let uri = format!("at://{TEST_DID}/at.opake.keyring/{rkey}");
-        mock.enqueue(put_record_response(&uri));
+        mock.enqueue(put_record_response(&format!(
+            "at://{TEST_DID}/at.opake.keyring/placeholder"
+        )));
 
         let mut client = mock_client(mock.clone());
         let params = CreateKeyringParams {
@@ -123,7 +131,6 @@ mod tests {
             owner_did: TEST_DID,
             owner_x25519_public_key: &owner.x25519_pub,
             owner_ml_kem_public_key: &owner.ml_kem_pub,
-            rkey,
             created_at: "2026-03-01T00:00:00Z",
         };
 
@@ -131,20 +138,20 @@ mod tests {
             .await
             .unwrap();
 
+        // spec: workspace-identity § Genesis URI is the workspace identity
+        let expected_rkey = crypto::derive_workspace_identity_tag(&group_key, TEST_DID);
+        let uri = format!("at://{TEST_DID}/at.opake.keyring/{expected_rkey}");
         assert_eq!(result_uri, uri);
         assert_eq!(group_key.0.len(), 32);
 
         let reqs = mock.requests();
         assert_eq!(reqs.len(), 1);
-        // create_keyring uses putRecord with a client-chosen rkey so the
-        // keyring URI is known before the group key is wrapped (the URI
-        // is bound into the HKDF info via WrapContext::Keyring).
         assert!(reqs[0].url.contains("putRecord"));
 
         match &reqs[0].body {
             Some(RequestBody::Json(v)) => {
                 assert_eq!(v["collection"], KEYRING_COLLECTION);
-                assert_eq!(v["rkey"], rkey);
+                assert_eq!(v["rkey"], expected_rkey.as_str());
                 let record: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
                 assert_eq!(record.algo, "aes-256-gcm");
                 assert_eq!(record.rotation, 0);
@@ -183,7 +190,6 @@ mod tests {
             owner_did: TEST_DID,
             owner_x25519_public_key: &owner.x25519_pub,
             owner_ml_kem_public_key: &owner.ml_kem_pub,
-            rkey: "tid456",
             created_at: "2026-03-01T00:00:00Z",
         };
 

@@ -706,10 +706,11 @@ async fn fetch_workspace_entries(
     drop(opake);
 
     let bundle = private_keys.bundle();
+    // spec: workspace-identity § Identity adoption verifies by derivation
     let entries = fetched
         .workspaces
         .iter()
-        .filter_map(|envelope| wk::try_build_entry(envelope, &did, &bundle))
+        .filter_map(|envelope| wk::try_build_entry(envelope, &did, &bundle).entry())
         .collect();
     Ok((entries, fetched.unreadable))
 }
@@ -975,7 +976,7 @@ async fn apply_keyring_to_workspace_keeper(
             if gate.borrow_mut().capture_if_active(event) {
                 return;
             }
-            let maybe_entry = {
+            let outcome = {
                 let guard = opake_rc.lock().await;
                 let did = guard.did().to_string();
                 let private_keys = match guard.identity().owned_private_keys() {
@@ -995,8 +996,10 @@ async fn apply_keyring_to_workspace_keeper(
             // on a removal supersede the envelope carries the *new head*,
             // and a delete keyed by it would no-op against the genesis-keyed
             // entry — the removed member's sidebar keeps a workspace they
-            // can no longer decrypt.
-            keeper.apply_keyring_record(envelope.workspace_id().as_str(), maybe_entry);
+            // can no longer decrypt. The outcome dispatch keeps a forged
+            // record from mapping onto that delete.
+            // spec: workspace-identity § Identity adoption verifies by derivation
+            keeper.apply_keyring_record(envelope.workspace_id().as_str(), outcome);
         }
         SseEvent::KeyringDelete(payload) => {
             if gate.borrow_mut().capture_if_active(event) {

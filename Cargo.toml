@@ -36,7 +36,7 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive", "color"] }
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 env_logger = "0.11"
 futures-channel = { version = "0.3", default-features = false, features = ["std", "sink"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }

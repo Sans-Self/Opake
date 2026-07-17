@@ -191,7 +191,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         // original's lineage anchor is threaded onto the new record so its
         // blob and metadata seal under the object's identity, not the new
         // record's own URI.
-        let (metadata, original_anchor) = {
+        let (metadata, original_anchor, original_cid) = {
             let group_keys = GroupKeys {
                 current_rotation: rotation,
                 current: &group_key,
@@ -224,6 +224,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 tags: &metadata.tags,
                 created_at: now,
                 supersedes: Some(document_uri),
+                supersedes_cid: Some(&original_cid),
                 lineage: Some(&original_anchor),
             },
             &mut self.opake.rng,

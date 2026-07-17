@@ -29,6 +29,12 @@ export type OpakeErrorKind =
   // next bootstrap or keyring event resolves which case it was. The client
   // retries this within the visibility window before it ever reaches a caller.
   | "WorkspaceNotIndexed"
+  // A keyring's declared identity failed the derivation check: its genesis rkey
+  // is not derived from the key material it carries, under the declared owner
+  // DID. A forged or malformed workspace-identity claim; nothing is adopted. On
+  // listing surfaces such a record is dropped silently — surfacing it would only
+  // inform a forger — so a caller sees this only on a direct resolve.
+  | "WorkspaceIdentityMismatch"
   // The indexer read an indexed chain head and the caller's DID is absent from
   // its members. Definitive, never retried: the UI may say "not permitted".
   | "NotWorkspaceMember"
@@ -84,6 +90,7 @@ const KNOWN_KINDS = new Set<string>([
   "Mnemonic",
   "Sse",
   "WorkspaceNotIndexed",
+  "WorkspaceIdentityMismatch",
   "NotWorkspaceMember",
   "VisibilityTimeout",
   "CasConflict",

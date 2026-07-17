@@ -37,6 +37,11 @@ pub enum LevelMode {
     /// contents do.
     Supersede {
         prior_head_uri: String,
+        /// CID of `prior_head_uri` — this level's immediate predecessor.
+        /// Pinned onto the new record; every level pins its own predecessor,
+        /// never inherited from elsewhere in the cascade.
+        // spec: lineage § Supersede references carry a content pin
+        prior_head_cid: String,
         key_wrapping: KeyWrapping,
         encrypted_metadata: EncryptedMetadata,
         /// The chain's lineage anchor (genesis URI). Stamped onto the new
@@ -202,7 +207,8 @@ async fn write_level<T: Transport>(
     is_workspace_root: bool,
     modified_at: &str,
 ) -> Result<CascadeStep, Error> {
-    let (key_wrapping, encrypted_metadata, supersedes, rkey, lineage) = unpack_mode(mode);
+    let (key_wrapping, encrypted_metadata, supersedes, supersedes_cid, rkey, lineage) =
+        unpack_mode(mode);
 
     let record = Directory {
         opake_version: SCHEMA_VERSION,
@@ -210,6 +216,7 @@ async fn write_level<T: Transport>(
         encrypted_metadata,
         entries,
         supersedes: supersedes.clone(),
+        supersedes_cid,
         lineage,
         workspace_id: Some(workspace_id.to_owned()),
         is_workspace_root,
@@ -323,6 +330,7 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
     let leaf = LeafLevel {
         mode: LevelMode::Supersede {
             prior_head_uri: leaf_node.uri,
+            prior_head_cid: leaf_node.cid,
             key_wrapping: leaf_node.record.key_wrapping,
             encrypted_metadata: leaf_node.record.encrypted_metadata,
             lineage: leaf_lineage,
@@ -354,6 +362,7 @@ pub async fn build_deep_cascade_levels<T: crate::client::Transport>(
         ancestors.push(AncestorLevel {
             mode: LevelMode::Supersede {
                 prior_head_uri: ancestor_node.uri,
+                prior_head_cid: ancestor_node.cid,
                 key_wrapping: ancestor_node.record.key_wrapping,
                 encrypted_metadata: ancestor_node.record.encrypted_metadata,
                 lineage: ancestor_lineage,
@@ -381,10 +390,12 @@ fn unpack_mode(
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 ) {
     match mode {
         LevelMode::Supersede {
             prior_head_uri,
+            prior_head_cid,
             key_wrapping,
             encrypted_metadata,
             lineage,
@@ -392,15 +403,16 @@ fn unpack_mode(
             key_wrapping,
             encrypted_metadata,
             Some(prior_head_uri),
+            Some(prior_head_cid),
             None,
             Some(lineage),
         ),
-        // Genesis records identify themselves — no lineage.
+        // Genesis records identify themselves — no lineage, no pin.
         LevelMode::Genesis {
             key_wrapping,
             encrypted_metadata,
             rkey,
-        } => (key_wrapping, encrypted_metadata, None, rkey, None),
+        } => (key_wrapping, encrypted_metadata, None, None, rkey, None),
     }
 }
 

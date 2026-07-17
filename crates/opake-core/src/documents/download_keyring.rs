@@ -27,7 +27,7 @@ async fn fetch_keyring_document(
     transport: &impl Transport,
     group_keys: GroupKeys<'_>,
     document_uri: &str,
-) -> Result<(Document, ContentKey, String), Error> {
+) -> Result<(Document, String, ContentKey, String), Error> {
     let doc_at = atproto::parse_at_uri(document_uri)?;
     if doc_at.collection != DOCUMENT_COLLECTION {
         return Err(Error::InvalidRecord(format!(
@@ -51,6 +51,7 @@ async fn fetch_keyring_document(
     )
     .await?;
 
+    let doc_cid = doc_entry.cid;
     let doc: Document = serde_json::from_value(doc_entry.value)?;
     records::check_version(doc.opake_version)?;
 
@@ -77,7 +78,7 @@ async fn fetch_keyring_document(
         .map_err(|e| Error::InvalidRecord(format!("invalid wrapped content key: {e}")))?;
     let content_key = crypto::unwrap_content_key_from_keyring(&wrapped_ck_bytes, group_key)?;
 
-    Ok((doc, content_key, doc_pds))
+    Ok((doc, doc_cid, content_key, doc_pds))
 }
 
 /// Read and decrypt a keyring-encrypted document's metadata without fetching
@@ -92,13 +93,13 @@ pub async fn fetch_keyring_document_metadata(
     transport: &impl Transport,
     group_keys: GroupKeys<'_>,
     document_uri: &str,
-) -> Result<(DocumentMetadata, String), Error> {
-    let (doc, content_key, _pds) =
+) -> Result<(DocumentMetadata, String, String), Error> {
+    let (doc, doc_cid, content_key, _pds) =
         fetch_keyring_document(transport, group_keys, document_uri).await?;
     let anchor = doc.lineage_anchor(document_uri).to_string();
     let context = SealContext::new(&anchor, SealType::DocumentMetadata);
     let metadata = crypto::decrypt_metadata(&content_key, &doc.encrypted_metadata, &context)?;
-    Ok((metadata, anchor))
+    Ok((metadata, anchor, doc_cid))
 }
 
 /// Download and decrypt a keyring-encrypted document using already-resolved
@@ -171,7 +172,7 @@ pub async fn download_keyring_document(
     document_uri: &str,
 ) -> Result<(String, Vec<u8>), Error> {
     let doc_at = atproto::parse_at_uri(document_uri)?;
-    let (doc, content_key, doc_pds) =
+    let (doc, _doc_cid, content_key, doc_pds) =
         fetch_keyring_document(transport, group_keys, document_uri).await?;
 
     let Encryption::Keyring(kr_enc) = &doc.encryption else {

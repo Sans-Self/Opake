@@ -209,6 +209,7 @@ mod keyring_supersede {
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             created_at: "2026-03-01T00:00:00Z".into(),
             modified_at: None,
@@ -788,6 +789,150 @@ mod keyring_supersede {
             vec![ALICE_DID, BOB_DID]
         );
     }
+
+    /// Build a genesis keyring whose group key `gk` is really wrapped to
+    /// `member`, addressed at `head_uri`. When `head_uri`'s rkey is
+    /// `derive_workspace_identity_tag(gk, authority)` the record is honest;
+    /// any other rkey is a forgery that unwraps cleanly but fails identity
+    /// derivation. The caller owns `gk` so it can compute the honest rkey.
+    fn real_genesis_envelope(
+        head_uri: &str,
+        member_pub: &crate::crypto::PublicKeyBundle<'_>,
+        member_did: &str,
+        gk: &crate::crypto::ContentKey,
+        rng: &mut crate::crypto::OsRng,
+    ) -> crate::indexer::types::IndexerEnvelope<crate::records::Keyring> {
+        use crate::crypto::{
+            encrypt_metadata, wrap_key, KeyringMetadata, SealContext, SealType, WrapContext,
+        };
+        use crate::records::{Keyring, KeyringMember, Role, SCHEMA_VERSION};
+
+        let wrapped = wrap_key(
+            gk,
+            member_pub,
+            member_did,
+            &WrapContext::Keyring { uri: head_uri },
+            rng,
+        )
+        .unwrap();
+        let meta_ctx = SealContext::new(head_uri, SealType::KeyringMetadata);
+        let encrypted_metadata = encrypt_metadata(
+            gk,
+            &KeyringMetadata {
+                name: "W".into(),
+                description: None,
+                icon: None,
+            },
+            &meta_ctx,
+            rng,
+        )
+        .unwrap();
+        crate::indexer::types::IndexerEnvelope {
+            uri: head_uri.to_string(),
+            record: Keyring {
+                opake_version: SCHEMA_VERSION,
+                algo: "aes-256-gcm".into(),
+                members: vec![KeyringMember {
+                    wrapped_key: wrapped,
+                    role: Role::Manager,
+                }],
+                rotation: 0,
+                key_history: Vec::new(),
+                encrypted_metadata,
+                supersedes: None,
+                supersedes_cid: None,
+                lineage: None,
+                created_at: "2026-04-17T00:00:00Z".into(),
+                modified_at: None,
+            },
+            indexed_at: "2026-04-17T00:00:01Z".into(),
+            deleted_at: None,
+        }
+    }
+
+    /// C1 regression: the CLI daemon's sync loop is the sole workspace-identity
+    /// adoption surface on a keeper-less client. A keyring that unwraps for the
+    /// caller but whose declared genesis rkey is not derived from its key
+    /// material must be rejected before any tree sync — the same forgery the
+    /// WASM keeper drops. Without the check the daemon walks and adopts a
+    /// foreign identity under the attacker's group key.
+    // spec: workspace-identity § Identity adoption verifies by derivation
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__daemon_sync_rejects_forged_workspace_identity() {
+        let mock = MockTransport::new();
+        let mut opake = opake_for(BOB_DID, mock.clone());
+
+        let x = opake.identity().x25519_public_key_bytes().unwrap();
+        let m = opake.identity().ml_kem_public_key_bytes().unwrap();
+        let bob_pub = crate::crypto::PublicKeyBundle {
+            x25519: &x,
+            ml_kem: &m,
+        };
+        let mut rng = crate::crypto::OsRng;
+
+        // Forged: an arbitrary rkey Bob's key cannot derive.
+        let gk = crate::crypto::generate_content_key(&mut rng);
+        let forged_uri = format!("at://{ALICE_DID}/at.opake.keyring/forgednotaderivedtag00000");
+        let forged = real_genesis_envelope(&forged_uri, &bob_pub, BOB_DID, &gk, &mut rng);
+
+        let private_keys = opake.identity().owned_private_keys().unwrap();
+        let result = opake
+            .sync_single_workspace(&forged, &private_keys.bundle())
+            .await;
+
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("identity could not be verified")),
+            "forged workspace identity must be rejected, got {:?}",
+            result.error
+        );
+        assert!(
+            mock.requests().is_empty(),
+            "rejection must short-circuit before any tree fetch"
+        );
+    }
+
+    /// Contrast for the C1 regression: an honestly derived genesis rkey passes
+    /// the identity gate, so the sync proceeds to `load_tree` and any error is
+    /// a tree-sync error — never an identity mismatch. Proves the gate admits
+    /// legitimate workspaces rather than rejecting everything.
+    // spec: workspace-identity § Identity adoption verifies by derivation
+    #[tokio::test]
+    async fn daemon_sync_admits_derived_workspace_identity() {
+        let mock = MockTransport::new();
+        let mut opake = opake_for(BOB_DID, mock.clone());
+
+        let x = opake.identity().x25519_public_key_bytes().unwrap();
+        let m = opake.identity().ml_kem_public_key_bytes().unwrap();
+        let bob_pub = crate::crypto::PublicKeyBundle {
+            x25519: &x,
+            ml_kem: &m,
+        };
+        let mut rng = crate::crypto::OsRng;
+
+        // Honest by construction: the rkey IS the tag derived from this gk.
+        let gk = crate::crypto::generate_content_key(&mut rng);
+        let tag = crate::crypto::derive_workspace_identity_tag(&gk, ALICE_DID);
+        let honest_uri = format!("at://{ALICE_DID}/at.opake.keyring/{tag}");
+        let honest = real_genesis_envelope(&honest_uri, &bob_pub, BOB_DID, &gk, &mut rng);
+
+        let private_keys = opake.identity().owned_private_keys().unwrap();
+        let result = opake
+            .sync_single_workspace(&honest, &private_keys.bundle())
+            .await;
+
+        // The gate passed: any error is from the (unmocked) tree fetch, not
+        // from identity verification.
+        if let Some(err) = result.error.as_deref() {
+            assert!(
+                !err.contains("identity could not be verified"),
+                "honest derived identity must pass the gate, got {err}"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -864,6 +1009,7 @@ mod workspace_resolution {
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             created_at: "2026-07-14T00:00:00Z".into(),
             modified_at: None,

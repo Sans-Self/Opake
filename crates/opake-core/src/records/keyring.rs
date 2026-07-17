@@ -27,6 +27,12 @@ pub struct Keyring {
     /// authored by a manager of the prior keyring.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// CID of the exact predecessor record named by `supersedes`. Present
+    /// whenever `supersedes` is; readers verify a fetched predecessor's bytes
+    /// against it. Names the immediate predecessor only, never copied through.
+    // spec: lineage § Supersede references carry a content pin
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes_cid: Option<String>,
     /// This chain's genesis URI — the stable workspace identity across
     /// rotations and membership changes. Absent on the genesis keyring,
     /// which identifies itself. Present, and never changing, on every
@@ -56,6 +62,7 @@ impl Keyring {
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             created_at,
             modified_at: None,
@@ -66,6 +73,12 @@ impl Keyring {
     /// records leave `lineage` absent — their own URI is the identity.
     pub fn with_lineage(mut self, lineage: impl Into<String>) -> Self {
         self.lineage = Some(lineage.into());
+        self
+    }
+
+    /// Pin the CID of the immediate predecessor this record supersedes.
+    pub fn with_supersedes_cid(mut self, cid: impl Into<String>) -> Self {
+        self.supersedes_cid = Some(cid.into());
         self
     }
 

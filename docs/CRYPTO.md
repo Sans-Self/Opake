@@ -36,7 +36,11 @@ HYBRID_CIPHERTEXT_LEN    = 1160    // 32 (X25519 eph pub) + 1088 (ML-KEM ct) + 4
 PBKDF2_ROUNDS            = 2048    // BIP-39 standard
 PBKDF2_SALT              = b"mnemonic"  // BIP-39 standard (no passphrase)
 SCHEMA_VERSION           = 1       // Embedded in HKDF info strings
+
+IDENTITY_TAG_LEN         = 16      // 128-bit pubkey-hash commitment in the genesis rkey
 ```
+
+Transcript labels (domain-separate the three consumers): `opake-wrap-info` (key wraps), `opake-seal-aad` (content/metadata AAD), `opake-workspace-identity` (genesis rkey derivation). No label is a prefix of another.
 
 ## Key Types
 
@@ -89,6 +93,46 @@ Group key (per-keyring, random)
      → stored in keyring.members[].wrappedKey
      → plaintext stored locally in keyrings/<rkey>.json (per-rotation)
 ```
+
+## Workspace Identity
+
+A workspace's identity is its genesis keyring URI. That URI is not an arbitrary address the creator picks — its rkey is **derived from the genesis group key and the owner DID**, so the identity commits to key material only members hold. A party cannot mint a keyring that claims a workspace whose rotation-0 key it does not possess.
+
+### Genesis rkey derivation (`identity_tag.rs`)
+
+```
+seed  = HKDF-SHA256(ikm = K₀,                       [K₀ = rotation-0 group key]
+                    info = transcript("opake-workspace-identity", [owner_did]))
+                    [..32 bytes]
+(sk, pk) = Ed25519 keygen(seed)
+rkey  = base32-lower(SHA-256(pk)[..16])             [26 chars, rkey-charset-safe]
+uri   = at://<owner_did>/at.opake.keyring/<rkey>
+```
+
+- **The owner DID is folded into the derivation.** A tag is therefore valid under exactly one authority: a forged rkey fails on the key, a forged owner attribution fails on the DID, and both halves of the URI are checked in one offline derivation with no repo lookup.
+- **The rkey commits to a public key, not a bare KDF tag.** At v1 nothing is signed and the private half is used nowhere — but the commitment means workspace *signatures* (verifiable by non-members via `(pk, sig)` plus the rkey pin, no key registry) can land later as an additive field rather than an identity migration. This is the seam replication/archival verification will build on.
+- **KAT-pinned.** `derive_workspace_identity_tag(key=0x42×32, "did:plc:pinned") == "452upqgt6ql7ci462dvsfcv6bm"`. The construction is a wire-frozen identity — every existing workspace's URI *is* its derived tag — so a drift in the label, transcript, keygen, hash, or encoding fails the KAT loudly rather than silently orphaning every workspace.
+- **Zeroization.** The HKDF `seed` is `Zeroizing`; the Ed25519 `SigningKey` uses `ed25519-dalek`'s `zeroize` feature and is dropped immediately after the public key is taken. The private half never escapes the derivation.
+
+Creation order dissolves the circularity that sinks content-hash rkeys: `K₀ → keypair → tag → URI`, and only then do the member wraps and metadata AAD bind that URI. The identity precedes everything it anchors.
+
+### Adoption verification (`workspace.rs::verify_workspace_identity`)
+
+Every path that keys workspace state under a *declared* identity re-derives the tag from the record's rotation-0 key and the declared anchor's authority DID, and compares it to the anchor's rkey. This is one offline KDF — no network, no chain walk, no persisted state, cost independent of chain length. The adopting paths are enumerated as a contract, because a single unguarded path reopens the attack:
+
+- **Direct resolution** — `resolve_workspace_by_uri` (both branches), `resolve_foreign_workspace`. Mismatch → distinct `WorkspaceIdentityMismatch` error.
+- **Web keeper** — `WorkspaceKeeper` bootstrap + `keyring:upsert` patch (`try_build_entry`). Mismatch → **silent drop** (no entry, no placeholder, no signal — a rendered artifact is the forger's payoff).
+- **CLI daemon sync** — `sync_single_workspace`. The CLI has no keepers, so this loop is its sole adoption surface. Mismatch → sync error, adopts nothing.
+
+**Threat model.** An outsider holding no workspace key material cannot construct a keyring that resolves as another workspace — it would require a preimage of the victim's tag. Key-holders (members and ex-members) *can* mint identity-valid records; forks by key-holders are the jurisdiction of chain-authority enforcement (the indexer's write-time gates + the client chain-walk mirror), and the set of parties that can forge a workspace's identity is exactly the set already trusted with its contents. The check is client-side and members-only: the indexer cannot run it (it holds no group key), which is by design — identity adoption is a client decision about client state.
+
+## Supersede Content Pin
+
+Every superseding record (keyring, document, directory) carries `supersedesCid` alongside `supersedes` — the CID of the immediate predecessor it supersedes, stamped by the writer from the chain-head pointer it holds. It names the immediate predecessor only and is never copied through verbatim-copy paths; each level of a cascade pins its own predecessor.
+
+**v1 verification scope — reported CID, not recomputed hash.** The chain walk (`directories/chain.rs`) compares the pin against the CID the serving host *reports* for the fetched predecessor. Clients do not compute atproto CIDs (canonical dag-cbor + multihash) today, so the pin detects disagreement between honest, non-colluding hosts — a stale cache, an accidental substitution, an indexer/PDS reporting inconsistent heads — but **not** a malicious host that serves tampered bytes while reporting the true CID, which controls both sides of the comparison. Real byte-level tamper-evidence requires recomputing the CID from the fetched bytes; that is deferred to the replicated/archival serving work that needs it (issue #64), where records arrive from untrusted third parties.
+
+The pin is **not** what protects workspace identity — derivation is — and it is not, at v1, a trust boundary against a hostile host. It is defense-in-depth against honest-host CID inconsistency, and a pre-v1 wire reservation so the byte-binding can be added as an already-present field rather than a post-freeze migration. A CID disagreement classifies the link unverifiable: directory chains degrade to the newest fully-verifiable head, authority walks reject the proposed head.
 
 ## Operations
 
@@ -370,6 +414,8 @@ Sensitive types are zeroized on drop to prevent key material lingering in memory
 
 - `ContentKey` is intentionally NOT `Copy` — `Copy` types can be implicitly duplicated, escaping zeroization. `Clone` requires explicit intent.
 
+- **Workspace-identity derivation intermediates** (`identity_tag.rs`) — the HKDF `seed` is `Zeroizing<[u8; 32]>` and the derived Ed25519 `SigningKey` (zeroized via `ed25519-dalek`'s `zeroize` feature) is dropped immediately after its public key is taken. The derivation runs on every identity adoption, so these are materialized far more often than seed-phrase-derived keys; the private half is used by no operation and never leaves the function.
+
 - `PrivateKeyBundle<'a>` and `PublicKeyBundle<'a>` are *views*, not owners. They borrow into a longer-lived owner (`Identity`, `Cabinet`, `OwnedPrivateKeys`); their `Debug` impl prints byte-length only via the `Redacted` adapter.
 
 ## Security Properties
@@ -386,6 +432,8 @@ Sensitive types are zeroized on drop to prevent key material lingering in memory
 | Deterministic recovery | Yes | BIP-39 mnemonic → same X25519, ML-KEM, Ed25519 keys every time |
 | Post-quantum confidentiality | Yes (IND-CCA2) | ML-KEM-768 in the hybrid combiner — breaking the wrap requires breaking *both* X25519 and ML-KEM |
 | Post-quantum authenticity | No (deferred) | Ed25519 signing keys are still classical; record signatures by atproto's existing scheme |
+| Workspace identity unforgeability | Yes (to non-key-holders) | Genesis rkey derived from the group key + owner DID; forging it requires the rotation-0 key (a preimage otherwise). Adoption re-derives and rejects mismatches. Key-holders are not excluded — see the threat model under *Workspace Identity* |
+| Chain integrity vs a hostile host | No (v1) | The supersede pin compares reported CIDs, not recomputed hashes — honest-host disagreement only. Byte-binding deferred to #64 |
 
 The hybrid construction provides "harvest-now-decrypt-later" resistance: an adversary recording today's ciphertexts cannot decrypt them with a future quantum computer unless ML-KEM-768 is broken in the meantime. Per BSI TR-02102 / ANSSI, hybrid is the recommended deployment posture for transitional security — the combiner is at least as strong as either component (Bindel-Brendel-Fischlin-Goncalves-Stebila, PQCrypto 2019).
 

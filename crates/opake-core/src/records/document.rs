@@ -39,6 +39,12 @@ pub struct Document {
     /// Absent on a fresh document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<String>,
+    /// CID of the exact predecessor record named by `supersedes`. Present
+    /// whenever `supersedes` is; readers verify a fetched predecessor's bytes
+    /// against it. Names the immediate predecessor only, never copied through.
+    // spec: lineage § Supersede references carry a content pin
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes_cid: Option<String>,
     /// This document chain's genesis URI — the document's stable object
     /// identity. Absent on a genesis document, which identifies itself.
     /// Present, and never changing, on every supersede. Content and
@@ -69,6 +75,7 @@ impl Document {
             encryption,
             encrypted_metadata,
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             workspace_id: None,
             created_at,
@@ -87,6 +94,12 @@ impl Document {
     /// Genesis records leave `lineage` absent — they identify themselves.
     pub fn with_lineage(mut self, lineage: impl Into<String>) -> Self {
         self.lineage = Some(lineage.into());
+        self
+    }
+
+    /// Pin the CID of the immediate predecessor this record supersedes.
+    pub fn with_supersedes_cid(mut self, cid: impl Into<String>) -> Self {
+        self.supersedes_cid = Some(cid.into());
         self
     }
 

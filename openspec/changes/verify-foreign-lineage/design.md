@@ -15,7 +15,7 @@ The rework inverts the primitive. The genesis group key `K₀` exists before any
 - A workspace identity cannot be minted without holding that workspace's rotation-0 group key; outsider identity forgery is cryptographically unconstructible, not procedurally rejected.
 - Verification is O(1), offline, and runs on every resolution — no tiering, no persisted verification state, no dependence on any PDS's liveness.
 - No history-depth cliff, no rollback interaction, no new trusted party. The indexer stays availability-only.
-- Chain records become tamper-evident from any source (content pin), as a standing dowry for replication/archival work.
+- Chain records carry a predecessor CID pin — at v1 a defense against honest-host CID inconsistency and a pre-freeze wire reservation for the byte-level integrity replication work will need.
 
 **Non-Goals:**
 
@@ -45,7 +45,7 @@ Creation order dissolves the circularity that killed content-hash rkeys: `K₀` 
 
 The indexer, deliberately, does not participate: its exposure is covered by firehose per-repo authentication plus its existing write-time gates (naked-supersede rejection, supersede authority against the indexed prior). The attack surface this change closes is the client's direct-PDS read path, which bypasses the indexer entirely.
 
-The keyring lexicon's record key widens from `tid` (supersede records keep client-generated TIDs; only genesis carries the derived tag — a keyring record whose rkey is its own derived tag *is* genesis, a second, structural way to recognize it).
+The keyring lexicon's record key widens from `tid` (supersede records keep client-generated TIDs; only genesis carries the derived tag). Genesis is recognized by absent `lineage`, as today; the derived-rkey property is not used as a separate recognition signal — it is enforced implicitly, because a no-lineage record only passes the adoption derivation check when its own rkey is its derived tag.
 
 ### D2 — Derivation check on every identity adoption
 
@@ -69,7 +69,7 @@ Verification requires deriving from `K₀` specifically — rotation is invisibl
 |---|---|---|
 | Outsider (no workspace key material) | Mints an identity-colliding keyring freely; delivered via `keyring:upsert` fan-out | Cannot construct one: needs a `K₀` preimage for the victim's tag |
 | Ex-member (holds historical `K₀`) | Same as outsider, plus forks | Can mint identity-valid records — the fork case, policed as today by chain authority (indexer gates + client mirrors) |
-| Compromised host serving chain records | Can substitute record content | Pin mismatch — tamper-evident (D6) |
+| Compromised host serving chain records | Can substitute record content | NOT defended at v1 by the pin (it compares reported CIDs, not recomputed hashes — D6); identity adoption is unaffected because it never relies on the pin |
 | Malicious indexer | Availability attacks only | Unchanged — the derivation check is client-side and key-bound; the indexer was never able to vouch for identity and now never needs to |
 
 The residual insider surface is deliberate: key-holders are inside the confidentiality boundary already (they can decrypt everything); pretending the identity layer excludes them would be theater. What the change guarantees is that the *set of parties able to forge a workspace's identity* equals the set already trusted with its content.
@@ -80,11 +80,13 @@ A record declaring `lineage` without `supersedes` claims chain membership withou
 
 ### D6 — Supersedes content pin
 
-Superseding records carry the predecessor's CID (`supersedesCid`) alongside `supersedes`. Writers stamp it from the chain-head pointers they already hold; the pin names the *immediate* predecessor per record and is never copied through verbatim-copy paths — every level of a cascade pins its own predecessor. Readers verify fetched predecessor bytes against the pin when present.
+Superseding records carry the predecessor's CID (`supersedesCid`) alongside `supersedes`. Writers stamp it from the chain-head pointers they already hold; the pin names the *immediate* predecessor per record and is never copied through verbatim-copy paths — every level of a cascade pins its own predecessor.
 
-Failure posture follows the chain's owner: on directory chains, a pin mismatch is an unverifiable link feeding tree-chains' degrade-not-error contract (present the newest fully-verifiable head); on keyring authority walks, an unverifiable link already means the proposed head is not accepted. The pin adds tamper-evidence to both without changing either posture.
+**v1 verification scope — reported CID, not recomputed hash.** Readers compare the pin against the CID the serving host *reports* for the fetched predecessor; clients do not compute atproto CIDs (canonical dag-cbor + multihash) today. So the pin catches disagreement between honest, non-colluding hosts — a stale cache, an accidental substitution, an indexer/PDS reporting inconsistent heads — but NOT a malicious host that serves tampered bytes under the true CID, which controls both sides of the comparison. Recomputing the CID from bytes closes that gap and is deferred to replicated/archival serving, where records arrive from untrusted third parties and byte-binding is the whole point. Tracked as a follow-up; not in #51's scope.
 
-The pin is integrity, not trust bootstrap, and it is not what stops identity forgery (D2 is). Its standing value: replication, archival serving, and record pruning inherit byte-integrity from any source — and the field must exist before the v1 freeze for that work to land without a migration.
+Failure posture follows the chain's owner: on directory chains, a CID disagreement is an unverifiable link feeding tree-chains' degrade-not-error contract (present the newest fully-verifiable head); on keyring authority walks, an unverifiable link already means the proposed head is not accepted.
+
+The pin is not what stops identity forgery (D2 is) and is not, at v1, a trust boundary against a hostile host. Its value here is twofold: defense-in-depth against honest-host CID inconsistency, and a pre-v1 wire reservation so replication/archival/pruning work can add real byte-binding as an already-present field rather than a post-freeze migration.
 
 ### D7 — The signature door (design note, not a requirement)
 

@@ -30,6 +30,18 @@ pub enum Error {
     #[error("the indexer cannot answer for workspace {workspace_id}")]
     WorkspaceNotIndexed { workspace_id: String },
 
+    /// A keyring's declared lineage anchor is not a valid identity claim for
+    /// its key material: either the rotation-0 group key does not derive the
+    /// anchor's rkey under the anchor's authority DID (a forgery, or corrupt
+    /// key material), or the record declares a lineage without superseding a
+    /// chain (a malformed identity claim). Either way nothing may be keyed
+    /// under the declared identity. Deliberately does not distinguish the two
+    /// — both are invalid at the adoption boundary and a specific reason
+    /// would only inform a forger.
+    // spec: workspace-identity § Identity adoption verifies by derivation
+    #[error("workspace identity could not be verified for {anchor}")]
+    WorkspaceIdentityMismatch { anchor: String },
+
     /// A workspace-scoped indexer endpoint consulted an indexed keyring chain
     /// head and the caller's DID was absent from its `members[]`. Because the
     /// head was read, this is definitive — it is never a lag artifact, so it

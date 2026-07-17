@@ -8,7 +8,7 @@ An indexer snapshot SHALL be treated as containing whole chains — every supers
 
 The head-only set is `DirectoryTree::canonical_directory_uris()`; the unfiltered set is `all_directory_uris()` and is correct only for whole-chain work. `find_parent` SHALL skip superseded records so it returns the canonical parent rather than an arbitrary prior version whose ancestors walk up to a stale root.
 
-Head adoption is subject to verifiability: when a chain walk cannot verify a proposed head — because a link is corrupt (see record-validity), or because a link's bytes fail the successor's `supersedesCid` content pin (`spec:lineage § Supersede references carry a content pin`) — the consumer SHALL NOT adopt the proposed head and SHALL continue presenting the newest head it can fully verify. This knowingly-stale presentation is a deliberate degradation state, not an error: the consumer SHALL surface that a newer, unverifiable head exists, and SHALL re-attempt verification when the chain changes. An unverifiable head never silently becomes canonical.
+Head adoption is subject to verifiability: when a chain walk cannot verify a proposed head — because a link is corrupt (see record-validity), or because a link's reported CID disagrees with the successor's `supersedesCid` content pin (`spec:lineage § Supersede references carry a content pin`) — the consumer SHALL NOT adopt the proposed head and SHALL continue presenting the newest head it can fully verify. This knowingly-stale presentation is a deliberate degradation state, not an error: the consumer SHALL surface that a newer, unverifiable head exists, and SHALL re-attempt verification when the chain changes. An unverifiable head never silently becomes canonical.
 
 Directory supersede records, like every superseding record kind, carry the content pin alongside `supersedes`; cascades stamp it per level.
 
@@ -20,6 +20,6 @@ Directory supersede records, like every superseding record kind, carry the conte
 
 #### Scenario: pin-mismatched head degrades, not errors
 
-- **GIVEN** a proposed directory head whose predecessor bytes fail the head's content pin
+- **GIVEN** a proposed directory head whose predecessor's reported CID disagrees with the head's content pin
 - **WHEN** a consumer builds the live tree
 - **THEN** the proposed head is not adopted, the newest fully-verifiable head remains presented, the unverifiable newer head is surfaced, and verification is re-attempted when the chain changes

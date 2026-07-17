@@ -157,7 +157,7 @@ fn apply_keyring_record_none_deletes() {
     keeper.install_watcher(callback);
 
     // "Record arrived but we're not a member anymore" → delete.
-    keeper.apply_keyring_record("at://a/kr/1", None);
+    keeper.apply_keyring_record("at://a/kr/1", EntryOutcome::NotMember);
 
     let snaps = captured.borrow();
     assert_eq!(snaps.len(), 2);
@@ -277,6 +277,7 @@ fn make_keyring_envelope(
                 },
             },
             supersedes: None,
+            supersedes_cid: None,
             lineage: None,
             created_at: "2026-04-17T00:00:00Z".into(),
             modified_at: None,
@@ -305,9 +306,9 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     // Completely different keypair — unwrap will fail.
     let wrong_keys = TestKeys::generate("did:plc:alice");
 
-    let entry = try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys());
-
-    let entry = entry.expect("unwrap failure must return Some, not None");
+    let entry = try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys())
+        .entry()
+        .expect("unwrap failure must return an entry, not a drop");
     assert_eq!(
         entry.workspace_id,
         "at://did:plc:alice/at.opake.keyring/abc"
@@ -331,18 +332,30 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
 /// The member wrap and the metadata are both anchored to `genesis_uri`
 /// (the stable workspace identity), while the envelope's own URI is
 /// `head_uri` — exactly the post-add-member shape where head ≠ genesis.
+/// Build a superseding head envelope over a genesis whose rkey is honestly
+/// derived from the group key and genesis authority — the identity check in
+/// `try_build_entry` verifies exactly that derivation, so fixtures with
+/// invented genesis rkeys stopped representing honest workspaces.
+/// Returns the envelope together with the derived genesis URI.
 fn make_superseded_envelope_with_name(
     head_uri: &str,
-    genesis_uri: &str,
+    genesis_authority: &str,
     member_did: &str,
     name: &str,
     keys: &crate::test_utils::TestKeys,
     rng: &mut (impl CryptoRng + RngCore),
-) -> crate::indexer::types::IndexerEnvelope<crate::records::Keyring> {
+) -> (
+    crate::indexer::types::IndexerEnvelope<crate::records::Keyring>,
+    String,
+) {
     use crate::crypto::{encrypt_metadata, generate_content_key, wrap_key, WrapContext};
     use crate::records::{Keyring, KeyringMember, SCHEMA_VERSION};
 
     let gk = generate_content_key(rng);
+    // spec: workspace-identity § Genesis URI is the workspace identity
+    let tag = crate::crypto::derive_workspace_identity_tag(&gk, genesis_authority);
+    let genesis_uri = format!("at://{genesis_authority}/at.opake.keyring/{tag}");
+    let genesis_uri = genesis_uri.as_str();
     // Wrap anchored to genesis — the way add_member carries members forward.
     let wrapped = wrap_key(
         &gk,
@@ -361,7 +374,7 @@ fn make_superseded_envelope_with_name(
         crate::crypto::SealContext::new(genesis_uri, crate::crypto::SealType::KeyringMetadata);
     let encrypted_metadata = encrypt_metadata(&gk, &metadata, &meta_context, rng).unwrap();
 
-    crate::indexer::types::IndexerEnvelope {
+    let envelope = crate::indexer::types::IndexerEnvelope {
         uri: head_uri.to_string(),
         record: Keyring {
             opake_version: SCHEMA_VERSION,
@@ -374,13 +387,15 @@ fn make_superseded_envelope_with_name(
             key_history: Vec::new(),
             encrypted_metadata,
             supersedes: Some(genesis_uri.to_string()),
+            supersedes_cid: Some("bafygenesis".into()),
             lineage: Some(genesis_uri.to_string()),
             created_at: "2026-04-17T00:00:00Z".into(),
             modified_at: Some("2026-04-17T00:01:00Z".into()),
         },
         indexed_at: "2026-04-17T00:00:01Z".into(),
         deleted_at: None,
-    }
+    };
+    (envelope, genesis_uri.to_string())
 }
 
 /// Regression: adding a member supersedes the keyring, so the head URI no
@@ -395,13 +410,12 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
     let head = "at://did:plc:alice/at.opake.keyring/head2";
     let keys = TestKeys::generate("did:plc:alice");
 
-    let envelope = make_superseded_envelope_with_name(
+    let (envelope, genesis) = make_superseded_envelope_with_name(
         head,
-        genesis,
+        "did:plc:alice",
         "did:plc:alice",
         "Shared Space",
         &keys,
@@ -409,6 +423,7 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
     );
 
     let entry = try_build_entry(&envelope, "did:plc:alice", &keys.private_keys())
+        .entry()
         .expect("member entry must resolve");
 
     // Identity is the stable genesis, head tracks the current record.
@@ -435,38 +450,146 @@ fn bug__removal_supersede_drops_workspace_keyed_by_genesis() {
     use crate::test_utils::TestKeys;
 
     let mut rng: OsRng = OsRng;
-    let genesis = "at://did:plc:alice/at.opake.keyring/genesis";
     let head = "at://did:plc:alice/at.opake.keyring/head2";
     let alice = TestKeys::generate("did:plc:alice");
 
-    // Bob's keeper tracks the workspace under its genesis id.
-    let mut keeper = WorkspaceKeeper::new();
-    keeper.bootstrap(vec![sample_entry(genesis, 0)]);
-
     // Removal supersede: fresh head record whose member list holds only
     // alice — exactly what bob receives before the server unsubscribes him.
-    let envelope = make_superseded_envelope_with_name(
+    let (envelope, genesis) = make_superseded_envelope_with_name(
         head,
-        genesis,
+        "did:plc:alice",
         "did:plc:alice",
         "Shared Space",
         &alice,
         &mut rng,
     );
 
+    // Bob's keeper tracks the workspace under its genesis id.
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(&genesis, 0)]);
+
     let bob = TestKeys::generate("did:plc:bob");
-    let entry = try_build_entry(&envelope, "did:plc:bob", &bob.private_keys());
-    assert!(entry.is_none(), "removed member must not build an entry");
+    let outcome = try_build_entry(&envelope, "did:plc:bob", &bob.private_keys());
+    assert!(
+        matches!(outcome, EntryOutcome::NotMember),
+        "removed member must resolve to NotMember"
+    );
 
     // The dispatch contract: the apply is keyed on the derived genesis
     // identity, never the envelope (head) URI.
     assert_eq!(envelope.workspace_id().as_str(), genesis);
-    keeper.apply_keyring_record(envelope.workspace_id().as_str(), entry);
+    keeper.apply_keyring_record(envelope.workspace_id().as_str(), outcome);
 
     assert_eq!(
         keeper.entry_count(),
         0,
         "workspace must drop from the removed member's sidebar"
+    );
+}
+
+/// Build a forged keyring: the attacker wraps their own group key to the
+/// recipient and seals metadata, but declares `lineage` pointing at a
+/// genesis URI whose rkey their key does not derive. Every crypto step
+/// succeeds — only the identity derivation exposes it.
+fn make_forged_identity_envelope(
+    head_uri: &str,
+    declared_genesis_uri: &str,
+    recipient_did: &str,
+    recipient_keys: &crate::test_utils::TestKeys,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> crate::indexer::types::IndexerEnvelope<crate::records::Keyring> {
+    use crate::crypto::{encrypt_metadata, generate_content_key, wrap_key, WrapContext};
+    use crate::records::{Keyring, KeyringMember, SCHEMA_VERSION};
+
+    let gk = generate_content_key(rng);
+    // Wrapped and sealed under the *declared* anchor, so unwrap and metadata
+    // decrypt both succeed and control reaches the derivation check.
+    let wrapped = wrap_key(
+        &gk,
+        &recipient_keys.public_keys(),
+        recipient_did,
+        &WrapContext::Keyring {
+            uri: declared_genesis_uri,
+        },
+        rng,
+    )
+    .unwrap();
+    let metadata = KeyringMetadata {
+        name: "Totally The Victim's Workspace".to_string(),
+        description: None,
+        icon: None,
+    };
+    let meta_context = crate::crypto::SealContext::new(
+        declared_genesis_uri,
+        crate::crypto::SealType::KeyringMetadata,
+    );
+    let encrypted_metadata = encrypt_metadata(&gk, &metadata, &meta_context, rng).unwrap();
+
+    crate::indexer::types::IndexerEnvelope {
+        uri: head_uri.to_string(),
+        record: Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: vec![KeyringMember {
+                wrapped_key: wrapped,
+                role: crate::records::Role::Manager,
+            }],
+            rotation: 0,
+            key_history: Vec::new(),
+            encrypted_metadata,
+            supersedes: Some(declared_genesis_uri.to_string()),
+            supersedes_cid: Some("bafyforged".into()),
+            lineage: Some(declared_genesis_uri.to_string()),
+            created_at: "2026-04-17T00:00:00Z".into(),
+            modified_at: Some("2026-04-17T00:01:00Z".into()),
+        },
+        indexed_at: "2026-04-17T00:00:01Z".into(),
+        deleted_at: None,
+    }
+}
+
+/// A keyring that unwraps for the recipient but whose declared genesis
+/// rkey is not derived from its key material is a forgery targeting that
+/// recipient. It resolves to `IdentityMismatch` and is dropped silently:
+/// no keeper entry is created, and an existing entry under the declared
+/// identity is left untouched — the forger gets no rendered artifact and
+/// cannot displace real state.
+// spec: workspace-identity § Identity adoption verifies by derivation
+#[test]
+#[allow(non_snake_case)] // bug__ regression-naming convention
+fn bug__forged_identity_keyring_is_dropped_silently() {
+    use crate::crypto::OsRng;
+    use crate::test_utils::TestKeys;
+
+    let mut rng: OsRng = OsRng;
+    let victim_genesis = "at://did:plc:victim/at.opake.keyring/victimgenesistag00000000";
+    let head = "at://did:plc:attacker/at.opake.keyring/head";
+    let victim = TestKeys::generate("did:plc:victim");
+
+    let envelope =
+        make_forged_identity_envelope(head, victim_genesis, "did:plc:victim", &victim, &mut rng);
+
+    let outcome = try_build_entry(&envelope, "did:plc:victim", &victim.private_keys());
+    assert!(
+        matches!(outcome, EntryOutcome::IdentityMismatch),
+        "a keyring whose key does not derive its declared genesis rkey must be rejected"
+    );
+
+    // A real entry under the declared identity must survive the forgery:
+    // the mismatch is a no-op, never a delete or a replace.
+    let mut keeper = WorkspaceKeeper::new();
+    keeper.bootstrap(vec![sample_entry(victim_genesis, 3)]);
+    keeper.apply_keyring_record(victim_genesis, outcome);
+
+    assert_eq!(
+        keeper.entry_count(),
+        1,
+        "the forged record must not create, delete, or replace keeper state"
+    );
+    assert_eq!(
+        keeper.snapshot().entries[0].rotation,
+        3,
+        "the genuine entry is untouched by the forgery"
     );
 }
 
@@ -606,7 +729,10 @@ fn try_build_entry_non_member_returns_none() {
     let bob = TestKeys::generate("did:plc:bob");
     let result = try_build_entry(&envelope, "did:plc:bob", &bob.private_keys());
 
-    assert!(result.is_none(), "non-member DID must return None");
+    assert!(
+        matches!(result, EntryOutcome::NotMember),
+        "non-member DID must resolve to NotMember"
+    );
 }
 
 // ---------------------------------------------------------------------------

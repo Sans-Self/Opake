@@ -26,6 +26,7 @@ extern crate self as opake_crypto;
 mod at_bytes;
 mod content;
 pub mod error;
+mod identity_tag;
 mod key_wrapping;
 mod keyring_wrapping;
 mod metadata;
@@ -48,6 +49,7 @@ pub use x25519_dalek::{
 pub use at_bytes::AtBytes;
 pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
 pub use error::Error;
+pub use identity_tag::derive_workspace_identity_tag;
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
 pub use seal_context::{SealContext, SealType};
 // `WrapContext` is part of the public wrap/unwrap surface — callers must

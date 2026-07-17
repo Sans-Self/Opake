@@ -49,7 +49,9 @@ Single-canonical chain. The genesis keyring is written by the workspace creator 
 at://{author-did}/at.opake.keyring/{rkey}
 ```
 
-Carries member set, wrapped group keys, rotation counter, key history, and (for non-genesis keyrings) a `supersedes` field referencing the prior keyring URI. No discriminator — every supersede is the same operation conceptually ("the keyring got updated"), even when the update is a rotation, a member change, or a workspace rename. **Workspace identity is the genesis keyring's at-uri** — an opaque string the indexer treats as immortal. The string remains valid even after the genesis keyring record itself is deleted from the originating PDS; it identifies the workspace, not a live record.
+Carries member set, wrapped group keys, rotation counter, key history, and (for non-genesis keyrings) a `supersedes` field referencing the prior keyring URI plus a `supersedesCid` pin on that predecessor (see [Supersede content pin](#supersede-content-pin)). No discriminator — every supersede is the same operation conceptually ("the keyring got updated"), even when the update is a rotation, a member change, or a workspace rename. **Workspace identity is the genesis keyring's at-uri** — an opaque string the indexer treats as immortal. The string remains valid even after the genesis keyring record itself is deleted from the originating PDS; it identifies the workspace, not a live record.
+
+The genesis keyring's rkey is not arbitrary. It is **derived** from the genesis (rotation-0) group key and the creator's DID — `base32-lower(SHA-256(Ed25519_pubkey(HKDF(K₀, transcript("opake-workspace-identity", owner_did))))[..16])`, a 26-character tag (construction in [CRYPTO.md](CRYPTO.md#workspace-identity)). So the identity URI commits to key material only members hold: an outsider cannot mint a keyring that claims a workspace whose rotation-0 key it lacks — a forged rkey would be a preimage of the victim's tag. Every client that adopts a workspace under a *declared* identity re-derives the tag from the record's rotation-0 key and the declared owner DID and rejects a mismatch. The check is members-only and offline — one HKDF, no chain walk, no host round-trip — and the indexer cannot run it, because it holds no group key. Supersede records use ordinary client-generated TIDs; only the genesis carries the derived tag, which is why the keyring lexicon's record `key` is `any` rather than `tid`.
 
 ### Directory
 
@@ -72,6 +74,7 @@ The directory record carries:
   encryptedMetadata: <directory's own name, encrypted under group key>,
   entries: [{ target: at-uri, targetCid: cid }, ...],
   supersedes: <prior canonical URI>,    // omitted for genesis at this path
+  supersedesCid: <CID of that predecessor>, // present whenever supersedes is
   isWorkspaceRoot: true,                // omitted (= false) for non-root directories
   createdAt,
 }
@@ -89,7 +92,7 @@ Per-member, on the writing member's PDS. The doc record carries the encrypted bl
 at://{member-did}/at.opake.document/{rkey}
 ```
 
-A superseding document (an editor's wiki-style edit) carries `supersedes: <original uri>` and `lineage: <the chain's genesis uri>`; its blob and metadata are re-encrypted under a fresh content key but sealed to the same lineage anchor, so the document keeps one object identity across edits. Genesis documents carry neither field and identify themselves.
+A superseding document (an editor's wiki-style edit) carries `supersedes: <original uri>`, `supersedesCid: <that predecessor's CID>`, and `lineage: <the chain's genesis uri>`; its blob and metadata are re-encrypted under a fresh content key but sealed to the same lineage anchor, so the document keeps one object identity across edits. Genesis documents carry none of these fields and identify themselves.
 
 ## The workspace root
 
@@ -128,6 +131,12 @@ When a curator edits a directory, they:
 5. Bundle in one signed `applyWrites` on the curator's PDS
 
 O(depth) records updated per change. In typical workspaces depth is 3–7, so write amplification is bounded.
+
+## Supersede content pin
+
+Every superseding record — keyring, directory, document — carries `supersedesCid` alongside `supersedes`: the CID of the immediate predecessor it supersedes, stamped by the writer from the chain-head pointer it already holds. It names the immediate predecessor only, and each level of a cascade pins its own predecessor rather than copying a pin through. This pins *which version* a supersede was authored against, so the chain records not just its shape but the exact record each link advanced from.
+
+**At v1 the pin compares a reported CID, not a hash recomputed from bytes.** Clients do not yet compute atproto CIDs (canonical dag-cbor + multihash), so a chain walk compares `supersedesCid` against the CID the serving host *reports* for the fetched predecessor. That catches disagreement between honest, non-colluding hosts — a stale cache, an accidental substitution, an indexer and PDS reporting inconsistent heads — but **not** a malicious host that serves tampered bytes under the true CID, which controls both sides of the comparison. True byte-level tamper-evidence needs recomputing the CID from fetched bytes; it is deferred to the replicated/archival serving work where records arrive from untrusted third parties. The pin is defense-in-depth against honest-host CID drift and a pre-v1 wire reservation so byte-binding lands later as an already-present field, never a hostile-host trust boundary at v1. On a disagreement, directory chains degrade to the newest fully-verifiable head and authority walks reject the proposed head.
 
 ## Curatorial writes: carry-forward responsibility
 
@@ -187,6 +196,7 @@ new_keyring {
   keyHistory: [...],         // extended if rotating
   encryptedMetadata: ...,    // workspace name, possibly updated
   supersedes: <prior keyring uri>,
+  supersedesCid: <CID of that prior keyring>,  // present whenever supersedes is
   lineage: <genesis keyring uri>,  // the workspace identity, never changing
   createdAt,
 }
