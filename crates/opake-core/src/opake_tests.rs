@@ -618,7 +618,7 @@ mod keyring_supersede {
     /// admitting manager still holds, the joiner's supersede gains a wrapped
     /// copy of that historical key — so documents written under prior
     /// rotations remain readable to a member who joined after them.
-    // spec:key-rotation § New members can read the full history they are admitted to
+    // spec:workspace-key-rotation § New members can read the full history they are admitted to
     #[tokio::test]
     async fn add_member_grants_wrapped_history_to_the_joiner() {
         use crate::crypto::{self, generate_content_key, PrivateKeyBundle, WrapContext};

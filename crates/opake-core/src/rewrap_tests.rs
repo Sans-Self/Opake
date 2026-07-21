@@ -101,7 +101,7 @@ fn keyring_ref(document: &Document) -> &KeyringRef {
 
 // A trailing wrap re-wraps to the head and the migrated key still unwraps to
 // the original content key; a wrap already at the head is left alone.
-// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
+// spec:workspace-key-rotation § The re-wrap sweep is hygiene under the background-work contract
 #[test]
 fn plan_rewrap_migrates_trailing_wrap_to_head() {
     let (k0, k1) = (key(0), key(1));
@@ -213,7 +213,7 @@ fn plan_rewrap_targets_the_head_resolved_at_write_time() {
 
 // A mixed set derives exactly the trailing remainder: docs behind the head are
 // re-wrapped, docs at the head are skipped as already current.
-// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
+// spec:workspace-key-rotation § The re-wrap sweep is hygiene under the background-work contract
 #[test]
 fn sweep_derives_only_the_trailing_remainder() {
     let (k0, k1) = (key(0), key(1));

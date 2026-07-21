@@ -493,7 +493,7 @@ impl WasmOpakeHandle {
                 // straight from the event record, archiving the prior key
                 // and re-decrypting names, then notifies watchers. No
                 // reload; the projection is correct from the event alone.
-                // spec:key-rotation § Live projections adopt a rotation completely
+                // spec:workspace-key-rotation § Live projections adopt a rotation completely
                 {
                     let mut keeper = tree_keeper_rc.lock().await;
                     // Re-check after acquiring the lock: if we were

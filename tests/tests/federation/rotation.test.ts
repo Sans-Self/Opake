@@ -4,7 +4,7 @@
 //
 // What this tier can and cannot show: the CLI has no keepers, so the
 // "live projection adopts a rotation without reload" requirement
-// (`spec:key-rotation § Live projections adopt a rotation completely`) is a
+// (`spec:workspace-key-rotation § Live projections adopt a rotation completely`) is a
 // WASM/keeper property and is pinned by the tree-keeper unit regression
 // (`rotation_event_keeps_names_readable_across_rotation`), not here — every
 // CLI download re-resolves from the indexer, so there is no live projection to
@@ -70,7 +70,7 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
     // A removed member cannot read content created after the rotation their
     // removal triggered — forward secrecy is complete the moment the supersede
     // lands, no follow-up sweep required.
-    // spec:key-rotation § The rotation event is synchronous and self-sufficient
+    // spec:workspace-key-rotation § The rotation event is synchronous and self-sufficient
     // spec:workspace-membership § Removal rotates the group key; leave does not
     "removed member cannot decrypt a document uploaded after the rotation",
     async () => {
@@ -112,7 +112,7 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
     // prior rotation — the admitting supersede wraps the retained historical
     // key to the joiner. Without that, the joiner has only the current key and
     // the pre-rotation document is unreadable to them.
-    // spec:key-rotation § New members can read the full history they are admitted to
+    // spec:workspace-key-rotation § New members can read the full history they are admitted to
     "post-rotation joiner reads a document written before the rotation",
     async () => {
       const ws = uniqueName("joiner");
@@ -155,7 +155,7 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
     // A continuous member reads a rotation-0 document after the keyring has
     // rotated many times — the read walks the full key history and succeeds.
     // History depth is a performance cost, never a correctness cliff.
-    // spec:key-rotation § Unbounded key history is the accepted cost of unswept workspaces
+    // spec:workspace-key-rotation § Unbounded key history is the accepted cost of unswept workspaces
     "deep history: rotation-0 document stays readable after many rotations",
     async () => {
       const ws = uniqueName("deep");

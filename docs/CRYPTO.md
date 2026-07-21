@@ -361,7 +361,7 @@ On member removal, the group key rotates inside the single operation that trigge
 4. Increment `rotation` counter
 5. Re-encrypt keyring metadata under new group key
 
-This is **one bounded write with no blob work** — per-document content keys are wrapped under the group key precisely so rotating the group key never re-encrypts ciphertext (key hierarchy, above). The moment the keyring supersede lands, the workspace is fully correct: forward secrecy holds against the removed member, and every remaining member can still read every document. Nothing else has to run — not the sweep below, not any background task. (The lifecycle contract for this is the `key-rotation` capability under `openspec/specs/`.)
+This is **one bounded write with no blob work** — per-document content keys are wrapped under the group key precisely so rotating the group key never re-encrypts ciphertext (key hierarchy, above). The moment the keyring supersede lands, the workspace is fully correct: forward secrecy holds against the removed member, and every remaining member can still read every document. Nothing else has to run — not the sweep below, not any background task. (The lifecycle contract for this is the `workspace-key-rotation` capability under `openspec/specs/`.)
 
 Adding a member does **not** rotate. The admitting manager wraps the current group key *and* every retained `keyHistory` key to the joiner, so a member admitted after N rotations can still read documents written under all N prior generations. You cannot grant a rotation the admitting manager no longer holds.
 

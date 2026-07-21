@@ -57,7 +57,7 @@ pub struct WatcherHandle(u64);
 /// directory content keys, and a workspace unwraps the freshly-minted group
 /// key straight from a rotation event so the live projection adopts it
 /// without an indexer refetch.
-/// spec:key-rotation § Live projections adopt a rotation completely
+/// spec:workspace-key-rotation § Live projections adopt a rotation completely
 ///
 /// Mirrors the zeroization pattern from `cabinet::Cabinet` so dropping
 /// the `Box` cleanly wipes both halves.
@@ -409,7 +409,7 @@ impl TreeKeeper {
     /// workspace, a non-advancing rotation, or a caller who was rotated
     /// out (unwrap fails).
     ///
-    /// spec:key-rotation § Live projections adopt a rotation completely
+    /// spec:workspace-key-rotation § Live projections adopt a rotation completely
     fn adopt_keyring_rotation(
         &mut self,
         keyring_uri: &str,

@@ -1,4 +1,4 @@
-# key-rotation Specification
+# workspace-key-rotation Specification
 
 ## Purpose
 

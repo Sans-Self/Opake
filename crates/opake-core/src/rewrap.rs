@@ -12,7 +12,7 @@
 // is untouched (per-document content keys are wrapped under the group key
 // precisely so rotation never re-encrypts blobs — CLAUDE.md decision 3).
 //
-// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
+// spec:workspace-key-rotation § The re-wrap sweep is hygiene under the background-work contract
 // spec:background-work § Concurrency is resolved per record by compare-and-swap
 
 use base64::Engine;

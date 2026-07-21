@@ -673,7 +673,7 @@ fn dir_upsert_of(record: crate::records::Directory, uri: &str) -> SseEvent {
 // group key is unwrapped straight from the keyring record, the prior key is
 // archived, and cached names re-decrypt — no reload. Regression for the
 // keeper that used to bump the counter and blank the names to "?".
-// spec:key-rotation § Live projections adopt a rotation completely
+// spec:workspace-key-rotation § Live projections adopt a rotation completely
 #[test]
 fn rotation_event_keeps_names_readable_across_rotation() {
     const WS_URI: &str = "at://did:plc:test/at.opake.keyring/rot";

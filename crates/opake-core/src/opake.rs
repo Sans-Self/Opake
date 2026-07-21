@@ -1088,7 +1088,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // wrap that key for the joiner so documents written under prior
         // rotations remain readable to them. A rotation the manager lacks is
         // simply not extended — you cannot grant a key you do not hold.
-        // spec:key-rotation § New members can read the full history they are admitted to
+        // spec:workspace-key-rotation § New members can read the full history they are admitted to
         for entry in &mut new_record.key_history {
             if entry.members.iter().any(|m| m.did() == member_did) {
                 continue;
@@ -1813,10 +1813,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// runner re-derives exactly the unmigrated remainder and a document
     /// another runner already migrated is skipped on a CAS conflict. Never
     /// required for correctness — a workspace that is never swept stays fully
-    /// readable, it just accrues a longer history walk (`spec:key-rotation §
+    /// readable, it just accrues a longer history walk (`spec:workspace-key-rotation §
     /// Unbounded key history is the accepted cost of unswept workspaces`).
     ///
-    /// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
+    /// spec:workspace-key-rotation § The re-wrap sweep is hygiene under the background-work contract
     pub async fn sweep_owned_documents_rewrap(
         &mut self,
     ) -> Result<crate::rewrap::RewrapOutcome, Error> {
