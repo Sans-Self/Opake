@@ -7,7 +7,7 @@ Federation-class change. Nothing past group 1 begins until the spec delta is red
 - [x] 1.1 Run `/spec-crossref-review walk-free-workspace-v2` — done; findings folded in as sibling deltas (keyring-tombstones rollback, lineage byte-recompute, workspace-key-rotation roster-key carry, auth-identity required Ed25519, tree-chains CID tiebreak) plus record-validity silent-drop carve-out and workspace-membership indexer-authority MODIFIED
 - [ ] 1.2 Noï red-pens the delta — the federation-class requirement — and sign-off is recorded before any code. Open design calls to weigh: (a) the keyring-tombstones witnessed-removal rollback bound, (b) directory fork tiebreak moving createdAt→CID, (c) whether roster-as-registry needs a signing-key acquisition step beyond `publicKey/self`. Non-blocking red-pen notes from the third crossref pass: (d) `keyring-tombstones § Rollback restores the newest live record and re-broadcasts it` — the heading now says "newest" over an endorsement-selected body; carry an OpenSpec RENAMED op at sync or leave the wart; (e) `auth-pairing § Completion authenticates the received identity against the published key` verifies only X25519+ML-KEM, not the now-mandatory Ed25519 — harmless while it re-derives from the same mnemonic, worth a one-line pairing-spec note eventually (out of this change's scope)
 - [ ] 1.3 Re-run adversarial skeptic reviews (freshness, fold, and availability lenses) against walk-free v2 and fold surviving findings back into the delta
-- [ ] 1.4 Confirm [#64](https://github.com/Opake-at/Opake/issues/64) (byte-recomputed CIDs) is merged; if not, it blocks group 3 and is tracked as the hard prerequisite
+- [ ] 1.4 Byte-recomputed CIDs ([#64](https://github.com/Opake-at/Opake/issues/64)) are **folded into this change** as its first implementation task (3.1), not an external prerequisite — the behaviour is already specified by `spec:lineage § Supersede references carry a content pin`, and signing (group 3) builds on it
 
 ## 2. Wire format and lexicon
 
@@ -18,14 +18,15 @@ Federation-class change. Nothing past group 1 begins until the spec delta is red
 - [ ] 2.5 Bump `opakeVersion` and declare the wire break per the pre-v1 in-place-redefine rule (`spec:record-validity § opakeVersion is a stable protocol contract`)
 - [ ] 2.6 Add the VRF public key to the `at.opake.publicKey` and keyring roster lexicons, and a VRF-proof field to fork-eligible records (keyring + directory)
 
-## 3. Record signing (opake-core / opake-crypto)
+## 3. Byte-recompute and record signing (opake-core / opake-crypto)
 
-- [ ] 3.1 Sign keyring records with the member Ed25519 key over the canonical dag-cbor bytes the CID pins
-- [ ] 3.2 Verify author signatures from the roster-carried key, offline, with no external DID-document fetch
-- [ ] 3.3 Resolve a record author's signing key from the roster (`spec:workspace-membership § The roster carries each member's signing key`)
-- [ ] 3.4 Implement the signed governance envelope so a keyless enforcer can reject a forged author without decrypting
-- [ ] 3.5 Detect equivocation: two signed records superseding the same parent are provable double-writes
-- [ ] 3.6 Gate signatures leniently on read / strictly on write (`spec:record-validity § Signature verification is a validity gate`), distinguishing "unauthenticated" from "structurally corrupt"
+- [ ] 3.1 Implement client-side atproto CID computation over canonical dag-cbor (folds in [#64](https://github.com/Opake-at/Opake/issues/64)) — the recomputed CID both the content pin and author signatures verify against (`spec:lineage § Supersede references carry a content pin`)
+- [ ] 3.2 Sign keyring records with the member Ed25519 key over the record's unsigned canonical form, while the CID commits to the full record (`spec:record-signatures § Every workspace record carries an author signature`)
+- [ ] 3.3 Verify author signatures from the roster-carried key, offline, with no external DID-document fetch
+- [ ] 3.4 Resolve a record author's signing key from the roster (`spec:workspace-membership § The roster carries each member's signing key`)
+- [ ] 3.5 Implement the signed governance envelope so a keyless enforcer can reject a forged author without decrypting
+- [ ] 3.6 Detect equivocation: two signed records superseding the same parent are provable double-writes
+- [ ] 3.7 Gate signatures leniently on read / strictly on write (`spec:record-validity § Signature verification is a validity gate`), distinguishing "unauthenticated" from "structurally corrupt"
 
 ## 4. Discard-and-retry membership writes
 
