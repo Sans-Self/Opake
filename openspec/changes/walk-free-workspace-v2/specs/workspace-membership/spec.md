@@ -96,17 +96,35 @@ Because losing a tie costs only a retry (`§ Membership writes are compare-and-s
 - **WHEN** it competes against a fork carrying a valid VRF proof at equal endorsement
 - **THEN** the proof-carrying fork wins, because a record without a valid proof ranks after every record that has one
 
-### Requirement: Removal is effective when witnessed
+### Requirement: Removal is durable once built upon, not merely witnessed
 
-A removal's effect SHALL be treated as a liveness fact, not a cryptographic instant: it is effective once witnessed by enough independent parties that a single host death cannot erase it. A removal recorded on exactly one host that dies before any other party observes it did not take effect, and the removing manager's client SHALL NOT treat the rotation as complete until the removal is independently observed (`§ A membership write is confirmed only by an independent observer`). This is the durability window named in `spec:workspace § Stated limitations no construction removes`; the change bounds and surfaces it rather than claiming to remove it.
+A removal is a membership write, and its durability follows the same liveness reality as any write — not a cryptographic instant. Three bars must not be conflated: a removal is **observed** once an independent party echoes it (`§ A membership write is confirmed only by an independent observer`); it is **durable** only once a live descendant record supersedes it (`spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it`), or while the remover's host stays honest. Observation is not durability, and the removing manager's client SHALL NOT present a removal as complete-and-durable on observation alone.
 
-This complements, and does not replace, the rotation mechanics in `§ Removal rotates the group key; leave does not`: rotation still mints and re-wraps the group key; this requirement governs when the remover may rely on the removal having landed.
+Because the removal record lives on the remover's own — untrusted — PDS and is signed by the remover (so no other party can republish it as the same record), that host can revert the removal by deleting it: the head delete rolls back to the pre-removal record, reinstating the member with the pre-rotation group key. This is the same liveness attack as a host accepting a write and then withholding it (the PDS→relay lie): detected, not prevented. The removing manager's client SHALL watch the resolved head for the removed member reappearing and re-issue the removal; a persistently hostile remover-host is escaped only by account migration, the standing human remedy for a hostile host. The revert is surfaced, never silent (`§ A rejected membership write is surfaced, never silently discarded`).
 
-#### Scenario: a single-host removal that dies is not effective
+**Forward-secrecy gate.** Content that must exclude the removed member SHALL NOT be committed under the post-removal epoch until the removal is durable: encrypting under the new key before durability risks orphaning that content if the removal is reverted (the new key lives only in the not-yet-durable record), and encrypting under the old key leaks it to the removed member. Forward-secure writes therefore wait for durability. This bounds a revert's blast radius to "the member briefly reappears," not "the member reads new content."
 
-- **GIVEN** a manager who removes a member, writing the rotation only to their own PDS, which dies before anyone else observes it
-- **WHEN** the workspace's state is later resolved by other members
-- **THEN** the removal did not take effect, and the manager's client did not report it as complete
+**Indexer ceiling (availability help, not a truth dependency).** Where an indexer is present it retains the signed records it ingests and continues to serve an ingested removal record after the author's host deletes it, so the removal stays verifiable and the head does not roll back past it (`spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it`). This closes the offline-remover and persistent-revert gaps in practice. It is an availability enhancement, not a correctness dependency: the served record is signed, so a client verifies it exactly as from any host and trusts the signature, not the indexer (`spec:indexer-consistency § The indexer is an auditor, never necessary for writing or truth`); a client with no such indexer, or whose indexer lacks the record, falls back to the built-upon durability floor above. General member-to-member replication of records — which would make removal cryptographically durable without an indexer — is out of scope here ([#19](https://github.com/Opake-at/Opake/issues/19)).
+
+Rotation mechanics are unchanged (`spec:workspace-key-rotation § The rotation event is synchronous and self-sufficient`); this requirement governs when the remover may rely on the removal, and what the workspace may safely encrypt in the meantime. It replaces the earlier "effective when witnessed" framing, which conflated observation with durability.
+
+#### Scenario: a hostile remover-host reverts a witnessed-but-unsuperseded removal
+
+- **GIVEN** manager Alice removes member M in head record B (which also rotates the key), B is observed by other parties but no live record yet supersedes it
+- **WHEN** Alice's own hostile PDS deletes B and the head rolls back to the pre-removal record
+- **THEN** the removal is reverted — a detected liveness attack, not a silent loss: Alice's client observes M reappear on the resolved head and re-issues, and durability is reached only once a live descendant supersedes the removal, the indexer holds the record available, or Alice migrates off the hostile host
+
+#### Scenario: forward-secure writes wait for durability
+
+- **GIVEN** a removal that is not yet durable
+- **WHEN** a member would upload content that must exclude the removed member
+- **THEN** it does not commit under the post-removal epoch until the removal is durable — neither orphaned under an unwitnessed new key nor leaked under the old key
+
+#### Scenario: the indexer holds a removal available for an offline remover
+
+- **GIVEN** a removal ingested by an indexer, whose author then goes offline, and whose host deletes the removal record
+- **WHEN** a client resolves the workspace through that indexer
+- **THEN** the indexer serves the signed removal record it retained, the client verifies its signature, the head does not roll back past it, and a client with no such indexer falls back to the built-upon durability floor
 
 ### Requirement: The roster carries each member's signing key
 

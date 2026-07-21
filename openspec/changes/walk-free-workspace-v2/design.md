@@ -125,7 +125,7 @@ The build (certificate-transparency playbook):
 
 **What it still does not buy:** inclusion can be *refused* (now visibly, but it can), and nothing forces a hostile host to broadcast in the first place (the PDS→relay lie of D5). Those remedies stay human.
 
-### D8 — Endorsement-weighted head selection; removal effective when witnessed
+### D8 — Endorsement-weighted head selection; removal durable when built upon
 
 Head selection must not reward *quantity* of self-asserted entries (the finding that made walk-free's "largest floor wins" an ownership lever). With signed records (D2), "another member built on this" is unforgeable, so head selection leans on genuine endorsement — which branch real members actually extended. Two refinements, both surfaced by an isolated convergence simulation of this model:
 
@@ -135,7 +135,13 @@ Head selection must not reward *quantity* of self-asserted entries (the finding 
 
 *Alternatives considered for the tie-break.* Sequencer log position ("first-witnessed") is ungrindable too and needs no new crypto, but it makes the tie-break depend on the semi-trusted sequencer and is unavailable to a pure self-hoster — against the "never necessary" ethos. External entropy postdating the fork (a Bitcoin block hash, or a public randomness beacon) is ungrindable but adds latency and an external availability dependency. The VRF was chosen because it is self-contained: it lives in the roster and the record, needs no sequencer, no beacon, and no external entropy, and resolves offline — the same aesthetic as the rest of walk-free. The VRF key is a separate mnemonic-derived key (its own HKDF path), not the Ed25519 signing key reused, to avoid cross-scheme key reuse.
 
-Removal's effect is stated as a liveness fact, not a cryptographic promise: it is effective once witnessed by enough independent parties that a single host-death cannot erase it (the *unwitnessed* notion of D5). This is the honest form of the first-fold durability window — we name it rather than paper it.
+Removal's durability is a liveness property, not a cryptographic instant. Skeptic review (freshness + availability lenses) found the earlier "effective when witnessed" framing conflated *observation* with *durability*: because the signed removal record sits on the remover's own untrusted PDS, a hostile host can delete it, rolling the head back and reinstating the member — witnessing (holding a copy) does not prevent this; only a live descendant superseding the removal does. The fix has two layers — a liveness floor that always holds, and an indexer ceiling that hardens it in practice:
+
+- **Liveness floor.** Treat the revert as the same detected liveness attack as the PDS→relay lie (D5): the remover watches the resolved head, re-issues on a revert, and ultimately migrates off a persistently-hostile host. A removal is durable once built upon by a live descendant, or while the remover's host is honest. Never silent.
+- **Forward-secrecy gate.** Forward-secure writes wait for durability — encrypting under the new epoch before the removal is durable would either orphan that content on a revert or leak it under the old key. This bounds a revert to "the member briefly reappears," not "reads new content."
+- **Indexer ceiling.** Where an indexer is present, it retains and re-serves the signed removal record after the author's host deletes it, so the head does not roll back past it — closing the offline-remover and persistent-revert gaps. An availability help (the record is signed, so the client trusts the signature, not the indexer), never a truth dependency; a client with no indexer falls back to the liveness floor.
+
+General member-to-member replication — which would make removal cryptographically durable without an indexer — stays deferred ([#19](https://github.com/Opake-at/Opake/issues/19), post-grant). This is the honest form of the first-fold durability window: named and bounded, not papered.
 
 ## Risks / Trade-offs
 
