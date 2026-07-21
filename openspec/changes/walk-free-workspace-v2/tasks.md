@@ -68,8 +68,8 @@ Federation-class change. Nothing past group 1 begins until the spec delta is red
 ## 9. Head selection and the VRF tie-break
 
 - [ ] 9.1 Derive a VRF key from the mnemonic on its own HKDF path (ECVRF over Ed25519, RFC 9381); publish it in `publicKey/self` and carry it in the roster, immutable like the signing key
-- [ ] 9.2 Stamp a VRF output over `supersedesCid` on every fork-eligible record (keyring + workspace directory), and verify it against the fork-base roster's VRF key
-- [ ] 9.3 Implement pre-fork-scoped endorsement (distinct managers present at the fork's common ancestor); sockpuppets added inside a branch count for nothing
+- [ ] 9.2 Stamp a VRF output over `supersedesCid` on every fork-eligible record (keyring + workspace directory); resolve a fork at the most-recent common ancestor of the competing heads, comparing the branch-root records that supersede it (whose `supersedesCid` is the shared VRF input), and verify each against the roster's VRF key
+- [ ] 9.3 Implement frontier-scoped endorsement (distinct managers in the verifier's current frontier roster who built on the branch); a since-removed member counts for nothing regardless of fork depth; couple to the ceiling and accept the no-frontier-no-beacon residual
 - [ ] 9.4 Tie-break at equal endorsement by lowest verified VRF output; a record with no valid proof ranks after those that carry one; lowest-CID only as the flagged degraded fallback
 - [ ] 9.5 Align `tree-chains` directory fork resolution to the same VRF tie-break (retire the createdAt and the wrong lowest-CID claim)
 

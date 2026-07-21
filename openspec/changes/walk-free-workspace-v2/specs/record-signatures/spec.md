@@ -65,7 +65,7 @@ This envelope is metadata that full confidentiality would otherwise hide; exposi
 
 Two signed records by the same author that supersede the same parent record SHALL be treated as proof of equivocation by that author, requiring no trusted time and no ordering to establish. Any party holding both records can demonstrate the equivocation to any other party, because each record carries the author's own signature over its own contradictory claim.
 
-Signatures make the disagreement provable; they do not choose a winner. Fork resolution is owned by `spec:workspace-membership § Head selection is endorsement-weighted, pre-fork-scoped, and tie-broken ungrindably`.
+Signatures make the disagreement provable; they do not choose a winner. Fork resolution is owned by `spec:workspace-membership § Head selection is endorsement-weighted, frontier-scoped, and tie-broken ungrindably`.
 
 #### Scenario: a double-supersede convicts its author
 

@@ -66,35 +66,43 @@ The distinction is load-bearing: a member gone a month in a quiet workspace whos
 - **WHEN** a write supersedes R, rooted more than the ceiling behind the current head as measured against the beacon
 - **THEN** the write is refused as late, independent of any timestamp it carries
 
-### Requirement: Head selection is endorsement-weighted, pre-fork-scoped, and tie-broken ungrindably
+### Requirement: Head selection is endorsement-weighted, frontier-scoped, and tie-broken ungrindably
 
 When a single current record must be chosen among competing valid heads (a fork), selection SHALL proceed in this order:
 
-1. **Pre-fork-scoped endorsement (primary).** Prefer the branch endorsed by the most distinct members who were already managers at the fork's common ancestor — the record the competing forks supersede. Endorsement counts only members present-and-managerial at that base, so a member added *inside* a contested branch (a sockpuppet) contributes nothing. This is sound only because records are author-signed, which makes "a distinct member built on this" unforgeable (`spec:record-signatures § Every workspace record carries an author signature`). Quantity of self-asserted entries — roster size, number of removals — SHALL NOT count.
+1. **Frontier-scoped endorsement (primary).** Prefer the branch endorsed by the most distinct members who are managers **in the verifier's current frontier roster** — the newest membership state the verifier has already verified — and who authored a record on that branch. The electorate is the *current* roster, not the roster at the fork's base: an author counts only if they are a manager now. So a member removed before the fork — including a since-removed sockpuppet — contributes nothing even when the fork is rooted at an ancient record where they were still a manager, and an honest manager added recently *does* count. This is sound only because records are author-signed, which makes "a distinct member built on this" unforgeable (`spec:record-signatures § Every workspace record carries an author signature`). Quantity of self-asserted entries — roster size, number of removals — SHALL NOT count.
 
-2. **Ungrindable tie-break at equal endorsement.** The tie-break SHALL NOT be the record CID. A CID is a hash of author-chosen bytes, so an author can vary content (padding, reordering, a nonce) and mine a low CID — a reverse proof-of-work that hands the tie to whoever computes more hashes. Instead, each fork-eligible record SHALL carry a VRF (verifiable random function) output over its `supersedesCid` — the common-ancestor CID both forks share — computed with the author's roster-carried VRF key (`§ The roster carries each member's signing key`), and the fork with the lowest verified VRF output wins. A VRF output is unique per `(key, input)`: the author cannot search for a favourable one, the input is fixed and not author-controlled, and every observer verifies the proof against the fork-base roster and computes the same winner offline, with no sequencer and no external entropy. A record carrying no valid VRF proof SHALL rank after every record that carries one, so omitting the proof never improves an author's odds.
+   Anchoring the electorate to the verifier's frontier is what makes endorsement Sybil-resistant, and it is the same anchor the fork-timing ceiling uses: a fork rooted far behind the frontier is refused by the ceiling before endorsement is consulted (`§ The fork-timing ceiling is measured against the frontier`). Together they mean a verifier holding a live frontier (or a fresh beacon) cannot have its endorsement electorate dragged backward by where an attacker roots a fork. A verifier with **neither** a frontier nor a beacon — a device that lost its cache and reaches no indexer — has no electorate anchor and is exposed to endorsement inversion, exactly as it is exposed to stale state. This is the accepted memoryless-victim limitation (`spec:workspace § Stated limitations no construction removes` — fork-danger and staleness-danger are one problem), not a separate defence, and is not defended here.
 
-3. **Degraded fallback.** Only where no competing record carries a valid VRF proof — a transitional state, or a member without a VRF key — SHALL the winner be the lowest CID, and this is a known-grindable fallback, explicitly not a trust boundary.
+2. **Ungrindable tie-break at equal endorsement, anchored at the common ancestor.** The tie-break SHALL NOT be the record CID (a hash of author-chosen bytes, mineable by whoever computes more hashes). Competing heads may diverge at different depths — a stale-rooted head competing with an advanced one — so the fork SHALL be resolved at the **most-recent common ancestor (MRCA)** of the full competing head-set, and the records compared SHALL be the branch-root records that directly supersede the MRCA. Each fork-eligible record carries a VRF (verifiable random function) output over its own `supersedesCid`, computed with the author's roster-carried VRF key (`§ The roster carries each member's signing key`); because each branch-root supersedes the MRCA, its `supersedesCid` **is** the MRCA CID, so all contenders' VRF outputs share one input and are comparable, and the branch whose root has the lowest verified VRF output wins. A VRF output is unique per `(key, input)`: the author cannot search for a favourable one, the input is not author-controlled, and every observer verifies the proof and computes the same winner offline, with no sequencer and no external entropy. A record carrying no valid VRF proof SHALL rank after every record that carries one, so omitting the proof never improves an author's odds. Comparing each head's own `supersedesCid` directly (which differ across depths) is non-conforming.
 
-Because losing a tie costs only a retry (`§ Membership writes are compare-and-swap on the superseded record`) and a tie is broken the moment any real member endorses either branch, the tie-break governs only the instant before endorsement — and the VRF makes even that instant unbiasable. The residual way to influence it is to mint a low-VRF identity and add it, which is a witnessed membership change contributing zero pre-fork endorsement: closed on the endorsement axis before the tie-break is consulted.
+3. **Degraded fallback.** Only where no competing branch-root carries a valid VRF proof — a transitional state, or a member without a VRF key — SHALL the winner be the lowest CID, a known-grindable fallback, explicitly not a trust boundary.
 
-#### Scenario: sockpuppets do not win the head
+Because losing a tie costs only a retry (`§ Membership writes are compare-and-swap on the superseded record`) and a tie is broken the moment a real member endorses either branch, the tie-break governs only the instant before endorsement — and the VRF makes even that unbiasable. The residual way to influence it is to mint a low-VRF identity and add it, which is a witnessed membership change contributing zero endorsement in the current frontier roster: closed on the endorsement axis before the tie-break is consulted.
 
-- **GIVEN** an honest branch two distinct pre-fork managers built on, and a rival branch where one manager added five sockpuppets who each authored a trivial supersede
-- **WHEN** head selection runs
-- **THEN** the honest branch wins on pre-fork endorsement (2 vs the sockpuppets' 1), because members added inside the contested branch do not count
+#### Scenario: a since-removed sockpuppet does not win via an ancient fork base
+
+- **GIVEN** a hostile manager who roots a branch at an ancient record whose roster still listed sockpuppets the workspace later removed, and has those sockpuppets author on it; and an honest branch built on by managers added after that ancient record
+- **WHEN** a verifier holding the current frontier runs head selection
+- **THEN** the sockpuppets contribute nothing — they are not managers in the current frontier roster — and the honest recent managers count, so the honest branch wins; the attacker's choice of fork depth does not move the electorate
+
+#### Scenario: cross-depth forks compare at the common ancestor
+
+- **GIVEN** competing heads at different depths — one superseding record H, another superseding a descendant of H — whose most-recent common ancestor is M
+- **WHEN** the tie-break runs
+- **THEN** the records compared are the two that directly supersede M, whose `supersedesCid` is M's CID, so their VRF outputs share one input and are comparable
 
 #### Scenario: grinding record bytes does not steal the tie
 
 - **GIVEN** two equally-endorsed forks, one whose author pads and reorders content searching for a low CID
 - **WHEN** the tie is broken
-- **THEN** the winner is the lowest VRF output over the shared parent CID, which is independent of record content, so the grinding confers no advantage
+- **THEN** the winner is the lowest VRF output over the common-ancestor CID, independent of record content, so the grinding confers no advantage
 
 #### Scenario: omitting the VRF proof does not help
 
-- **GIVEN** a fork whose author omits a VRF proof to dodge an unfavourable output
-- **WHEN** it competes against a fork carrying a valid VRF proof at equal endorsement
-- **THEN** the proof-carrying fork wins, because a record without a valid proof ranks after every record that has one
+- **GIVEN** a fork whose branch-root omits a VRF proof to dodge an unfavourable output
+- **WHEN** it competes against a branch-root carrying a valid VRF proof at equal endorsement
+- **THEN** the proof-carrying branch wins, because a record without a valid proof ranks after every record that has one
 
 ### Requirement: Removal is durable once built upon, not merely witnessed
 
@@ -128,7 +136,7 @@ Rotation mechanics are unchanged (`spec:workspace-key-rotation § The rotation e
 
 ### Requirement: The roster carries each member's signing key
 
-The workspace roster SHALL carry each member's public identity keys — their signing key and their VRF key (or commitments to them) — alongside their DID and role, so that adding a member is itself the act of attesting both. Signature verification reads the signing key from the roster the verifier already holds (`spec:record-signatures § Signature verification uses the roster-carried key, with no external lookup`); the VRF key is read from the same roster to break fork ties ungrindably (`§ Head selection is endorsement-weighted, pre-fork-scoped, and tie-broken ungrindably`). Key provenance is internal to the workspace and needs no external DID-document lookup (`spec:workspace-identity § The roster is the workspace key registry`); both keys are attested at add time and served from the roster, never re-fetched.
+The workspace roster SHALL carry each member's public identity keys — their signing key and their VRF key (or commitments to them) — alongside their DID and role, so that adding a member is itself the act of attesting both. Signature verification reads the signing key from the roster the verifier already holds (`spec:record-signatures § Signature verification uses the roster-carried key, with no external lookup`); the VRF key is read from the same roster to break fork ties ungrindably (`§ Head selection is endorsement-weighted, frontier-scoped, and tie-broken ungrindably`). Key provenance is internal to the workspace and needs no external DID-document lookup (`spec:workspace-identity § The roster is the workspace key registry`); both keys are attested at add time and served from the roster, never re-fetched.
 
 A member's signing and VRF keys SHALL be immutable once attested. They derive from the member's mnemonic on distinct derivation paths and do not rotate (identity rotation does not exist — `spec:workspace-key-rotation`; [#18](https://github.com/Opake-at/Opake/issues/18)). Every supersede SHALL carry each continuing member's keys forward byte-identical, and any supersede that alters, drops, or substitutes a continuing member's signing or VRF key SHALL be rejected by the authority check — indexer at ingest and client on verification alike. Only an add introduces a new `{did, signing key, VRF key}` binding. Without this, a supersede that is otherwise authorised — a pure self-removal, or a manager's role change — could rewrite a *remaining* member's signing key and thereby forge that member's future authorship, since verification roots in the roster-carried key; the immutability rule closes that escalation, and extends it to the VRF key so a member's tie-break identity cannot be swapped either.
 
