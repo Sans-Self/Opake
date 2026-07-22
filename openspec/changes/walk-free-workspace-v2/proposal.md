@@ -41,6 +41,9 @@ This change writes the synthesis of that exercise into canon. It is deliberately
 - `workspace-key-rotation`: The self-sufficient rotation write set carries every remaining member's signing key and is author-signed, so a rotation head can still authenticate the roster.
 - `auth-identity`: The Ed25519 verifying key and a mnemonic-derived VRF key become required in `publicKey/self` — the keys a manager reads to attest a member into the roster.
 - `tree-chains`: Directory fork resolution breaks ties by the ungrindable VRF tie-break instead of author-controlled `createdAt` or mineable CID (an earlier draft's lowest-CID claim was wrong — CIDs are grindable); directory records are confirmed in signature scope (formalizing an assumption the spec already made).
+- `auth-pairing`: Pairing completion authenticates all four published halves of a transferred identity — X25519, ML-KEM-768, Ed25519, and VRF — not only the two encryption keys, since the signing and VRF keys are now load-bearing published material.
+- `background-work`: The key-rotation re-wrap sweep re-seals only under a durable rotation, since a removal-rotation is reversible until built upon and re-sealing under a not-yet-durable one would orphan content; the removal watch-and-re-issue loop is named a correctness obligation, explicitly not a droppable background task.
+- `document-crypto`: The zeroize-on-drop enumeration gains the mnemonic-derived VRF private key and the log-keeper's private Ed25519 key.
 
 ## Impact
 

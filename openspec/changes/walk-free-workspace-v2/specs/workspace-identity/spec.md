@@ -8,6 +8,14 @@ The forcing reason is that `did:web` has no audit log: a `did:web` document is a
 
 The cost is trust-on-first-use at add time — the same human trust the invite already carries — and the fact that key rotation, when it exists ([#18](https://github.com/Opake-at/Opake/issues/18)), means updating every workspace a member belongs to rather than one directory entry.
 
+The member's public signing key originates in their own `at.opake.publicKey/self` record, self-published from their mnemonic-derived key. That record is read **once, at add time**, when the attesting manager copies the key into the roster; it is never consulted again to verify authorship. Reading it once trusts the member's untrusted PDS for that single moment — the same trust the manager already extends by vouching for the member — while pinning the key in the roster means a later swap of `publicKey/self` by a hostile host cannot retroactively validate a forged record. Verification reads the roster's pinned copy, never the original; `publicKey/self` is the birth certificate the roster copies down once, not a source re-fetched at check time.
+
+#### Scenario: publicKey/self is read at add time and pinned, not re-fetched
+
+- **GIVEN** a member added to a workspace, their signing key copied from their `publicKey/self` record into the roster
+- **WHEN** the member's host later serves a different `publicKey/self`
+- **THEN** authorship verification is unaffected, because it reads the roster's pinned key and never re-fetches `publicKey/self`
+
 #### Scenario: authorship verifies from the roster offline
 
 - **WHEN** a verifier checks a keyring record's author signature

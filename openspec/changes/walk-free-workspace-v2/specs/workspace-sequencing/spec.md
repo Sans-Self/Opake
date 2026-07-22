@@ -41,6 +41,22 @@ A tree head establishes a frontier position, never a wall-clock time. Freshness 
 - **WHEN** a client reads a signed tree head
 - **THEN** it derives only a frontier position from it, and makes no wall-clock claim about when that position was reached
 
+### Requirement: The sequencer's tree-head key is roster-attested
+
+A signed tree head is verified against a role-scoped Ed25519 key for the log-keeper — the same signature primitive as member records (`spec:record-signatures § Every workspace record carries an author signature`), so no second algorithm enters the system. That key SHALL be carried in the workspace roster, attested when a sequencer is designated exactly as a member's key is attested at add time (`spec:workspace-membership § The roster carries each member's signing key`); a cold joiner MAY receive it in the signed tree head conveyed with their invite, before they hold the roster. It is a distinct role key, never a human member's identity key, so replacing the log-keeper never touches anyone's identity.
+
+The key is available to every party that syncs the roster and mandatory for none: only a client using the freshness beacon, or a witness cosigning a head, consults it, and a workspace running no log carries no such key (`§ The log is never necessary for truth`). Witnesses cosign with their own already-attested member keys, so cosigning introduces no further keys. The log-keeper's *private* key lives only with whoever runs the log; where the indexer runs the log it holds that role key alone, never a member's identity key.
+
+#### Scenario: a beacon verifies against the roster-attested key
+
+- **WHEN** a client checks a signed tree head
+- **THEN** it verifies the signature against the log-keeper's role-scoped Ed25519 key carried in the roster — or the key conveyed with its invite before the roster is held — and never against an external document
+
+#### Scenario: a workspace with no sequencer carries no sequencer key
+
+- **WHEN** a workspace runs no transparency log
+- **THEN** its roster carries no log-keeper key, and no correctness path consults one
+
 ### Requirement: The log is never necessary for truth
 
 No correctness property of a workspace SHALL depend on a sequencer or its log. The layering is: the trustless compare-and-swap rule at the bottom, human endorsement above it, the auditable log on top when present. A client with no log SHALL fall back to the structural defence — a member holding a live frontier already refuses a fork rooted behind it — losing the cold-joiner protection and the tightened fork ceiling, never correctness.

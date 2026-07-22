@@ -37,6 +37,14 @@ A membership write SHALL be treated as pending until it is echoed back from a pa
 
 The echo MAY carry the compare-and-swap verdict — the set of records the observer has seen superseding the same parent — so the client reaches its own conclusion rather than trusting the observer's (`spec:indexer-consistency § The write echo carries the compare-and-swap verdict`).
 
+Confirmation is not terminal. An echo establishes that a write was *seen*, not that it won for good: a confirmed membership write MAY still be displaced — transition to `lost` — if a competing record superseding the same parent is observed later, until the write is built upon by a live descendant. The built-upon floor that makes a removal durable governs every membership write (`§ Removal is durable once built upon, not merely witnessed`). A client SHALL treat a confirmed-but-not-yet-built-upon membership write as displaceable, and SHALL surface a post-confirmation displacement exactly as it surfaces an initial loss (`§ A rejected membership write is surfaced, never silently discarded`). Detecting a displacement requires observing the competing record; where a client reaches no indexer that observation is best-effort, the same liveness reality under which an indexer is recommended (`spec:workspace-sequencing § The log is never necessary for truth`).
+
+#### Scenario: a confirmed write is later displaced
+
+- **GIVEN** a membership write confirmed by an independent observer and not yet built upon
+- **WHEN** a competing write superseding the same parent is observed later and wins head selection
+- **THEN** the confirmed write transitions to lost, the displacement is surfaced to its author, and no projection continues to show it as applied
+
 #### Scenario: own-host success is not confirmation
 
 - **WHEN** a member's PDS accepts a membership write and the member has no independent echo
@@ -151,6 +159,23 @@ A member's signing and VRF keys SHALL be immutable once attested. They derive fr
 - **WHEN** any member authors a supersede whose roster keeps alice but carries a signing key other than K for her
 - **THEN** the supersede is rejected — a continuing member's signing key is immutable across supersedes — even if the supersede is an otherwise-valid self-removal or role change
 
+### Requirement: Re-adding a removed member rebinds its prior key
+
+Key immutability (`§ The roster carries each member's signing key`) protects *continuing* members; a removal breaks the binding, so re-adding a previously-removed DID is a fresh attestation that rule alone does not constrain. Without a further constraint a hostile manager could re-admit a removed DID under a key the manager controls — authoring as that member and silently dropping that member's genuinely-signed records, which would then fail to verify against the substituted key. To close that, a re-add of a DID the workspace lineage records as a prior member SHALL bind the same signing and VRF keys that DID last held. An add that reintroduces a previously-known DID with different keys SHALL be rejected by the authority check wherever the prior binding is recoverable from the lineage the verifier holds, and the manager constructing the re-add — who holds that history — SHALL carry the prior keys forward.
+
+Binding a *new* key to a returning DID is identity rotation, which does not exist (`spec:workspace-key-rotation`; [#18](https://github.com/Opake-at/Opake/issues/18)): a member who lost their mnemonic returns under a new DID, not a rebound old one. A verifier whose held lineage does not reach the prior binding cannot enforce this and falls back to trusting the attesting manager — the same social-trust floor every add already rests on (`spec:workspace § The trust surface is four-tiered, and time is trusted nowhere`).
+
+#### Scenario: re-adding a removed member under an attacker key is rejected
+
+- **GIVEN** a DID that was previously a member with signing key K, since removed, whose prior binding is present in the lineage the verifier holds
+- **WHEN** a manager authors an add reintroducing that DID with a signing key other than K
+- **THEN** the add is rejected, because a re-added DID rebinds the key it last held, not a new one
+
+#### Scenario: a genuine re-add carries the prior keys forward
+
+- **WHEN** a manager re-adds a previously-removed member
+- **THEN** the add carries that member's prior signing and VRF keys, and the member's existing signed records continue to verify
+
 ## MODIFIED Requirements
 
 ### Requirement: Keyring supersede authority is manager-only, except pure self-removal
@@ -177,3 +202,20 @@ The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_s
 - **GIVEN** a signed keyring supersede that the indexer accepted but whose author does not hold the required role in the roster the client verifies against
 - **WHEN** the client evaluates the record
 - **THEN** the client rejects it on its own verification rather than deferring to the indexer's acceptance
+
+### Requirement: Adding a member is a manager-authored supersede
+
+A manager adds a member by attesting the member's identity keys into the roster and wrapping the current group key to the recipient's published hybrid public keys, appending both to a superseding keyring record. Attesting the member's keys is part of the add, not a separate step: the superseding record's roster carries the new member's `{did, role, signing key, VRF key}` binding (`§ The roster carries each member's signing key`), copied once from the member's `publicKey/self` at add time (`spec:workspace-identity § The roster is the workspace key registry`). An add that wraps the group key but does not attest the member's signing and VRF keys is incomplete and SHALL be rejected — there is no keyless admission path. Adding a DID already in the member list SHALL be rejected; re-adding a previously-removed DID rebinds its prior keys (`§ Re-adding a removed member rebinds its prior key`). The wrap's AEAD anchor is the genesis URI (`spec:workspace-identity § Group-key wraps are AEAD-bound to genesis`); the role is assigned at add time.
+
+Direct manager add is the only admission channel: no invitation, request-to-join, or other self-service path exists.
+
+#### Scenario: duplicate add rejected
+
+- **GIVEN** bob already in the member list
+- **WHEN** a manager adds bob again
+- **THEN** the operation fails before any write (`add_workspace_member`, crates/opake-core/src/opake.rs)
+
+#### Scenario: an add that omits the member's keys is rejected
+
+- **WHEN** a manager authors an add whose roster wraps the group key to a new DID but carries no signing or VRF key for it
+- **THEN** the supersede is rejected, because attesting the member's keys is part of the add and no keyless admission path exists
