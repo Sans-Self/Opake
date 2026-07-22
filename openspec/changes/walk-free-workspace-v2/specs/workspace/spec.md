@@ -57,6 +57,7 @@ These limits follow from no-trusted-time and hostile-or-mortal hosts. A workspac
 - **Freshness is a liveness property, never a proof.** "Newest" cannot be established from bytes alone. A member can verify that a served state is authentic but not that it is current; the only evidence of currency is a live signal (a peer, a stream, a fresh beacon).
 - **Silence is invisible.** Omission is undetectable in principle. Every "current state" answer means "current among what I have been shown."
 - **Agreement is only ever eventual.** Coordination-free writing is fork-prone; those are the same property, not a defect to be removed.
+- **History is mortal.** Nothing guarantees a past record survives; anything that must persist lives in a current record or in members' heads. A construction that assumes the chain's earlier history is still fetchable is relying on liveness, not on a durability guarantee.
 - **Removal is the knife's edge.** It is the one operation where cryptography (rotate the key) and agreement (everyone accepts the new roster) must land together, and it is where the durability window bites (`spec:workspace-membership § Removal is durable once built upon, not merely witnessed`).
 - **Small groups get no arithmetic.** No-owner, enforceable roles, and no-coordination are jointly unsatisfiable at two or three members — which is exactly where the target population lives. The trade is exposed, not resolved.
 - **The social graph is public.** Member DIDs sit in world-readable records. Content and metadata are encrypted; who-is-in is not.

@@ -82,13 +82,19 @@ Ingestion into the log SHALL NOT confer validity. A record that fails its author
 - **WHEN** the log contains a leaf for a record whose author signature does not verify
 - **THEN** every client rejects the record, and its presence in the log changes nothing
 
-### Requirement: Witness cosigning defeats equivocation by the sequencer
+### Requirement: Witness cosigning detects sequencer equivocation
 
-The sequencer MAY be hardened against equivocation — showing one tree head to one member and a divergent head to another — by witness cosigning: members' own daemons countersign the heads they observe (the C2SP `tlog-witness` shape). Two cosigned heads that are inconsistent SHALL be treated as proof the sequencer equivocated, on the same footing as an author's double-supersede (`spec:record-signatures § Equivocation is self-incriminating`). Witness cosigning is optional hardening; its absence weakens the beacon's trustworthiness for the memoryless, it does not break correctness.
+The sequencer MAY be hardened against equivocation — showing one tree head to one member and a divergent head to another — by witness cosigning: members' own daemons countersign the heads they observe (the C2SP `tlog-witness` shape). Two cosigned heads that are inconsistent SHALL be treated as proof the sequencer equivocated, on the same footing as an author's double-supersede (`spec:record-signatures § Equivocation is self-incriminating`). Cosigning *detects* divergence; it does not defeat every equivocation. A sequencer that shows every witness the *same* stale head produces no divergence to catch, so uniform staleness evades cosigning and is bounded only by beacon freshness (`§ A signed tree head is the freshness beacon`), not by this mechanism. Witness cosigning is optional hardening; its absence weakens the beacon's trustworthiness for the memoryless, it does not break correctness.
 
 #### Scenario: divergent cosigned heads convict the sequencer
 
 - **GIVEN** two signed tree heads for the same workspace and sequence position, each cosigned by a distinct honest witness, that fail a consistency proof against each other
 - **WHEN** any party holds both
 - **THEN** it can prove the sequencer equivocated, using only the two cosigned heads
+
+#### Scenario: uniform staleness evades cosigning
+
+- **GIVEN** a sequencer that serves every witness the same stale-but-internally-consistent tree head
+- **WHEN** the witnesses cosign the heads they observe
+- **THEN** the cosignatures agree and detect no equivocation, because there is no divergence — the staleness is bounded by beacon freshness, not caught by cosigning
 
