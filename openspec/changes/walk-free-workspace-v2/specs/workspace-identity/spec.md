@@ -45,4 +45,4 @@ A future in which a founder needs distance from what they founded is not hypothe
 #### Scenario: the founder DID remains in the identity derivation
 
 - **WHEN** a workspace identity tag is derived
-- **THEN** the founder DID is an input, and this is documented as a known residue pending the rotation design pass, not treated as resolved
+- **THEN** the founder DID is an input, and this is documented as a known residue pending identity rotation ([#18](https://github.com/Opake-at/Opake/issues/18)), not treated as resolved

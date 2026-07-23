@@ -47,7 +47,7 @@ This change writes the resulting design into canon. It is deliberately *smaller*
 
 ## Impact
 
-- **Federation-class.** Per project rule, the spec delta is red-penned before any implementation begins. No code lands from this proposal until the delta is reviewed.
+- **Federation-class.** Per project rule, the spec delta is reviewed and signed off before any implementation begins. No code lands from this proposal until that sign-off is recorded.
 - **Wire format.** New signature field(s) on `at.opake.keyring` (and the signed governance envelope); a new sequencing/tree-head record or indexer-published artifact. Lexicon JSON, `OPAKE_COLLECTIONS`, and the auth permission set all move together (CLAUDE.md #13).
 - **Crypto.** Ed25519 record signing over canonical dag-cbor; depends on byte-recomputed CID verification ([#64](https://github.com/Opake-at/Opake/issues/64)) shipping first. A mnemonic-derived VRF key (ECVRF over Ed25519, RFC 9381; its own HKDF path) for the ungrindable fork tie-break, published in `publicKey/self` and attested into the roster. No change to the proven encryption layer (group-key wrap, content-key hierarchy, rotation-aware reads).
 - **Indexer (Elixir).** `authority.ex` gains signature verification at ingest; a new transparency-log consumer/publisher (Merkle log, signed tree heads, proof endpoints); the echo/verdict on the write path.
