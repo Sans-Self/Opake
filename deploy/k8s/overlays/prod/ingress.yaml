@@ -1,0 +1,20 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: opake-prod
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    secretName: opake-at-tls
+  routes:
+    - match: Host(`indexer.opake.at`)
+      kind: Rule
+      services:
+        - name: opake-indexer
+          port: 6100
+    - match: Host(`opake.at`)
+      kind: Rule
+      services:
+        - name: opake-web
+          port: 3000

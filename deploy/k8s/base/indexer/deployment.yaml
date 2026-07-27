@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opake-indexer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: opake-indexer
+  template:
+    metadata:
+      labels:
+        app: opake-indexer
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: indexer
+          image: rg.fr-par.scw.cloud/opake/indexer
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 6100
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: opake-database-url
+                  key: url
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: opake-secrets
+                  key: secret-key-base
+            - name: PHX_SERVER
+              value: "true"
+            # jetstream2 us-east is deliberate: the Frankfurt instance has
+            # served silent zero-frame streams before. Overlays do not
+            # override this.
+            - name: JETSTREAM_URL
+              value: wss://jetstream2.us-east.bsky.network/subscribe
+            # PHX_HOST, CORS_ORIGIN, OPAKE_FRONTEND_URL are set per overlay.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 6100
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 6100
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 6100
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

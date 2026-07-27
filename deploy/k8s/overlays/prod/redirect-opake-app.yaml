@@ -1,0 +1,31 @@
+# opake.app → opake.at, permanent. The old domain keeps resolving (DNS points
+# it at the same LB) but every request bounces to the canonical origin.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-opake-at
+spec:
+  redirectRegex:
+    regex: "^https?://(?:[a-z0-9-]+\\.)*opake\\.app/(.*)"
+    replacement: "https://opake.at/${1}"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: opake-app-redirect
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    secretName: opake-app-redirect-tls
+  routes:
+    - match: HostRegexp(`^(?:[a-z0-9-]+\.)*opake\.app$`)
+      kind: Rule
+      middlewares:
+        - name: redirect-opake-at
+      services:
+        # Traefik requires a service on every route; the middleware redirects
+        # before this is ever reached.
+        - name: opake-web
+          port: 3000

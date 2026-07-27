@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opake-indexer
+spec:
+  template:
+    spec:
+      containers:
+        - name: indexer
+          env:
+            - name: PHX_HOST
+              value: indexer.opake.at
+            - name: CORS_ORIGIN
+              value: https://opake.at
+            - name: OPAKE_FRONTEND_URL
+              value: https://opake.at
