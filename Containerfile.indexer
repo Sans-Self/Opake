@@ -9,14 +9,17 @@ RUN mix local.hex --force && mix local.rebar --force
 
 ENV MIX_ENV=prod
 
-COPY mix.exs mix.lock ./
+COPY apps/indexer/mix.exs apps/indexer/mix.lock ./
 RUN mix deps.get --only $MIX_ENV && \
     mkdir config && \
     mix deps.compile
 
-COPY config/config.exs config/prod.exs config/runtime.exs config/
-COPY lib lib
-COPY priv priv
+COPY apps/indexer/config/config.exs apps/indexer/config/prod.exs apps/indexer/config/runtime.exs config/
+COPY apps/indexer/lib lib
+COPY apps/indexer/priv priv
+# vocabulary.ex resolves the shared lexicon vocabulary five directories above
+# lib/opake_indexer/lexicon/ at compile time — /lexicons in this image.
+COPY lexicons /lexicons
 
 RUN mix compile && mix release
 
@@ -34,7 +37,7 @@ RUN groupadd -g 1000 opake && useradd -u 1000 -g opake -m opake
 
 WORKDIR /app
 COPY --from=build --chown=1000:1000 /app/_build/prod/rel/opake_indexer ./
-COPY --chown=1000:1000 rel/entrypoint.sh ./
+COPY --chown=1000:1000 apps/indexer/rel/entrypoint.sh ./
 
 USER 1000:1000
 EXPOSE 6100
