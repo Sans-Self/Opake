@@ -33,16 +33,24 @@ A record whose signature is absent, malformed, or does not verify under a known 
 
 ### Requirement: Signature verification uses the roster-carried key, with no external lookup
 
-A verifier SHALL obtain the author's public signing key from the workspace roster it is already holding (`spec:workspace-identity § The roster is the workspace key registry`), never by fetching an external DID document at verification time. Verifying a record's authorship is thereby an offline operation against state the verifier already has, with no network fetch and no dependency on a member's PDS being alive.
+A verifier SHALL obtain the author's public signing key from the `{DID → signing key}` bindings the workspace keyring chain carries (`spec:workspace-identity § The roster is the workspace key registry`), never by fetching an external DID document at verification time. The binding is drawn from the chain's ever-was-a-member key union, not the live frontier roster alone: because a member's signing key is immutable once attested and carried forward byte-identical across every supersede (`spec:workspace-membership § The roster carries each member's signing key`), the key an author held at the record's own chain position is recoverable even after that author has left the live roster. Verifying a record's authorship is thereby an offline operation against state the verifier already has, with no network fetch and no dependency on a member's PDS being alive.
+
+Authentication is not authority. This gate answers only whether the named author signed the bytes; whether that author was *entitled* to the decision the record makes is the separate question owned by `spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal` and by head selection (`spec:workspace-membership § Head selection is endorsement-weighted, frontier-scoped, and tie-broken ungrindably`). A member removed after authoring a record still authenticates as its author — their key stays in the chain's binding union — and carries exactly the authority their role held at that record's position, no more. Collapsing the two would make every former member's historical records retroactively unverifiable and break the additive chain walk, which already reasons over the union of everyone who was ever a manager (`spec:tree-chains § Editor supersedes are additive; managers are unrestricted`); up to and including a founder's genesis record once the founder leaves.
 
 #### Scenario: verification touches no member PDS
 
 - **WHEN** a verifier checks a keyring record's author signature
-- **THEN** it reads the author's signing key from the current roster and completes the check with no fetch of the author's `publicKey` record or DID document
+- **THEN** it reads the author's signing key from the binding the keyring chain carries for that author and completes the check with no fetch of the author's `publicKey` record or DID document
 
-#### Scenario: an author absent from the roster cannot be authenticated
+#### Scenario: a since-removed author's historical record still authenticates
 
-- **WHEN** a record's declared author is not present in the roster the verifier holds
+- **GIVEN** a keyring record authored by a member the live roster no longer lists, removed after they authored it
+- **WHEN** a verifier checks the signature against the `{DID → signing key}` binding the keyring chain carries for that author
+- **THEN** the signature verifies — authentication draws on the chain's ever-was-a-member key union, not the live roster — so the record stays usable at the chain position it occupies, even though its author holds no current membership authority
+
+#### Scenario: an author the chain never bound cannot be authenticated
+
+- **WHEN** a record's declared author has no `{DID → signing key}` binding anywhere in the keyring chain the verifier holds
 - **THEN** the record is unauthenticated for this verifier and is refused as an authority for any membership decision
 
 ### Requirement: The signed governance envelope enables keyless enforcement
