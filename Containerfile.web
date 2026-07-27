@@ -4,11 +4,12 @@ WORKDIR /build/apps/web
 COPY apps/web/package.json apps/web/bun.lock ./
 RUN bun install --frozen-lockfile
 
-FROM rust:1.88-slim-bookworm AS wasm-builder
+# rust:1 tracks latest stable, matching the dev shell (flake.nix pins
+# rust-bin.stable.latest) so the image compiles with the same toolchain
+# development and CI test against.
+FROM rust:1-slim-bookworm AS wasm-builder
 
-# Prebuilt, pinned wasm-pack: newer releases require a newer toolchain than
-# this base image carries, and compiling it from source costs minutes per
-# cold build.
+# Prebuilt, pinned wasm-pack: a source build costs minutes per cold cache.
 RUN apt-get update -y && apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     curl -sSfL https://github.com/drager/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
