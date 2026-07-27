@@ -1,0 +1,32 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: staging-auth
+spec:
+  basicAuth:
+    secret: staging-basicauth
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: opake-staging
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    secretName: staging-opake-at-tls
+  routes:
+    - match: Host(`indexer.staging.opake.at`)
+      kind: Rule
+      middlewares:
+        - name: staging-auth
+      services:
+        - name: opake-indexer
+          port: 6100
+    - match: Host(`staging.opake.at`)
+      kind: Rule
+      middlewares:
+        - name: staging-auth
+      services:
+        - name: opake-web
+          port: 3000

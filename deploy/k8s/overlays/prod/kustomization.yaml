@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The opake namespace is owned by the Infrastructure repo (platform/gitops).
+namespace: opake
+
+resources:
+  - ../../base/web
+  - ../../base/indexer
+  - cert.yaml
+  - ingress.yaml
+  - redirect-opake-app.yaml
+  - network-policy.yaml
+
+patches:
+  - path: indexer-env.yaml
+  - path: web-replicas.yaml
+
+images:
+  - name: rg.fr-par.scw.cloud/opake/web
+    newTag: latest
+  - name: rg.fr-par.scw.cloud/opake/indexer
+    newTag: latest

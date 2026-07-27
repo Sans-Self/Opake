@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The opake-staging namespace itself is owned by the Infrastructure repo
+# (platform/gitops) — the deployer service account is namespace-scoped and
+# cannot create namespaces.
+namespace: opake-staging
+
+resources:
+  - ../../base/web
+  - ../../base/indexer
+  - cert.yaml
+  - ingress.yaml
+  - network-policy.yaml
+
+patches:
+  - path: indexer-env.yaml
+
+images:
+  - name: rg.fr-par.scw.cloud/opake/web
+    newTag: staging
+  - name: rg.fr-par.scw.cloud/opake/indexer
+    newTag: staging

@@ -1,0 +1,28 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: opake-at
+spec:
+  secretName: opake-at-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - opake.at
+    - indexer.opake.at
+---
+# opake.app is being phased out; the cert exists only so the redirect below
+# can answer over TLS. Drop it when the domain is retired for good.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: opake-app-redirect
+spec:
+  secretName: opake-app-redirect-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - opake.app
+    - staging.opake.app
+    - indexer.opake.app
