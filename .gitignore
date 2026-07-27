@@ -39,6 +39,7 @@ e2e-tests/playwright-report/
 
 # nix / direnv
 .direnv/
+.envrc.local
 /result
 /result-*
 .claude/skills/openspec-*
