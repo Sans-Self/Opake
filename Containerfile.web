@@ -10,7 +10,11 @@ COPY packages/opake-sdk/package.json packages/opake-sdk/
 COPY packages/opake-daemon/package.json packages/opake-daemon/
 COPY packages/opake-react/package.json packages/opake-react/
 COPY tests/package.json tests/
-RUN bun install --frozen-lockfile
+# Hoisted linker: the default isolated layout scatters real packages into a
+# .bun store with per-workspace symlink trees, which does not survive the
+# COPY into the runtime image. Hoisting makes /build/node_modules a real,
+# portable tree the SSR server can resolve from.
+RUN bun install --frozen-lockfile --linker=hoisted
 
 # rust:1 tracks latest stable, matching the dev shell (flake.nix pins
 # rust-bin.stable.latest) so the image compiles with the same toolchain
