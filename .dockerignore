@@ -1,14 +1,24 @@
-# The only image built from the repo root is the dev-env indexer
-# (dev-env/build/indexer.Dockerfile), which needs just apps/indexer and the
-# shared lexicons. Everything else — notably the 19G Rust target/ — must stay
-# out of the build context. Ignore all, then re-include what the build copies.
+# Repo-root build contexts: the indexer image (Containerfile.indexer, also
+# dev-env/build/indexer.Dockerfile) and the web image (Containerfile.web,
+# which builds the wasm bundle from the Rust workspace). Everything else —
+# notably the 19G Rust target/ — must stay out of the build context. Ignore
+# all, then re-include what the builds copy.
 *
 !apps/indexer
 !lexicons
+!Cargo.toml
+!Cargo.lock
+!crates
+!apps/cli
+!apps/web
 
 # Drop build artifacts even within the re-included paths; the image runs a
 # fresh mix deps.get / compile.
 apps/indexer/_build
 apps/indexer/deps
 apps/indexer/.elixir_ls
+**/target
+apps/web/node_modules
+apps/web/dist
+apps/web/src/wasm
 **/.DS_Store
