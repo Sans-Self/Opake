@@ -31,16 +31,14 @@ through a cowboy on Opus.
    `model: "opus"`, foreground (`run_in_background: false`; do not use tmux
    teams — broken on this machine, see memory).
 
-   **Harvesting the report:** the Opake Review agent type has NO
-   SendMessage tool — it cannot deliver its report itself, and an idle
-   notification is its only completion signal (verified 2026-07-12; two
-   idles and a futile nudge before this was diagnosed). If the spawn ran
-   async and only idles arrive, do not keep nudging: extract the final
-   assistant text from the agent's transcript JSONL under
-   `~/.claude/projects/<project-dir>/` (grep the .jsonl files for a
-   distinctive phrase from the brief to find the right one, then take the
-   last assistant text entry). Tell the cowboy in the brief that its final
-   plain-text output IS the deliverable.
+   **Harvesting the report:** the Opake Review agent has SendMessage
+   (added 2026-07-27) and its definition instructs it to deliver the
+   complete report — not a summary — via SendMessage to its spawner.
+   Expect the full report as a message; the final assistant text in the
+   agent result carries it as well. Fallback if neither arrives (e.g. a
+   stale agent definition): extract the last assistant text from the
+   agent's transcript JSONL under `~/.claude/projects/<project-dir>/`
+   (grep the .jsonl files for a distinctive phrase from the brief).
 
    Prompt shape:
 
