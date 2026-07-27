@@ -264,9 +264,25 @@ Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` 
 
 `Workspace` and `Cabinet` are domain types carrying decrypted key material, both with `ZeroizeOnDrop` — key bytes are overwritten when the context is dropped. `Workspace::from_keyring` is `pub(crate)`, so the only way to produce a `Workspace` outside opake-core is through the resolution methods (`resolve_workspace`, `file_context`, `workspaceByUri`) — this keeps the invariant that the URI, owner, group key, and rotation all came from the same verified keyring record. The WASM layer uses `WasmFileManagerHandle`, which shares an `Rc<Mutex<WasmOpake>>` with the parent `WasmOpakeHandle` and creates short-lived `FileManager` borrows inside each JS method (wasm_bindgen can't carry lifetimes across the boundary). The shared `Mutex` queues concurrent async operations instead of panicking on aliased `&mut self`. WASM persistence goes through `JsStorage`, a `Storage` impl that calls back into a JS-side `IndexedDbStorage`; `NoopStorage` is tests only. Raw functions (`encrypt_and_upload`, etc.) are `pub(crate)` — `FileManager` is the public API.
 
+## WASM Security Boundary
+
+Tokens, DPoP keys, session credentials, and all cryptographic operations live in WASM (opake-core). JS cannot zeroize memory — strings are immutable and garbage-collected on the runtime's schedule — so secret-bearing state must never cross into JS-managed memory. The OAuth login flow itself runs in WASM (`startOAuthLogin`, `completeOAuthLogin`, `loginWithAppPasswordWasm`). JS never calls `session()` for auth state; token expiry is checked via `tokenExpiresAt()` (returns only the timestamp) and refresh runs through `proactiveRefresh()` (calls `refresh_token` directly).
+
+One deliberate exception: `PendingLogin` state crosses the boundary during redirect flows (the DPoP key sits in sessionStorage while the browser round-trips through the authorization server), bounded by a 10-minute TTL and auto-cleared on read.
+
+Flow-level detail lives in **[AUTH.md](AUTH.md)**.
+
+## Core Is the Protocol
+
+opake-core is the product surface a builder reads to understand Opake on its own — records, crypto, key hierarchy, chain walking, the trust model. The protocol is the product; the web app is convenience.
+
+Reactive-client machinery — the SSE keepers, bootstrap/stream sequencing, watchers, optimistic overlays — is *not* protocol: a reader shouldn't have to learn how one client keeps a live projection to understand Opake, and the CLI proves the point by syncing without any of it. New client-sync logic (snapshot/stream reconciliation, debouncing, optimistic state) belongs in the client layer — `opake-wasm`, the SDK, or `opake-react` — never core.
+
+The keepers currently sit in core for a packaging reason (they must be WASM-compatible Rust and core is the shared home), not because they are protocol; that is a boundary to respect, not extend, and a candidate to eventually lift out. The one thing that earns core placement is a genuine *protocol contract* — for example, a monotonic indexer cursor that defines the snapshot/stream consistency model every client must honour. A client-side workaround that compensates for the lack of such a contract is convenience, and stays in the client.
+
 ## Background Work
 
-Some maintenance runs outside any user action: retrying a share to a recipient who wasn't ready, deleting expired pair requests, and (with the key-rotation change) re-wrapping keyring entries after a rotation. Two tiers run it. The **CLI daemon** is a committed runner — long-lived, unthrottled, expected to drain work sets. The **web client** is an opportunistic runner — it runs maintenance only while a tab is open and visible, and promises nothing, because a tab's lifetime isn't ours to extend and the service-worker alternative is disqualified (group keys can't leave page-WASM; see decision 12 above).
+Some maintenance runs outside any user action: retrying a share to a recipient who wasn't ready, deleting expired pair requests, and (with the key-rotation change) re-wrapping keyring entries after a rotation. Two tiers run it. The **CLI daemon** is a committed runner — long-lived, unthrottled, expected to drain work sets. The **web client** is an opportunistic runner — it runs maintenance only while a tab is open and visible, and promises nothing, because a tab's lifetime isn't ours to extend and the service-worker alternative is disqualified (group keys can't leave page-WASM; see [WASM Security Boundary](#wasm-security-boundary)).
 
 The design that follows from this: no protocol guarantee depends on background work completing, each task's remaining work is *derived* from records rather than stored (a dead runner leaves nothing to recover), and duplicate execution is harmless. When two runners collide on one record, they arbitrate per-record at the PDS — an idempotent upsert at a derived rkey, or a `swapRecord` compare-and-swap — never a lease, leader, or ownership claim. See **[BACKGROUND_WORK.md](BACKGROUND_WORK.md)** for the full contract, the multi-device walkthrough, and the checklist for designing a new task.
 
