@@ -20,7 +20,7 @@ FROM rust:1-slim-bookworm AS wasm-builder
 # Prebuilt, pinned wasm-pack: a source build costs minutes per cold cache.
 RUN apt-get update -y && apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
-    curl -sSfL https://github.com/drager/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
+    curl -sSfL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz \
     | tar xz --strip-components=1 -C /usr/local/bin wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack
 
 WORKDIR /build
