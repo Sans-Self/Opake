@@ -27,6 +27,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY apps/cli/ apps/cli/
+# opake-core includes the shared lexicon vocabulary relative to the
+# workspace root at compile time.
+COPY lexicons/ lexicons/
 
 # Same invocation and output path as `just wasm`.
 RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../packages/opake-sdk/wasm --out-name opake
