@@ -11,6 +11,12 @@
 !crates
 !apps/cli
 !apps/web
+!package.json
+!bun.lock
+!packages
+!tests
+tests/*
+!tests/package.json
 
 # Drop build artifacts even within the re-included paths; the image runs a
 # fresh mix deps.get / compile.
@@ -18,7 +24,8 @@ apps/indexer/_build
 apps/indexer/deps
 apps/indexer/.elixir_ls
 **/target
-apps/web/node_modules
+**/node_modules
 apps/web/dist
-apps/web/src/wasm
+packages/*/dist
+packages/opake-sdk/wasm
 **/.DS_Store

@@ -1,7 +1,15 @@
+# Workspace install: bun needs every workspace member's package.json to
+# resolve @opake/* dependencies; sources come later so this layer only
+# invalidates when a manifest changes.
 FROM oven/bun:1 AS web-deps
 
-WORKDIR /build/apps/web
-COPY apps/web/package.json apps/web/bun.lock ./
+WORKDIR /build
+COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/
+COPY packages/opake-sdk/package.json packages/opake-sdk/
+COPY packages/opake-daemon/package.json packages/opake-daemon/
+COPY packages/opake-react/package.json packages/opake-react/
+COPY tests/package.json tests/
 RUN bun install --frozen-lockfile
 
 # rust:1 tracks latest stable, matching the dev shell (flake.nix pins
@@ -20,19 +28,27 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY apps/cli/ apps/cli/
 
-RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../apps/web/src/wasm/opake-wasm --out-name opake
+# Same invocation and output path as `just wasm`.
+RUN wasm-pack build crates/opake-wasm --target web --out-dir ../../packages/opake-sdk/wasm --out-name opake
 
 FROM web-deps AS web-builder
 
-ARG VITE_INDEXER_URL=https://indexer.opake.app
-ARG VITE_SITE_URL=https://opake.app
+ARG VITE_INDEXER_URL=https://indexer.opake.at
+ARG VITE_SITE_URL=https://opake.at
 ENV VITE_INDEXER_URL=$VITE_INDEXER_URL
 ENV VITE_SITE_URL=$VITE_SITE_URL
 
-COPY apps/web/ ./
-COPY --from=wasm-builder /build/apps/web/src/wasm/opake-wasm/ ./src/wasm/opake-wasm/
+COPY packages/ packages/
+COPY apps/web/ apps/web/
+COPY --from=wasm-builder /build/packages/opake-sdk/wasm/ packages/opake-sdk/wasm/
 
-RUN bun run tsc && bun run vite build
+# Same chain as `just web-build`: sdk -> daemon -> react, then the app.
+RUN cd packages/opake-sdk && bun run build && \
+    cd ../opake-daemon && bun run build && \
+    cd ../opake-react && bun run build
+
+WORKDIR /build/apps/web
+RUN bun run build
 
 FROM oven/bun:1-slim
 
@@ -40,7 +56,7 @@ RUN groupadd -g 1000 opake || true && useradd -u 1000 -g 1000 -m opake || true
 
 WORKDIR /app
 COPY --from=web-builder --chown=1000:1000 /build/apps/web/dist/ ./dist/
-COPY --from=web-builder --chown=1000:1000 /build/apps/web/node_modules/ ./node_modules/
+COPY --from=web-builder --chown=1000:1000 /build/node_modules/ ./node_modules/
 COPY --from=web-builder --chown=1000:1000 /build/apps/web/package.json ./
 COPY --from=web-builder --chown=1000:1000 /build/apps/web/serve.ts ./
 
