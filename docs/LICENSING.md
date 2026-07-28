@@ -51,9 +51,17 @@ If your code calls Opake functions by importing the library, it's AGPL. If your 
 
 ## For Contributors
 
-By submitting a pull request, you agree that your contribution is licensed under AGPL-3.0, the same license as the rest of the project. There is no CLA (Contributor License Agreement) — you retain copyright over your code.
+Contributions are released under AGPL-3.0, the same license as the rest of the project, and contributing requires signing the [Contributor License Agreement](../CLA.md). You keep copyright over your code; the CLA grants the project steward a license to it, including the right to offer the project under additional licenses. Signing happens automatically on your first pull request — an assistant comments with instructions and remembers you afterwards. If your employer holds rights to work you contribute, they sign the [Corporate CLA](../CORPORATE_CLA.md) instead.
 
 If your contribution includes code from another source, it must be compatible with AGPL-3.0. MIT, BSD, and Apache-2.0 are compatible. GPL-2.0-only is not.
+
+## Commercial licensing
+
+The AGPL is the only license Opake is offered under today. If the terms above rule out a use you want to pursue — embedding the library in a product you cannot release under AGPL, for instance — an alternative license may be negotiable: the CLA exists so that the steward can grant one. That is a conversation, not a published price list.
+
+Contact: **me@sans-self.org**, subject line "commercial licensing".
+
+Two things worth saying plainly. Talking to Opake over its APIs needs no license from anyone, so check the linking boundary above before assuming you need this. And nothing here weakens the AGPL release: the code that is public stays public under AGPL, permanently.
 
 ## Why AGPL?
 
