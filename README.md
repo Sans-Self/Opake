@@ -8,7 +8,10 @@
 
 <p align="center">
   <a href="https://opake.at">
-    <img src="apps/web/public/bsky-banner.png" alt="Opake — your data, freely shared, privately kept" width="780" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png" />
+      <img src=".github/assets/banner-light.png" alt="Opake — your data, freely shared, privately kept" width="780" />
+    </picture>
   </a>
 </p>
 

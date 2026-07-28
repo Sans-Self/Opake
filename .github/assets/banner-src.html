@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face {
+    font-family: "Cormorant Garamond";
+    src: url("../../apps/web/public/fonts/cormorant-garamond-latin-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    src: url("../../apps/web/public/fonts/inter-latin-normal.woff2") format("woff2");
+  }
+  html, body { margin: 0; background: transparent; }
+  .banner {
+    width: 1560px;
+    height: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+  .mark { margin-bottom: 26px; }
+  .wordmark {
+    font-family: "Cormorant Garamond", serif;
+    font-size: 118px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .tagline {
+    margin-top: 18px;
+    font-family: "Inter", sans-serif;
+    font-size: 27px;
+    letter-spacing: 0.01em;
+    color: var(--ink-soft);
+  }
+  .light { --ink: #2b241a; --ink-soft: #6f6353; }
+  .dark  { --ink: #f0ead9; --ink-soft: #b3a78f; }
+</style>
+</head>
+<body>
+<div class="banner light" id="light">
+  <svg class="mark" width="84" height="84" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="22" height="22" rx="2" fill="#9A7840" fill-opacity="0.7" />
+    <rect x="6" y="6" width="22" height="22" rx="2" fill="#9A7840" fill-opacity="0.2" stroke="#9A7840" stroke-opacity="0.45" stroke-width="1.5" />
+  </svg>
+  <div class="wordmark">Opake</div>
+  <div class="tagline">Your data, freely shared, privately kept</div>
+</div>
+<div class="banner dark" id="dark">
+  <svg class="mark" width="84" height="84" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="22" height="22" rx="2" fill="#B99356" fill-opacity="0.85" />
+    <rect x="6" y="6" width="22" height="22" rx="2" fill="#B99356" fill-opacity="0.22" stroke="#B99356" stroke-opacity="0.55" stroke-width="1.5" />
+  </svg>
+  <div class="wordmark">Opake</div>
+  <div class="tagline">Your data, freely shared, privately kept</div>
+</div>
+</body>
+</html>
