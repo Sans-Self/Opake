@@ -113,7 +113,7 @@ function CabinetLayout() {
         {/* Mobile sidebar drawer */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 z-40 flex md:hidden"
+            className="fixed inset-0 z-100 flex md:hidden"
             role="dialog"
             aria-modal="true"
             aria-label="Navigation"
