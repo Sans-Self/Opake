@@ -1,4 +1,9 @@
-@import "tailwindcss";
+/* Explicit source(): Tailwind v4's automatic source detection resolves
+   differently between the client and SSR build passes in container builds,
+   yielding two different CSS outputs — the SSR pass then links a stylesheet
+   hash the client build never emits (404 + hydration mismatch). Pinning the
+   scan root makes both passes compile identical CSS. */
+@import "tailwindcss" source("../");
 @plugin "daisyui";
 
 /* ─── Fallback font metric overrides (eliminates layout shift on swap) ──── */
