@@ -1,0 +1,90 @@
+name: deploy-prod
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Scaleway registry
+        uses: docker/login-action@v3
+        with:
+          registry: rg.fr-par.scw.cloud
+          username: nologin
+          password: ${{ secrets.SCW_SECRET_KEY }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push indexer
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile.indexer
+          platforms: linux/amd64
+          push: true
+          tags: |
+            rg.fr-par.scw.cloud/opake/indexer:latest
+            rg.fr-par.scw.cloud/opake/indexer:prod-${{ github.sha }}
+          cache-from: type=gha,scope=indexer
+          cache-to: type=gha,scope=indexer,mode=max
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile.web
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_INDEXER_URL=https://indexer.opake.at
+            VITE_SITE_URL=https://opake.at
+            VITE_BETA=1
+          tags: |
+            rg.fr-par.scw.cloud/opake/web:latest
+            rg.fr-par.scw.cloud/opake/web:prod-${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Render secrets
+        run: |
+          kubectl create secret generic opake-secrets \
+            --namespace opake \
+            --from-literal secret-key-base='${{ secrets.PROD_SECRET_KEY_BASE }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic opake-database-url \
+            --namespace opake \
+            --from-literal url='${{ secrets.PROD_DATABASE_URL }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply prod overlay
+        run: kubectl apply -k deploy/k8s/overlays/prod
+
+      - name: Roll deployments
+        run: |
+          kubectl rollout restart deployment/opake-web deployment/opake-indexer -n opake
+          kubectl rollout status deployment/opake-indexer -n opake --timeout=300s
+          kubectl rollout status deployment/opake-web -n opake --timeout=300s

@@ -9,6 +9,7 @@ import {
 import type { AuthSnapshot } from "@/stores/auth";
 import { ToastContainer } from "@/components/ToastContainer";
 import { OpakeLogo } from "@/components/OpakeLogo";
+import { BetaBadge } from "@/components/BetaBadge";
 import css from "@/index.css?url";
 
 export interface RouterContext {
@@ -47,6 +48,7 @@ function RootDocument({ children }: Readonly<{ children: React.ReactNode }>) {
         <HeadContent />
       </head>
       <body>
+        <BetaBadge />
         {children}
         <Scripts />
       </body>

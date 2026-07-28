@@ -42,8 +42,10 @@ FROM web-deps AS web-builder
 
 ARG VITE_INDEXER_URL=https://indexer.opake.at
 ARG VITE_SITE_URL=https://opake.at
+ARG VITE_BETA=""
 ENV VITE_INDEXER_URL=$VITE_INDEXER_URL
 ENV VITE_SITE_URL=$VITE_SITE_URL
+ENV VITE_BETA=$VITE_BETA
 
 COPY packages/ packages/
 COPY apps/web/ apps/web/
