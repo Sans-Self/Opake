@@ -5,6 +5,7 @@ import {
   ShareNetworkIcon,
   GlobeIcon,
   SparkleIcon,
+  EyeSlashIcon,
   BookOpenIcon,
   QuestionIcon,
   UsersThreeIcon,
@@ -22,6 +23,7 @@ export type IconName =
   | "share"
   | "globe"
   | "sparkles"
+  | "eye-slash"
   | "book"
   | "question"
   | "group"
@@ -38,6 +40,7 @@ const ICON_MAP: Readonly<Record<IconName, Icon>> = {
   share: ShareNetworkIcon,
   globe: GlobeIcon,
   sparkles: SparkleIcon,
+  "eye-slash": EyeSlashIcon,
   book: BookOpenIcon,
   question: QuestionIcon,
   group: UsersThreeIcon,

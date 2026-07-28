@@ -73,7 +73,7 @@ const FILES: readonly MockFile[] = [
     badge: { label: "Shared", className: "bg-bg-sage text-success border-success/30" },
   },
   {
-    name: "Q4 Strategy.docx",
+    name: "Meeting notes.docx",
     meta: "245 KB · 2 days ago",
     iconBg: "bg-file-doc-bg",
     iconText: "text-file-doc",
@@ -81,7 +81,7 @@ const FILES: readonly MockFile[] = [
     badge: { label: "Private", className: "badge-accent text-primary border-border-accent" },
   },
   {
-    name: "Budget 2026.xlsx",
+    name: "Household budget.xlsx",
     meta: "1.2 MB · Shared",
     iconBg: "bg-file-sheet-bg",
     iconText: "text-file-sheet",
@@ -89,7 +89,7 @@ const FILES: readonly MockFile[] = [
     badge: { label: "Shared", className: "bg-bg-sage text-success border-success/30" },
   },
   {
-    name: "Design Brief.pdf",
+    name: "Rental contract.pdf",
     meta: "3.4 MB · Yesterday",
     iconBg: "bg-file-pdf-bg",
     iconText: "text-file-pdf",

@@ -31,12 +31,12 @@ function LandingPage() {
     <>
       <HeroSection>
         <HeroHeadline>
-          Your data; <Highlight>freely shared</Highlight>, privately kept.
+          Your data, <Highlight>freely shared</Highlight>, privately kept.
         </HeroHeadline>
 
         <HeroSubtext>
-          Private collaboration, finally made simple. Your files belong to you, they&apos;re shared
-          on your terms, and no one else has the keys.
+          Private collaboration without giving up your files. They’re shared on your terms, and no
+          one else holds the keys.
         </HeroSubtext>
 
         <CtaGroup>
@@ -64,8 +64,8 @@ function LandingPage() {
               Your data is encrypted locally. By the time it hits a server, it&apos;s unreadable to
               everyone but you. We couldn't look at your files even if we wanted to.
               <Divider text="Modern Sharing" />
-              Forget the "Create an Account" hurdles. Share instantly using your digital handle.
-              Your files, your rules—grant or revoke access whenever you want.
+              Forget the "Create an Account" hurdles. Share instantly using a handle. Your files,
+              your rules — grant or revoke access whenever you want.
               <div className="border-border-accent/40 my-6 border-t" />
               <TextLink href="/docs/at-protocol">
                 Read the technical documentation <ArrowRightIcon size="1em" />
@@ -78,19 +78,19 @@ function LandingPage() {
             keys&nbsp;&mdash; always.
           </InfoCard>
 
-          <InfoCard icon="network" title="No Platform Lock-in">
+          <InfoCard icon="network" title="No platform lock-in">
             Built on the same open standard as Bluesky. Your identity and your files belong to you,
             not us.
           </InfoCard>
 
-          <InfoCard icon="share" title="Seamless sharing">
-            Skip the "Create an Account" forms. Share instantly using your digital handle and stay
-            in control of who sees what
+          <InfoCard icon="share" title="Share by handle">
+            No new accounts on either side — type a handle, choose what they can see, and revoke
+            whenever you like.
           </InfoCard>
 
-          <InfoCard icon="sparkles" title="We Can’t Peek">
-            Our system is physically unable to read your data. Your privacy is built into the code,
-            not just a promise in a legal document.
+          <InfoCard icon="eye-slash" title="We can’t peek">
+            Opake’s servers only ever hold ciphertext. Your privacy is enforced by encryption, not
+            by a promise in a legal document.
           </InfoCard>
         </InfoGrid>
       </Section>
@@ -104,32 +104,32 @@ function LandingPage() {
           <StepCard num="I" icon="lock" featured>
             <StepTitle>Start with your handle</StepTitle>
             <StepBody>
-              Log in using your AT Protocol identity (like Bluesky). Opake connects to your digital
-              home and sets up your private keys automatically.
+              Log in using your AT Protocol identity (like Bluesky). Opake connects to your
+              account’s home server and sets up your keys automatically.
             </StepBody>
           </StepCard>
 
           <StepCard num="II" icon="lock">
-            <StepTitle>Automatic Privacy</StepTitle>
+            <StepTitle>Automatic privacy</StepTitle>
             <StepBody>
               Drop a file in. It’s locked on your device before it’s ever uploaded. To the rest of
-              the world—including your storage provider—it’s completely unreadable.
+              the world — including your storage provider — it’s completely unreadable.
             </StepBody>
           </StepCard>
 
           <StepCard num="III" icon="share">
-            <StepTitle>Effortless Sharing</StepTitle>
+            <StepTitle>Effortless sharing</StepTitle>
             <StepBody>
-              Just type a friend’s handle to share. We handle the complex security in the background
-              so that only the person you chose can open what you’ve sent.
+              Type a friend’s handle. The keys are exchanged in the background, so only the person
+              you chose can open what you’ve sent.
             </StepBody>
           </StepCard>
 
           <StepCard num="IV" icon="globe">
-            <StepTitle>Never Locked In</StepTitle>
+            <StepTitle>Never locked in</StepTitle>
             <StepBody>
               You’re in charge of where your files live. Switch providers or host them yourself
-              whenever you like. Your data and your identity always stay with you
+              whenever you like. Your data and your identity always stay with you.
             </StepBody>
           </StepCard>
         </StepGrid>
@@ -137,7 +137,7 @@ function LandingPage() {
 
       <CenterAction
         headline="your cabinet is waiting."
-        subtext="Take back your data. No surveillance, no compromise. Just your files, exactly as private as you choose."
+        subtext="Take back your data. Just your files, exactly as private as you choose — on an identity you already own."
       >
         <Link
           to="/cabinet"

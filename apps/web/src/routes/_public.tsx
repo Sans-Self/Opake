@@ -141,9 +141,6 @@ function PublicLayout() {
                 <br />
                 Built with the AT&nbsp;Protocol.
               </p>
-              <p className="text-text-faint text-caption mt-3 tracking-[0.04em]">
-                Amsterdam · The Open Web
-              </p>
             </div>
 
             {/* Link columns */}
@@ -182,7 +179,7 @@ function PublicLayout() {
           {/* Bottom bar */}
           <div className="border-border-accent/30 mt-16 flex flex-wrap items-center justify-between gap-4 border-t pt-6">
             <p className="text-text-faint text-caption tracking-wider">
-              MMXXVI · Opake · All rights reserved
+              © 2026 Opake · Free software under AGPL-3.0
             </p>
             <p className="font-display text-text-faint text-caption tracking-wide italic">
               Privacy without the bunker.
