@@ -42,6 +42,15 @@ export default defineConfig({
     // tanstackStart() replaces TanStackRouterVite() + react()
     tanstackStart(),
   ],
+  environments: {
+    // Materialize the SSR pass's assets. The SSR bundle links a stylesheet
+    // hash computed over the SSR environment's own CSS compilation; in
+    // container builds that compilation diverges from the client's and the
+    // hash points at a file that otherwise never exists. Emitting it makes
+    // the divergent bytes inspectable (and the diagnostic step in
+    // Containerfile.web diffs them against the client's).
+    ssr: { build: { emitAssets: true } },
+  },
   server: {
     // Listen on all interfaces so 127.0.0.1:5173 works (required for
     // atproto OAuth — RFC 8252 rejects "localhost", needs loopback IP)

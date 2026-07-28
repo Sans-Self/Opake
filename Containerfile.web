@@ -64,8 +64,11 @@ RUN bun run build
 # container builds. Print both sides so the build log shows the mismatch.
 RUN echo "=== stylesheet diagnostic ===" && \
     echo "client emits:" && ls dist/client/assets/*.css && \
+    echo "server emits:" && (ls dist/server/assets/*.css 2>/dev/null || echo none) && \
     echo "server references:" && \
-    grep -rhoE "assets/[A-Za-z0-9._-]+\.css" dist/server/ | sort -u && \
+    grep -rhoE "assets/[A-Za-z0-9._-]+\.css" dist/server/ --include="*.js" | sort -u && \
+    echo "diff (server vs client):" && \
+    (diff dist/server/assets/index-*.css dist/client/assets/index-*.css | head -80 || true) && \
     echo "=== end stylesheet diagnostic ==="
 
 FROM oven/bun:1-slim
