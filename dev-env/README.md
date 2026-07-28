@@ -12,7 +12,9 @@ configuration, so nothing here can drift from what ships.
 dev-env/
   docker-compose.yml         the stack
   caddy/Caddyfile            TLS vhosts: pds-{a,b,c}.test, plc.test, indexer.test
-  certs/                     local dev CA + one leaf cert (SANs for every vhost)
+  certs/regen.sh             generates the local dev CA + leaf cert (SANs for
+                             every vhost). Runs automatically on `just
+                             dev-env-up`; the key material is never committed.
   fixtures/actors.json       6 fixed-mnemonic actors, 2 per PDS  (owned by fixtures task)
   fixtures/generate_mnemonics.py  regenerates the fixture set (run once, checked in)
   bootstrap/bootstrap.sh     provisions the actors (runs inside the network)

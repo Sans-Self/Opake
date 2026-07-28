@@ -43,3 +43,12 @@ e2e-tests/playwright-report/
 /result
 /result-*
 .claude/skills/openspec-*
+
+# Playwright storage-state snapshots hold live bearer credentials for the
+# dev-stack test accounts (see SECURITY.md).
+.auth/
+
+# dev-env TLS material is generated locally by dev-env/certs/regen.sh —
+# never committed, so a published CA key cannot be trusted by anyone.
+dev-env/certs/*.key
+dev-env/certs/*.crt

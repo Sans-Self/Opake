@@ -258,6 +258,9 @@ dev-env-build:
 
 # Start the stack (healthcheck-gated) and bootstrap the fixture actors
 dev-env-up: dev-env-build
+    # TLS material is generated locally, never committed: a published CA key
+    # would be one anyone could mint trusted certificates against.
+    [ -f dev-env/certs/ca.key ] || dev-env/certs/regen.sh
     cd dev-env && docker compose up -d --wait
     cd dev-env && docker compose run --rm bootstrap /bootstrap/bootstrap.sh
 
