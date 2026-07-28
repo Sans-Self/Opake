@@ -59,6 +59,15 @@ RUN cd packages/opake-sdk && bun run build && \
 WORKDIR /build/apps/web
 RUN bun run build
 
+# Diagnostic for the SSR/client stylesheet hash divergence: the SSR bundle
+# has been observed linking a CSS hash the client build never emits, only in
+# container builds. Print both sides so the build log shows the mismatch.
+RUN echo "=== stylesheet diagnostic ===" && \
+    echo "client emits:" && ls dist/client/assets/*.css && \
+    echo "server references:" && \
+    grep -rhoE "assets/[A-Za-z0-9._-]+\.css" dist/server/ | sort -u && \
+    echo "=== end stylesheet diagnostic ==="
+
 FROM oven/bun:1-slim
 
 RUN groupadd -g 1000 opake || true && useradd -u 1000 -g 1000 -m opake || true
