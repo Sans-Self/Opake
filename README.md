@@ -100,3 +100,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the "mini-nuke" policy and commit con
 ## License
 
 [AGPL-3.0](LICENSE) — see [docs/LICENSING.md](docs/LICENSING.md) for what this means for self-hosters, plugin developers, and contributors.
+
+Contributing requires signing the [Contributor License Agreement](CLA.md); the process runs automatically on your first pull request. If the AGPL rules out a use you want to pursue, [commercial licensing](docs/LICENSING.md#commercial-licensing) is a conversation worth having.
