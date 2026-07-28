@@ -6,15 +6,32 @@
   documentation drift.
 -->
 
-# Opake
+<p align="center">
+  <a href="https://opake.at">
+    <img src="apps/web/public/bsky-banner.png" alt="Opake — your data, freely shared, privately kept" width="780" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Opake-at/Opake/actions/workflows/qa.yml"><img src="https://github.com/Opake-at/Opake/actions/workflows/qa.yml/badge.svg" alt="QA" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-AGPL--3.0-9a7840" alt="Licence: AGPL-3.0" /></a>
+  <a href="https://atproto.com"><img src="https://img.shields.io/badge/built%20on-AT%20Protocol-9a7840" alt="Built on the AT Protocol" /></a>
+</p>
+
+<p align="center">
+  <a href="https://opake.at">opake.at</a> ·
+  <a href="https://opake.at/docs">The Handbook</a> ·
+  <a href="https://github.com/Opake-at/Opake/issues">Issue Tracker</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
+
+---
 
 **/oʊˈpɑːk/** — like "opaque," but built for the AT Protocol.
 
 An encrypted personal cloud where privacy and collaboration are no longer a tradeoff. Opake uses your PDS as a blind storage layer. Files are encrypted client-side (AES-256-GCM) before they ever touch the network.
 
 Your data is opaque to everyone without the key. That's the point.
-
-[The Handbook](https://opake.at/docs) · [Issue Tracker](https://github.com/Opake-at/Opake/issues) · [Architecture](docs/ARCHITECTURE.md)
 
 ## Quick Start
 
