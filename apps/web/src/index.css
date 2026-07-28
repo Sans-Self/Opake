@@ -1,9 +1,13 @@
-/* Explicit source(): Tailwind v4's automatic source detection resolves
-   differently between the client and SSR build passes in container builds,
-   yielding two different CSS outputs — the SSR pass then links a stylesheet
-   hash the client build never emits (404 + hydration mismatch). Pinning the
-   scan root makes both passes compile identical CSS. */
+/* Explicit source() + dist exclusion: the client pass compiles first and
+   writes dist/, then the SSR pass rescans — and without a .git dir (as in
+   container builds) Tailwind's ignore heuristics don't skip dist/, so the
+   SSR pass harvests phantom utility candidates from the freshly written
+   minified bundles. Its CSS then hashes differently from the client's and
+   the SSR-rendered stylesheet link 404s. Excluding dist/ makes both passes
+   scan identical sources regardless of environment. */
 @import "tailwindcss" source("../");
+@source not "../dist";
+@source not "../.tanstack";
 @plugin "daisyui";
 
 /* ─── Fallback font metric overrides (eliminates layout shift on swap) ──── */
