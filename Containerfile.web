@@ -69,8 +69,8 @@ RUN echo "=== stylesheet diagnostic ===" && \
     grep -rhoE "assets/[A-Za-z0-9._-]+\.css" dist/server/ --include="*.js" | sort -u && \
     echo "sizes:" && wc -c dist/server/assets/index-*.css dist/client/assets/index-*.css && \
     echo "rule-level diff (server vs client):" && \
-    tr '}' '\n' < dist/server/assets/index-*.css > /tmp/ssr-rules && \
-    tr '}' '\n' < dist/client/assets/index-*.css > /tmp/client-rules && \
+    cat dist/server/assets/index-*.css | tr '}' '\n' > /tmp/ssr-rules && \
+    cat dist/client/assets/index-*.css | tr '}' '\n' > /tmp/client-rules && \
     (diff /tmp/ssr-rules /tmp/client-rules | head -120 || true) && \
     echo "=== end stylesheet diagnostic ==="
 
