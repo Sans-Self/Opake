@@ -14,7 +14,7 @@ An encrypted personal cloud where privacy and collaboration are no longer a trad
 
 Your data is opaque to everyone without the key. That's the point.
 
-[The Handbook](https://opake.app/docs) · [Issue Tracker](https://tangled.org/opake.app/opake/issues) · [Architecture](docs/ARCHITECTURE.md)
+[The Handbook](https://opake.at/docs) · [Issue Tracker](https://github.com/Opake-at/Opake/issues) · [Architecture](docs/ARCHITECTURE.md)
 
 ## Quick Start
 

@@ -14,7 +14,7 @@ import {
   Opake publishes `at.opake.*` records to the caller's PDS. This page is a working
   reference for the schemas — what a document record looks like on the wire, how the
   encryption envelope is shaped, what fields the indexer relies on. The authoritative
-  schemas live in [`/lexicons`](https://tangled.org/opake.app/opake/tree/main/lexicons)
+  schemas live in [`/lexicons`](https://github.com/Opake-at/Opake/tree/main/lexicons)
   in the repo.
 </Lead>
 
@@ -41,7 +41,7 @@ config.
 ## Encryption primitives
 
 Three small shapes underpin every opaque field on every record. They live in
-[`at.opake.defs`](https://tangled.org/opake.app/opake/blob/main/lexicons/at.opake.defs.json)
+[`at.opake.defs`](https://github.com/Opake-at/Opake/blob/main/lexicons/at.opake.defs.json)
 as shared refs.
 
 ### `wrappedKey`
@@ -145,7 +145,7 @@ The indexer never decrypts anything. All the filtering is over plaintext metadat
 (DIDs, AT-URIs, timestamps, roles) — the encrypted payload passes through opaque.
 
 See [Live updates](/docs/sdk/events) for the client-side stream consumer, and
-[docs/indexer.md](https://tangled.org/opake.app/opake/blob/main/docs/indexer.md)
+[docs/indexer.md](https://github.com/Opake-at/Opake/blob/main/docs/indexer.md)
 for the indexer's own configuration and API.
 
 ## Schema versioning
@@ -167,12 +167,12 @@ your supported set.
 
 ## Getting the authoritative schemas
 
-The JSON schema files in [`/lexicons`](https://tangled.org/opake.app/opake/tree/main/lexicons)
+The JSON schema files in [`/lexicons`](https://github.com/Opake-at/Opake/tree/main/lexicons)
 are the canonical source. Every field description, constraint, and `knownValues` list is
 there. Clone the repo and wire them into your codegen:
 
 ```sh
-git clone https://tangled.org/opake.app/opake
+git clone https://github.com/Opake-at/Opake
 # then point your lexicon codegen at opake/lexicons/
 ```
 

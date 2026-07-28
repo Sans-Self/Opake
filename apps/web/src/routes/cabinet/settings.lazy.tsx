@@ -136,7 +136,7 @@ function SettingsPage() {
               <input
                 type="url"
                 className="input input-bordered input-sm flex-1"
-                placeholder="https://indexer.opake.app"
+                placeholder="https://indexer.opake.at"
                 value={indexerUrl}
                 onChange={(e) => setIndexerUrl(e.target.value)}
                 disabled={saving}
