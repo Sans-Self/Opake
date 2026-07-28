@@ -1,0 +1,73 @@
+{/*
+  The prose on this page is Noï's. It is the one page whose whole point is
+  that a human wrote it — do not edit the text on anyone else's behalf.
+*/}
+
+<ChapterHeader title="AI and Opake" />
+
+<Lead>
+  A note from Noï, the maintainer. Last reviewed{" "}
+  <time dateTime="2026-07-28">28 July 2026</time>.
+</Lead>
+
+We live in an age of AI. Two years ago, I co-wrote an internal motion at the Dutch Partij voor de Dieren's members' assembly to stop AI-usage within the party. One year ago, I begrudgingly started to use fancy autocomplete in my editors. Today, frontier-models are mind-blowing.
+
+## AI within this project
+
+Text that should be read by humans, should be written by humans. This is a core belief I hold. Below is where I have and have not lived up to it.
+
+### On the UI and documentation
+
+Some user-facing parts of this project have been produced using several AI coding- and design tools including Claude Code and Open Code + locally hosted Qwen. This includes the web UI and most markdown files (not .mdx).
+
+In case of the UI, I did come up with broadly how I want the interface to look, but I am not a UX-designer. This is something that will require a chunk of money.
+
+In case of the documentation contained in markdown files; the project has gone through substantial changes over its development. I have had to teach myself a lot more in-depth cryptographic work than I've ever had to touch, I've had to familiarize myself with ATProto, I've had to familiarize myself with federated systems. Writing the documentation by hand for a project such as this takes substantial time but will be done before v1.
+
+### On the codebase itself
+
+When I started this project, I was firmly against using AI to generate large portions of code. Over its runtime, AI has improved to the point where my views on this have shifted. The blog post ["We mourn our craft"](https://nolanlawson.com/2026/02/07/we-mourn-our-craft/) by Nolan Lawson accurately describes how I feel about this change.
+
+I have started to use [OpenSpec](https://openspec.dev/) and a (human) review process to keep the quality of this project up to my standards, but write very few of the lines by hand. I will be requiring these specs as part of PRs and have included a citation tool to be used in tests, docs, and comments.
+
+### How to check my work
+
+Trust me less than that. The claims above are inspectable:
+
+- Behaviour is written down as a [requirement](https://github.com/Opake-at/Opake/tree/main/openspec/specs) before it is written as code.
+- Tests, comments and docs cite the requirement they implement, by name.
+- `just spec-lint` fails when a citation points at a requirement that no longer exists, so the specs cannot quietly drift away from the code.
+- Formatting, lints, the Rust suite, the indexer suite and that citation check all run on every pull request.
+
+None of this proves the code is correct. It proves that where the code disagrees with what I said it should do, the disagreement is visible to you and not only to me.
+
+R&D is AI-assisted: I dictate the architecture, the algorithms used, the width of trust boundaries and attack vectors. But every published line of code belongs to the human behind it. That means every bug or vulnerability is, too. External contributors are also welcome to use AI in their process, but these standards will apply to all.
+
+## Ethics of AI in general
+
+Before writing this page I went back and checked my old beliefs and positions. Not all of it held up.
+
+### AI energy usage
+On energy, I at the time used a source describing a worst-case scenario (every AI chip running continuously, with no efficiency gains) and the paper itself said so.<sup>[[source](https://www.sciencedirect.com/science/article/pii/S2542435123003653)]</sup> It got reported as a forecast.
+
+The best current estimate is that data centres are a little over one percent of global electricity and half a percent of global CO₂,<sup>[[source](https://www.iea.org/reports/energy-and-ai/executive-summary)]</sup> and that between now and 2030 the extra demand from electric cars and from air conditioning is each larger than the extra demand from data centres.<sup>[[source](https://www.carbonbrief.org/ai-five-charts-that-put-data-centre-energy-use-and-emissions-into-context)]</sup> This is still a problem with our current non-renewable energy infrastructure — the growth is real, and the load concentrates, which is why some national grids are already a fifth data centre — but not the disaster previously argued.
+
+### AI water usage
+On water I was plainly wrong in a way that clearly shows a confirmation bias. Roughly a third of agriculture's water footprint is animal products<sup>[[source](https://waterfootprint.org/resources/Mekonnen-Hoekstra-2012-WaterFootprintFarmAnimalProducts_1.pdf)]</sup> while data centres are a fraction of a percent of public water supply.<sup>[[source](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025AV002140)]</sup> The gap is orders of magnitude. If drinking water is the objection, animal agriculture is the argument, and I was pointing at the wrong thing. A data centre drinking a drought-prone region's groundwater is a real issue, but the problem there is capitalism and a state that doesn't protect its citizens rather than AI.
+
+### What I learned from this
+To put it bluntly: this was a harsh lesson in confirmation bias. I sought arguments to fit my position rather than the other way around. This probably is very human, but I like to think during the next potentially revolutionary technological leap, I'll judge differently.
+
+### AI and creative work
+The harm to people who *make* things for a living turned out worse than we feared, not better: the Society of Authors found that a quarter of illustrators had already lost work to generative AI,<sup>[[source](https://europeanwriterscouncil.eu/soa-survey-uk-ai-2024/)]</sup> and UNESCO now projects a quarter of music creators' income gone by 2028.<sup>[[source](https://news.un.org/en/story/2026/02/1166989)]</sup> For this reason I intend to have Opake's entire UI be redesigned by human artists and designers; something that currently is financially not within reach.
+
+So I did not stop objecting. The objection moved; and as a programmer/artist this concern does directly affect me. I was self-taught as a developer at the age of 12; my first programming projects were Minecraft mods. I now doubt that is a skill people will continue to nurture. But a technology like this cannot and should not be uninvented. I simply hope I can channel my objections into steering the results of this brave new world.
+
+### Reasons to be hopeful
+I have also turned to a more optimistic outlook on the world. There are reasons to be hopeful: personalized mRNA cancer vaccines, where an algorithm picks up to 34 tumour-specific targets per patient, cutting the risk of recurrence or death in resected melanoma by 44% over immunotherapy alone;<sup>[[source](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(23)02268-7/abstract)]</sup> a Nobel Prize for predicting the shape of very nearly every protein science has sequenced, then publishing all two hundred million of them for anyone to use, free;<sup>[[source](https://www.nobelprize.org/prizes/chemistry/2024/press-release/)]</sup> gold-medal standard at the International Mathematical Olympiad, five problems out of six, where only 67 of 630 human contestants took gold;<sup>[[source](https://deepmind.google/blog/advanced-version-of-gemini-with-deep-think-officially-achieves-gold-medal-standard-at-the-international-mathematical-olympiad/)]</sup> and a weather model that beats Europe's gold-standard forecast on 97% of targets while replacing hours on a supercomputer with eight minutes on a single chip.<sup>[[source](https://deepmind.google/blog/gencast-predicts-weather-and-the-risks-of-extreme-conditions-with-sota-accuracy/)]</sup>
+
+None of this arrives on its own. The future is ours to shape with our own hands.
+
+And while this future might end up being bright, we won't see it if we instinctively look away.<br />
+
+*Love, Noï van Mondfrans (she/her)*

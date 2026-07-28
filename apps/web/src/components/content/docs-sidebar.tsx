@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { CATEGORY_META, findDoc, partitionCategoryForSidebar, type DocMeta } from "@/lib/docs-registry";
+import {
+  CATEGORY_META,
+  crossCuttingDocs,
+  partitionCategoryForSidebar,
+  type DocMeta,
+} from "@/lib/docs-registry";
 import { DocsSearch, DocsSearchButton } from "./DocsSearch";
 
 interface DocsSidebarProps {
@@ -43,7 +48,7 @@ export function DocsSidebar({
   currentGroup,
   variant = "public",
 }: DocsSidebarProps) {
-  const faq = findDoc("faq");
+  const crossCutting = crossCuttingDocs();
   const [searchOpen, setSearchOpen] = useState(false);
 
   const baseSectionGap = variant === "cabinet" ? "space-y-4" : "space-y-5";
@@ -104,17 +109,18 @@ export function DocsSidebar({
         );
       })}
 
-      {faq && (
-        <section>
-          <ul className="flex flex-col gap-0.5">
+      <section>
+        <ul className="flex flex-col gap-0.5">
+          {crossCutting.map((doc) => (
             <SidebarLink
-              doc={faq}
-              isCurrent={isCurrent(faq, currentSlug, currentGroup)}
+              key={doc.slug}
+              doc={doc}
+              isCurrent={isCurrent(doc, currentSlug, currentGroup)}
               linkSize={linkSize}
             />
-          </ul>
-        </section>
-      )}
+          ))}
+        </ul>
+      </section>
     </nav>
   );
 }
@@ -169,7 +175,7 @@ export function DocsSidebarCabinet({
   readonly currentSlug?: string;
   readonly currentGroup?: string;
 }) {
-  const faq = findDoc("faq");
+  const crossCutting = crossCuttingDocs();
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
@@ -220,13 +226,17 @@ export function DocsSidebarCabinet({
         );
       })}
 
-      {faq && (
-        <section>
-          <ul>
-            <CabinetLink doc={faq} isCurrent={isCurrent(faq, currentSlug, currentGroup)} />
-          </ul>
-        </section>
-      )}
+      <section>
+        <ul>
+          {crossCutting.map((doc) => (
+            <CabinetLink
+              key={doc.slug}
+              doc={doc}
+              isCurrent={isCurrent(doc, currentSlug, currentGroup)}
+            />
+          ))}
+        </ul>
+      </section>
     </nav>
   );
 }

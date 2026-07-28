@@ -17,6 +17,13 @@ export interface DocMeta {
    * without turning every flat doc into a nested URL.
    */
   readonly group?: string;
+  /**
+   * Speaks about the whole project rather than to one audience. Cross-cutting
+   * docs are excluded from their category's listing and pinned to the end of
+   * the sidebar and landing page instead, in registry order. `category` is
+   * still required — it decides nothing for these, so pick the closest fit.
+   */
+  readonly crossCutting?: boolean;
   readonly title: string;
   readonly description: string;
   readonly icon: IconName;
@@ -266,14 +273,21 @@ export const DOCS_REGISTRY: readonly DocMeta[] = [
   // -- Cross-cutting ---------------------------------------------------------
   {
     slug: "faq",
-    // FAQ sits outside a category intentionally; `category: "use"` keeps the
-    // type simple while rendering code can special-case the slug to pin it
-    // to the top level of the sidebar / landing.
     category: "use",
+    crossCutting: true,
     title: "FAQ",
     icon: "question",
     description:
       "Common questions about privacy, security, and how Opake compares to alternatives.",
+  },
+  {
+    slug: "ai",
+    category: "understand",
+    crossCutting: true,
+    title: "AI and Opake",
+    icon: "book",
+    description:
+      "A note from the maintainer on where AI tooling is and is not used, in the interface, the documentation, and the code.",
   },
 ];
 
@@ -282,7 +296,12 @@ export function findDoc(slug: string): DocMeta | undefined {
 }
 
 export function docsByCategory(category: DocCategory): readonly DocMeta[] {
-  return DOCS_REGISTRY.filter((d) => d.category === category && d.slug !== "faq");
+  return DOCS_REGISTRY.filter((d) => d.category === category && d.crossCutting !== true);
+}
+
+/** Cross-cutting docs in registry order — rendered after every category. */
+export function crossCuttingDocs(): readonly DocMeta[] {
+  return DOCS_REGISTRY.filter((d) => d.crossCutting === true);
 }
 
 /** URL path for a doc — nested under `group` if set, flat otherwise. */
@@ -328,10 +347,10 @@ export function nextDoc(currentSlug: string): DocMeta | null {
       : candidate.category !== current.category;
 
   // The first candidate after `current` that either continues the sequence or
-  // ends it decides the answer; anything before that (FAQ, or a grouped page
-  // sitting inside a flat category's band) is walked past.
+  // ends it decides the answer; anything before that (a cross-cutting page, or
+  // a grouped page sitting inside a flat category's band) is walked past.
   const candidate = DOCS_REGISTRY.slice(index + 1).find(
-    (c) => c.slug !== "faq" && (continuesSequence(c) || endsSequence(c)),
+    (c) => c.crossCutting !== true && (continuesSequence(c) || endsSequence(c)),
   );
 
   return candidate && continuesSequence(candidate) ? candidate : null;

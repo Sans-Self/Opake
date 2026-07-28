@@ -25,7 +25,8 @@
   <a href="https://opake.at">opake.at</a> ·
   <a href="https://opake.at/docs">The Handbook</a> ·
   <a href="https://github.com/Opake-at/Opake/issues">Issue Tracker</a> ·
-  <a href="docs/ARCHITECTURE.md">Architecture</a>
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="https://opake.at/docs/ai">AI and Opake</a>
 </p>
 
 ---
@@ -35,6 +36,13 @@
 An encrypted personal cloud where privacy and collaboration are no longer a tradeoff. Opake uses your PDS as a blind storage layer. Files are encrypted client-side (AES-256-GCM) before they ever touch the network.
 
 Your data is opaque to everyone without the key. That's the point.
+
+> **On AI.** The web UI and most markdown files were produced with AI assistance;
+> the code is AI-assisted under human-dictated architecture, specs, and review, and
+> every published line is the maintainer's responsibility. The same standards apply to
+> external contributions. The full note, including where the maintainer's own position
+> on AI has changed and where it hasn't, is
+> [AI and Opake](https://opake.at/docs/ai).
 
 ## Quick Start
 

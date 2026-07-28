@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { MdxContent } from "@/components/content/MdxProvider";
-import { DocsSidebar } from "@/components/content/docs-sidebar";
+import { DocsLayout } from "@/components/content/docs-layout";
 import { findDoc } from "@/lib/docs-registry";
 import { ogMeta } from "@/lib/og-meta";
 
@@ -17,6 +17,7 @@ import Glossary from "@/content/docs/understand/glossary.mdx";
 import Cli from "@/content/docs/build/cli.mdx";
 import Lexicons from "@/content/docs/build/lexicons.mdx";
 import Faq from "@/content/docs/faq.mdx";
+import Ai from "@/content/docs/ai.mdx";
 
 const CONTENT_BY_SLUG: Partial<
   Record<string, ComponentType<{ readonly components?: Record<string, ComponentType<never>> }>>
@@ -33,6 +34,7 @@ const CONTENT_BY_SLUG: Partial<
   cli: Cli,
   lexicons: Lexicons,
   faq: Faq,
+  ai: Ai,
 };
 
 function DocChapterPage() {
@@ -48,16 +50,9 @@ function DocChapterPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl gap-10 px-6 pt-28 pb-20 sm:px-10">
-      <aside className="hidden shrink-0 lg:block lg:w-60">
-        <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1">
-          <DocsSidebar currentSlug={slug} />
-        </div>
-      </aside>
-      <main className="min-w-0 flex-1">
-        <MdxContent Content={Content} className="prose max-w-3xl" />
-      </main>
-    </div>
+    <DocsLayout currentSlug={slug}>
+      <MdxContent Content={Content} className="prose max-w-3xl" />
+    </DocsLayout>
   );
 }
 

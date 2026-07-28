@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { MdxContent } from "@/components/content/MdxProvider";
-import { DocsSidebar } from "@/components/content/docs-sidebar";
+import { DocsLayout } from "@/components/content/docs-layout";
 import { findDoc } from "@/lib/docs-registry";
 import { ogMeta } from "@/lib/og-meta";
 
@@ -54,16 +54,9 @@ function NestedDocChapterPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl gap-10 px-6 pt-28 pb-20 sm:px-10">
-      <aside className="hidden shrink-0 lg:block lg:w-60">
-        <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1">
-          <DocsSidebar currentSlug={slug} currentGroup={category} />
-        </div>
-      </aside>
-      <main className="min-w-0 flex-1">
-        <MdxContent Content={Content} className="prose max-w-3xl" />
-      </main>
-    </div>
+    <DocsLayout currentSlug={slug} currentGroup={category}>
+      <MdxContent Content={Content} className="prose max-w-3xl" />
+    </DocsLayout>
   );
 }
 
