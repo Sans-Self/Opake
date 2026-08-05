@@ -107,9 +107,11 @@ authenticity. Verifying the log would be additive later and requires no change t
 
 - **A host holding the account's rotation keys can replace the verification method itself, sign a
   substituted bundle under it, and resolve as verified.** → The replacement is an operation in a
-  public append-only log, permanently visible; monitoring the log for a member's document changes
-  is the detection path. An account whose owner holds their own rotation key is not exposed to this
-  at all. Stated as a limitation, not closed.
+  public, append-only history, and resolution reads that history rather than only the current
+  document, so the replacement is reported at the moment a counterparty would act on it. This needs
+  no monitoring infrastructure and no stored record of previously seen keys. An account whose owner
+  holds their own rotation key is not exposed at all. Detection, not prevention: the caller is told
+  and decides.
 - **A host can simply decline to sign the operation that publishes a verification method**, leaving
   its users permanently unverified. → No mitigation: no operation is submitted, so there is nothing
   to monitor. The client reports the refusal to the owner rather than retrying silently. This is a

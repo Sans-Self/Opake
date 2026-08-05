@@ -158,6 +158,45 @@ its verification requirement is not.
 - **WHEN** a counterparty resolves its keys
 - **THEN** resolution succeeds and reports the account as unverified
 
+### Requirement: Resolution reads the anchor's history and reports a replacement
+
+A signature verifies against whatever key the DID document currently names, so a host that holds
+an account's rotation keys can replace the verification method with a key it controls, re-sign a
+substituted bundle under it, and resolve as verified. The signature is sound; the anchor moved.
+
+Where the DID method provides an operation history, resolving a verified account SHALL read it and
+determine whether the `#opake` verification method has ever been replaced with a different key. A
+replacement SHALL be reported alongside the verified state: verification succeeds, and the caller
+is told the anchor changed. The signing key derives from the seed phrase, so re-anchoring after
+migration republishes the same value — a removal and re-addition of the same key is not a
+replacement, and today no legitimate cause for a genuine replacement exists.
+
+The history SHALL be read at resolution time and cached under the same expiry as the rest of
+resolution. No record of previously observed verification methods SHALL be kept: the history is
+public and authoritative, and reading it covers replacements that predate the caller's first
+contact with the account, which a remembered value cannot.
+
+This does not reach an anchor that was never legitimate. A host that publishes a key it controls
+before the account first anchors leaves a history with no replacement in it, and the account
+resolves as cleanly verified. First contact is outside what any in-band mechanism can establish.
+
+When identity rotation exists, a legitimate change of signing key will need a statement signed by
+the outgoing key rather than a bare substitution; until then the distinction does not arise.
+
+#### Scenario: a replaced anchor is reported despite a valid signature
+
+- **GIVEN** an account whose host replaced its `#opake` verification method with a key the host
+  controls and re-signed the published record under it
+- **WHEN** a counterparty resolves the account
+- **THEN** the signature verifies, and the caller is additionally told the verification method was
+  replaced
+
+#### Scenario: re-anchoring after migration is not a replacement
+
+- **GIVEN** an account that lost its verification method to a migration and republished it
+- **WHEN** a counterparty resolves the account
+- **THEN** the history shows the same key restored, and nothing is reported
+
 ### Requirement: Recipients are resolved independently and a multi-recipient operation never fails wholesale
 
 An operation that wraps a key to another account SHALL resolve each recipient's verification state
@@ -236,11 +275,16 @@ Restricting an operation to verified counterparties is not part of this capabili
 
 ### Requirement: An account detects and repairs the loss of its own verification method
 
-Account migration is authored by the account's previous host and does not carry an `#opake`
-verification method forward, so a migrated account becomes unverified without any action by its
-owner. A client SHALL check its own DID document for its `#opake` verification method, SHALL report
-the state to the owner when it is absent or holds a key other than the account's own, and SHALL
-offer to republish.
+Account migration replaces an account's verification methods with the credentials the receiving
+host recommends, and that recommendation names only the atproto signing key. Nothing in the
+protocol requires this — an operation that omitted the verification methods entirely would carry
+them all forward, and one that supplied the full map alongside the new signing key would preserve
+`#opake` — but no account can rely on the tooling performing a migration doing either. A migrated
+account therefore becomes unverified without any action by its owner.
+
+A client SHALL check its own DID document for its `#opake` verification method, SHALL report the
+state to the owner when it is absent or holds a key other than the account's own, and SHALL offer
+to republish.
 
 The check SHALL distinguish absent from mismatched. An absent verification method is the expected
 consequence of migration. A verification method present but holding a key the account does not

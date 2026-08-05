@@ -28,7 +28,9 @@
 - [ ] 4.3 Return the error state when a verification method is present and the signature is absent, malformed, or does not verify, distinct from every existing resolution error
 - [ ] 4.4 Return the error state when a verified account's record omits `signingKey`, or when the record's `signingKey` differs from the DID document's `#opake` key
 - [ ] 4.5 Return the unverified state when no verification method is present, preserving the existing `RecipientNotReady` and wrong-algorithm outcomes unchanged
-- [ ] 4.6 Add regressions for each outcome, including a stripped-signature case asserting refusal rather than downgrade
+- [ ] 4.6 Read the DID's operation history at resolution time and report whether the `#opake` verification method has ever been replaced with a different key, treating a removal and re-addition of the same key as no replacement
+- [ ] 4.7 Cache the history under the same expiry as the rest of resolution, keeping no record of previously observed verification methods
+- [ ] 4.8 Add regressions for each outcome, including a stripped-signature case asserting refusal rather than downgrade, and a replaced-anchor case asserting a valid signature is still reported as a replacement
 
 ## 5. Publication
 
