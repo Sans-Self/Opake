@@ -101,6 +101,14 @@ pending-share daemon — the confirmation is captured when the share is queued, 
 state the recipient turns out to have. A background task cannot invent consent and must not proceed
 on a default.
 
+**An identity operation is authorized separately from the standing session.** Widening the session
+scope would put authority over the DID document itself into every stored credential, for the sake of
+an operation a person performs twice in an account's life. It would also oblige every existing
+session to re-consent. Requesting a short-lived authorization per operation inverts both: the
+standing scope keeps deriving from the collection registry, nothing re-consents, and the authority
+that can move an account's identity is never at rest anywhere. That it may require authenticating
+again is the point rather than the cost.
+
 **Confirmation is a person's decision, not the client's.** A machine rule refusing unverified
 counterparties would break every account that has not opted in, and adoption is what makes
 verification meaningful. The honest limitation is that a prompt shown often enough stops being read;
@@ -142,8 +150,10 @@ authenticity. Verifying the log would be additive later and requires no change t
   dropping every verified account into the error state indistinguishably from an attack. → The
   encoder's consumers are enumerated and the blast radius is stated in `document-crypto`; a change
   takes the version-bump path.
-- **Widening the OAuth scope obliges every existing session to re-consent.** → One-time, at the
-  release that introduces it.
+- **The identity operation depends on an authorization the authorization server may not offer in a
+  form distinct from the standing session.** → Unresolved; see Open Questions. Nothing else in the
+  change depends on it, so an account that cannot obtain one stays unverified and every other path
+  is unaffected.
 - **One key signs both the published record and the indexer authentication challenge.** → Domain
   separation in the transcript's context label; any future use adds a distinct label.
 
@@ -162,9 +172,11 @@ after which the account resolves as unverified and every consumer proceeds as be
 
 ## Open Questions
 
-- The literal scope token for the identity-operation grant. The requirement names the capability
-  needed rather than a string, because the string is fixed by the authorization server rather than
-  chosen here.
+- How an identity operation is authorized in practice, and whether the authorization server offers
+  a short-lived grant distinct from the standing session scope at all. The requirement names the
+  properties the authorization must have rather than a token, because the vocabulary is fixed by
+  the authorization server rather than chosen here. If no distinct grant exists, publication falls
+  back to whatever the server does offer and the obligation never to persist it still binds.
 - Whether the indexer's own authentication should prefer a verified key when one is available. The
   three-state rule already applies to it as a consumer; whether the credential it accepts is
   additionally bound to the verification method is a separate decision that changes no requirement

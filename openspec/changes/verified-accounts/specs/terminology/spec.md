@@ -68,6 +68,31 @@ where they would introduce a concept a reader has no reason to hold.
 - **WHEN** the outcome is displayed
 - **THEN** it reads as verified or unverified, and the word anchor does not appear
 
+### Requirement: The parties behind an account are named by what they control
+
+"Host" names at least three parties that a deployment may or may not unify, and collapsing them
+hides the distinction most of this protocol turns on:
+
+- **PDS** — the server that stores and serves an account's records.
+- **PDS operator** — the party that runs it. It decides what the PDS serves, so it is the party
+  that can substitute a published record or strip a signature from one.
+- **Rotation-key holder** — the party able to sign operations against the account's DID. It is the
+  party that can move an anchor, and the party that may decline to publish one.
+
+For an account on a hosted PDS these are ordinarily the same party, and for a self-hosted account
+the rotation-key holder may be the owner. Which they are is a deployment property and SHALL NOT be
+assumed. A spec SHALL name the party by what it controls wherever the difference changes the claim,
+and SHALL NOT use "host" to mean the rotation-key holder.
+
+The bare word "host" MAY stand for the PDS operator where no DID-document operation is in view.
+
+#### Scenario: a spec describes an unpublishable verification method
+
+- **GIVEN** a spec explaining why an account cannot become verified
+- **WHEN** it names the party that declines
+- **THEN** it says rotation-key holder, since a PDS operator that holds no rotation key cannot
+  decline and a rotation-key holder that operates no PDS still can
+
 ### Requirement: Rotation names three unrelated operations and is always qualified
 
 - **PLC rotation key** — a key authorized to sign operations on a `did:plc` identifier. It is not

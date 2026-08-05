@@ -183,24 +183,39 @@ resolution. No record of previously observed verification methods SHALL be kept:
 public and authoritative, and reading it covers replacements that predate the caller's first
 contact with the account, which a remembered value cannot.
 
-This does not reach an anchor that was never legitimate. A host that publishes a key it controls
-before the account first anchors leaves a history with no replacement in it, and the account
-resolves as cleanly verified. First contact is outside what any in-band mechanism can establish.
+This does not reach an anchor that was never legitimate. A rotation-key holder that publishes a key
+it controls before the account first anchors leaves a history with no replacement in it, and the
+account resolves as cleanly verified. First contact is outside what any in-band mechanism can
+establish.
+
+Where the DID method publishes no operation history, no replacement is reported and the account
+resolves as verified on its current document alone. `did:web` is such a method: its document is a
+served file with no log behind it. Resolution SHALL NOT represent the absence of a history as the
+absence of a replacement, and SHALL distinguish an account whose history shows no replacement from
+one whose method offers no history to read.
 
 When identity rotation exists, a legitimate change of signing key will need a statement signed by
 the outgoing key rather than a bare substitution; until then the distinction does not arise.
 
 #### Scenario: a replaced anchor is reported despite a valid signature
 
-- **GIVEN** an account whose host replaced its `#opake` verification method with a key the host
-  controls and re-signed the published record under it
+- **GIVEN** a `did:plc` account whose rotation-key holder replaced its `#opake` verification method
+  with a key it controls and re-signed the published record under it
 - **WHEN** a counterparty resolves the account
 - **THEN** the signature verifies, and the caller is additionally told the verification method was
   replaced
 
-#### Scenario: re-anchoring after migration is not a replacement
+#### Scenario: a method with no history cannot report a replacement
 
-- **GIVEN** an account that lost its verification method to a migration and republished it
+- **GIVEN** a `did:web` account carrying an `#opake` verification method and a record that verifies
+- **WHEN** a counterparty resolves the account
+- **THEN** it resolves as verified, and the caller is told the method publishes no history rather
+  than told that no replacement occurred
+
+#### Scenario: an anchor dropped and republished is not a replacement
+
+- **GIVEN** an account whose verification method was removed and later republished carrying the
+  same key
 - **WHEN** a counterparty resolves the account
 - **THEN** the history shows the same key restored, and nothing is reported
 
@@ -234,9 +249,17 @@ nothing at all. It cannot reach past its own user to block another account's ope
 
 #### Scenario: a single-recipient operation refuses
 
-- **GIVEN** a prospective grant recipient whose record does not verify
+- **GIVEN** a prospective grant recipient carrying an `#opake` verification method whose published
+  record does not verify under it
 - **WHEN** the owner shares a document to them
 - **THEN** the operation is refused and no grant record is written
+
+#### Scenario: declining to verify is never itself a refusal
+
+- **GIVEN** a prospective grant recipient carrying no verification method
+- **WHEN** the owner shares a document to them
+- **THEN** the recipient resolves as unverified and the share proceeds on the owner's confirmation,
+  because refusal attaches to a broken claim of verification and never to its absence
 
 ### Requirement: Wrapping a key to an unverified account requires explicit confirmation
 
@@ -250,6 +273,13 @@ Confirmation is captured **once per account per workspace or share relationship*
 access is granted. A subsequent re-wrap to an account already admitted — a group-key rotation —
 SHALL NOT ask again: the decision to trust that account's keys was taken at admission, and
 repeating it converts a deliberate choice into routine noise.
+
+The confirmation SHALL NOT expire on a clock. A prompt repeated on a timer presents the caller with
+facts identical to the ones they already answered, which teaches them to dismiss it. It SHALL
+instead be bound to the key material it was given for: where an unverified account's published
+encryption keys differ from those the confirmation was captured against, the confirmation SHALL NOT
+carry, and the caller SHALL be asked again. Nothing anchors an unverified account's keys, so a
+substitution between admission and re-wrap is precisely the event the earlier answer did not cover.
 
 An operation that runs with no caller present SHALL NOT invent consent. Where a queued operation
 will later wrap to an account whose verification state is not yet knowable, the confirmation SHALL
@@ -293,23 +323,28 @@ A client SHALL check its own DID document for its `#opake` verification method, 
 state to the owner when it is absent or holds a key other than the account's own, and SHALL offer
 to republish.
 
-The check SHALL distinguish absent from mismatched. An absent verification method is the expected
-consequence of migration. A verification method present but holding a key the account does not
-control is a substitution, and SHALL be reported as such rather than repaired silently.
+The check SHALL distinguish absent from mismatched. A verification method may be absent because the
+account never published one, because an operation dropped it, or because a rotation-key holder
+removed it; the account is unverified in every case, and the report SHALL name the state rather
+than guess a cause. A verification method present but holding a key the account does not control is
+a substitution, and SHALL be reported as such rather than repaired silently.
 
 Publication requires a rotation key, and the directory accepts a signed operation from any holder
 of one without authenticating the submitter. An account holding its own rotation key therefore
-publishes its verification method without its host's participation. An account holding none must
-ask its host to sign, and a host may decline — leaving no record of the refusal anywhere, since no
-operation is ever submitted. Such an account cannot escape the refusal from inside, because
-acquiring a rotation key is itself an operation the same host must sign. A client SHALL report a
+publishes its verification method with no other party's participation. An account holding none must
+ask a rotation-key holder to sign, and that party may decline — leaving no record of the refusal
+anywhere, since no operation is ever submitted. Such an account cannot escape the refusal from
+inside, because acquiring a rotation key is itself an operation the same party must sign
+(`spec:terminology § The parties behind an account are named by what they control`). A client SHALL report a
 refused publication to the owner rather than retrying silently.
 
-#### Scenario: a migrated account is told it is no longer verified
+#### Scenario: an account whose anchor is gone is told it is no longer verified
 
-- **GIVEN** an account that was verified before migrating to a new host
+- **GIVEN** an account that was verified and whose DID document no longer carries an `#opake`
+  verification method
 - **WHEN** its client next checks its own DID document
-- **THEN** the owner is told the verification method is absent and offered republication
+- **THEN** the owner is told the verification method is absent and offered republication,
+  whatever removed it
 
 #### Scenario: a foreign key in the account's own verification method is reported as substitution
 
@@ -319,9 +354,9 @@ refused publication to the owner rather than retrying silently.
 - **THEN** the owner is told the method holds a key that is not theirs, distinctly from the absent
   case
 
-#### Scenario: a host that declines to sign is surfaced
+#### Scenario: a rotation-key holder that declines to sign is surfaced
 
-- **GIVEN** an account whose host refuses the identity operation that would publish its
-  verification method
+- **GIVEN** an account holding no rotation key of its own, whose rotation-key holder refuses the
+  identity operation that would publish its verification method
 - **WHEN** the owner attempts to become verified
 - **THEN** the refusal is reported to the owner rather than retried silently

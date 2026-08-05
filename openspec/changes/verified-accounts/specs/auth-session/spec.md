@@ -4,11 +4,7 @@
 
 The scope string SHALL be built from `OPAKE_COLLECTIONS` (crates/opake-core/src/scope.rs): `atproto`, one `repo:<collection>` per registered collection, and `blob:*/*`. Every `*_COLLECTION` constant in the codebase SHALL appear in the registry — enforced by test, so adding a collection without granting its scope fails the build rather than failing at runtime with an opaque 403.
 
-The scope string SHALL additionally carry the identity-operation grant that permits an authorized client to submit an operation against the account's DID document, without which no session can publish or remove an `#opake` verification method (`spec:account-verification § A verified account publishes its signing key as a DID-document verification method`). Becoming verified and reverting to unverified are both DID-document operations, so the grant SHALL cover removal as well as publication; a client that can only add is a client that cannot roll back.
-
-The scope is therefore no longer derivable from the collection registry alone. The registry remains the single source of truth for the `repo:` terms and its completeness test SHALL continue to bind, but the scope string SHALL be assembled from the registry plus the explicitly named non-repo grants, and a term that is not a collection SHALL NOT be smuggled into the registry to make the derivation look total.
-
-Widening the scope changes what the authorization server was asked for. Sessions established under the narrower scope SHALL NOT be assumed to carry the identity-operation grant, SHALL NOT have it inferred from the client's own build, and SHALL require re-consent before an operation that needs it is attempted. A session that lacks the grant SHALL report that verification requires re-authorization, rather than surfacing the authorization server's refusal as a failure of the verification mechanism.
+The scope SHALL NOT carry authority to submit an operation against the account's DID document. Publishing and removing an `#opake` verification method are authorized separately, per operation (`spec:auth-session § An identity operation is authorized per operation and never from the standing session`). The derivation from the registry therefore stays total, and no session established before verification existed is obliged to re-consent.
 
 #### Scenario: unregistered collection fails the build
 
@@ -17,13 +13,37 @@ Widening the scope changes what the authorization server was asked for. Sessions
 - **THEN** `all_collection_constants_are_registered` fails naming the constant
 - Verified in `all_collection_constants_are_registered`, `oauth_scope_includes_all_collections` (crates/opake-core/src/scope.rs tests)
 
-#### Scenario: the scope requests the identity-operation grant
+#### Scenario: the standing scope carries no identity authority
 
 - **WHEN** a client builds the scope string for an OAuth authorization request
-- **THEN** the string carries the `repo:` terms derived from the registry, the blob term, and the identity-operation grant, and the identity-operation grant appears nowhere in the collection registry
+- **THEN** the string carries the `repo:` terms derived from the registry and the blob term, and carries nothing that would permit an operation against the DID document
 
-#### Scenario: a pre-widening session is told to re-consent
+## ADDED Requirements
 
-- **GIVEN** a session established under a scope that predates the identity-operation grant
-- **WHEN** its owner attempts to publish an `#opake` verification method
-- **THEN** the client reports that the operation needs re-authorization at the widened scope, and no identity operation is submitted
+### Requirement: An identity operation is authorized per operation and never from the standing session
+
+Publishing or removing an `#opake` verification method submits an operation against the account's DID document. That is authority over the identity itself rather than over records in a collection, and it SHALL NOT be reachable from the standing session.
+
+A client SHALL obtain a distinct authorization for each such operation, SHALL NOT persist it, and SHALL discard it once the operation is submitted or abandoned. The authorization MAY oblige the owner to authenticate again. That cost is intended: a DID-document operation is the class of action that should not proceed on a credential any background task could reach, and verification is a deliberate, rare, owner-present act in both directions.
+
+The authorization SHALL cover removal as well as publication. A client that can only add is a client that cannot roll back, and an account that cannot return to unverified is an account whose owner cannot withdraw from the mechanism.
+
+A client SHALL NOT infer the authorization from its own build, and SHALL report that the operation needs a fresh authorization rather than surfacing the authorization server's refusal as a failure of the verification mechanism.
+
+#### Scenario: publishing requests its own authorization
+
+- **GIVEN** an owner with a valid standing session
+- **WHEN** they choose to publish an `#opake` verification method
+- **THEN** the client requests a fresh authorization for that operation rather than using the session's credentials
+
+#### Scenario: the authorization does not outlive the operation
+
+- **GIVEN** a client that has obtained an authorization for an identity operation
+- **WHEN** the operation is submitted, refused, or abandoned
+- **THEN** the authorization is discarded and no part of it is written to storage
+
+#### Scenario: removal is covered by the same authorization path
+
+- **GIVEN** a verified account whose owner chooses to return to unverified
+- **WHEN** the client submits the operation removing the verification method
+- **THEN** it obtains an authorization the same way, and no standing session grants the removal implicitly

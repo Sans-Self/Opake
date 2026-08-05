@@ -35,8 +35,10 @@ a public, attributable act — without changing where the bundle lives.
   confirmation when it is queued.
 - Pairing completion verifies received identity keys against the DID document rather than against
   a record served by the same host that relayed the response.
-- Account migration does not carry the verification method forward, so a migrated account becomes
-  unverified. Clients detect this against their own DID document and offer to republish.
+- Migration tooling replaces an account's verification methods with the ones the receiving PDS
+  recommends, and those name only the atproto signing key, so a migrated account becomes unverified.
+  The protocol does not require this, but no account can rely on the tooling doing otherwise.
+  Clients detect the loss against their own DID document and offer to republish.
 - **BREAKING**: the change extends the closed vocabulary list with a signature algorithm
   identifier, which is a schema version bump. The pre-v1 window permits it; this change declares it
   rather than claiming to be purely additive.
@@ -68,9 +70,10 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
   the statement that the signing key is the existing derived Ed25519 key rather than a new one.
 - `auth-pairing`: completion authenticates received keys against the DID document; the published
   record ceases to be the authority for that check.
-- `auth-session`: the OAuth scope must express the identity-operation grant that publishing and
-  removing a verification method requires; it is no longer derivable from the collection registry
-  alone, and widening it obliges existing sessions to re-consent.
+- `auth-session`: an identity operation is authorized per operation and never from the standing
+  session, so the scope stays derivable from the collection registry alone and no existing session
+  is obliged to re-consent. The authorization is short-lived, never persisted, and may require the
+  owner to authenticate again.
 - `workspace-membership`: admission resolves the recipient's verification state; removal resolves
   each remaining member independently and excludes rather than aborts.
 - `key-rotation`: a rotation excludes a member whose keys do not resolve and still completes;
@@ -94,8 +97,8 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 - **opake-core**: signature construction and verification, DID-document verification-method lookup,
   three-state resolution used by member addition, group-key rotation, grant creation, the pending-share
   daemon, and pairing completion, and the boot-time check of the account's own verification method.
-- **OAuth**: the scope string gains an identity-operation grant, which obliges every existing
-  session to re-consent.
+- **OAuth**: the standing scope is unchanged; publishing and removing a verification method each
+  obtain a separate short-lived authorization that is discarded after use.
 - **Indexer**: authentication accepts an account with no verification method and refuses one whose
   verification method is present but whose published record does not verify under it.
 - **Clients**: verification state is displayed wherever a counterparty is named; confirmation is

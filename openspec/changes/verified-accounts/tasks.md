@@ -35,11 +35,12 @@
 ## 5. Publication
 
 - [ ] 5.1 Sign the record in `publish_public_key`, writing the signed record on login, recovery, and share healing
-- [ ] 5.2 Extend the OAuth scope with the identity-operation grant, and handle the re-consent every existing session will require
+- [ ] 5.2 Obtain a distinct short-lived authorization for each identity operation, holding it only for the operation's duration and discarding it on submission, refusal, or abandonment
 - [ ] 5.3 Add the operation that publishes the `#opake` verification method, ordered strictly after the signed record exists
 - [ ] 5.4 Add the operation that removes the verification method, returning the account to unverified
 - [ ] 5.5 Report a host's refusal to sign the identity operation to the owner rather than retrying silently
 - [ ] 5.6 Add a regression asserting publication order, so a verified account never obliges a check it cannot yet satisfy
+- [ ] 5.7 Add a regression asserting no part of an identity-operation authorization reaches storage
 
 ## 6. Single-recipient callers
 
@@ -102,3 +103,4 @@
 - [ ] 13.5 Document rotation-key custody as the deployment property that bounds both limitations: a key held off the infrastructure that serves the PDS and listed at higher authority than the host's, and what the recovery window does and does not cover
 - [ ] 13.6 Align `docs/CRYPTO.md`, `docs/AUTH.md`, and `docs/ARCHITECTURE.md` with the terminology capability, in particular the two signing keys a verified account's DID document carries and the three operations called rotation
 - [ ] 13.7 Use verified and unverified in every interface string, keeping anchor out of user-facing copy
+- [ ] 13.8 Sweep the specs and docs for "host" where a DID-document operation is in view, replacing it with the party the terminology capability names
