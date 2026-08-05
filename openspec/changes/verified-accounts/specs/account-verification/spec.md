@@ -1,7 +1,9 @@
 ## Purpose
 
 Verification is how a client learns that an account's published encryption keys are vouched for by
-a key the account's host cannot reach. This capability owns the DID-document verification method,
+a key held outside the record its host serves, in a document derived from a public, append-only
+operation log. A host holding the account's rotation keys can still move that key, but only by
+signing an operation the log records permanently. This capability owns the DID-document verification method,
 the signature over the published key record, the three-valued resolution every consumer performs,
 and what each outcome obliges the caller to do.
 
@@ -290,11 +292,13 @@ The check SHALL distinguish absent from mismatched. An absent verification metho
 consequence of migration. A verification method present but holding a key the account does not
 control is a substitution, and SHALL be reported as such rather than repaired silently.
 
-Publication depends on the account's host. A host that holds the account's rotation keys may
-decline to sign the operation, leaving its users permanently unverified with no record of the
-refusal anywhere; this is a denial of the mechanism that monitoring cannot detect, because no
-operation is ever submitted. A client SHALL report a refused publication to the owner rather than
-retrying silently.
+Publication requires a rotation key, and the directory accepts a signed operation from any holder
+of one without authenticating the submitter. An account holding its own rotation key therefore
+publishes its verification method without its host's participation. An account holding none must
+ask its host to sign, and a host may decline — leaving no record of the refusal anywhere, since no
+operation is ever submitted. Such an account cannot escape the refusal from inside, because
+acquiring a rotation key is itself an operation the same host must sign. A client SHALL report a
+refused publication to the owner rather than retrying silently.
 
 #### Scenario: a migrated account is told it is no longer verified
 

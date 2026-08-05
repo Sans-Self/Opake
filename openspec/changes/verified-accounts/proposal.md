@@ -6,10 +6,12 @@ host that serves a substituted bundle receives every future document wrapped to 
 no party can tell. The same unauthenticated read decides pairing completion and indexer
 authentication.
 
-The AT Protocol already provides a place to put a key that a PDS cannot reach: the DID document,
-whose contents are derived from a signed, append-only operation log rather than served by the
-account's host. Publishing one small signing key there, and having it vouch for the encryption
-bundle, moves the decision out of the host's hands without changing where the bundle lives.
+The AT Protocol already provides somewhere else to put a key: the DID document, whose contents are
+derived from a signed, append-only operation log rather than served by the account's host. A host
+holding the account's rotation keys can still change what that document says, but only by signing an
+operation that is permanently and publicly recorded. Publishing one small signing key there, and
+having it vouch for the encryption bundle, turns a substitution from an invisible record write into
+a public, attributable act — without changing where the bundle lives.
 
 ## What Changes
 

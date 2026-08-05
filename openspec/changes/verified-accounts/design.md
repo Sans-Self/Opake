@@ -7,8 +7,14 @@ See proposal.md — Why. The constraints that shape the approach:
   ML-KEM-768 public key is roughly an order of magnitude past that length and has no registered
   encoding, so the encryption bundle cannot move into the document.
 - A `did:plc` document is derived from a signed append-only operation log rather than served by the
-  account's host, so a host cannot alter it. A `did:web` document is a file, ordinarily served by
-  the same origin as the PDS; the design carries this difference rather than resolving it.
+  account's host. A host holding the account's rotation keys can alter it, but not silently: every
+  change is a signed, timestamped operation in a public log that is mirrored and streamed. A
+  `did:web` document is a file, ordinarily served by the same origin as the PDS; the design carries
+  this difference rather than resolving it.
+- Rotation keys for a hosted account are ordinarily the host's, and the same keys are reused across
+  every account it hosts. A self-hosted deployment generates one onto the machine that serves the
+  PDS. Custody is therefore a deployment property rather than a protocol one, and the design cannot
+  assume the two halves a consumer reads are independently held.
 - Rotation keys accept only p256 and secp256k1. This design publishes a verification method and
   never a rotation key, so that constraint does not bind here — but it means a hosted account's
   verification method is published by an operation its host signs.
@@ -73,10 +79,12 @@ verified with someone else's keys as its wrap target.
 
 **Resolution is three-valued, and the third value is an error rather than a downgrade.** Treating a
 missing signature as merely unverified hands a host a silent downgrade: strip one optional field and
-the strongest tier collapses to the weakest. Making it an error works because the two halves are
-served by different parties — the host controls the record but not the document — and needs no
-client-side memory, because a consumer that cannot read the DID document cannot locate the host to
-read the record from either.
+the strongest tier collapses to the weakest. Making it an error works because the two halves differ
+in what they cost to change rather than in who holds them: stripping the signature is an ordinary
+record write, while removing the verification method that obliges the check is an operation
+permanently recorded in a public log. A host may do either, but only one of them quietly. It needs
+no client-side memory, because a consumer that cannot read the DID document cannot locate the host
+to read the record from either.
 
 **Recipients are resolved independently, and a multi-recipient operation excludes rather than
 aborts.** Refusing the whole operation on any error state would let a single host, by serving an
@@ -109,13 +117,19 @@ authenticity. Verifying the log would be additive later and requires no change t
   substituted bundle under it, and resolve as verified.** → The replacement is an operation in a
   public, append-only history, and resolution reads that history rather than only the current
   document, so the replacement is reported at the moment a counterparty would act on it. This needs
-  no monitoring infrastructure and no stored record of previously seen keys. An account whose owner
-  holds their own rotation key is not exposed at all. Detection, not prevention: the caller is told
-  and decides.
-- **A host can simply decline to sign the operation that publishes a verification method**, leaving
-  its users permanently unverified. → No mitigation: no operation is submitted, so there is nothing
-  to monitor. The client reports the refusal to the owner rather than retrying silently. This is a
-  total denial of the mechanism available to any hosting provider.
+  no monitoring infrastructure and no stored record of previously seen keys. Exposure is bounded by
+  where the rotation key lives rather than by whose account it is: a key generated onto the machine
+  that serves the PDS falls with it, while a key held off that infrastructure and listed at higher
+  authority than the host's can additionally nullify the replacement inside the recovery window.
+  Detection, not prevention: the caller is told and decides.
+- **A host can decline to sign the operation that publishes a verification method**, for an account
+  that holds no rotation key of its own. → The directory accepts an operation from any rotation-key
+  holder without authenticating the submitter, so a refusal reaches only accounts whose keys are
+  entirely their host's — which is the default for a hosted account. It is not escapable from
+  inside, because acquiring a rotation key is itself an operation the same host must sign. Nothing
+  is submitted, so there is nothing to monitor; the client reports the refusal to the owner rather
+  than retrying silently. Holding a rotation key is a posture established before a host turns
+  hostile, not a remedy afterwards.
 - **A `did:web` document served from the same origin as the PDS gives the anchor no independence.**
   → Out of scope to resolve here; the state is reported the same way and the difference is a
   deployment property.

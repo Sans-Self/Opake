@@ -98,4 +98,5 @@
 - [ ] 13.1 Document the verification method, the signed transcript, and the three states in `docs/CRYPTO.md`
 - [ ] 13.2 Document the setup and repair flows in `docs/AUTH.md`, including that a migrated account becomes unverified
 - [ ] 13.3 Correct the statement in `docs/ARCHITECTURE.md` that DID documents carry only signing keys
-- [ ] 13.4 Record the limitations that a host holding rotation keys can replace the verification method, and that a host can refuse to publish one at all
+- [ ] 13.4 Record that a host holding the account's rotation keys can replace the verification method, and that a host can refuse to publish one for an account that holds no rotation key of its own
+- [ ] 13.5 Document rotation-key custody as the deployment property that bounds both limitations: a key held off the infrastructure that serves the PDS and listed at higher authority than the host's, and what the recovery window does and does not cover
