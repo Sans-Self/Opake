@@ -15,21 +15,29 @@ bundle, moves the decision out of the host's hands without changing where the bu
 
 - An account may publish an `#opake` verification method in its DID document. An account that has
   done so is **verified**; one that has not continues to work unchanged.
-- `at.opake.publicKey` gains an optional `signature` field over the record's contents, produced by
-  the key named in `#opake`.
+- `at.opake.publicKey` gains optional `signature` and `signatureAlgo` fields. The signature covers a
+  fixed, closed transcript naming the account and the scheme version, so that a field added to the
+  record later cannot change whether an existing signature verifies.
 - Resolution of another account's keys becomes three-valued: no verification method is
   **unverified** and proceeds; a verification method with a valid signature is **verified**; a
-  verification method with a missing or invalid signature is an **error** and the operation is
-  refused. The third state is not a degraded form of the first — an anchored account has no
-  legitimate reason to serve an unsigned record, so a host that strips the field is refused rather
-  than downgraded.
-- Operations that wrap a content key to an unverified account surface that fact and require
-  explicit confirmation before proceeding. Verification never silently blocks and never silently
-  proceeds.
+  verification method with a missing or invalid signature is an **error**. The third state is not a
+  degraded form of the first — an anchored account has no legitimate reason to serve an unsigned
+  record, so a host that strips the field is refused rather than downgraded.
+- Recipients are resolved **independently**. A single-recipient operation is refused on the error
+  state. An operation that re-wraps to every remaining member — a group-key rotation — excludes the
+  affected member and completes, because an operation that withdraws access must not be blockable
+  by an account it is not withdrawing access from.
+- Operations that wrap a key to an unverified account surface that fact and require explicit
+  confirmation. Confirmation is captured once per relationship, at the point access is granted, so
+  a later rotation does not ask again. An operation that runs with no caller present captures its
+  confirmation when it is queued.
 - Pairing completion verifies received identity keys against the DID document rather than against
   a record served by the same host that relayed the response.
 - Account migration does not carry the verification method forward, so a migrated account becomes
   unverified. Clients detect this against their own DID document and offer to republish.
+- **BREAKING**: the change extends the closed vocabulary list with a signature algorithm
+  identifier, which is a schema version bump. The pre-v1 window permits it; this change declares it
+  rather than claiming to be purely additive.
 
 The signing key is the account's existing mnemonic-derived Ed25519 key, already published as
 `signingKey` and already derivable on any device holding the phrase. No new derivation path is
@@ -48,29 +56,46 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 
 ### Modified Capabilities
 
-- `auth-identity`: the published key record gains a signature, the ordering constraint that the
-  signed record exists before the verification method that vouches for it, and the statement that
-  the signing key is the existing derived Ed25519 key rather than a new one.
+- `auth-identity`: the published key record gains a signature and its algorithm, the ordering
+  constraint that the signed record exists before the verification method that vouches for it, and
+  the statement that the signing key is the existing derived Ed25519 key rather than a new one.
 - `auth-pairing`: completion authenticates received keys against the DID document; the published
   record ceases to be the authority for that check.
-- `workspace-membership`: adding a member resolves the recipient's verification state before
-  wrapping the group key, refuses on the error state, and requires confirmation on the unverified
-  state.
-- `sharing-grants`: creating a grant carries the same obligation for the recipient's keys.
+- `auth-session`: the OAuth scope must express the identity-operation grant that publishing and
+  removing a verification method requires; it is no longer derivable from the collection registry
+  alone, and widening it obliges existing sessions to re-consent.
+- `workspace-membership`: admission resolves the recipient's verification state; removal resolves
+  each remaining member independently and excludes rather than aborts.
+- `key-rotation`: a rotation excludes a member whose keys do not resolve and still completes;
+  forward secrecy holds unconditionally, readability is qualified.
+- `sharing-grants`: grant creation resolves the recipient; the pending-share queue captures its
+  confirmation at queue time and reports an error-state recipient rather than expiring silently.
+- `background-work`: a task running with no caller present cannot carry a consent obligation, and
+  the re-wrap sweep picks up members excluded from a rotation.
+- `document-crypto`: the context-transcript encoder acquires a signature consumer, its consumers
+  are enumerated, and the blast radius of changing it is stated.
+- `record-validity`: the closed vocabulary list gains signature algorithm identifiers, and the
+  version bump that entails is declared.
+- `dev-env`: at least one bootstrapped actor is verified, so all three resolution outcomes are
+  reachable hermetically.
+- `e2e-testing`: scenarios that wrap to an unverified counterparty supply the confirmation the
+  operation now requires.
 
 ## Impact
 
-- **Lexicon**: `at.opake.publicKey` gains an optional `signature` field. Additive; a client that
-  ignores it reads identical bytes and derives identical keys.
-- **opake-core**: signature construction and verification, DID-document verification-method
-  lookup, the three-state resolution used by member addition, grant creation, and pairing
-  completion, and the boot-time check of the account's own verification method.
+- **Lexicon**: `at.opake.publicKey` gains optional `signature` and `signatureAlgo` fields.
+- **opake-core**: signature construction and verification, DID-document verification-method lookup,
+  three-state resolution used by member addition, rotation, grant creation, the pending-share
+  daemon, and pairing completion, and the boot-time check of the account's own verification method.
+- **OAuth**: the scope string gains an identity-operation grant, which obliges every existing
+  session to re-consent.
 - **Indexer**: authentication accepts an account with no verification method and refuses one whose
   verification method is present but whose published record does not verify under it.
-- **Clients**: verification state is displayed wherever a counterparty is named, and confirmation
-  is required before wrapping to an unverified account.
-- **Issues**: closes the cross-PDS half of #70 for verified counterparties; narrows #57 to
-  accounts that have not published a verification method.
+- **Clients**: verification state is displayed wherever a counterparty is named; confirmation is
+  required before wrapping to an unverified account; excluded members are reported after a rotation.
+- **Dev-env and e2e**: a verified fixture actor, and a harness affordance for the confirmation.
+- **Issues**: closes the cross-PDS half of #70 for verified counterparties; narrows #57 to accounts
+  that have not published a verification method.
 
 Out of scope, and deliberately not addressed here: whether the keyring chain authority walk stays
 on the read path, which is a question about trust in the indexer rather than in a counterparty's

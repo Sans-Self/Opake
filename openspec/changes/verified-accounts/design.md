@@ -10,11 +10,14 @@ See proposal.md — Why. The constraints that shape the approach:
   account's host, so a host cannot alter it. A `did:web` document is a file, ordinarily served by
   the same origin as the PDS; the design carries this difference rather than resolving it.
 - Rotation keys accept only p256 and secp256k1. This design publishes a verification method and
-  never a rotation key, so that constraint does not bind here.
+  never a rotation key, so that constraint does not bind here — but it means a hosted account's
+  verification method is published by an operation its host signs.
 - The account's Ed25519 signing key already exists, already derives from the seed phrase, and is
   already published in `at.opake.publicKey/self`.
 - The published record reaches a client as JSON re-serialized by the host, which may alter the
   encoding of byte fields without altering their values.
+- Optional fields may be added to a record without a version bump, so any construction that signs
+  "the whole record" is unstable across ordinary schema evolution.
 
 ## Goals / Non-Goals
 
@@ -42,21 +45,25 @@ permits adding one, but not altering the existing three), and the paired-device 
 field to carry it — a freshly paired device would hold no way to sign. Reusing the existing key
 avoids both: it derives from the phrase on every device that holds it, pairing already transfers
 it, and it is already the value published as `signingKey`. The cost is that one key serves two
-purposes, which is contained by domain separation in the signed transcript.
+purposes, contained by domain separation in the signed transcript.
 
-**The signature covers a field transcript, not a re-encoding of the record's bytes.** Signing a
-canonical binary encoding of the record would cover fields not yet invented, which is attractive.
-It does not survive contact with delivery: the host re-serializes records, byte fields may lose
-padding in the process, and a typed parse discards unknown fields — so a verifier reconstructing
-bytes from what it received would compute a different input than the signer, and would have to
-operate on the raw untyped value to have any chance. A field transcript through the encoder the
-project already uses for wrap contexts has none of these failure modes, and the scheme version in
-the context label bounds what a future field can mean without being covered.
+**The signature covers a fixed, closed field list, not a re-encoding of the record's bytes and not
+"every field".** Signing a canonical binary encoding would cover fields not yet invented, which is
+attractive until it meets delivery: hosts re-serialize records, byte fields may lose padding, and a
+typed parse discards unknown fields, so a verifier reconstructing bytes computes a different input
+than the signer. Signing "every field of the record" fails differently and worse — optional field
+additions need no version bump, so a client that ignores a newer field computes a shorter transcript,
+fails verification, and reports its counterparty's host as hostile. A closed list per scheme version
+has neither failure: the version bounds what an uncovered field can mean, and a covered field
+cannot appear or vanish without a version change. Because a verified account must publish
+`signingKey` — it is the key its own verification method names — every covered field is always
+present, so the transcript is fixed-arity and no absent-field encoding is required.
 
-**The scheme version lives in the context label rather than only in a record field.** Domain
-separation at the transcript level means a signature made under one scheme cannot be reinterpreted
-as a statement under another, before any parsing occurs. This mirrors the versioned info strings in
-the key derivation.
+**The scheme version and the signature algorithm are read from the record.** `spec:record-validity § cryptographic parameters derive from the record's declaration`
+forbids selecting verification parameters from the client's own build; with one scheme that choice
+is invisible, and with two it becomes a downgrade oracle. The version derives from the record's
+`opakeVersion` and the algorithm from a new `signatureAlgo` field, which is a vocabulary extension
+and therefore a version bump — declared rather than absorbed.
 
 **The DID is in the transcript.** Neither the record nor its rkey identifies its owner, and neither
 DID method proves possession of a published verification method. Without the DID, a signature over
@@ -64,19 +71,33 @@ a bundle is valid wherever those bytes appear, so any account could publish anot
 signing key as its own verification method, serve a copy of that account's record, and resolve as
 verified with someone else's keys as its wrap target.
 
-**Resolution is three-valued, and the third value is an error rather than a downgrade.** The
-alternative — treating a missing signature as simply unverified — hands a host a silent downgrade:
-strip one optional field and the strongest tier collapses to the weakest. Making it an error works
-because the two halves are served by different parties: the host controls the record but not the
-document, so it can remove the signature but not the requirement to have one. This needs no
-client-side memory of who was previously verified, because a consumer that cannot read the DID
-document cannot locate the host to read the record from either.
+**Resolution is three-valued, and the third value is an error rather than a downgrade.** Treating a
+missing signature as merely unverified hands a host a silent downgrade: strip one optional field and
+the strongest tier collapses to the weakest. Making it an error works because the two halves are
+served by different parties — the host controls the record but not the document — and needs no
+client-side memory, because a consumer that cannot read the DID document cannot locate the host to
+read the record from either.
 
-**Confirmation for the unverified state is a person's decision, not the client's.** A machine rule
-refusing unverified counterparties would break every account that has not opted in, and adoption is
-the thing that makes verification meaningful. The honest limitation is that a prompt shown often
-enough stops being read; the mitigation is that the prompt's strength grows as verified accounts
-become the norm, and the error state — which is the actual attack signal — is never a prompt.
+**Recipients are resolved independently, and a multi-recipient operation excludes rather than
+aborts.** Refusing the whole operation on any error state would let a single host, by serving an
+unverifiable record for its own user, permanently prevent the removal of anyone else from a
+workspace — a liveness attack on forward secrecy delivered by the mechanism meant to strengthen it.
+Excluding the affected member instead confines a host to starving its own user, which it can
+already do by serving nothing. Forward secrecy is unaffected either way: it depends on which key was
+minted, never on who it was wrapped to.
+
+**Confirmation is captured once per relationship, at the point access is granted.** Re-asking on
+every rotation would produce one prompt per member per removal and convert a deliberate decision
+into routine noise, which is how a prompt stops being read. Where no caller is present at all — the
+pending-share daemon — the confirmation is captured when the share is queued, covering whichever
+state the recipient turns out to have. A background task cannot invent consent and must not proceed
+on a default.
+
+**Confirmation is a person's decision, not the client's.** A machine rule refusing unverified
+counterparties would break every account that has not opted in, and adoption is what makes
+verification meaningful. The honest limitation is that a prompt shown often enough stops being read;
+the mitigation is that the prompt's strength grows as verified accounts become the norm, and the
+error state — the actual attack signal — is never a prompt.
 
 **The DID method's operation log is not verified client-side.** DID resolution already determines
 which host every read and write is addressed to, so a directory that lies defeats far more than key
@@ -89,6 +110,10 @@ authenticity. Verifying the log would be additive later and requires no change t
   public append-only log, permanently visible; monitoring the log for a member's document changes
   is the detection path. An account whose owner holds their own rotation key is not exposed to this
   at all. Stated as a limitation, not closed.
+- **A host can simply decline to sign the operation that publishes a verification method**, leaving
+  its users permanently unverified. → No mitigation: no operation is submitted, so there is nothing
+  to monitor. The client reports the refusal to the owner rather than retrying silently. This is a
+  total denial of the mechanism available to any hosting provider.
 - **A `did:web` document served from the same origin as the PDS gives the anchor no independence.**
   → Out of scope to resolve here; the state is reported the same way and the difference is a
   deployment property.
@@ -96,20 +121,34 @@ authenticity. Verifying the log would be additive later and requires no change t
   distinguishes absent from mismatched, and a mismatch is reported as substitution rather than
   offered as a repair.
 - **The prompt for unverified counterparties is weakest when few accounts are verified.** → No
-  mitigation beyond adoption; the error state carries the load that the prompt cannot.
-- **One key signs both the published record and, in future, other artefacts.** → Domain separation
-  in the transcript's context label; any future use adds a distinct label.
+  mitigation beyond adoption; the error state carries the load the prompt cannot.
+- **Changing the context-transcript encoder invalidates every published signature at once**,
+  dropping every verified account into the error state indistinguishably from an attack. → The
+  encoder's consumers are enumerated and the blast radius is stated in `document-crypto`; a change
+  takes the version-bump path.
+- **Widening the OAuth scope obliges every existing session to re-consent.** → One-time, at the
+  release that introduces it.
+- **One key signs both the published record and the indexer authentication challenge.** → Domain
+  separation in the transcript's context label; any future use adds a distinct label.
 
 ## Migration Plan
 
-Additive throughout. The record field is optional and ignore-safe, so existing records and existing
-clients are unaffected and no data migration is required. Accounts become verified individually,
-each publishing the signed record before the verification method that obliges consumers to check
-it. Rollback is publishing an operation that removes the verification method, after which the
-account resolves as unverified and every consumer proceeds as before.
+The record fields are optional and ignore-safe, so existing records remain readable and a client
+that ignores them behaves exactly as before. The change is **not** purely additive: extending the
+closed vocabulary with a signature algorithm identifier is a schema version bump under
+`spec:record-validity § schema evolution is additive and vocabulary is version-pinned`, and the
+pre-v1 window permits it only when the break is declared. This change declares it.
+
+Accounts become verified individually, each publishing the signed record before the verification
+method that obliges consumers to check it. The OAuth scope change lands with the release and
+requires re-consent. Rollback is publishing an operation that removes the verification method,
+after which the account resolves as unverified and every consumer proceeds as before.
 
 ## Open Questions
 
+- The literal scope token for the identity-operation grant. The requirement names the capability
+  needed rather than a string, because the string is fixed by the authorization server rather than
+  chosen here.
 - Whether the indexer's own authentication should prefer a verified key when one is available. The
   three-state rule already applies to it as a consumer; whether the credential it accepts is
   additionally bound to the verification method is a separate decision that changes no requirement
