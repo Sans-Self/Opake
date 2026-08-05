@@ -58,7 +58,21 @@ through a cowboy on Opus.
    > false alarm risk)`. Return `CLEAN` with one sentence of reasoning
    > per sibling spec if nothing is stale.
 
-4. **Report, never auto-fix.** Findings go to Noï as a review readout.
+   Require a verdict for **every** sibling, stale or not, so "nothing
+   here" is something the reviewer wrote rather than something nobody
+   noticed. Any suspected trouble spots you include are hypotheses to
+   test, not conclusions to confirm — ask for them to be named explicitly
+   when they do not hold. A pass that only finds what it was pointed at
+   has confirmed your priors instead of checking them.
+
+4. **Verify before surgery.** Findings that would cause real spec work —
+   an extra delta, a requirement rewrite — are worth one refutation pass
+   before acting on them. Spawn a second reviewer whose brief is to
+   attack the findings, told plainly that "all of them hold and I found
+   nothing new" is a complete answer. Default to refuted on uncertainty:
+   unnecessary spec surgery costs more than a second opinion.
+
+5. **Report, never auto-fix.** Findings go to Noï as a review readout.
    Canon specs and change deltas only change after her red pen — the
    disposition for a confirmed finding is either an additional delta in
    the same change or an Open Questions entry, her call. Do not edit
