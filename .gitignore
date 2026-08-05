@@ -13,6 +13,7 @@ settings.local.json
 .mcp.json
 .cache
 issues.db
+graphify-out/
 .ripsed
 .opencode/
 driver-key.pub
