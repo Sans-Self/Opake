@@ -31,7 +31,7 @@ a public, attributable act — without changing where the bundle lives.
   by an account it is not withdrawing access from.
 - Operations that wrap a key to an unverified account surface that fact and require explicit
   confirmation. Confirmation is captured once per relationship, at the point access is granted, so
-  a later rotation does not ask again. An operation that runs with no caller present captures its
+  a later group-key rotation does not ask again. An operation that runs with no caller present captures its
   confirmation when it is queued.
 - Pairing completion verifies received identity keys against the DID document rather than against
   a record served by the same host that relayed the response.
@@ -55,6 +55,11 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 
 - `account-verification`: what an account publishes to become verified, what bytes the signature
   covers, how a consumer resolves the three states, and what each state obliges a caller to do.
+- `terminology`: one fixed meaning for each term that names more than one thing — the two signing
+  keys a verified account's DID document carries, the three operations called rotation, the three
+  checks called verification, and the anchor. It constrains spec prose and obliges no
+  implementation. This change introduces it because it introduces most of the collisions; it is a
+  home for later terms, not a glossary of the whole protocol.
 
 ### Modified Capabilities
 
@@ -73,7 +78,7 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 - `sharing-grants`: grant creation resolves the recipient; the pending-share queue captures its
   confirmation at queue time and reports an error-state recipient rather than expiring silently.
 - `background-work`: a task running with no caller present cannot carry a consent obligation, and
-  the re-wrap sweep picks up members excluded from a rotation.
+  the re-wrap sweep picks up members excluded from a group-key rotation.
 - `document-crypto`: the context-transcript encoder acquires a signature consumer, its consumers
   are enumerated, and the blast radius of changing it is stated.
 - `record-validity`: the closed vocabulary list gains signature algorithm identifiers, and the
@@ -87,14 +92,14 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 
 - **Lexicon**: `at.opake.publicKey` gains optional `signature` and `signatureAlgo` fields.
 - **opake-core**: signature construction and verification, DID-document verification-method lookup,
-  three-state resolution used by member addition, rotation, grant creation, the pending-share
+  three-state resolution used by member addition, group-key rotation, grant creation, the pending-share
   daemon, and pairing completion, and the boot-time check of the account's own verification method.
 - **OAuth**: the scope string gains an identity-operation grant, which obliges every existing
   session to re-consent.
 - **Indexer**: authentication accepts an account with no verification method and refuses one whose
   verification method is present but whose published record does not verify under it.
 - **Clients**: verification state is displayed wherever a counterparty is named; confirmation is
-  required before wrapping to an unverified account; excluded members are reported after a rotation.
+  required before wrapping to an unverified account; excluded members are reported after a group-key rotation.
 - **Dev-env and e2e**: a verified fixture actor, and a harness affordance for the confirmation.
 - **Issues**: closes the cross-PDS half of #70 for verified counterparties; narrows #57 to accounts
   that have not published a verification method.

@@ -54,8 +54,13 @@ entries in this order and no others:
    `opakeVersion`,
 2. the account's DID,
 3. `opakeVersion`,
-4. `x25519PublicKey`, 5. `x25519Algo`, 6. `mlKemPublicKey`, 7. `mlKemAlgo`,
-8. `signingKey`, 9. `signingAlgo`, 10. `createdAt`.
+4. `x25519PublicKey`,
+5. `x25519Algo`,
+6. `mlKemPublicKey`,
+7. `mlKemAlgo`,
+8. `signingKey`,
+9. `signingAlgo`,
+10. `createdAt`.
 
 `signature` and `signatureAlgo` are excluded, being the fields the signature produces. The list is
 **closed for a given scheme version**: a field added to the record later is not covered, and
@@ -263,7 +268,7 @@ Restricting an operation to verified counterparties is not part of this capabili
 - **WHEN** an operation would wrap a key to them
 - **THEN** the operation surfaces the unverified state and writes nothing until the caller confirms
 
-#### Scenario: rotation does not re-ask for an admitted member
+#### Scenario: a group-key rotation does not re-ask for an admitted member
 
 - **GIVEN** a workspace member admitted as unverified with the manager's confirmation
 - **WHEN** a later removal rotates the group key

@@ -49,13 +49,13 @@
 - [ ] 6.4 Verify received keys against the DID document in pairing completion, rejecting the error state
 - [ ] 6.5 Add regressions asserting no record is written on the error state in each of the three paths
 
-## 7. Multi-recipient rotation
+## 7. Multi-recipient group-key rotation
 
 - [ ] 7.1 Resolve each remaining member independently in the removal re-wrap loop in `crates/opake-core/src/opake.rs`
-- [ ] 7.2 Exclude a member resolving to the error state from the re-wrap and complete the rotation, rather than aborting it
+- [ ] 7.2 Exclude a member resolving to the error state from the re-wrap and complete the group-key rotation, rather than aborting it
 - [ ] 7.3 Report excluded members to the authoring manager as part of the operation's result
 - [ ] 7.4 Re-wrap without prompting for a member already admitted as unverified
-- [ ] 7.5 Extend the re-wrap sweep to pick up members excluded from a rotation once their record verifies
+- [ ] 7.5 Extend the re-wrap sweep to pick up members excluded from a group-key rotation once their record verifies
 - [ ] 7.6 Add a regression asserting a removal completes with one member unverifiable, that forward secrecy holds, and that the excluded member is named in the result
 
 ## 8. Unattended paths
@@ -83,7 +83,7 @@
 - [ ] 11.1 Surface verification state wherever a counterparty is named, with an accessible non-colour indicator
 - [ ] 11.2 Present the unverified confirmation at the point access is granted, naming the consequence rather than the mechanism
 - [ ] 11.3 Present the error state as a refusal with no override
-- [ ] 11.4 Present excluded members after a rotation, naming what they cannot read until repaired
+- [ ] 11.4 Present excluded members after a group-key rotation, naming what they cannot read until repaired
 - [ ] 11.5 Add the verification setup and removal flows to the CLI
 - [ ] 11.6 Add the self-check result to the web account view
 
@@ -100,3 +100,5 @@
 - [ ] 13.3 Correct the statement in `docs/ARCHITECTURE.md` that DID documents carry only signing keys
 - [ ] 13.4 Record that a host holding the account's rotation keys can replace the verification method, and that a host can refuse to publish one for an account that holds no rotation key of its own
 - [ ] 13.5 Document rotation-key custody as the deployment property that bounds both limitations: a key held off the infrastructure that serves the PDS and listed at higher authority than the host's, and what the recovery window does and does not cover
+- [ ] 13.6 Align `docs/CRYPTO.md`, `docs/AUTH.md`, and `docs/ARCHITECTURE.md` with the terminology capability, in particular the two signing keys a verified account's DID document carries and the three operations called rotation
+- [ ] 13.7 Use verified and unverified in every interface string, keeping anchor out of user-facing copy

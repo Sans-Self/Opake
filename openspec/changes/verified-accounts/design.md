@@ -95,7 +95,7 @@ already do by serving nothing. Forward secrecy is unaffected either way: it depe
 minted, never on who it was wrapped to.
 
 **Confirmation is captured once per relationship, at the point access is granted.** Re-asking on
-every rotation would produce one prompt per member per removal and convert a deliberate decision
+every group-key rotation would produce one prompt per member per removal and convert a deliberate decision
 into routine noise, which is how a prompt stops being read. Where no caller is present at all — the
 pending-share daemon — the confirmation is captured when the share is queued, covering whichever
 state the recipient turns out to have. A background task cannot invent consent and must not proceed

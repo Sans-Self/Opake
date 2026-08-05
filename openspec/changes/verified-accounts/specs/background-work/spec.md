@@ -15,13 +15,13 @@ The work set SHALL include re-wraps a synchronous operation deliberately left un
 
 #### Scenario: an excluded member is re-wrapped once their record verifies
 
-- **GIVEN** a member excluded from a rotation's re-wrap whose published record subsequently verifies
+- **GIVEN** a member excluded from a group-key rotation's re-wrap whose published record subsequently verifies
 - **WHEN** any runner derives the re-wrap sweep's work set
-- **THEN** the member's missing wrap for the current rotation is in it, and the sweep writes it with no operator action
+- **THEN** the member's missing wrap for the current group-key rotation is in it, and the sweep writes it with no operator action
 
 #### Scenario: an unresolved recipient is not re-wrapped by a runner's initiative
 
-- **GIVEN** a member excluded from a rotation whose record still does not verify
+- **GIVEN** a member excluded from a group-key rotation whose record still does not verify
 - **WHEN** a runner derives the work set
 - **THEN** the member remains excluded, no wrap is written, and the item stays derivable for a later pass
 
