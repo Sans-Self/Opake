@@ -96,7 +96,12 @@ pub fn plan_rewrap(
         .decode()
         .map_err(|e| Error::Decryption(format!("rewrap: invalid wrapped content key: {e}")))?;
     let content_key = crate::crypto::unwrap_content_key_from_keyring(&wrapped_bytes, old_key)?;
-    let new_wrapped = crate::crypto::wrap_content_key_for_keyring(&content_key, head.current)?;
+    let current = head
+        .current
+        .ok_or_else(|| Error::CurrentGroupKeyUnavailable {
+            workspace_id: workspace_id.to_owned(),
+        })?;
+    let new_wrapped = crate::crypto::wrap_content_key_for_keyring(&content_key, current)?;
 
     let mut rewrapped = document.clone();
     rewrapped.encryption = records::Encryption::Keyring(records::KeyringEncryption {
@@ -119,7 +124,8 @@ pub fn plan_rewrap(
 /// A CAS conflict returns [`RewrapItem::Conflict`], not an error: the record
 /// changed under us — almost always another runner finished it first — so the
 /// runner re-derives (finds nothing to do) and skips.
-pub async fn rewrap_document_to_head<T: Transport>(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn rewrap_document_to_head<T: Transport>(
     client: &mut XrpcClient<T>,
     workspace_id: &str,
     doc_uri: &str,

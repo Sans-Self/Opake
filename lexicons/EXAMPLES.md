@@ -179,11 +179,17 @@ array only contains Alice's wrapped key — only she can decrypt.
     "ciphertext": { "$bytes": "base64-wrapped-content-key-for-bob" },
     "algo": "x25519-mlkem768-hkdf-a256kw-v2"
   },
-  "permissions": "read",
-  "note": "Here's the tax doc you asked about",
+  "encryptedMetadata": {
+    "ciphertext": { "$bytes": "base64-aes-256-gcm-encrypted-grant-metadata" },
+    "nonce": { "$bytes": "base64-encoded-12-byte-nonce" }
+  },
   "createdAt": "2026-02-27T11:00:00.000Z"
 }
 ```
+
+The grant metadata decrypts to the permission and optional note. When the owner
+explicitly approves an unverified recipient bundle, it also carries that
+bundle's 32-byte approval commitment; it never approves a replacement bundle.
 
 **How Bob decrypts:**
 1. His client/Indexer discovers this grant (firehose, query, or notification)
@@ -201,16 +207,16 @@ the document with a fresh content key.
 
 ### The keyring record:
 
-The `owner` field identifies the canonical owner (Alice). Each member has a `role`: manager (full control), editor (upload/edit), or viewer (read-only). The keyring name and description are inside `encryptedMetadata`, encrypted with the group key.
+Each member is an explicit DID-and-role relationship: manager (full control), editor (upload/edit), or viewer (read-only). A current `wrappedKey` is optional; an admitted member without one can retain historical access but cannot read or create current-generation content until a manager repairs the wrap. An unverified recipient's 32-byte `unverifiedKeyApproval` is optional and binds approval to that exact encryption bundle. The keyring name and description are inside `encryptedMetadata`, encrypted with the group key. This is the pre-v1 record shape; there is no legacy member reader or inferred DID.
 
 ```json
 {
   "$type": "at.opake.keyring",
   "opakeVersion": 1,
   "algo": "aes-256-gcm",
-  "owner": "did:plc:alice123",
   "members": [
     {
+      "did": "did:plc:alice123",
       "wrappedKey": {
         "did": "did:plc:alice123",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-alice" },
@@ -219,14 +225,17 @@ The `owner` field identifies the canonical owner (Alice). Each member has a `rol
       "role": "manager"
     },
     {
+      "did": "did:plc:bob456",
       "wrappedKey": {
         "did": "did:plc:bob456",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-bob" },
         "algo": "x25519-mlkem768-hkdf-a256kw-v2"
       },
+      "unverifiedKeyApproval": { "$bytes": "base64-encoded-32-byte-approval-commitment" },
       "role": "editor"
     },
     {
+      "did": "did:plc:carol789",
       "wrappedKey": {
         "did": "did:plc:carol789",
         "ciphertext": { "$bytes": "base64-group-key-wrapped-for-carol" },
@@ -314,6 +323,7 @@ When manager Bob removes Carol and rotates the group key, he writes a **supersed
   "algo": "aes-256-gcm",
   "members": [
     {
+      "did": "did:plc:alice123",
       "wrappedKey": {
         "did": "did:plc:alice123",
         "ciphertext": { "$bytes": "base64-rotation-1-group-key-for-alice" },
@@ -322,6 +332,7 @@ When manager Bob removes Carol and rotates the group key, he writes a **supersed
       "role": "manager"
     },
     {
+      "did": "did:plc:bob456",
       "wrappedKey": {
         "did": "did:plc:bob456",
         "ciphertext": { "$bytes": "base64-rotation-1-group-key-for-bob" },
@@ -336,6 +347,7 @@ When manager Bob removes Carol and rotates the group key, he writes a **supersed
       "rotation": 0,
       "members": [
         {
+          "did": "did:plc:alice123",
           "wrappedKey": {
             "did": "did:plc:alice123",
             "ciphertext": { "$bytes": "base64-rotation-0-group-key-for-alice" },
@@ -344,6 +356,7 @@ When manager Bob removes Carol and rotates the group key, he writes a **supersed
           "role": "manager"
         },
         {
+          "did": "did:plc:bob456",
           "wrappedKey": {
             "did": "did:plc:bob456",
             "ciphertext": { "$bytes": "base64-rotation-0-group-key-for-bob" },
@@ -420,7 +433,7 @@ Both PDS records are deleted after successful transfer. The ephemeral private bu
 
 ## 8. Pending share (recipient hasn't set up Opake yet)
 
-When sharing with someone who hasn't logged into Opake, a `pendingShare` record is created instead of a grant. The daemon retries periodically until the recipient publishes their public key.
+When sharing with someone who has a DID but has not published an Opake key, a `pendingShare` record is created instead of a grant. The owner explicitly permits one first publication at queue time; the daemon retries periodically until that bound recipient publishes an eligible key.
 
 ```json
 {
@@ -437,11 +450,13 @@ When sharing with someone who hasn't logged into Opake, a `pendingShare` record 
 ```
 
 **Key points:**
-- `recipient` stores the handle or DID as the user entered it (not necessarily a DID)
-- `encryptedMetadata` contains `{ permissions: "read", note: "..." }` encrypted with the document's content key — same format as a grant's metadata
+- `recipient` stores the handle or DID as the user entered it and is display input only
+- `encryptedMetadata` contains `{ permissions: "read", note: "...", recipientDid: "did:plc:bob456", allowUnverifiedFirstPublication: true }` encrypted with the document's content key
+- The bound `recipientDid` and explicit first-publication permission prevent a later handle reassignment or a background default from redirecting the handoff
 - No `wrappedKey` — the content key can't be wrapped until the recipient publishes their public key
 - The daemon re-derives the content key from the document at retry time using the owner's identity
-- Records expire after 7 days and are automatically deleted by the daemon
+- Completion conditionally creates one designated grant and deletes the unchanged intent together; cancellation, replacement, expiry, and retry cannot create another grant
+- Records expire after 7 days. A conditional expiry deletes the still-current intent; verification failures are reported to the owner instead of being silently treated as ordinary retry failures
 - Cross-device: created from any device, retried by any device with the daemon running
 
 ## 9. Document update (collaborative editing)

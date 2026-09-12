@@ -13,7 +13,7 @@ All client-side cryptography lives in the [`opake-crypto`](../crates/opake-crypt
 | AES-256-KW (RFC 3394) | Symmetric key wrapping (content key → group key) | `aes-kw` |
 | HKDF-SHA256 | KDF for key wrapping + identity derivation | `hkdf` + `sha2` |
 | PBKDF2-HMAC-SHA512 | Mnemonic → master seed | `pbkdf2` + `sha2` |
-| Ed25519 | Indexer authentication signatures | `ed25519-dalek` |
+| Ed25519 | Indexer authentication and account public-key signatures | `ed25519-dalek` |
 | BIP-39 | 24-word mnemonic encoding (256-bit entropy) | `bip39` (embedded wordlist) |
 
 The hybrid construction is `x25519-mlkem768-hkdf-a256kw-v2`. Aligned with [BSI TR-02102](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr02102/tr02102_node.html) (Germany) and [ANSSI](https://www.ssi.gouv.fr/) guidance for hybrid post-quantum key establishment. ML-KEM-768 byte sizes follow [NIST FIPS-203](https://csrc.nist.gov/pubs/fips/203/final).
@@ -40,7 +40,11 @@ SCHEMA_VERSION           = 1       // Embedded in HKDF info strings
 IDENTITY_TAG_LEN         = 16      // 128-bit pubkey-hash commitment in the genesis rkey
 ```
 
-Transcript labels (domain-separate the three consumers): `opake-wrap-info` (key wraps), `opake-seal-aad` (content/metadata AAD), `opake-workspace-identity` (genesis rkey derivation). No label is a prefix of another.
+Transcript labels domain-separate five consumers: `opake-wrap-info` (key wraps),
+`opake-seal-aad` (content/metadata AAD), `opake-workspace-identity` (genesis rkey derivation),
+`at.opake.publicKey/self:v<n>` (account public-key signatures), and
+`at.opake.unverified-key-approval:v<n>` (unverified-recipient approval). Each consumer family has
+a distinct label; its declared version is encoded as a separate framed field where applicable.
 
 ## Key Types
 
@@ -138,14 +142,60 @@ The pin is **not** what protects workspace identity — derivation is — and it
 
 ### Context transcripts (`transcript.rs`)
 
-Every byte string that commits to a tuple of context fields — the HKDF `info` for key wraps and the AAD for content/metadata encryption — is produced by one injective encoder:
+Every byte string that commits to a tuple of context fields — the HKDF `info` for key wraps, AAD
+for content/metadata encryption, account signatures, and approval commitments — is produced by one
+injective encoder:
 
 ```
 transcript(label, fields)
   → label ‖ u32le(field_count) ‖ (u32le(len) ‖ bytes) per field
 ```
 
-Length-prefixing makes the encoding injective by construction: no arrangement of field contents can imitate another arrangement. (Delimiter-joining is not injective when a field may contain the delimiter — `did:web` identifiers legally contain hyphens.) The two consumers use distinct labels (`opake-wrap-info`, `opake-seal-aad`), so a wrap transcript can never collide with an AAD.
+Length-prefixing makes the encoding injective by construction: no arrangement of field contents can imitate another arrangement. (Delimiter-joining is not injective when a field may contain the delimiter — `did:web` identifiers legally contain hyphens.) Every consumer uses a distinct label, so a transcript for one purpose cannot collide with a transcript for another.
+
+### Account public-key signatures
+
+An account that publishes an `#opake` verification method in its DID document signs its
+`at.opake.publicKey/self` record with the mnemonic-derived Ed25519 key. The signature transcript
+uses `at.opake.publicKey/self:v<n>` and this fixed ordered tuple:
+
+```
+[did, opakeVersion_le32, x25519PublicKey, x25519Algo,
+ mlKemPublicKey, mlKemAlgo, signingKey, signingAlgo, createdAt]
+```
+
+The key bytes are decoded before encoding the tuple. `signature` and `signatureAlgo` are excluded,
+as are fields added after this scheme version, so JSON re-serialization and future additive fields
+cannot invalidate a valid signature. Verifiers select the scheme from the record's `opakeVersion`
+and the signature algorithm from its declared `signatureAlgo`; they verify against the DID
+document's `#opake` key rather than trusting the record's own `signingKey`. The DID in the tuple
+prevents copying a signed record to a different account.
+
+The signature binds a key record to the DID document that exists at resolution
+time. It does not constrain a party that can replace that document's `#opake`
+method. Deployments that need independence from the PDS or another service
+holding that authority keep a PLC rotation key outside that service and give it
+higher DID authority. That key can replace a compromised service key or nullify
+a replacement while the PLC recovery policy permits it; it cannot recover keys
+or plaintext that a recipient already obtained, and it cannot help after every
+independent PLC rotation credential is lost.
+
+### Approval for unverified recipient keys
+
+When an owner or manager explicitly accepts an unverified recipient's encryption bundle, the
+relationship record stores a 32-byte SHA-256 commitment rather than a timestamp-sensitive copy of
+the whole public-key record:
+
+```
+SHA-256(transcript("at.opake.unverified-key-approval:v<n>",
+  [relationship_scope_uri, recipient_did, x25519PublicKey, x25519Algo,
+   mlKemPublicKey, mlKemAlgo]))
+```
+
+The scope is a workspace's genesis URI for membership or a document URI for a share. The enclosing
+relationship record's `opakeVersion` supplies `<n>`. Changing either encryption key or either
+algorithm therefore needs a new decision, while an unchanged bundle keeps approval across a new
+timestamp or JSON encoding.
 
 ### Seal contexts — AAD (`seal_context.rs`)
 
@@ -302,12 +352,44 @@ Used everywhere: document encryption envelopes, grants, group keyring members, p
 
 ```json
 {
-  "wrappedKey": { "did": "...", "ciphertext": "...", "algo": "..." },
+  "did": "did:plc:alice",
   "role": "manager"
 }
 ```
 
-Only used in keyring `members` and `keyHistory` arrays. Composes a `WrappedKey` with a workspace role. The role is plaintext because the Indexer needs it for authorization — it's not a crypto concept.
+`wrappedKey` and `unverifiedKeyApproval` are optional. A present `wrappedKey`
+has the same `{ did, ciphertext: { "$bytes": "..." }, algo }` shape as the
+wrapped-key example above and must name this member's DID. A present
+`unverifiedKeyApproval` is `{ "$bytes": "<32-byte base64 commitment>" }`.
+
+Only used in keyring `members` and `keyHistory` arrays. A member is an
+explicit `(did, role)` relationship; `wrappedKey` is optional key material for
+that relationship, not the relationship itself. A listed member with no
+current wrap remains admitted and may retain usable historical wraps, but
+cannot decrypt current-generation metadata or create new current-generation
+content until a manager repairs that wrap. Every member list, including a
+history snapshot, has unique DIDs; a present wrap must name its containing
+member's DID.
+
+`unverifiedKeyApproval`, when present, is a 32-byte commitment to the
+relationship version, workspace genesis URI, member DID, and the exact hybrid
+encryption keys and algorithms. It is not a general consent flag. A manager
+may re-wrap to an unverified account without another prompt only when a fresh
+resolution produces the same commitment. A changed key, missing approval, or
+verification failure leaves the member admitted without a new wrap; it never
+copies an old generation's wrap into the current slot.
+
+The member representation is a pre-v1 structural reset: development fixtures
+and local dev databases must be reset together before using this draft. There
+is no legacy reader, inferred DID, or inferred approval. This reset procedure
+is intentionally unavailable after the v1 protocol freeze; later structural
+changes require a new collection NSID.
+
+Pending shares bind their resolved recipient DID and their explicit
+first-publication permission inside encrypted intent metadata. Completion
+creates the designated grant and consumes that unchanged intent in one
+same-repository CAS transaction. A retry never transfers the permission to a
+different DID or publishes a second grant after a conflict.
 
 ### Encryption union on documents
 

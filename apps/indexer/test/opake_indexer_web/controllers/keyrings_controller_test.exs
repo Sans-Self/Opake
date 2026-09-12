@@ -33,7 +33,7 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
           "opakeVersion" => 1,
           "members" =>
             Enum.map(members_dids, fn did ->
-              %{"wrappedKey" => %{"did" => did}, "role" => "manager"}
+              %{"did" => did, "role" => "manager"}
             end)
         }
       })
@@ -70,7 +70,7 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
       assert envelope["uri"] == genesis
 
       assert envelope["record"]["members"] == [
-               %{"wrappedKey" => %{"did" => did}, "role" => "manager"}
+               %{"did" => did, "role" => "manager"}
              ]
     end
 
@@ -92,8 +92,8 @@ defmodule OpakeIndexerWeb.KeyringsControllerTest do
           indexed_at: DateTime.utc_now(),
           record_jsonb: %{
             "members" => [
-              %{"wrappedKey" => %{"did" => did}, "role" => "manager"},
-              %{"wrappedKey" => %{"did" => "did:plc:new"}, "role" => "editor"}
+              %{"did" => did, "role" => "manager"},
+              %{"did" => "did:plc:new", "role" => "editor"}
             ]
           }
         })

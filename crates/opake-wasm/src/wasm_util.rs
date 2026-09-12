@@ -12,6 +12,9 @@ use wasm_bindgen::prelude::*;
 pub fn wasm_err(e: opake_core::error::Error) -> JsError {
     use opake_core::error::Error;
     let kind = match &e {
+        Error::CurrentGroupKeyUnavailable { .. } => "CurrentGroupKeyUnavailable",
+        Error::UnverifiedKeyApprovalRequired { .. } => "UnverifiedKeyApprovalRequired",
+        Error::VerificationFailed(_) => "VerificationFailed",
         Error::Encryption(_) => "Encryption",
         Error::Decryption(_) => "Decryption",
         Error::KeyWrap(_) => "KeyWrap",
@@ -57,6 +60,7 @@ pub fn pub_key_from_slice(bytes: &[u8]) -> Result<X25519PublicKey, JsError> {
 use opake_core::crypto::OsRng;
 use opake_core::manager::FileContext;
 use opake_core::opake::Opake;
+use std::rc::Rc;
 
 use crate::js_storage::JsStorage;
 
@@ -85,6 +89,7 @@ pub async fn make_opake_from_storage(
     // same setTimeout-backed timer the SSE reconnect loop uses. Lets a fresh-
     // workspace mutation wait out the genesis-indexing race instead of 403ing.
     opake.set_sleep_fn(Box::new(|d| Box::pin(crate::sse_wasm::wasm_sleep(d))));
+    opake.set_identity_sleep_fn(Rc::new(|d| Box::pin(crate::sse_wasm::wasm_sleep(d))));
 
     Ok(opake)
 }
@@ -94,10 +99,9 @@ pub fn cabinet_context(opake: &WasmOpake) -> Result<FileContext, JsError> {
     opake.cabinet_context().map_err(wasm_err)
 }
 
-// DownloadResult + serde_bytes moved to `crate::bindings`. Re-export to
-// keep existing import paths (`crate::wasm_util::DownloadResult`,
-// `crate::wasm_util::serde_bytes`) working without churning every site.
-pub use crate::bindings::{serde_bytes, DownloadResult};
+// DownloadResult moved to `crate::bindings`; retain its established internal
+// import path while the byte serializer stays with the DTO definitions.
+pub use crate::bindings::DownloadResult;
 
 // ---------------------------------------------------------------------------
 // Shared serialization helpers (used by opake_context + file_manager)

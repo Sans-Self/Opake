@@ -57,17 +57,20 @@ type WasmFileManager = {
   deleteRecursive(uri: string): Promise<unknown>;
   share(
     documentUri: string,
-    recipientDid: string,
-    recipientX25519PublicKey: Uint8Array,
-    recipientMlKemPublicKey: Uint8Array,
+    recipient: string,
+    confirmedUnverifiedKeys: Uint8Array | null,
     permissions: string,
     note: string | null,
   ): Promise<unknown>;
+  shareApprovalChallenge(documentUri: string, recipient: string): Promise<unknown>;
+  resolveRecipientDid(recipient: string): Promise<string>;
   revokeShare(grantUri: string): Promise<void>;
   listShares(): Promise<unknown>;
   createPendingShare(
     documentUri: string,
     recipient: string,
+    recipientDid: string,
+    allowUnverifiedFirstPublication: boolean,
     permissions: string,
     note: string | null,
   ): Promise<string>;
@@ -573,30 +576,43 @@ export class FileManager {
    * recipient's public encryption key.
    *
    * @param documentUri - URI of the document to share.
-   * @param recipientDid - DID of the recipient.
-   * @param recipientX25519PublicKey - Recipient's X25519 public key (32 bytes).
-   * @param recipientMlKemPublicKey - Recipient's ML-KEM-768 public key (1184 bytes).
+   * @param recipient - Handle or DID of the recipient.
+   * @param confirmedUnverifiedKeys - Exact 32-byte confirmation from the
+   * inspection call when the recipient is unverified.
    * @param role - Access role ("read" or "write").
    */
   @wrapWasmErrors
   share(
     documentUri: string,
-    recipientDid: string,
-    recipientX25519PublicKey: Uint8Array,
-    recipientMlKemPublicKey: Uint8Array,
+    recipient: string,
+    confirmedUnverifiedKeys: Uint8Array | null,
     permissions: string,
     note?: string,
   ): Promise<MutationResult> {
     return this.track(() =>
       this.requireHandle().share(
         documentUri,
-        recipientDid,
-        recipientX25519PublicKey,
-        recipientMlKemPublicKey,
+        recipient,
+        confirmedUnverifiedKeys,
         permissions,
         note ?? null,
       ),
     ) as Promise<MutationResult>;
+  }
+
+  /**
+   * Inspect the exact confirmation required to share with an unverified
+   * recipient. Pass `confirmation` unchanged to {@link share}; `null` means
+   * their current key record is verified.
+   */
+  @wrapWasmErrors
+  shareApprovalChallenge(
+    documentUri: string,
+    recipient: string,
+  ): Promise<{ did: string; confirmation: Uint8Array | null }> {
+    return this.track(() =>
+      this.requireHandle().shareApprovalChallenge(documentUri, recipient),
+    ) as Promise<{ did: string; confirmation: Uint8Array | null }>;
   }
 
   /**
@@ -636,6 +652,11 @@ export class FileManager {
    *
    * @param documentUri - URI of the document to share.
    * @param recipient - Recipient's handle or DID as entered by the user.
+   * @param recipientDid - DID resolved from `recipient` while the target was
+   * known to exist. This binds first-publication consent against handle
+   * reassignment.
+   * @param allowUnverifiedFirstPublication - Explicit first-publication
+   * permission bound to the DID resolved from `recipient`.
    * @param permissions - Access role (typically `"read"`).
    * @param note - Optional message carried through to the resulting grant.
    * @returns The URI of the created pending share record.
@@ -644,12 +665,27 @@ export class FileManager {
   createPendingShare(
     documentUri: string,
     recipient: string,
+    recipientDid: string,
+    allowUnverifiedFirstPublication: boolean,
     permissions: string,
     note: string | null,
   ): Promise<string> {
     return this.track(() =>
-      this.requireHandle().createPendingShare(documentUri, recipient, permissions, note),
+      this.requireHandle().createPendingShare(
+        documentUri,
+        recipient,
+        recipientDid,
+        allowUnverifiedFirstPublication,
+        permissions,
+        note,
+      ),
     );
+  }
+
+  /** Resolve the DID to bind into a pending-share first-publication intent. */
+  @wrapWasmErrors
+  resolveRecipientDid(recipient: string): Promise<string> {
+    return this.track(() => this.requireHandle().resolveRecipientDid(recipient));
   }
 
   // ---------------------------------------------------------------------------

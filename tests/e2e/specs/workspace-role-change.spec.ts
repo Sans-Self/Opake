@@ -18,8 +18,14 @@ const actor = (name: string) => {
 
 const uniq = () => `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 
-async function newActorPage(browser: import("@playwright/test").Browser, name: string): Promise<Page> {
-  const context = await browser.newContext({ storageState: authFile(name), ignoreHTTPSErrors: true });
+async function newActorPage(
+  browser: import("@playwright/test").Browser,
+  name: string,
+): Promise<Page> {
+  const context = await browser.newContext({
+    storageState: authFile(name),
+    ignoreHTTPSErrors: true,
+  });
   const page = await context.newPage();
   await installBlockade(page);
   return page;
@@ -49,7 +55,13 @@ test(`manager changes a cross-PDS member's role and it survives reload on both s
     await addDialog.getByLabel("Member handle").fill(carol.handle);
     // Default role in the dialog is Editor — leave it, then demote via the
     // settings-page select below so the test actually exercises a change.
+    const consent = alicePage.waitForEvent("dialog");
     await addDialog.getByRole("button", { name: "Add", exact: true }).click();
+    const confirmation = await consent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("is unverified");
+    expect(confirmation.message()).toContain("expose every workspace file");
+    await confirmation.accept();
 
     // The role select only renders for rows the viewer can manage and isn't
     // themself — with one other member, it's unambiguous. Display names

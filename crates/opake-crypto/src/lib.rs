@@ -31,6 +31,7 @@ mod key_wrapping;
 mod keyring_wrapping;
 mod metadata;
 mod mnemonic;
+mod public_key_transcript;
 mod seal_context;
 mod secrets;
 mod transcript;
@@ -51,13 +52,17 @@ pub use content::{decrypt_blob, encrypt_blob, generate_content_key};
 pub use error::Error;
 pub use identity_tag::derive_workspace_identity_tag;
 pub use key_wrapping::{create_group_key, unwrap_key, wrap_key};
+pub use public_key_transcript::{
+    public_key_signature_transcript, unverified_key_approval, unverified_key_approval_transcript,
+    EncryptionKeyFields,
+};
 pub use seal_context::{SealContext, SealType};
 // `WrapContext` is part of the public wrap/unwrap surface — callers must
 // pass one to scope their wrap to a record context.
 pub use keyring_wrapping::{unwrap_content_key_from_keyring, wrap_content_key_for_keyring};
 pub use metadata::{
     decrypt_metadata, encrypt_metadata, DirectoryMetadata, DocumentMetadata, GrantMetadata,
-    KeyringMetadata,
+    KeyringMetadata, PendingShareMetadata,
 };
 pub use mnemonic::{
     derive_keys_from_mnemonic, format_mnemonic_grid, generate_mnemonic, parse_mnemonic,
@@ -70,6 +75,9 @@ pub use wire::{EncryptedMetadata, WrappedKey};
 /// with version <= this are compatible; higher versions must be rejected by
 /// the caller. Also folded into the HKDF info string for domain separation
 /// so wraps from one schema version cannot be replayed under a later one.
+/// Pre-v1 draft redefined by verified-accounts: explicit member DIDs, optional
+/// current wraps, key-bound approvals and signed public-key records. Development
+/// records must be reset as a unit; no legacy member or consent inference.
 pub const SCHEMA_VERSION: u32 = 1;
 
 const CONTENT_KEY_LEN: usize = 32;

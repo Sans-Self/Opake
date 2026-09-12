@@ -166,12 +166,10 @@ _dev-env-check:
 e2e-cli:
     cd tests && bun test tests/cli/
 
-# Web e2e (Playwright) against the dev-env. The optional argument scopes the run
-# to an actor namespace (`just e2e-web alpha`): six derived actors provisioned on
-# demand, their own auth snapshots, their own test-results/ and report — so it can
-# run concurrently with any other namespace, and with a bare invocation, against
-# the one dev-env. Bare is the checked-in six and today's paths, unchanged.
-e2e-web ns="": _dev-env-check
+# Web e2e (Playwright) against the dev-env. Runs use an isolated namespace by
+# default because membership scenarios mutate fixture accounts. Pass another
+# namespace (`just e2e-web alpha`) to run separately.
+e2e-web ns="e2e-web": _dev-env-check
     cd tests && E2E_ACTOR_NS={{ ns }} bunx playwright test --project=e2e
 
 # Rebuild the dev-env CLI image iff the working-tree CLI sources changed since
@@ -182,11 +180,10 @@ e2e-web ns="": _dev-env-check
 _dev-env-cli-fresh:
     @dev-env/build/build-cli.sh ensure
 
-# CLI federation tier against the dev-env. Takes the same optional actor
-# namespace as `e2e-web` — the tier resolves its fixture actors through the same
-# helper, so a scoped run drives that namespace's actors and provisions them if
-# they are new.
-e2e-federation ns="": _dev-env-check _dev-env-cli-fresh
+# CLI federation tier against the dev-env. It uses an isolated namespace by
+# default; pass the same namespace as `e2e-web` when a run intentionally shares
+# fixtures across the native and browser tiers.
+e2e-federation ns="e2e-fed": _dev-env-check _dev-env-cli-fresh
     cd tests && OPAKE_TEST_ENV=devenv E2E_ACTOR_NS={{ ns }} bunx vitest run tests/federation/
 
 # Harness meta-tier: tests of the e2e harness itself (snapshot liveness,
@@ -208,8 +205,8 @@ e2e-ns-clean ns:
 # decisions. Running the tiers on an AGED stack instead is a soak run: new
 # failures there are accumulation findings, not gate noise — file them.
 e2e-gate: dev-env-reset
-    cd tests && E2E_REAUTH=1 bunx playwright test --project=e2e
-    just e2e-federation
+    cd tests && E2E_REAUTH=1 E2E_ACTOR_NS=e2e-gate bunx playwright test --project=e2e
+    just e2e-federation e2e-gate
 
 # Run all e2e tests
 e2e: e2e-cli

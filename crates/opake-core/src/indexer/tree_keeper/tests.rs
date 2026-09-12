@@ -567,10 +567,7 @@ fn wrapped_member(group_key: &ContentKey, workspace_id: &str) -> crate::records:
         &mut OsRng,
     )
     .unwrap();
-    crate::records::KeyringMember {
-        wrapped_key,
-        role: crate::records::Role::Manager,
-    }
+    crate::records::KeyringMember::with_wrap(wrapped_key, crate::records::Role::Manager)
 }
 
 /// Build a keyring record with the test identity as sole member holding
@@ -605,12 +602,19 @@ fn keyring_record(
                 encoded: String::new(),
             },
         },
-        supersedes: None,
-        supersedes_cid: None,
+        // This helper models a non-genesis live head. A record that declares
+        // lineage without a supersedes link is rejected before crypto.
+        supersedes: Some(format!("{workspace_id}/prior")),
+        supersedes_cid: Some("bafytest".into()),
         lineage: Some(workspace_id.into()),
         created_at: "2026-04-17T00:00:00Z".into(),
         modified_at: None,
     }
+}
+
+fn workspace_uri_for_genesis_key(key: &ContentKey) -> String {
+    let tag = crate::crypto::derive_workspace_identity_tag(key, "did:plc:test");
+    format!("at://did:plc:test/at.opake.keyring/{tag}")
 }
 
 fn keyring_upsert_of(record: crate::records::Keyring, uri: &str) -> SseEvent {
@@ -676,7 +680,6 @@ fn dir_upsert_of(record: crate::records::Directory, uri: &str) -> SseEvent {
 // spec:key-rotation § Live projections adopt a rotation completely
 #[test]
 fn rotation_event_keeps_names_readable_across_rotation() {
-    const WS_URI: &str = "at://did:plc:test/at.opake.keyring/rot";
     const ROOT_URI2: &str = "at://did:plc:test/at.opake.directory/rot-root";
     const SUB_URI: &str = "at://did:plc:test/at.opake.directory/rot-sub";
     const NEW_URI: &str = "at://did:plc:test/at.opake.directory/rot-new";
@@ -685,11 +688,12 @@ fn rotation_event_keeps_names_readable_across_rotation() {
     let kp = test_keypair();
     let key0 = crypto::generate_content_key(&mut OsRng);
     let key1 = crypto::generate_content_key(&mut OsRng);
+    let ws_uri = workspace_uri_for_genesis_key(&key0);
 
     // Rotation-0 tree: root + a "Reports" subdir, both wrapped under key0.
     let tree = {
-        let root = keyring_dir(ROOT_URI2, "/", WS_URI, &key0, 0, vec![SUB_URI.into()]);
-        let sub = keyring_dir(SUB_URI, "Reports", WS_URI, &key0, 0, vec![]);
+        let root = keyring_dir(ROOT_URI2, "/", &ws_uri, &key0, 0, vec![SUB_URI.into()]);
+        let sub = keyring_dir(SUB_URI, "Reports", &ws_uri, &key0, 0, vec![]);
         let mut tree = DirectoryTree::from_records(vec![
             (ROOT_URI2.to_string(), root),
             (SUB_URI.to_string(), sub),
@@ -698,10 +702,10 @@ fn rotation_event_keeps_names_readable_across_rotation() {
         let hist: Vec<crate::workspace::HistoricalKey> = Vec::new();
         let view = crate::workspace::GroupKeys {
             current_rotation: 0,
-            current: &key0,
+            current: Some(&key0),
             historical: &hist,
         };
-        let group_keys = HashMap::from([(WS_URI.to_string(), view)]);
+        let group_keys = HashMap::from([(ws_uri.clone(), view)]);
         tree.decrypt_names_with_group_keys(TEST_DID, &kp.private_keys(), &group_keys);
         assert_eq!(tree.directory_name(SUB_URI), Some("Reports"));
         tree
@@ -709,7 +713,7 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
     let mut keeper = cabinet_keeper();
     keeper.install_workspace_tree(
-        WS_URI.into(),
+        ws_uri.clone(),
         tree,
         key0.clone(),
         0,
@@ -719,13 +723,13 @@ fn rotation_event_keeps_names_readable_across_rotation() {
     );
 
     let sink = RecordingSink::new();
-    keeper.watch_workspace(WS_URI.into(), ROOT_URI2.into(), sink.callback());
+    keeper.watch_workspace(ws_uri.clone(), ROOT_URI2.into(), sink.callback());
     let before = sink.count();
 
     // Rotation event: rotation 1, key1 current, key0 pushed into history.
-    let record = keyring_record(WS_URI, 1, &key1, &[(0, &key0)]);
+    let record = keyring_record(&ws_uri, 1, &key1, &[(0, &key0)]);
     keeper
-        .apply_event(&keyring_upsert_of(record, WS_URI))
+        .apply_event(&keyring_upsert_of(record, &ws_uri))
         .unwrap();
 
     // Adoption notified watchers.
@@ -735,7 +739,7 @@ fn rotation_event_keeps_names_readable_across_rotation() {
     // not blanked to "?" or "".
     assert_eq!(
         keeper
-            .workspace_tree(WS_URI)
+            .workspace_tree(&ws_uri)
             .and_then(|t| t.directory_name(SUB_URI)),
         Some("Reports"),
         "pre-rotation names survive an in-place rotation"
@@ -743,13 +747,13 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
     // A directory written under rotation 1 decrypts via the adopted key,
     // with no re-bootstrap (post-rotation upload readable by a live peer).
-    let new_dir = keyring_dir(NEW_URI, "Q3", WS_URI, &key1, 1, vec![]);
+    let new_dir = keyring_dir(NEW_URI, "Q3", &ws_uri, &key1, 1, vec![]);
     keeper
         .apply_event(&dir_upsert_of(new_dir, NEW_URI))
         .unwrap();
     assert_eq!(
         keeper
-            .workspace_tree(WS_URI)
+            .workspace_tree(&ws_uri)
             .and_then(|t| t.directory_name(NEW_URI)),
         Some("Q3"),
         "post-rotation entries decrypt via the adopted key without reload"
@@ -758,14 +762,14 @@ fn rotation_event_keeps_names_readable_across_rotation() {
 
 #[test]
 fn keyring_upsert_without_rotation_bump_is_noop() {
-    const WS_URI: &str = "at://did:plc:test/at.opake.keyring/abc";
     use crate::crypto::{self, OsRng};
 
     let key = crypto::generate_content_key(&mut OsRng);
+    let ws_uri = workspace_uri_for_genesis_key(&key);
     let mut keeper = cabinet_keeper();
     install_ws(
         &mut keeper,
-        WS_URI,
+        &ws_uri,
         DirectoryTree::from_records(std::iter::empty()),
         key.clone(),
         5,
@@ -773,19 +777,167 @@ fn keyring_upsert_without_rotation_bump_is_noop() {
 
     let sink = RecordingSink::new();
     keeper.watch_workspace(
-        WS_URI.into(),
+        ws_uri.clone(),
         "at://did:plc:test/at.opake.directory/ws-abc".into(),
         sink.callback(),
     );
     let before = sink.count();
 
     // Same rotation → metadata-only supersede; nothing key-derived changes.
-    let record = keyring_record(WS_URI, 5, &key, &[]);
+    let record = keyring_record(&ws_uri, 5, &key, &[]);
     keeper
-        .apply_event(&keyring_upsert_of(record, WS_URI))
+        .apply_event(&keyring_upsert_of(record, &ws_uri))
         .unwrap();
 
     assert_eq!(sink.count(), before, "no watcher fire expected");
+}
+
+// A same-rotation member-wrap repair is an authoritative replacement of the
+// head.  Conversely, deleting that repair restores the missing-wrap head. The
+// keeper must not keep the repair's key simply because the rotation did not
+// change.
+// spec:key-rotation § Live projections adopt a rotation completely
+#[test]
+fn same_rotation_missing_wrap_and_repair_replace_live_key_state() {
+    use crate::crypto::{self, OsRng};
+
+    let key0 = crypto::generate_content_key(&mut OsRng);
+    let key1 = crypto::generate_content_key(&mut OsRng);
+    let ws_uri = workspace_uri_for_genesis_key(&key0);
+    let mut keeper = cabinet_keeper();
+    install_ws(
+        &mut keeper,
+        &ws_uri,
+        DirectoryTree::from_records(std::iter::empty()),
+        key1.clone(),
+        1,
+    );
+
+    // This is the restored head after a repair was deleted. It still proves
+    // genesis through history, but deliberately has no current member wrap.
+    let mut missing_wrap = keyring_record(&ws_uri, 1, &key1, &[(0, &key0)]);
+    missing_wrap.members[0].wrapped_key = None;
+    keeper
+        .apply_event(&keyring_upsert_of(missing_wrap, &ws_uri))
+        .unwrap();
+    let Some(super::HeldTree::Workspace {
+        group_key,
+        rotation,
+        ..
+    }) = keeper.workspaces.get(&ws_uri)
+    else {
+        panic!("workspace must remain installed after losing current access");
+    };
+    assert_eq!(*rotation, 1);
+    assert!(
+        group_key.is_none(),
+        "deleted repair must not leave its key live"
+    );
+
+    // A new repair of that same rotation may restore the current wrap without
+    // requiring a full workspace reload.
+    keeper
+        .apply_event(&keyring_upsert_of(
+            keyring_record(&ws_uri, 1, &key1, &[(0, &key0)]),
+            &ws_uri,
+        ))
+        .unwrap();
+    let Some(super::HeldTree::Workspace {
+        group_key,
+        rotation,
+        ..
+    }) = keeper.workspaces.get(&ws_uri)
+    else {
+        panic!("workspace must remain installed after repair");
+    };
+    assert_eq!(*rotation, 1);
+    assert_eq!(group_key.as_ref().map(|key| key.0), Some(key1.0));
+}
+
+// A corrupt or undecryptable current wrap is the same availability state as a
+// missing one. The event may still prove genesis through history, so retaining
+// the old current key would incorrectly expose the deleted/new head's
+// generation.
+// spec:key-rotation § Live projections adopt a rotation completely
+#[test]
+fn undecryptable_current_wrap_adopts_historical_only_state() {
+    use crate::crypto::{self, OsRng};
+
+    let key0 = crypto::generate_content_key(&mut OsRng);
+    let key1 = crypto::generate_content_key(&mut OsRng);
+    let ws_uri = workspace_uri_for_genesis_key(&key0);
+    let mut keeper = cabinet_keeper();
+    install_ws(
+        &mut keeper,
+        &ws_uri,
+        DirectoryTree::from_records(std::iter::empty()),
+        key1,
+        1,
+    );
+
+    let mut corrupt_wrap = keyring_record(&ws_uri, 1, &key0, &[(0, &key0)]);
+    corrupt_wrap.members[0]
+        .wrapped_key
+        .as_mut()
+        .expect("fixture has a current wrap")
+        .ciphertext
+        .encoded = "not-a-valid-wrap".into();
+    keeper
+        .apply_event(&keyring_upsert_of(corrupt_wrap, &ws_uri))
+        .unwrap();
+
+    let Some(super::HeldTree::Workspace {
+        group_key,
+        rotation,
+        ..
+    }) = keeper.workspaces.get(&ws_uri)
+    else {
+        panic!("historical-only workspace must remain installed");
+    };
+    assert_eq!(*rotation, 1);
+    assert!(
+        group_key.is_none(),
+        "old current key must not remain active"
+    );
+}
+
+// Indexer keyring upserts name the resolved live head. A rollback can restore
+// an earlier rotation, so this must replace the held rotation and key rather
+// than treating the counter as a monotonic SSE sequence.
+// spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it
+#[test]
+fn rollback_upsert_replaces_a_newer_rotation() {
+    use crate::crypto::{self, OsRng};
+
+    let key0 = crypto::generate_content_key(&mut OsRng);
+    let key1 = crypto::generate_content_key(&mut OsRng);
+    let ws_uri = workspace_uri_for_genesis_key(&key0);
+    let mut keeper = cabinet_keeper();
+    install_ws(
+        &mut keeper,
+        &ws_uri,
+        DirectoryTree::from_records(std::iter::empty()),
+        key1,
+        1,
+    );
+
+    keeper
+        .apply_event(&keyring_upsert_of(
+            keyring_record(&ws_uri, 0, &key0, &[]),
+            &ws_uri,
+        ))
+        .unwrap();
+
+    let Some(super::HeldTree::Workspace {
+        group_key,
+        rotation,
+        ..
+    }) = keeper.workspaces.get(&ws_uri)
+    else {
+        panic!("workspace must remain installed after rollback");
+    };
+    assert_eq!(*rotation, 0);
+    assert_eq!(group_key.as_ref().map(|key| key.0), Some(key0.0));
 }
 
 #[test]

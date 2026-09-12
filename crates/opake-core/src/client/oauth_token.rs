@@ -26,10 +26,12 @@ pub struct ParResponse {
 }
 
 /// Token response from the authorization server.
-#[derive(Debug, Deserialize)]
+#[derive(crate::RedactedDebug, Deserialize)]
 pub struct TokenResponse {
+    #[redact]
     pub access_token: String,
     pub token_type: String,
+    #[redact]
     pub refresh_token: Option<String>,
     pub expires_in: Option<u64>,
     pub scope: Option<String>,
@@ -98,13 +100,14 @@ pub async fn pushed_authorization_request(
 
 /// Build the loopback client ID for atproto OAuth (RFC 8252 §7.3).
 ///
-/// The scope is embedded in the client ID URL and MUST match what the app
-/// requests in the PAR body — pass the same scope string to both.
-pub fn build_client_id(redirect_uri: &str, scope: &str) -> String {
+/// The client ID declares the union of scopes this client may request. Each
+/// PAR still carries its actual operation scope, so standing sessions do not
+/// gain identity-operation authority from this declaration.
+pub fn build_client_id(redirect_uri: &str) -> String {
     format!(
         "http://localhost?redirect_uri={}&scope={}",
         urlencoding::encode(redirect_uri),
-        urlencoding::encode(scope),
+        urlencoding::encode(&crate::scope::client_metadata_scope()),
     )
 }
 
@@ -142,6 +145,39 @@ pub async fn exchange_code(
     timestamp: i64,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<TokenResponse, Error> {
+    let token_response = exchange_code_unvalidated(
+        transport,
+        token_endpoint,
+        client_id,
+        code,
+        redirect_uri,
+        pkce_verifier,
+        dpop_key,
+        dpop_nonce,
+        timestamp,
+        rng,
+    )
+    .await?;
+    validate_token_response(&token_response, expected_did)?;
+    Ok(token_response)
+}
+
+/// Exchange a code without binding the received token to an account.
+///
+/// This remains crate-private because only the identity-operation cleanup path
+/// may hold an unvalidated credential long enough to revoke it.
+pub(crate) async fn exchange_code_unvalidated(
+    transport: &impl Transport,
+    token_endpoint: &str,
+    client_id: &str,
+    code: &str,
+    redirect_uri: &str,
+    pkce_verifier: &str,
+    dpop_key: &DpopKeyPair,
+    dpop_nonce: &mut Option<String>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<TokenResponse, Error> {
     let params = vec![
         ("grant_type".into(), "authorization_code".into()),
         ("client_id".into(), client_id.into()),
@@ -170,7 +206,6 @@ pub async fn exchange_code(
     let token_response: TokenResponse = serde_json::from_slice(&response.body)
         .map_err(|e| Error::Auth(format!("invalid token response: {e}")))?;
 
-    validate_token_response(&token_response, expected_did)?;
     Ok(token_response)
 }
 
@@ -309,11 +344,123 @@ async fn send_dpop_request(
     transport.send(request).await
 }
 
+/// Attempt RFC 7009 revocation of one temporary credential. A response is not
+/// evidence that the server ended authority: the protocol intentionally uses
+/// the same success response for an unrecognised token.
+pub(crate) async fn revoke_temporary_token(
+    transport: &impl Transport,
+    revocation_endpoint: &str,
+    token: &str,
+    dpop_key: &DpopKeyPair,
+    dpop_nonce: &mut Option<String>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<(), Error> {
+    let response = send_with_dpop_retry(
+        transport,
+        revocation_endpoint,
+        "POST",
+        vec![("token".into(), token.into())],
+        dpop_key,
+        dpop_nonce,
+        None,
+        timestamp,
+        rng,
+    )
+    .await?;
+    if !(200..300).contains(&response.status) {
+        return Err(token_error(&response, "temporary token revocation failed"));
+    }
+    Ok(())
+}
+
+/// POST an identity endpoint with a temporary DPoP-bound access token.
+///
+/// This stays crate-private so the operation holder is the only application
+/// surface that can cause temporary identity credentials to cross into
+/// protocol I/O. It deliberately does not use `XrpcClient`: that client owns
+/// a serializable standing session and can proactively refresh it.
+pub(crate) async fn authenticated_json_post(
+    transport: &impl Transport,
+    url: &str,
+    body: Option<serde_json::Value>,
+    access_token: &str,
+    dpop_key: &DpopKeyPair,
+    dpop_nonce: &mut Option<String>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<HttpResponse, Error> {
+    let response = send_authenticated_json(
+        transport,
+        url,
+        body.clone(),
+        access_token,
+        dpop_key,
+        dpop_nonce.as_deref(),
+        timestamp,
+        rng,
+    )
+    .await?;
+    if let Some(nonce) = extract_dpop_nonce(&response) {
+        *dpop_nonce = Some(nonce);
+    }
+    if !is_use_dpop_nonce_error(&response) {
+        return Ok(response);
+    }
+    let retry = send_authenticated_json(
+        transport,
+        url,
+        body,
+        access_token,
+        dpop_key,
+        dpop_nonce.as_deref(),
+        timestamp,
+        rng,
+    )
+    .await?;
+    if let Some(nonce) = extract_dpop_nonce(&retry) {
+        *dpop_nonce = Some(nonce);
+    }
+    Ok(retry)
+}
+
+async fn send_authenticated_json(
+    transport: &impl Transport,
+    url: &str,
+    body: Option<serde_json::Value>,
+    access_token: &str,
+    dpop_key: &DpopKeyPair,
+    nonce: Option<&str>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<HttpResponse, Error> {
+    let proof = create_dpop_proof(
+        dpop_key,
+        "POST",
+        url,
+        timestamp,
+        nonce,
+        Some(access_token),
+        rng,
+    )?;
+    transport
+        .send(HttpRequest {
+            method: HttpMethod::Post,
+            url: url.to_owned(),
+            headers: vec![
+                ("Authorization".into(), format!("DPoP {access_token}")),
+                ("DPoP".into(), proof),
+            ],
+            body: body.map(RequestBody::Json),
+        })
+        .await
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
-fn validate_token_response(
+pub(crate) fn validate_token_response(
     response: &TokenResponse,
     expected_did: Option<&str>,
 ) -> Result<(), Error> {
@@ -333,12 +480,13 @@ fn validate_token_response(
     }
 
     if let Some(did) = expected_did {
-        if let Some(sub) = &response.sub {
-            if sub != did {
-                return Err(Error::Auth(format!(
-                    "token sub \"{sub}\" does not match expected DID \"{did}\""
-                )));
-            }
+        let sub = response.sub.as_deref().ok_or_else(|| {
+            Error::Auth("token response omitted subject for account-bound authorization".into())
+        })?;
+        if sub != did {
+            return Err(Error::Auth(format!(
+                "token sub \"{sub}\" does not match expected DID \"{did}\""
+            )));
         }
     }
 

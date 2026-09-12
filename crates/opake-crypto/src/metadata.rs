@@ -51,6 +51,21 @@ pub struct GrantMetadata {
     pub permissions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// SHA-256 approval of this unverified recipient's exact encryption bundle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unverified_key_approval: Option<[u8; 32]>,
+}
+
+/// Encrypted, one-use intent for a recipient who has not yet published keys.
+/// The explicit boolean deliberately has no serde default: old/decryption-failed
+/// metadata cannot silently become consent for a first publication.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingShareMetadata {
+    pub permissions: Option<String>,
+    pub note: Option<String>,
+    pub recipient_did: String,
+    pub allow_unverified_first_publication: bool,
 }
 
 /// Plaintext directory metadata. Encrypted with the directory's content key.

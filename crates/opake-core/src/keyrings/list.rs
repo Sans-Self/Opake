@@ -67,15 +67,17 @@ mod tests {
 
     fn dummy_keyring(member_count: usize) -> Keyring {
         let members: Vec<KeyringMember> = (0..member_count)
-            .map(|i| KeyringMember {
-                wrapped_key: WrappedKey {
-                    did: format!("did:plc:member{i}"),
-                    ciphertext: AtBytes {
-                        encoded: "AAAA".into(),
+            .map(|i| {
+                KeyringMember::with_wrap(
+                    WrappedKey {
+                        did: format!("did:plc:member{i}"),
+                        ciphertext: AtBytes {
+                            encoded: "AAAA".into(),
+                        },
+                        algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                     },
-                    algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
-                },
-                role: Role::Manager,
+                    Role::Manager,
+                )
             })
             .collect();
 

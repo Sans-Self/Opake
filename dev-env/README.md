@@ -24,29 +24,40 @@ dev-env/
 
 ## Topology
 
-```
-                         edge network (plain bridge)
-                         published: 127.0.0.1:443
-                                   │
-                              ┌────┴────┐
-                              │  Caddy  │  TLS terminator + only host boundary
-                              └────┬────┘  vhosts → pds-{a,b,c}, plc, indexer
-  ══════════════════════════════ internal network (internal: true, no egress) ══
-     11.10.0.0/24 — public-range dark space (see below)
-                                   │
-         ┌──────────┬─────────────┼───────────────┬──────────────┐
-         │          │             │               │              │
-      ┌──┴──┐   ┌───┴───┐    ┌────┴────┐      ┌────┴───┐     ┌────┴────┐
-      │ plc │   │ pds-a │    │  pds-b  │      │ pds-c  │     │ indexer │
-      └──┬──┘   └───┬───┘    └────┬────┘      └────┬───┘     └────┬────┘
-      ┌──┴───┐      └────────┬────┴────────────────┘         ┌────┴─────┐
-      │plc-db│               │  requestCrawl / firehose      │indexer-db│
-      └──────┘          ┌────┴────┐                          └──────────┘
-                        │  relay  │  fan-in (one subscribeRepos upstream)
-                        └────┬────┘
-                        ┌────┴─────┐
-                        │jetstream │  /subscribe :8080  ─────► indexer
-                        └──────────┘
+```mermaid
+flowchart TB
+    subgraph host["host"]
+        PW["Playwright<br/>tests/e2e"]
+        FED["CLI federation tier<br/>tests/federation"]
+        VITE["Vite dev server<br/>127.0.0.1:5199"]
+        PW -->|browser| VITE
+        FED -->|docker compose exec| CLI
+    end
+
+    subgraph devenv["docker: dev-env"]
+        CADDY["Caddy<br/>127.0.0.1:443 · TLS by SNI"]
+        CLI["opake CLI container<br/>bootstrap / devenv-cli.sh"]
+
+        subgraph internal["internal network 11.10.0.0/24 · no egress"]
+            PLC["plc"] --- PLCDB[("plc-db")]
+            PDSA["pds-a<br/>alice · bob"]
+            PDSB["pds-b<br/>carol · dave"]
+            PDSC["pds-c<br/>eve · frank"]
+            RELAY["relay"]
+            JS["jetstream"]
+            IDX["indexer"] --- IDXDB[("indexer-db")]
+        end
+    end
+
+    VITE -->|OAuth · XRPC · SSE| CADDY
+    PW -->|admin API<br/>namespace provisioning| CADDY
+    CADDY --> PDSA & PDSB & PDSC & PLC & IDX
+    CLI -->|plain http| PDSA & PDSB & PDSC
+    PDSA & PDSB & PDSC -->|DID ops| PLC
+    PDSA & PDSB & PDSC -->|subscribeRepos| RELAY
+    RELAY --> JS
+    JS -->|/subscribe| IDX
+    IDX -.->|SSE| CADDY
 ```
 
 DID ops flow PDS → plc; record commits flow PDS → relay → jetstream → indexer →
@@ -109,6 +120,25 @@ artefact that pinned a DID is now stale. The one that bites in practice:
 > check). After a reset the file looks fresh but holds a session for a DID that
 > no longer exists, so specs fail on a dead session. Force a fresh login with
 > **`E2E_REAUTH=1`** (or delete `tests/e2e/.auth/`) on the first run after a reset.
+
+### Pre-v1 record-shape reset
+
+The verified-accounts draft redefines `opakeVersion: 1` before the protocol
+freeze. Keyring members now require `did` and `role`; `wrappedKey` is optional,
+and `unverifiedKeyApproval` is a 32-byte commitment. Old wrap-only keyrings and
+pending records are intentionally invalid: no client infers a DID or approval
+from a wrap, and there is no compatibility reader.
+
+Apply that break only to an isolated local stack: run `just dev-env-reset`, then
+run the next browser tier with `E2E_REAUTH=1` so it replaces stale auth states.
+Do not reset a stack other developers are using. For ordinary test work, use the
+isolated namespaces supplied by `just e2e-web` and `just e2e-federation`, or
+choose one explicitly when both tiers should exercise the same actors
+(`just e2e-web <namespace>` and `just e2e-federation <namespace>`). Clean only
+that namespace with `just e2e-ns-clean <namespace>`.
+After an isolated reset, confirm the regenerated shape through
+`docker compose run --rm bootstrap /bootstrap/verify-cli.sh`, the indexer
+lexicon tests, and the native/web federation tiers.
 
 ## Images (all pinned)
 

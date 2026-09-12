@@ -50,6 +50,42 @@ export interface MutationResult {
   readonly uri: string | null;
 }
 
+/** Non-secret outcome of a transient DID-document identity operation. */
+export type IdentityRefusal =
+  | "GrantRejected"
+  | "ConfirmationRequestRefused"
+  | "ConfirmationRefused"
+  | "ConfirmationDeliveryFailed"
+  | "ConfirmationDeliveryUnknown"
+  | "PreparationFailed"
+  | "SignerRefused"
+  | "SignerResponseUnknown";
+
+export type IdentityMutation =
+  | "Submitted"
+  | "Canceled"
+  | "Unknown"
+  | { readonly Refused: { readonly reason: IdentityRefusal } };
+
+export type IdentityReconciliation =
+  | "ObservedMatching"
+  | "ObservedUnchanged"
+  | "ObservedConflict"
+  | "Unavailable";
+
+export interface IdentityOperationResult {
+  readonly mutation: IdentityMutation;
+  readonly reconciliation: IdentityReconciliation | null;
+  readonly cleanup: "Attempted" | "Failed" | "Unavailable";
+}
+
+/** Direct DID-document check for the current account's `#opake` method. */
+export type OwnVerification =
+  | { readonly state: "absent" }
+  | { readonly state: "verified" }
+  | { readonly state: "substitution" }
+  | { readonly state: "unavailable"; readonly reason: string };
+
 /** Result of a file upload. */
 export interface UploadResult {
   /** AT URI of the created document record. */
@@ -118,12 +154,44 @@ export type WorkspaceRole = "manager" | "editor" | "viewer";
 
 /** A workspace member as stored in the keyring record. */
 export interface WorkspaceMember {
-  readonly wrappedKey: {
+  /** Membership identity is independent of current key availability. */
+  readonly did: string;
+  readonly wrappedKey?: {
     readonly did: string;
     readonly ciphertext: { readonly $bytes: string };
     readonly algo: string;
   };
   readonly role: WorkspaceRole;
+  /** Present only after a manager explicitly approved this unverified bundle. */
+  readonly unverifiedKeyApproval?: { readonly $bytes: string };
+}
+
+/** Fresh non-secret state for explaining a member's current access. */
+export interface WorkspaceMemberAccessStatus {
+  readonly did: string;
+  /** Whether the live head has a wrap for the current workspace rotation. */
+  readonly hasCurrentWrap: boolean;
+  /** Result of resolving this member's current published encryption bundle. */
+  readonly verification:
+    | "verified"
+    | "unverifiedApproved"
+    | "unverifiedApprovalRequired"
+    | "verificationError"
+    | "resolutionError";
+  /** This caller is a manager and has the live group key needed to repair. */
+  readonly canRepair: boolean;
+}
+
+export type ExcludedMemberReason = "verificationFailed" | "approvalRequired" | "resolutionFailed";
+
+export interface ExcludedWorkspaceMember {
+  readonly did: string;
+  readonly reason: ExcludedMemberReason;
+}
+
+export interface WorkspaceMemberRemoval {
+  readonly rotation: number;
+  readonly excludedMembers: readonly ExcludedWorkspaceMember[];
 }
 
 /** Workspace entry as returned by `listWorkspaces`. */
@@ -157,6 +225,8 @@ export interface ResolvedIdentity {
   readonly x25519Algo: string;
   readonly mlKemPublicKey: Uint8Array;
   readonly mlKemAlgo: string;
+  readonly verification: "verified" | "unverified";
+  readonly keyReplaced: boolean | null;
 }
 
 /** Result of a per-workspace sync operation (from daemon). */
@@ -242,6 +312,18 @@ export interface PendingShareEntry {
   readonly document: string;
   readonly recipient: string;
   readonly createdAt: string;
+}
+
+/** An owner-visible verification refusal encountered by a queued-share retry. */
+export interface PendingShareVerificationError {
+  /** URI of the queued intent that could not be safely completed. */
+  readonly uri: string;
+  /** DID whose currently published keys failed account verification. */
+  readonly recipientDid: string;
+  /** Verification failure reported by the resolver. */
+  readonly reason: string;
+  /** True only when the retry conditionally discarded the expired intent. */
+  readonly expired: boolean;
 }
 
 // ---------------------------------------------------------------------------

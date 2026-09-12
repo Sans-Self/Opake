@@ -440,35 +440,36 @@ pub fn try_build_entry(
     // the head — unwrapping with `head_uri` breaks the moment the workspace
     // supersedes (add/remove member). `lineage_anchor` resolves the right URI
     // from the record itself.
-    let group_key = match crypto::unwrap_key(
-        &my_member.wrapped_key,
-        private_keys,
-        &crypto::WrapContext::Keyring {
-            uri: keyring.lineage_anchor(head_uri),
-        },
-        keyring.opake_version,
-    ) {
-        Ok(k) => k,
-        Err(_) => {
-            return EntryOutcome::Entry(WorkspaceEntry {
-                workspace_id: workspace_id.to_string(),
-                head_uri: head_uri.to_string(),
-                rotation: keyring.rotation,
-                member_count,
-                created_at: Some(keyring.created_at.clone()),
-                name: None,
-                description: None,
-                icon: None,
-                my_role: Some(my_role.to_string()),
-            });
-        }
-    };
-
-    let anchor = keyring.lineage_anchor(head_uri);
     let historical =
         crate::workspace::derive_historical_keys(keyring, my_did, head_uri, private_keys);
+    let group_key = my_member
+        .wrapped_key
+        .as_ref()
+        .map(|wrap| {
+            crypto::unwrap_key(
+                wrap,
+                private_keys,
+                &crypto::WrapContext::Keyring {
+                    uri: keyring.lineage_anchor(head_uri),
+                },
+                keyring.opake_version,
+            )
+        })
+        // A malformed current wrap is not sufficient to render a workspace
+        // under its declared lineage. Historical material may still prove
+        // genesis and yield historical-only access; otherwise identity
+        // adoption below rejects it.
+        .transpose()
+        .unwrap_or_default();
+
+    let anchor = keyring.lineage_anchor(head_uri);
     // spec: workspace-identity § Identity adoption verifies by derivation
-    if !crate::workspace::verify_workspace_identity(keyring, anchor, &group_key, &historical) {
+    if !crate::workspace::verify_workspace_identity(
+        keyring,
+        anchor,
+        group_key.as_ref(),
+        &historical,
+    ) {
         log::trace!("keyring at {head_uri} failed identity derivation for {anchor}; dropped");
         return EntryOutcome::IdentityMismatch;
     }
@@ -477,13 +478,16 @@ pub fn try_build_entry(
         keyring.lineage_anchor(head_uri),
         crypto::SealType::KeyringMetadata,
     );
-    let (name, description, icon) = match crypto::decrypt_metadata::<KeyringMetadata>(
-        &group_key,
-        &keyring.encrypted_metadata,
-        &metadata_context,
-    ) {
-        Ok(meta) => (Some(meta.name), meta.description, meta.icon),
-        Err(_) => (None, None, None),
+    let (name, description, icon) = match group_key.as_ref().and_then(|key| {
+        crypto::decrypt_metadata::<KeyringMetadata>(
+            key,
+            &keyring.encrypted_metadata,
+            &metadata_context,
+        )
+        .ok()
+    }) {
+        Some(meta) => (Some(meta.name), meta.description, meta.icon),
+        None => (None, None, None),
     };
 
     EntryOutcome::Entry(WorkspaceEntry {

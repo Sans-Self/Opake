@@ -28,6 +28,8 @@ export const resolvedIdentitySchema = z
     x25519Algo: z.string(),
     mlKemPublicKey: uint8Array,
     mlKemAlgo: z.string(),
+    verification: z.enum(["verified", "unverified"]),
+    keyReplaced: z.boolean().nullable().optional(),
   })
   .transform((r) => ({
     did: r.did,
@@ -37,6 +39,8 @@ export const resolvedIdentitySchema = z
     x25519Algo: r.x25519Algo,
     mlKemPublicKey: r.mlKemPublicKey,
     mlKemAlgo: r.mlKemAlgo,
+    verification: r.verification,
+    keyReplaced: r.keyReplaced ?? null,
   }));
 
 export type ResolvedIdentity = z.output<typeof resolvedIdentitySchema>;

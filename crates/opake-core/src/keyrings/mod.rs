@@ -98,8 +98,11 @@ pub fn decrypt_indexer_workspace_name(
 ) -> Option<String> {
     let keyring = &envelope.record;
     let member = keyring.members.iter().find(|m| m.did() == did)?;
+    // A listed member can legitimately lack the current wrap after an
+    // exclusion. Name metadata is current-key encrypted, so leave it
+    // unavailable rather than panicking or treating the member as absent.
     let group_key = crypto::unwrap_key(
-        &member.wrapped_key,
+        member.wrapped_key.as_ref()?,
         private_keys,
         // Member wraps are anchored to the workspace's stable (genesis) URI,
         // which survives supersedes — not the head URI in `envelope.uri`.
@@ -164,10 +167,7 @@ mod indexer_workspace_tests {
         )
         .expect("encrypt_metadata");
 
-        let member_record = KeyringMember {
-            wrapped_key: wrapped,
-            role: crate::records::Role::Editor,
-        };
+        let member_record = KeyringMember::with_wrap(wrapped, crate::records::Role::Editor);
 
         IndexerEnvelope {
             uri: uri.into(),

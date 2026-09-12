@@ -7,14 +7,7 @@
 // Opake surfaces a warning and offers an explicit "Queue share" step, never a
 // silent queue, and editing the recipient dismisses it.
 import { readFileSync } from "node:fs";
-import {
-  blockadeTest as test,
-  expect,
-  cite,
-  ACTORS,
-  authFile,
-  installBlockade,
-} from "../fixtures";
+import { blockadeTest as test, expect, cite, ACTORS, authFile, installBlockade } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { unpublishPublicKey, clearGrantsTo, getDid } from "../pds-admin";
 import {
@@ -125,7 +118,14 @@ test(`shares a document cross-PDS, the recipient decrypts it over SSE, and revok
     // Alice shares with Carol by handle.
     const { input, shareButton } = await openShareDialog(alicePage, filename);
     await input.fill(carol.handle);
+    // The stock fixture's unsigned key needs the share operation's explicit
+    // acknowledgement. This remains scoped to this one share.
+    const consent = alicePage.waitForEvent("dialog");
     await shareButton.click();
+    const confirmation = await consent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("unverified encryption key");
+    await confirmation.accept();
     await expect(alicePage.getByText(/^Shared /).first()).toBeVisible({ timeout: 60_000 });
 
     // The grant surfaces in Carol's inbox via the indexer fan-out — no reload.

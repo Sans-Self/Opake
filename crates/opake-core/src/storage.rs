@@ -820,12 +820,13 @@ mod tests {
         assert!(json.get("seed_phrase").is_none());
         assert!(json.get("phrase").is_none());
         let serialized = serde_json::to_string(&identity).unwrap();
-        for word in phrase.split_whitespace() {
-            assert!(
-                !serialized.contains(word),
-                "serialized identity must not contain mnemonic word {word:?}",
-            );
-        }
+        // Compare the secret value as JSON, not individual words: words such
+        // as "private" can validly occur in structural field names.
+        let encoded_phrase = serde_json::to_string(&phrase).unwrap();
+        assert!(
+            !serialized.contains(&encoded_phrase),
+            "serialized identity must not contain the mnemonic phrase"
+        );
     }
 
     /// Round-trip the on-disk identity shape — fields decode back to the

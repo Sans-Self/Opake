@@ -36,7 +36,58 @@ impl Execute for ResolveCommand {
             identity.ml_kem_public_key.len()
         );
         println!("  ML-KEM algo: {}", identity.ml_kem_algo);
+        for line in verification_status_lines(&identity.verification) {
+            println!("  {line}");
+        }
 
         Ok(None)
+    }
+}
+
+fn verification_status_lines(verification: &resolve::VerificationState) -> [&'static str; 2] {
+    match verification {
+        resolve::VerificationState::Unverified => [
+            "Verification: Unverified",
+            "Verification method history: no verification method is published",
+        ],
+        resolve::VerificationState::Verified {
+            key_replaced: Some(true),
+        } => [
+            "Verification: Verified",
+            "Verification method history: the verification key was replaced",
+        ],
+        resolve::VerificationState::Verified {
+            key_replaced: Some(false),
+        } => [
+            "Verification: Verified",
+            "Verification method history: no replacement was found",
+        ],
+        resolve::VerificationState::Verified { key_replaced: None } => [
+            "Verification: Verified",
+            "Verification method history: unavailable; replacement is unknown",
+        ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prints_verified_unverified_and_unknown_history_explicitly() {
+        assert_eq!(
+            verification_status_lines(&resolve::VerificationState::Unverified),
+            [
+                "Verification: Unverified",
+                "Verification method history: no verification method is published",
+            ]
+        );
+        assert_eq!(
+            verification_status_lines(&resolve::VerificationState::Verified { key_replaced: None }),
+            [
+                "Verification: Verified",
+                "Verification method history: unavailable; replacement is unknown",
+            ]
+        );
     }
 }

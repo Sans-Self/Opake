@@ -54,7 +54,11 @@ function kindMeta(kind: DaemonTask["kind"]): {
     case "grantHealing":
       return { label: "Grant healing", icon: ShieldCheckIcon, detail: `${kind.healed} healed` };
     case "shareRetry":
-      return { label: "Share retry", icon: ArrowsClockwiseIcon, detail: `${kind.retried} retried` };
+      return {
+        label: "Share retry",
+        icon: ArrowsClockwiseIcon,
+        detail: `${kind.retried} retried`,
+      };
     case "unknown":
       return { label: "Background task", icon: ArrowsClockwiseIcon };
   }
@@ -74,6 +78,12 @@ function TaskCard({ task }: { readonly task: DaemonTask }) {
       </div>
 
       {kindDetail && <p className="text-caption text-text-faint mt-1">{kindDetail}</p>}
+
+      {task.kind.type === "shareRetry" && task.kind.verificationErrors.map((issue) => (
+        <p key={issue.uri} className="text-error text-caption mt-1">
+          {issue.recipientDid}: published-key verification failed{issue.expired ? "; queued share expired" : ""}. {issue.reason}
+        </p>
+      ))}
 
       {typeof task.status === "object" && "failed" in task.status && (
         <p className="text-error text-caption mt-1">{task.status.failed}</p>

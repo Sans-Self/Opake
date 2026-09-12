@@ -359,7 +359,7 @@ enum TreeInstall {
     Cabinet,
     Workspace(
         String,
-        opake_core::crypto::ContentKey,
+        Option<opake_core::crypto::ContentKey>,
         u64,
         Vec<opake_core::workspace::HistoricalKey>,
     ),

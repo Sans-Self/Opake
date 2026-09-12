@@ -177,6 +177,7 @@ fn grant_metadata_roundtrip() {
     let metadata = GrantMetadata {
         permissions: Some("read".into()),
         note: Some("shared for review".into()),
+        unverified_key_approval: Some([7; 32]),
     };
 
     let encrypted = encrypt_metadata(
@@ -191,6 +192,7 @@ fn grant_metadata_roundtrip() {
 
     assert_eq!(decrypted.permissions.as_deref(), Some("read"));
     assert_eq!(decrypted.note.as_deref(), Some("shared for review"));
+    assert_eq!(decrypted.unverified_key_approval, Some([7; 32]));
 }
 
 #[test]
@@ -199,6 +201,7 @@ fn grant_metadata_minimal() {
     let metadata = GrantMetadata {
         permissions: None,
         note: None,
+        unverified_key_approval: None,
     };
 
     let encrypted = encrypt_metadata(
@@ -213,6 +216,7 @@ fn grant_metadata_minimal() {
 
     assert!(decrypted.permissions.is_none());
     assert!(decrypted.note.is_none());
+    assert!(decrypted.unverified_key_approval.is_none());
 }
 
 #[test]
@@ -257,6 +261,33 @@ fn directory_metadata_minimal() {
 
     assert_eq!(decrypted.name, "/");
     assert!(decrypted.description.is_none());
+}
+
+#[test]
+fn pending_share_metadata_roundtrips_bound_did_and_explicit_permission() {
+    let key = generate_content_key(&mut OsRng);
+    let metadata = PendingShareMetadata {
+        permissions: Some("read".into()),
+        note: Some("for review".into()),
+        recipient_did: "did:plc:recipient".into(),
+        allow_unverified_first_publication: true,
+    };
+    let encrypted =
+        encrypt_metadata(&key, &metadata, &seal(SealType::GrantMetadata), &mut OsRng).unwrap();
+
+    let decrypted: PendingShareMetadata =
+        decrypt_metadata(&key, &encrypted, &seal(SealType::GrantMetadata)).unwrap();
+    assert_eq!(decrypted, metadata);
+}
+
+#[test]
+fn pending_share_metadata_missing_permission_cannot_default_to_consent() {
+    let legacy = serde_json::json!({
+        "permissions": "read",
+        "recipientDid": "did:plc:recipient"
+    });
+
+    assert!(serde_json::from_value::<PendingShareMetadata>(legacy).is_err());
 }
 
 // spec: document-crypto § Ciphertexts are AAD-bound to their lineage anchor and type

@@ -6,7 +6,7 @@ use crate::atproto;
 use crate::client::{Transport, XrpcClient};
 use crate::crypto::{self, ContentKey, CryptoRng, KeyringMetadata, RngCore};
 use crate::error::Error;
-use crate::records::{KeyHistoryEntry, Keyring, KeyringMember, Role};
+use crate::records::{KeyHistoryEntry, Keyring};
 
 use super::KEYRING_COLLECTION;
 
@@ -56,13 +56,6 @@ pub async fn remove_member(
     // understands, naming the keyring and the required remedy.
     super::guard_keyring_writable(keyring_uri, &keyring)?;
 
-    // Build a role map from existing members before mutation.
-    let role_map: HashMap<String, Role> = keyring
-        .members
-        .iter()
-        .map(|m| (m.did().to_owned(), m.role.clone()))
-        .collect();
-
     let original_count = keyring.members.len();
     keyring.members.retain(|m| m.did() != remove_did);
 
@@ -86,23 +79,23 @@ pub async fn remove_member(
     );
     let (new_group_key, new_wrapped) = crypto::create_group_key(remaining_keys, keyring_uri, rng)?;
 
-    // Pair new wrapped keys with roles from the original keyring.
-    let new_members: Result<Vec<KeyringMember>, Error> = new_wrapped
+    // Rebuild from the retained member records, not from produced wraps.
+    // An omitted recipient has no new current wrap but remains admitted with
+    // their role and approval intact; an old wrap must never be carried into
+    // the new rotation as though it protected the new group key.
+    let wraps_by_did: HashMap<String, _> = new_wrapped
         .into_iter()
-        .map(|wk| {
-            let role = role_map.get(&wk.did).cloned().ok_or_else(|| {
-                Error::InvalidRecord(format!(
-                    "{} is not a member of this keyring (cannot re-wrap)",
-                    wk.did
-                ))
-            })?;
-            Ok(KeyringMember {
-                wrapped_key: wk,
-                role,
-            })
+        .map(|wrapped| (wrapped.did.clone(), wrapped))
+        .collect();
+    let new_members = keyring
+        .members
+        .iter()
+        .cloned()
+        .map(|mut member| {
+            member.wrapped_key = wraps_by_did.get(member.did()).cloned();
+            member
         })
         .collect();
-    let new_members = new_members?;
 
     // Re-encrypt metadata: decrypt with old group key, encrypt with new one.
     // Both bind the keyring's lineage anchor (genesis URI), which the in-place

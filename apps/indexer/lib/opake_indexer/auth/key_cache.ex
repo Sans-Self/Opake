@@ -1,16 +1,14 @@
 defmodule OpakeIndexer.Auth.KeyCache do
   @moduledoc """
-  In-memory cache for Ed25519 signing public keys, keyed by DID with a 5-minute
-  TTL. Reads go directly to ETS (no bottleneck). Writes are serialized through
-  the GenServer to prevent thundering-herd fetches for the same DID.
+  Resolves a fresh authentication decision for every request. A DID document can
+  add or remove `#opake` independently of the public-key record, so caching a
+  previous successful decision would allow a stale verification state.
   """
 
   use GenServer
   require Logger
 
   @table :key_cache
-  @ttl_ms :timer.minutes(5)
-
   # Public API — direct ETS reads, no bottleneck
 
   def start_link(_opts) do
@@ -18,10 +16,7 @@ defmodule OpakeIndexer.Auth.KeyCache do
   end
 
   def get_key(did) do
-    case ets_lookup(did) do
-      {:ok, pubkey} -> {:ok, pubkey}
-      _ -> GenServer.call(__MODULE__, {:fetch, did}, 15_000)
-    end
+    GenServer.call(__MODULE__, {:fetch, did}, 15_000)
   end
 
   # GenServer — serializes concurrent fetches for the same DID
@@ -34,40 +29,9 @@ defmodule OpakeIndexer.Auth.KeyCache do
 
   @impl true
   def handle_call({:fetch, did}, _from, state) do
-    result =
-      case ets_lookup(did) do
-        {:ok, pubkey} ->
-          {:ok, pubkey}
-
-        _ ->
-          case key_fetcher().fetch_signing_key(did) do
-            {:ok, pubkey} ->
-              now = System.monotonic_time(:millisecond)
-              :ets.insert(@table, {did, pubkey, now})
-              {:ok, pubkey}
-
-            {:error, reason} ->
-              {:error, reason}
-          end
-      end
+    result = key_fetcher().fetch_signing_key(did)
 
     {:reply, result, state}
-  end
-
-  defp ets_lookup(did) do
-    case :ets.lookup(@table, did) do
-      [{^did, pubkey, inserted_at}] ->
-        now = System.monotonic_time(:millisecond)
-
-        if now - inserted_at < @ttl_ms do
-          {:ok, pubkey}
-        else
-          :stale
-        end
-
-      [] ->
-        :miss
-    end
   end
 
   defp key_fetcher do

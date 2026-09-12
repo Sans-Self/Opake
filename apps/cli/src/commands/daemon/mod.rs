@@ -114,6 +114,7 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
             let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
             let mut share_tick = tokio::time::interval(task_interval("share-retry"));
             let mut rewrap_tick = tokio::time::interval(task_interval("rotation-rewrap"));
+            let mut member_repair_tick = tokio::time::interval(task_interval("member-wrap-repair"));
 
             loop {
                 tokio::select! {
@@ -132,6 +133,10 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
                     _ = rewrap_tick.tick() => {
                         info!("running: rotation-rewrap");
                         run_rotation_rewrap(storage).await;
+                    }
+                    _ = member_repair_tick.tick() => {
+                        info!("running: member-wrap-repair");
+                        run_member_wrap_repair(storage).await;
                     }
                     _ = tokio::signal::ctrl_c() => {
                         info!("received SIGINT, shutting down");
@@ -256,6 +261,37 @@ async fn run_rotation_rewrap(storage: &FileStorage) {
             }
             Ok(_) => {}
             Err(e) => warn!("rotation-rewrap: failed for {did}: {e}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task: missing member-wrap repair
+// ---------------------------------------------------------------------------
+
+async fn run_member_wrap_repair(storage: &FileStorage) {
+    let Some(config) = load_config_or_warn(storage, "member-wrap-repair") else {
+        return;
+    };
+
+    for did in config.accounts.keys() {
+        let mut opake = match build_opake(storage, did).await {
+            Ok(o) => o,
+            Err(e) => {
+                warn!("member-wrap-repair: failed to build opake for {did}: {e}");
+                continue;
+            }
+        };
+
+        match opake.sweep_member_wrap_repairs().await {
+            Ok(outcome) if outcome.repaired > 0 => {
+                info!(
+                    "member-wrap-repair: repaired {} member wrap(s) for {did}; {} awaiting approval, {} verification failures",
+                    outcome.repaired, outcome.awaiting_approval, outcome.verification_failed,
+                );
+            }
+            Ok(_) => {}
+            Err(e) => warn!("member-wrap-repair: failed for {did}: {e}"),
         }
     }
 }
@@ -429,6 +465,9 @@ async fn list_tasks(storage: &FileStorage) -> Result<()> {
             DaemonTaskKind::ShareRetry { retried } => ("share-retry", format!("{retried} retried")),
             DaemonTaskKind::RotationRewrap { rewrapped } => {
                 ("rotation-rewrap", format!("{rewrapped} re-wrapped"))
+            }
+            DaemonTaskKind::MemberWrapRepair { repaired } => {
+                ("member-wrap-repair", format!("{repaired} repaired"))
             }
         };
         let status = match &task.status {

@@ -305,6 +305,10 @@ pub struct ResolvedIdentityDto {
     #[cfg_attr(feature = "ts-bindings", ts(type = "Uint8Array"))]
     pub ml_kem_public_key: Vec<u8>,
     pub ml_kem_algo: String,
+    /// Resolution is a live safety decision, distinct from any relationship
+    /// approval recorded on a workspace member entry.
+    pub verification: String,
+    pub key_replaced: Option<bool>,
 }
 
 impl From<&ResolvedIdentity> for ResolvedIdentityDto {
@@ -317,6 +321,14 @@ impl From<&ResolvedIdentity> for ResolvedIdentityDto {
             x25519_algo: r.x25519_algo.clone(),
             ml_kem_public_key: r.ml_kem_public_key.to_vec(),
             ml_kem_algo: r.ml_kem_algo.clone(),
+            verification: match &r.verification {
+                opake_core::resolve::VerificationState::Verified { .. } => "verified".into(),
+                opake_core::resolve::VerificationState::Unverified => "unverified".into(),
+            },
+            key_replaced: match &r.verification {
+                opake_core::resolve::VerificationState::Verified { key_replaced } => *key_replaced,
+                opake_core::resolve::VerificationState::Unverified => None,
+            },
         }
     }
 }

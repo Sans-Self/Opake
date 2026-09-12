@@ -74,6 +74,8 @@ enum Command {
     Keyring(commands::workspace::WorkspaceCommand),
     Metadata(commands::metadata::MetadataCommand),
     Pair(commands::pair::PairCommand),
+    /// Set up, remove, or inspect this account's DID verification method
+    Verification(commands::verification::VerificationCommand),
 
     // --- Files ---
     Upload(commands::upload::UploadCommand),
@@ -161,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
 
         Command::Config(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Pair(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
+        Command::Verification(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Purge(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Recover(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
         Command::Resolve(cmd) => run_with_context(&storage, as_flag.as_deref(), cmd).await?,
@@ -168,4 +171,34 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+    use crate::commands::verification::VerificationAction;
+
+    #[test]
+    fn verification_setup_parses_as_a_context_command() {
+        let cli = Cli::try_parse_from(["opake", "verification", "setup"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Verification(command)
+                if matches!(command.action, VerificationAction::Setup)
+        ));
+    }
+
+    #[test]
+    fn verification_removal_parses_as_a_context_command() {
+        let cli = Cli::try_parse_from(["opake", "--as", "did:plc:alice", "verification", "remove"])
+            .unwrap();
+        assert_eq!(cli.r#as.as_deref(), Some("did:plc:alice"));
+        assert!(matches!(
+            cli.command,
+            Command::Verification(command)
+                if matches!(command.action, VerificationAction::Remove)
+        ));
+    }
 }

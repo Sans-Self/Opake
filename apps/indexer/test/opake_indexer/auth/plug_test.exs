@@ -45,6 +45,48 @@ defmodule OpakeIndexer.Auth.PlugTest do
     assert json_response(conn, 200)
   end
 
+  # An account without a DID-document #opake method keeps the existing
+  # record-signing-key authentication path.
+  test "accepts an unverified account", %{conn: conn} do
+    did = "did:plc:unverified"
+    conn = conn |> authed_conn(did, "/api/inbox") |> get("/api/inbox?did=#{did}")
+    assert json_response(conn, 200)
+  end
+
+  test "refuses an account whose anchored public-key record is invalid", %{conn: conn} do
+    did = "did:plc:anchored"
+    {_pubkey, private_key} = :crypto.generate_key(:eddsa, :ed25519)
+    timestamp = System.system_time(:second)
+    message = "GET:/api/inbox:#{timestamp}:#{did}"
+    signature = :crypto.sign(:eddsa, :none, message, [private_key, :ed25519])
+
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_signing_key, fn ^did ->
+      {:error, "invalid account public-key signature"}
+    end)
+
+    conn =
+      conn
+      |> put_req_header(
+        "authorization",
+        "Opake-Ed25519 #{did}:#{timestamp}:#{Base.encode64(signature)}"
+      )
+      |> get("/api/inbox?did=#{did}")
+
+    assert json_response(conn, 401)["error"] =~ "signature"
+  end
+
+  test "authentication never reuses a prior DID verification decision" do
+    did = "did:plc:changed-anchor"
+    {pubkey, _private_key} = :crypto.generate_key(:eddsa, :ed25519)
+
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_signing_key, 2, fn ^did ->
+      {:ok, pubkey}
+    end)
+
+    assert {:ok, ^pubkey} = OpakeIndexer.Auth.KeyCache.get_key(did)
+    assert {:ok, ^pubkey} = OpakeIndexer.Auth.KeyCache.get_key(did)
+  end
+
   test "rejects expired timestamp", %{conn: conn} do
     old_timestamp = System.system_time(:second) - 120
     did = "did:plc:testuser"

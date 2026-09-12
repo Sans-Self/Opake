@@ -52,11 +52,18 @@ export function runTasks(
       tracked(
         taskStore,
         "share-retry",
-        { type: "shareRetry", retried: 0 },
+        { type: "shareRetry", retried: 0, verificationErrors: [] },
         async () => {
           const result = await opake.retryPendingShares();
           const retried = result.completed;
-          return { didWork: retried > 0, kind: { type: "shareRetry", retried } };
+          const verificationErrors = result.verificationErrors;
+          // A refusal is durable owner-visible work even when no grant was
+          // completed. Persist it so a browser timer cannot silently discard
+          // a verification failure (including the TTL expiry reason).
+          return {
+            didWork: retried > 0 || verificationErrors.length > 0,
+            kind: { type: "shareRetry", retried, verificationErrors },
+          };
         },
         options,
       ),
@@ -72,6 +79,19 @@ export function runTasks(
           const result = await opake.sweepRotationRewrap();
           const rewrapped = result.rewrapped;
           return { didWork: rewrapped > 0, kind: { type: "rotationRewrap", rewrapped } };
+        },
+        options,
+      ),
+
+    "member-wrap-repair": () =>
+      tracked(
+        taskStore,
+        "member-wrap-repair",
+        { type: "memberWrapRepair", repaired: 0 },
+        async () => {
+          const result = await opake.sweepMemberWrapRepairs();
+          const repaired = result.repaired;
+          return { didWork: repaired > 0, kind: { type: "memberWrapRepair", repaired } };
         },
         options,
       ),

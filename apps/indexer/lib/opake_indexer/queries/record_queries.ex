@@ -215,19 +215,24 @@ defmodule OpakeIndexer.Queries.RecordQueries do
   end
 
   @doc """
-  The `did => role` map of the current head keyring's members, or `nil`
+  The `did => {role, wrap_present, approval}` map of the current head keyring's members, or `nil`
   if no keyring has been indexed for the workspace.
   """
-  @spec head_member_roles(String.t()) :: %{String.t() => String.t()} | nil
-  def head_member_roles(workspace_id) do
+  @spec head_member_states(String.t()) ::
+          %{String.t() => {String.t(), boolean(), binary() | nil | :invalid}} | nil
+  def head_member_states(workspace_id) do
     case workspace_keyring_head(workspace_id) do
       nil ->
         nil
 
       %RecordSchema{record_jsonb: %{"members" => members}} when is_list(members) ->
         Map.new(members, fn
-          %{"wrappedKey" => %{"did" => did}, "role" => role} -> {did, role}
-          _ -> {nil, nil}
+          %{"did" => did, "role" => role} = member ->
+            {did,
+             {role, is_map(member["wrappedKey"]), approval_bytes(member["unverifiedKeyApproval"])}}
+
+          _ ->
+            {nil, nil}
         end)
 
       %RecordSchema{} ->
@@ -235,9 +240,20 @@ defmodule OpakeIndexer.Queries.RecordQueries do
     end
   end
 
+  defp approval_bytes(nil), do: nil
+
+  defp approval_bytes(%{"$bytes" => encoded}) when is_binary(encoded) do
+    case OpakeIndexer.Auth.Base64.decode(encoded) do
+      {:ok, bytes} when byte_size(bytes) == 32 -> bytes
+      _ -> :invalid
+    end
+  end
+
+  defp approval_bytes(_), do: :invalid
+
   defp extract_member_role(%{"members" => members}, did) when is_list(members) do
     Enum.find_value(members, fn
-      %{"wrappedKey" => %{"did" => ^did}, "role" => role} -> role
+      %{"did" => ^did, "role" => role} -> role
       _ -> nil
     end)
   end
@@ -254,7 +270,7 @@ defmodule OpakeIndexer.Queries.RecordQueries do
   def workspaces_for_member(did) do
     alias OpakeIndexer.Schemas.ChainHead
 
-    containment = %{"members" => [%{"wrappedKey" => %{"did" => did}}]}
+    containment = %{"members" => [%{"did" => did}]}
 
     Repo.all(
       from(c in ChainHead,

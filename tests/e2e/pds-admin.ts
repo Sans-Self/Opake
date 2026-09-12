@@ -33,6 +33,27 @@ interface XrpcResponse {
   readonly json: unknown;
 }
 
+/** A record read directly from a namespaced actor's real PDS repository. */
+export interface RepositoryRecord {
+  readonly uri: string;
+  readonly cid: string;
+  readonly value: unknown;
+}
+
+/** A raw applyWrites operation used only to prove PDS transaction semantics. */
+export type RepositoryWrite =
+  | {
+      readonly $type: "com.atproto.repo.applyWrites#create";
+      readonly collection: string;
+      readonly rkey: string;
+      readonly value: unknown;
+    }
+  | {
+      readonly $type: "com.atproto.repo.applyWrites#delete";
+      readonly collection: string;
+      readonly rkey: string;
+    };
+
 /** The PDS's Caddy vhost for an actor, e.g. actor.pds "pds-c" → "pds-c.test". */
 const pdsHost = (actor: Actor): string => `${actor.pds}.test`;
 
@@ -99,7 +120,8 @@ export async function clearGrantsTo(sharer: Actor, recipient: Actor): Promise<vo
     `/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=at.opake.grant&limit=100`,
   );
   if (list.status !== 200) return;
-  const records = (list.json as { records?: { uri: string; value: { recipient?: string } }[] }).records ?? [];
+  const records =
+    (list.json as { records?: { uri: string; value: { recipient?: string } }[] }).records ?? [];
   for (const rec of records) {
     if (rec.value.recipient !== recipientDid) continue;
     await xrpc(host, "/xrpc/com.atproto.repo.deleteRecord", {
@@ -147,7 +169,10 @@ export async function injectPoisonDirectory(
               },
             ],
           },
-          encryptedMetadata: { ciphertext: { $bytes: "AAAA" }, nonce: { $bytes: "BBBBBBBBBBBBBBBB" } },
+          encryptedMetadata: {
+            ciphertext: { $bytes: "AAAA" },
+            nonce: { $bytes: "BBBBBBBBBBBBBBBB" },
+          },
           createdAt: new Date(0).toISOString(),
         };
 
@@ -182,10 +207,151 @@ async function createSession(actor: Actor): Promise<{ did: string; token: string
     body: { identifier: actor.handle, password: actor.password },
   });
   if (res.status !== 200) {
-    throw new Error(`createSession ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`);
+    throw new Error(
+      `createSession ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
   }
   const s = res.json as { did: string; accessJwt: string };
   return { did: s.did, token: s.accessJwt };
+}
+
+/** Read the repository revision used by a conditional `applyWrites`. */
+export async function repositoryCommit(actor: Actor): Promise<string> {
+  const { did } = await createSession(actor);
+  const res = await xrpc(
+    pdsHost(actor),
+    `/xrpc/com.atproto.sync.getLatestCommit?did=${encodeURIComponent(did)}`,
+  );
+  if (res.status !== 200 || typeof (res.json as { cid?: unknown }).cid !== "string") {
+    throw new Error(
+      `getLatestCommit ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
+  }
+  return (res.json as { cid: string }).cid;
+}
+
+/** Read one record without changing any actor state. Returns null for absence. */
+export async function repositoryRecord(
+  actor: Actor,
+  collection: string,
+  rkey: string,
+): Promise<RepositoryRecord | null> {
+  const did = await getDid(actor);
+  const res = await xrpc(
+    pdsHost(actor),
+    `/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}` +
+      `&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`,
+  );
+  if (res.status === 400 || res.status === 404) return null;
+  if (res.status !== 200) {
+    throw new Error(
+      `getRecord ${collection}/${rkey} for ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
+  }
+  const record = res.json as Partial<RepositoryRecord>;
+  if (typeof record.uri !== "string" || typeof record.cid !== "string") {
+    throw new Error(`getRecord ${collection}/${rkey} returned no uri/cid`);
+  }
+  return { uri: record.uri, cid: record.cid, value: record.value };
+}
+
+/** List every record in one collection of an actor's real PDS repository. */
+export async function repositoryRecords(
+  actor: Actor,
+  collection: string,
+): Promise<readonly RepositoryRecord[]> {
+  const did = await getDid(actor);
+  // eslint-disable-next-line functional/no-let -- XRPC pagination carries the cursor forward.
+  let cursor: string | undefined;
+  const records: RepositoryRecord[] = [];
+  do {
+    const cursorQuery = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+    // eslint-disable-next-line no-await-in-loop -- page N depends on page N-1's cursor.
+    const res = await xrpc(
+      pdsHost(actor),
+      `/xrpc/com.atproto.repo.listRecords?repo=${encodeURIComponent(did)}` +
+        `&collection=${encodeURIComponent(collection)}&limit=100${cursorQuery}`,
+    );
+    if (res.status !== 200) {
+      throw new Error(
+        `listRecords ${collection} for ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+      );
+    }
+    const page = res.json as {
+      records?: readonly Partial<RepositoryRecord>[];
+      cursor?: unknown;
+    };
+    if (!Array.isArray(page.records)) {
+      throw new Error(`listRecords ${collection} for ${actor.handle} returned no records array`);
+    }
+    for (const record of page.records) {
+      if (typeof record.uri !== "string" || typeof record.cid !== "string") {
+        throw new Error(
+          `listRecords ${collection} for ${actor.handle} returned a record without uri/cid`,
+        );
+      }
+      records.push({ uri: record.uri, cid: record.cid, value: record.value });
+    }
+    cursor = typeof page.cursor === "string" && page.cursor !== "" ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return records;
+}
+
+/**
+ * Submit a real conditional same-repository transaction. This is intentionally
+ * narrow test support: callers supply actual PDS wire operations and inspect
+ * the response, while product code continues to use its production client.
+ */
+export async function applyWritesConditional(
+  actor: Actor,
+  swapCommit: string,
+  writes: readonly RepositoryWrite[],
+): Promise<{ readonly status: number; readonly json: unknown }> {
+  const { did, token } = await createSession(actor);
+  return xrpc(pdsHost(actor), "/xrpc/com.atproto.repo.applyWrites", {
+    method: "POST",
+    token,
+    body: { repo: did, swapCommit, writes },
+  });
+}
+
+/** Put a real record as an intentional concurrent writer in a CAS proof. */
+export async function putRepositoryRecord(
+  actor: Actor,
+  collection: string,
+  rkey: string,
+  record: unknown,
+): Promise<void> {
+  const { did, token } = await createSession(actor);
+  const res = await xrpc(pdsHost(actor), "/xrpc/com.atproto.repo.putRecord", {
+    method: "POST",
+    token,
+    body: { repo: did, collection, rkey, record },
+  });
+  if (res.status !== 200) {
+    throw new Error(
+      `putRecord ${collection}/${rkey} for ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
+  }
+}
+
+/** Delete one test-created record without touching any other namespace state. */
+export async function deleteRepositoryRecord(
+  actor: Actor,
+  collection: string,
+  rkey: string,
+): Promise<void> {
+  const { did, token } = await createSession(actor);
+  const res = await xrpc(pdsHost(actor), "/xrpc/com.atproto.repo.deleteRecord", {
+    method: "POST",
+    token,
+    body: { repo: did, collection, rkey },
+  });
+  if (res.status !== 200 && res.status !== 400 && res.status !== 404) {
+    throw new Error(
+      `deleteRecord ${collection}/${rkey} for ${actor.handle} failed: ${res.status} ${JSON.stringify(res.json)}`,
+    );
+  }
 }
 
 /**
@@ -229,9 +395,7 @@ export async function unpublishPublicKey(actor: Actor): Promise<() => Promise<vo
 // Namespace lifecycle
 // ---------------------------------------------------------------------------
 
-const COMPOSE_FILE = fileURLToPath(
-  new URL("../../dev-env/docker-compose.yml", import.meta.url),
-);
+const COMPOSE_FILE = fileURLToPath(new URL("../../dev-env/docker-compose.yml", import.meta.url));
 
 /** The DID behind a handle, or null if the PDS does not know it. */
 export async function resolveHandle(actor: Actor): Promise<string | null> {

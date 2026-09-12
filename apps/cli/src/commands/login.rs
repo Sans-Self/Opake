@@ -99,7 +99,9 @@ impl LoginCommand {
         {
             Ok(session) => Ok(Some(session)),
             Err(e) => {
-                log::warn!("OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}");
+                log::warn!(
+                    "OAuth login failed, falling back to password authentication. Password auth is deprecated by AT Protocol and will stop working. Error: {e}"
+                );
                 Self::legacy_login(&pds_url, &identifier, storage, self.force).await
             }
         }
@@ -202,12 +204,15 @@ pub async fn ensure_identity_and_publish(
 
     let public_key_bytes = identity.x25519_public_key_bytes()?;
     let ml_kem_public_key_bytes = identity.ml_kem_public_key_bytes()?;
-    let verify_key_bytes = identity.verify_key_bytes()?;
+    let signing_key_bytes = identity
+        .signing_key_bytes()?
+        .ok_or_else(|| anyhow::anyhow!("identity is missing Ed25519 signing key"))?;
+    let signing_key = opake_core::crypto::Ed25519SigningKey::from_bytes(&signing_key_bytes);
     opake_core::resolve::publish_public_key(
         client,
         &public_key_bytes,
         &ml_kem_public_key_bytes,
-        verify_key_bytes.as_ref(),
+        &signing_key,
         &Utc::now().to_rfc3339(),
     )
     .await?;

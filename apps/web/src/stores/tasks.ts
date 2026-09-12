@@ -8,6 +8,13 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { TaskRecord, TaskStore } from "@opake/daemon";
 
+interface PendingShareVerificationError {
+  readonly uri: string;
+  readonly recipientDid: string;
+  readonly reason: string;
+  readonly expired: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Public types (consumed by tasks.lazy.tsx)
 // ---------------------------------------------------------------------------
@@ -15,7 +22,11 @@ import type { TaskRecord, TaskStore } from "@opake/daemon";
 export type DaemonTaskKind =
   | { readonly type: "pairCleanup"; readonly deleted: number }
   | { readonly type: "grantHealing"; readonly healed: number }
-  | { readonly type: "shareRetry"; readonly retried: number }
+  | {
+      readonly type: "shareRetry";
+      readonly retried: number;
+      readonly verificationErrors: PendingShareVerificationError[];
+    }
   | { readonly type: "unknown"; readonly raw: Readonly<Record<string, unknown>> };
 
 export type TaskStatus = "running" | "completed" | { readonly failed: string };
@@ -40,7 +51,28 @@ function mapKind(raw: Readonly<Record<string, unknown>>): DaemonTaskKind {
     case "grantHealing":
       return { type: "grantHealing", healed: typeof raw.healed === "number" ? raw.healed : 0 };
     case "shareRetry":
-      return { type: "shareRetry", retried: typeof raw.retried === "number" ? raw.retried : 0 };
+      return {
+        type: "shareRetry",
+        retried: typeof raw.retried === "number" ? raw.retried : 0,
+        verificationErrors: Array.isArray(raw.verificationErrors)
+          ? raw.verificationErrors.flatMap((issue): readonly PendingShareVerificationError[] => {
+              if (issue === null || typeof issue !== "object" || Array.isArray(issue)) return [];
+              const value = issue as Record<string, unknown>;
+              if (
+                typeof value.uri !== "string"
+                || typeof value.recipientDid !== "string"
+                || typeof value.reason !== "string"
+                || typeof value.expired !== "boolean"
+              ) return [];
+              return [{
+                uri: value.uri,
+                recipientDid: value.recipientDid,
+                reason: value.reason,
+                expired: value.expired,
+              }];
+            })
+          : [],
+      };
     default:
       return { type: "unknown", raw };
   }

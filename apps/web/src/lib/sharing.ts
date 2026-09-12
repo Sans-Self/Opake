@@ -7,6 +7,19 @@
 import { getOpake } from "@/stores/auth";
 import { OpakeError, type ResolvedIdentity } from "@opake/sdk";
 
+/** Accessible counterparty status shown after the share dialog resolves a DID. */
+export function recipientVerificationLabel(
+  recipient: Pick<ResolvedIdentity, "did" | "verification" | "keyReplaced">,
+): string {
+  const verification = `${recipient.did} has a ${recipient.verification} encryption key.`;
+  if (recipient.verification === "unverified") {
+    return `${verification} Confirmation is required before sharing.`;
+  }
+  return recipient.keyReplaced === true
+    ? `${verification} Their verification method has changed.`
+    : verification;
+}
+
 /**
  * Thrown when a recipient has a valid handle/DID but hasn't published
  * an X25519 public key yet (no identity record on their PDS). The

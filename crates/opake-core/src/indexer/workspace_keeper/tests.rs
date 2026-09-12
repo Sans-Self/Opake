@@ -260,10 +260,7 @@ fn make_keyring_envelope(
         record: Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![KeyringMember {
-                wrapped_key: wrapped,
-                role,
-            }],
+            members: vec![KeyringMember::with_wrap(wrapped, role)],
             rotation: 1,
             key_history: Vec::new(),
             // Garbage metadata — tests that exercise unwrap-failure feed
@@ -287,11 +284,11 @@ fn make_keyring_envelope(
     }
 }
 
-/// A wrong private key causes unwrap to fail. The entry must still be
-/// returned (name = None), not silently deleted. The workspace stays
-/// visible in the sidebar and reconciles on the next SSE event.
+/// A malformed current wrap with no usable rotation-0 historical material
+/// cannot prove the declared workspace identity. It must not render a
+/// placeholder entry keyed by that declaration.
 #[test]
-fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
+fn try_build_entry_unwrap_failure_without_genesis_proof_is_dropped() {
     use crate::crypto::OsRng;
     use crate::test_utils::TestKeys;
 
@@ -306,26 +303,10 @@ fn try_build_entry_unwrap_failure_returns_some_without_metadata() {
     // Completely different keypair — unwrap will fail.
     let wrong_keys = TestKeys::generate("did:plc:alice");
 
-    let entry = try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys())
-        .entry()
-        .expect("unwrap failure must return an entry, not a drop");
-    assert_eq!(
-        entry.workspace_id,
-        "at://did:plc:alice/at.opake.keyring/abc"
-    );
-    assert!(
-        entry.name.is_none(),
-        "name should be None when unwrap fails"
-    );
-    assert!(
-        entry.description.is_none(),
-        "description should be None when unwrap fails"
-    );
-    assert_eq!(
-        entry.my_role.as_deref(),
-        Some("manager"),
-        "role must be preserved even when unwrap fails"
-    );
+    assert!(matches!(
+        try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys()),
+        EntryOutcome::IdentityMismatch
+    ));
 }
 
 /// Build a *superseded* keyring envelope with real, decryptable metadata.
@@ -379,10 +360,10 @@ fn make_superseded_envelope_with_name(
         record: Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![KeyringMember {
-                wrapped_key: wrapped,
-                role: crate::records::Role::Manager,
-            }],
+            members: vec![KeyringMember::with_wrap(
+                wrapped,
+                crate::records::Role::Manager,
+            )],
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata,
@@ -433,6 +414,68 @@ fn bug__superseded_keyring_decrypts_name_via_genesis_anchor() {
         entry.name.as_deref(),
         Some("Shared Space"),
         "name must decrypt via the genesis anchor, not the head URI"
+    );
+}
+
+#[test]
+fn historical_only_member_stays_in_keeper_after_genesis_derivation() {
+    use crate::crypto::{generate_content_key, wrap_key, OsRng, WrapContext};
+    use crate::records::{KeyHistoryEntry, Keyring, KeyringMember, SCHEMA_VERSION};
+    use crate::test_utils::TestKeys;
+
+    let mut rng = OsRng;
+    let did = "did:plc:carol";
+    let keys = TestKeys::generate(did);
+    let rotation_zero = generate_content_key(&mut rng);
+    let authority = "did:plc:alice";
+    let tag = crate::crypto::derive_workspace_identity_tag(&rotation_zero, authority);
+    let genesis = format!("at://{authority}/at.opake.keyring/{tag}");
+    let old_wrap = wrap_key(
+        &rotation_zero,
+        &keys.public_keys(),
+        did,
+        &WrapContext::Keyring { uri: &genesis },
+        &mut rng,
+    )
+    .unwrap();
+    let envelope = crate::indexer::types::IndexerEnvelope {
+        uri: "at://did:plc:alice/at.opake.keyring/head".into(),
+        record: Keyring {
+            opake_version: SCHEMA_VERSION,
+            algo: "aes-256-gcm".into(),
+            members: vec![KeyringMember {
+                did: did.into(),
+                role: crate::records::Role::Editor,
+                wrapped_key: None,
+                unverified_key_approval: None,
+            }],
+            rotation: 1,
+            key_history: vec![KeyHistoryEntry {
+                rotation: 0,
+                members: vec![KeyringMember::with_wrap(
+                    old_wrap,
+                    crate::records::Role::Editor,
+                )],
+            }],
+            encrypted_metadata: crate::test_utils::dummy_encrypted_metadata(),
+            supersedes: Some(genesis.clone()),
+            supersedes_cid: Some("bafygenesis".into()),
+            lineage: Some(genesis.clone()),
+            created_at: "2026-04-17T00:00:00Z".into(),
+            modified_at: None,
+        },
+        indexed_at: "2026-04-17T00:00:01Z".into(),
+        deleted_at: None,
+    };
+
+    let entry = try_build_entry(&envelope, did, &keys.private_keys())
+        .entry()
+        .expect("historical-only member with rotation 0 must remain adopted");
+    assert_eq!(entry.workspace_id, genesis);
+    assert_eq!(entry.my_role.as_deref(), Some("editor"));
+    assert!(
+        entry.name.is_none(),
+        "current metadata needs the unavailable current key"
     );
 }
 
@@ -530,10 +573,10 @@ fn make_forged_identity_envelope(
         record: Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![KeyringMember {
-                wrapped_key: wrapped,
-                role: crate::records::Role::Manager,
-            }],
+            members: vec![KeyringMember::with_wrap(
+                wrapped,
+                crate::records::Role::Manager,
+            )],
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata,

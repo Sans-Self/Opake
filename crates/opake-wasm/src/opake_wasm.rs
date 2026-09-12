@@ -20,8 +20,12 @@
 // methods triggers wasm-bindgen's internal borrow tracking, which panics
 // when two &mut self async operations overlap across await points.
 
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
+use futures_channel::oneshot;
 use futures_util::lock::Mutex;
 use opake_core::indexer::chain_fork_keeper::ChainForkKeeper;
 use opake_core::indexer::inbox_keeper::InboxKeeper;
@@ -37,13 +41,139 @@ use crate::wasm_util::{
     DownloadResult, MutationResultDto, WasmOpake,
 };
 
+use opake_core::client::identity_operation::{
+    IdentityCallback, IdentityOperation, IdentityOperationCancellation, OwnerConfirmation,
+    OwnerConfirmationFailure,
+};
+use opake_core::client::WasmTransport;
+
 // ---------------------------------------------------------------------------
 // OpakeContext
 // ---------------------------------------------------------------------------
 
+/// Account-view representation of a direct DID-document check. The explicit
+/// unavailable state keeps a transient directory failure from either blocking
+/// the standing client or being mistaken for an absent verification method.
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum OwnVerificationView {
+    Absent,
+    Verified,
+    Substitution,
+    Unavailable { reason: String },
+}
+
+impl From<opake_core::resolve::SelfVerificationState> for OwnVerificationView {
+    fn from(state: opake_core::resolve::SelfVerificationState) -> Self {
+        match state {
+            opake_core::resolve::SelfVerificationState::Absent => Self::Absent,
+            opake_core::resolve::SelfVerificationState::Verified => Self::Verified,
+            opake_core::resolve::SelfVerificationState::Substitution => Self::Substitution,
+        }
+    }
+}
+
+/// Opaque, in-memory identity authorization. It intentionally has no
+/// serializer, credential accessors, or route through `PendingLogin`.
+#[wasm_bindgen(js_name = IdentityOperation)]
+pub struct WasmIdentityOperationHandle {
+    operation: Mutex<Option<IdentityOperation<WasmTransport>>>,
+    cancellation: IdentityOperationCancellation,
+    confirmation: Rc<RefCell<Option<oneshot::Sender<OwnerConfirmation>>>>,
+    stage: Rc<Cell<u8>>,
+}
+
+#[wasm_bindgen(js_class = IdentityOperation)]
+impl WasmIdentityOperationHandle {
+    #[wasm_bindgen(js_name = startAuthorization)]
+    pub async fn start_authorization(&self) -> Result<String, JsError> {
+        let mut operation = self.operation.lock().await;
+        operation
+            .as_mut()
+            .ok_or_else(|| JsError::new("identity operation is no longer live"))?
+            .start_authorization()
+            .await
+            .map_err(wasm_err)
+    }
+
+    /// Start callback completion; owner input is supplied only after the
+    /// signer has accepted the bodyless confirmation request.
+    #[wasm_bindgen(js_name = complete)]
+    pub async fn complete(
+        &self,
+        code: String,
+        state: String,
+        issuer: String,
+    ) -> Result<JsValue, JsError> {
+        let mut operation = self
+            .operation
+            .lock()
+            .await
+            .take()
+            .ok_or_else(|| JsError::new("identity operation is no longer live"))?;
+        let (sender, receiver) = oneshot::channel();
+        *self.confirmation.borrow_mut() = Some(sender);
+        self.stage.set(1);
+        let stage = Rc::clone(&self.stage);
+        let result = operation
+            .complete(IdentityCallback::new(code, state, issuer), async move {
+                stage.set(2);
+                receiver
+                    .await
+                    .map_err(|_| OwnerConfirmationFailure::DeliveryUnknown)
+            })
+            .await
+            .map_err(wasm_err)?;
+        to_js(&result)
+    }
+
+    #[wasm_bindgen(js_name = supplyConfirmation)]
+    pub fn supply_confirmation(&self, value: String) -> Result<(), JsError> {
+        if self.stage.get() != 2 {
+            return Err(JsError::new(
+                "identity operation is not waiting for owner confirmation",
+            ));
+        }
+        self.confirmation
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| {
+                JsError::new("identity operation is not waiting for owner confirmation")
+            })?
+            .send(OwnerConfirmation::new(value))
+            .map_err(|_| JsError::new("identity operation is no longer live"))
+    }
+
+    #[wasm_bindgen(getter, js_name = stage)]
+    pub fn stage(&self) -> String {
+        match self.stage.get() {
+            1 => "confirmationRequested".into(),
+            2 => "waitingForConfirmation".into(),
+            _ => "ready".into(),
+        }
+    }
+
+    /// Prevents any later signing or submission. If completion is already
+    /// waiting on owner input, the core cancellation handle wakes it.
+    #[wasm_bindgen(js_name = cancel)]
+    pub fn cancel(&self) {
+        self.cancellation.cancel();
+        self.confirmation.borrow_mut().take();
+        // Before callback completion starts, dispose immediately rather than
+        // waiting for JS garbage collection. Once complete owns it, the
+        // cancellation handle wakes that in-flight cleanup path instead.
+        if let Some(mut operation) = self.operation.try_lock() {
+            operation.take();
+        }
+    }
+}
+
 #[wasm_bindgen(js_name = OpakeContext)]
 pub struct WasmOpakeHandle {
     pub(crate) inner: Rc<Mutex<WasmOpake>>,
+    /// Direct DID-document result captured during account bootstrap. This is
+    /// deliberately separate from host-recommended credentials.
+    boot_verification: OwnVerificationView,
     /// Persistent tree state + SSE watcher registry. Held behind its own
     /// Mutex (separate from the Opake mutex) so SSE event application and
     /// file operations don't block each other.
@@ -96,8 +226,16 @@ impl WasmOpakeHandle {
     ) -> Result<WasmOpakeHandle, JsError> {
         let opake = make_opake_from_storage(did.as_deref(), storage_adapter).await?;
         let did_owned = opake.did().to_string();
+        let boot_verification = opake
+            .check_own_verification()
+            .await
+            .map(OwnVerificationView::from)
+            .unwrap_or_else(|error| OwnVerificationView::Unavailable {
+                reason: error.to_string(),
+            });
         Ok(Self {
             inner: Rc::new(Mutex::new(opake)),
+            boot_verification,
             tree_keeper: Rc::new(Mutex::new(TreeKeeper::new(did_owned))),
             workspace_keeper: Rc::new(Mutex::new(WorkspaceKeeper::new())),
             inbox_keeper: Rc::new(Mutex::new(InboxKeeper::new())),
@@ -234,6 +372,7 @@ impl WasmOpakeHandle {
         keyring_uri: &str,
         member_did: &str,
         role: &str,
+        confirmed_unverified_keys: Option<Vec<u8>>,
     ) -> Result<JsValue, JsError> {
         let mut opake = self.opake().await?;
         let ws = opake
@@ -241,8 +380,118 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
         let role = parse_role(role)?;
+        let confirmed_unverified_keys = confirmed_unverified_keys
+            .map(|bytes| {
+                bytes
+                    .try_into()
+                    .map_err(|_| JsError::new("unverified approval must be 32 bytes"))
+            })
+            .transpose()?;
         let _outcome = opake
-            .add_workspace_member(&ws.id(), &ws.key, &ws.historical_keys, member_did, role)
+            .add_workspace_member(
+                &ws.id(),
+                ws.current_key().map_err(wasm_err)?,
+                &ws.historical_keys,
+                member_did,
+                role,
+                confirmed_unverified_keys,
+            )
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto { uri: None })
+    }
+
+    /// Resolve the current bundle and return the one-operation approval
+    /// commitment when this unverified recipient needs explicit consent.
+    #[wasm_bindgen(js_name = workspaceMemberApprovalChallenge)]
+    pub async fn workspace_member_approval_challenge(
+        &self,
+        keyring_uri: &str,
+        member_did: &str,
+    ) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        to_js(
+            &opake
+                .workspace_member_approval_challenge(&ws.id(), member_did)
+                .await
+                .map_err(wasm_err)?
+                .map(|v| v.to_vec()),
+        )
+    }
+
+    /// Fresh, non-secret access state for a member row. In particular, this
+    /// compares the live head's approval to the freshly resolved bundle so a
+    /// previously approved, unchanged unverified member is not prompted
+    /// again when their current wrap is repaired.
+    #[wasm_bindgen(js_name = workspaceMemberAccessStatus)]
+    pub async fn workspace_member_access_status(
+        &self,
+        keyring_uri: &str,
+        member_did: &str,
+    ) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        let status = opake
+            .workspace_member_access_status(&ws.id(), member_did)
+            .await
+            .map_err(wasm_err)?;
+        to_js(&status)
+    }
+
+    #[wasm_bindgen(js_name = repairWorkspaceMemberWrap)]
+    pub async fn repair_workspace_member_wrap(
+        &self,
+        keyring_uri: &str,
+        member_did: &str,
+        confirmed: Option<Vec<u8>>,
+    ) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        let confirmed = confirmed
+            .map(|v| {
+                v.try_into()
+                    .map_err(|_| JsError::new("unverified approval must be 32 bytes"))
+            })
+            .transpose()?;
+        opake
+            .repair_workspace_member_wrap(
+                &ws.id(),
+                ws.current_key().map_err(wasm_err)?,
+                member_did,
+                confirmed,
+            )
+            .await
+            .map_err(wasm_err)?;
+        to_js(&MutationResultDto { uri: None })
+    }
+
+    #[wasm_bindgen(js_name = approvePendingWorkspaceMember)]
+    pub async fn approve_pending_workspace_member(
+        &self,
+        keyring_uri: &str,
+        member_did: &str,
+        confirmed: Vec<u8>,
+    ) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let ws = opake
+            .resolve_workspace_by_uri(keyring_uri)
+            .await
+            .map_err(wasm_err)?;
+        let confirmed = confirmed
+            .try_into()
+            .map_err(|_| JsError::new("unverified approval must be 32 bytes"))?;
+        opake
+            .approve_pending_workspace_member(&ws.id(), member_did, confirmed)
             .await
             .map_err(wasm_err)?;
         to_js(&MutationResultDto { uri: None })
@@ -282,16 +531,22 @@ impl WasmOpakeHandle {
             .resolve_workspace_by_uri(keyring_uri)
             .await
             .map_err(wasm_err)?;
-        let (_new_key, rotation) = opake
-            .remove_workspace_member(&ws.id(), &ws.key, member_did)
+        let removal = opake
+            .remove_workspace_member(&ws.id(), ws.current_key().map_err(wasm_err)?, member_did)
             .await
             .map_err(wasm_err)?;
 
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct R {
             rotation: u64,
+            excluded_members: Vec<opake_core::opake::ExcludedMember>,
         }
-        serde_wasm_bindgen::to_value(&R { rotation }).map_err(|e| JsError::new(&e.to_string()))
+        serde_wasm_bindgen::to_value(&R {
+            rotation: removal.rotation,
+            excluded_members: removal.excluded_members,
+        })
+        .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Update workspace metadata (name, description, icon). Resolves the
@@ -313,7 +568,7 @@ impl WasmOpakeHandle {
         let _outcome = opake
             .update_workspace_metadata(
                 &ws.id(),
-                &ws.key,
+                ws.current_key().map_err(wasm_err)?,
                 name.as_deref(),
                 description.as_deref(),
                 icon.as_deref(),
@@ -453,6 +708,7 @@ impl WasmOpakeHandle {
             "expired": result.expired,
             "still_pending": result.still_pending,
             "failed": result.failed,
+            "verificationErrors": result.verification_errors,
         }))
     }
 
@@ -471,6 +727,16 @@ impl WasmOpakeHandle {
             "already_current": outcome.already_current,
             "conflicts": outcome.conflicts,
         }))
+    }
+
+    /// Repair missing current member wraps where this account is still the
+    /// live manager and its recorded approval permits it. No group key or
+    /// approval commitment crosses the WASM boundary.
+    #[wasm_bindgen(js_name = sweepMemberWrapRepairs)]
+    pub async fn sweep_member_wrap_repairs(&self) -> Result<JsValue, JsError> {
+        let mut opake = self.opake().await?;
+        let outcome = opake.sweep_member_wrap_repairs().await.map_err(wasm_err)?;
+        to_js(&outcome)
     }
 
     /// Override the cached indexer URL at runtime.
@@ -544,6 +810,69 @@ impl WasmOpakeHandle {
     pub async fn publish_public_key(&self) -> Result<String, JsError> {
         let mut opake = self.opake().await?;
         opake.publish_public_key().await.map_err(wasm_err)
+    }
+
+    /// Read the account's authoritative DID document at boot/account-view
+    /// time. `Absent` may offer setup; `Substitution` is a refusal and never
+    /// a silent repair. A directory failure remains explicit as `unavailable`.
+    #[wasm_bindgen(js_name = checkOwnVerification)]
+    pub async fn check_own_verification(&self) -> Result<JsValue, JsError> {
+        let opake = self.opake().await?;
+        let state = opake
+            .check_own_verification()
+            .await
+            .map(OwnVerificationView::from)
+            .unwrap_or_else(|error| OwnVerificationView::Unavailable {
+                reason: error.to_string(),
+            });
+        to_js(&state)
+    }
+
+    /// The direct DID-document result obtained while this account context was
+    /// bootstrapped. UI uses this to offer setup only for `absent`.
+    #[wasm_bindgen(getter, js_name = bootVerification)]
+    pub fn boot_verification(&self) -> Result<JsValue, JsError> {
+        to_js(&self.boot_verification)
+    }
+
+    /// Construct a live, opaque setup operation. The signed public-key record
+    /// is written through the standing session before the DID operation is
+    /// made available, so publishing #opake can never precede its proof.
+    #[wasm_bindgen(js_name = startVerificationMethodPublication)]
+    pub async fn start_verification_method_publication(
+        &self,
+        redirect_uri: String,
+    ) -> Result<WasmIdentityOperationHandle, JsError> {
+        let mut opake = self.opake().await?;
+        let (operation, cancellation) = opake
+            .prepare_verification_method_publication(redirect_uri)
+            .await
+            .map_err(wasm_err)?;
+        Ok(WasmIdentityOperationHandle {
+            operation: Mutex::new(Some(operation)),
+            cancellation,
+            confirmation: Rc::new(RefCell::new(None)),
+            stage: Rc::new(Cell::new(0)),
+        })
+    }
+
+    /// Construct a live, opaque removal operation. No identity credential is
+    /// serialized into the account context while this handle is alive.
+    #[wasm_bindgen(js_name = startVerificationMethodRemoval)]
+    pub async fn start_verification_method_removal(
+        &self,
+        redirect_uri: String,
+    ) -> Result<WasmIdentityOperationHandle, JsError> {
+        let mut opake = self.opake().await?;
+        let (operation, cancellation) = opake
+            .new_verification_method_removal(redirect_uri)
+            .map_err(wasm_err)?;
+        Ok(WasmIdentityOperationHandle {
+            operation: Mutex::new(Some(operation)),
+            cancellation,
+            confirmation: Rc::new(RefCell::new(None)),
+            stage: Rc::new(Cell::new(0)),
+        })
     }
 
     /// Discover workspaces the user is a member of (across all PDSes).
@@ -621,29 +950,11 @@ impl WasmOpakeHandle {
             .await
             .map_err(wasm_err)?;
 
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct R {
-            did: String,
-            handle: Option<String>,
-            pds_url: String,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            x25519_public_key: Vec<u8>,
-            x25519_algo: String,
-            #[serde(with = "crate::wasm_util::serde_bytes")]
-            ml_kem_public_key: Vec<u8>,
-            ml_kem_algo: String,
-        }
-
-        to_js(&R {
-            did: resolved.did,
-            handle: resolved.handle,
-            pds_url: resolved.pds_url,
-            x25519_public_key: resolved.x25519_public_key.to_vec(),
-            x25519_algo: resolved.x25519_algo,
-            ml_kem_public_key: resolved.ml_kem_public_key.to_vec(),
-            ml_kem_algo: resolved.ml_kem_algo,
-        })
+        // Keep the stateful holder on the same DTO as the free bindings API.
+        // The SDK validates this boundary before a caller can grant access, so
+        // omitting verification here turns even a valid recipient into a
+        // client-side resolution failure.
+        to_js(&crate::bindings::ResolvedIdentityDto::from(&resolved))
     }
 
     /// Resolve grant metadata without downloading the blob.

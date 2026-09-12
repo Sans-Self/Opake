@@ -14,9 +14,13 @@ instead of timing out every reactive spec.
 
 ## Actor namespaces
 
-`E2E_ACTOR_NS` scopes a run to its own population of fixture actors. Unset — the
-default — is the six checked-in actors from `dev-env/fixtures/actors.json` and
-today's paths. Set (`just e2e-web alpha`), it derives six actors of its own,
+`E2E_ACTOR_NS` scopes a run to its own population of fixture actors. The
+`e2e-web` and `e2e-federation` recipes use separate nonempty namespaces by
+default because membership scenarios mutate fixture accounts. Pass one explicit
+name to share a population across both tiers (`just e2e-web alpha`, then
+`just e2e-federation alpha`). An unset namespace remains available only for
+read-only legacy checks against the six checked-in actors from
+`dev-env/fixtures/actors.json`. A namespace derives six actors of its own,
 mirroring the same roles and PDS placement, provisions them against the dev-env
 on first use, and partitions everything the run writes:
 

@@ -8,12 +8,10 @@
 // on the other's completions.
 //
 // Why this is the regression for the completion fix: pending-share completion
-// writes the grant at the pending share's own rkey via idempotent `putRecord`
-// (crates/opake-core/src/sharing/create.rs::put_grant_at), not a fresh rkey via
-// createRecord. Both runners derive the same rkey and upsert there, so the repo
-// converges on one grant. Before the fix, two runners each created a grant at a
-// PDS-allocated rkey → two grants for one share. This test fails against the old
-// behaviour and passes against the new.
+// writes the grant at the pending share's own rkey in one conditional
+// `applyWrites(Create, Delete)` transaction. Both runners derive the same
+// designated rkey, but the PDS accepts only the runner whose observed
+// repository revision still matches; the loser reconciles the durable pair.
 //
 // ── RUN-TIME DEPENDENCIES (this spec is prepared, not yet wired to run) ───────
 //  1. Full stack: the dev-env docker stack (PDS-a/b/c, relay, jetstream, indexer)
@@ -129,7 +127,14 @@ test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-
         // eslint-disable-next-line no-await-in-loop
         const docUri = await uploadTextToCabinet(OWNER, uniqueName(i), `xtier payload ${i}`);
         // eslint-disable-next-line no-await-in-loop
-        const queued = await cli(OWNER, ["share", "new", docUri, recipientDid, "--queue"]);
+        const queued = await cli(OWNER, [
+          "share",
+          "new",
+          docUri,
+          recipientDid,
+          "--queue",
+          "--allow-unverified-first-publication",
+        ]);
         expect(queued.code, queued.stderr).toBe(0);
         docUris.push(docUri);
       }
@@ -192,8 +197,8 @@ test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-
       }
 
       // The owner's queue is drained of these docs: completion deleted each
-      // pending record (idempotently — a NotFound on the second runner's delete
-      // is success, not error).
+      // pending record. A losing runner reconciles the committed pair instead
+      // of issuing a second delete or an upsert.
       const pending = await cli(OWNER, ["share", "pending"]);
       for (const uri of docUris) {
         expect(pending.stdout).not.toContain(uri);

@@ -25,6 +25,7 @@ pub mod share_group;
 pub mod shared;
 pub mod tree;
 pub mod upload;
+pub mod verification;
 pub mod workspace;
 
 use anyhow::Result;

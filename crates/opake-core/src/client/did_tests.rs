@@ -13,6 +13,171 @@ fn success_response(body: &str) -> HttpResponse {
     response(200, body)
 }
 
+fn base58btc(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits = vec![0u8];
+    for &byte in bytes {
+        let mut carry = u32::from(byte);
+        for digit in digits.iter_mut().rev() {
+            carry += u32::from(*digit) << 8;
+            *digit = (carry % 58) as u8;
+            carry /= 58;
+        }
+        while carry != 0 {
+            digits.insert(0, (carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+    let leading_zeros = bytes.iter().take_while(|&&byte| byte == 0).count();
+    let mut output = String::with_capacity(leading_zeros + digits.len());
+    output.extend(std::iter::repeat_n('1', leading_zeros));
+    output.extend(
+        digits
+            .into_iter()
+            .map(|digit| ALPHABET[digit as usize] as char),
+    );
+    output
+}
+
+fn did_key(key: &[u8; 32]) -> String {
+    let mut multicodec = vec![0xed, 0x01];
+    multicodec.extend_from_slice(key);
+    format!("did:key:z{}", base58btc(&multicodec))
+}
+
+#[test]
+fn opake_method_lookup_distinguishes_absent_malformed_and_unsupported() {
+    let signing = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let key = signing.verifying_key().to_bytes();
+    let did = "did:plc:test";
+
+    let absent: DidDocument = serde_json::from_value(serde_json::json!({"id": did})).unwrap();
+    assert_eq!(absent.opake_key().unwrap(), None);
+
+    let malformed: DidDocument = serde_json::from_value(serde_json::json!({
+        "id": did,
+        "verificationMethod": [{"id": "#opake", "type": "Multikey"}],
+    }))
+    .unwrap();
+    assert!(matches!(
+        malformed.opake_key(),
+        Err(VerificationMethodError::Malformed(_))
+    ));
+
+    let unsupported: DidDocument = serde_json::from_value(serde_json::json!({
+        "id": did,
+        "verificationMethod": [{
+            "id": "#opake", "controller": did, "type": "P256Key",
+            "publicKeyMultibase": did_key(&key).strip_prefix("did:key:").unwrap(),
+        }],
+    }))
+    .unwrap();
+    assert_eq!(
+        unsupported.opake_key(),
+        Err(VerificationMethodError::UnsupportedKeyType)
+    );
+}
+
+#[test]
+fn opake_method_decodes_ed25519_multibase_and_rejects_wrong_codec() {
+    let signing = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
+    let key = signing.verifying_key().to_bytes();
+    assert_eq!(
+        decode_ed25519_multibase(did_key(&key).strip_prefix("did:key:").unwrap()).unwrap(),
+        key
+    );
+
+    let mut wrong_codec = vec![0xec, 0x01];
+    wrong_codec.extend_from_slice(&key);
+    assert_eq!(
+        decode_ed25519_multibase(&format!("z{}", base58btc(&wrong_codec))),
+        Err(VerificationMethodError::UnsupportedKeyType),
+    );
+}
+
+#[test]
+fn ed25519_did_key_encoding_round_trips() {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[42; 32])
+        .verifying_key()
+        .to_bytes();
+    let encoded = encode_ed25519_did_key(&key);
+    assert_eq!(encoded, did_key(&key));
+    assert_eq!(
+        decode_ed25519_multibase(encoded.strip_prefix("did:key:").unwrap()).unwrap(),
+        key
+    );
+}
+
+#[tokio::test]
+async fn plc_history_uses_active_operations_and_detects_replacement() {
+    let did = "did:plc:test";
+    let first = ed25519_dalek::SigningKey::from_bytes(&[9; 32])
+        .verifying_key()
+        .to_bytes();
+    let current = ed25519_dalek::SigningKey::from_bytes(&[10; 32])
+        .verifying_key()
+        .to_bytes();
+    let mock = MockTransport::new();
+    mock.enqueue(success_response(
+        &serde_json::json!([
+            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&first)}},
+            {"type": "plc_operation", "verificationMethods": {}},
+            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
+        ])
+        .to_string(),
+    ));
+
+    assert_eq!(
+        opake_key_replaced(&mock, did, &current).await.unwrap(),
+        Some(true)
+    );
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].url.ends_with("/did:plc:test/log"));
+}
+
+#[tokio::test]
+async fn plc_history_removal_and_same_key_readdition_is_not_replacement() {
+    let did = "did:plc:test";
+    let current = ed25519_dalek::SigningKey::from_bytes(&[11; 32])
+        .verifying_key()
+        .to_bytes();
+    let mock = MockTransport::new();
+    mock.enqueue(success_response(
+        &serde_json::json!([
+            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
+            {"type": "plc_operation", "verificationMethods": {}},
+            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
+        ])
+        .to_string(),
+    ));
+
+    assert_eq!(
+        opake_key_replaced(&mock, did, &current).await.unwrap(),
+        Some(false)
+    );
+}
+
+#[tokio::test]
+async fn did_web_has_no_plc_history_and_malformed_history_refuses() {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[12; 32])
+        .verifying_key()
+        .to_bytes();
+    let mock = MockTransport::new();
+    assert_eq!(
+        opake_key_replaced(&mock, "did:web:example.test", &key)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(mock.requests().is_empty());
+
+    mock.enqueue(success_response(r#"[{"verificationMethods": []}]"#));
+    assert!(opake_key_replaced(&mock, "did:plc:test", &key)
+        .await
+        .is_err());
+}
+
 // -- resolve_handle_wellknown --
 
 #[tokio::test]
@@ -252,6 +417,7 @@ fn pds_from_did_document_extracts_endpoint() {
 #[test]
 fn pds_from_did_document_no_service() {
     let doc = DidDocument {
+        verification_methods: vec![],
         id: "did:plc:test".into(),
         also_known_as: vec![],
         service: vec![],
@@ -264,6 +430,7 @@ fn pds_from_did_document_no_service() {
 #[test]
 fn pds_from_did_document_wrong_service_id() {
     let doc = DidDocument {
+        verification_methods: vec![],
         id: "did:plc:test".into(),
         also_known_as: vec![],
         service: vec![DidService {
@@ -305,6 +472,7 @@ fn handle_from_did_document_extracts_handle() {
 #[test]
 fn handle_from_did_document_no_at_entry() {
     let doc = DidDocument {
+        verification_methods: vec![],
         id: "did:plc:test".into(),
         also_known_as: vec!["https://example.com".into()],
         service: vec![],
@@ -315,6 +483,7 @@ fn handle_from_did_document_no_at_entry() {
 #[test]
 fn handle_from_did_document_empty() {
     let doc = DidDocument {
+        verification_methods: vec![],
         id: "did:plc:test".into(),
         also_known_as: vec![],
         service: vec![],

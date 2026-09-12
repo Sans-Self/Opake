@@ -7,14 +7,7 @@
 // Uses explicit contexts (not the per-worker actor fixture) because it spans
 // two specific actors; the blockade is installed on each page by hand. The
 // workspace name is unique per run for disjoint namespacing.
-import {
-  blockadeTest as test,
-  expect,
-  cite,
-  ACTORS,
-  authFile,
-  installBlockade,
-} from "../fixtures";
+import { blockadeTest as test, expect, cite, ACTORS, authFile, installBlockade } from "../fixtures";
 import type { Page } from "@playwright/test";
 
 const actor = (name: string) => {
@@ -71,7 +64,15 @@ test(`manager adds a cross-PDS member and the membership shows on both sides ${c
     await alicePage.getByRole("button", { name: "Add", exact: true }).click();
     const addDialog = alicePage.getByRole("dialog", { name: "Add member" });
     await addDialog.getByLabel("Member handle").fill(carol.handle);
+    // Carol has no DID verification method in the standard fixture. The
+    // acknowledgement belongs to this admission, not a test-wide bypass.
+    const consent = alicePage.waitForEvent("dialog");
     await addDialog.getByRole("button", { name: "Add", exact: true }).click();
+    const confirmation = await consent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("is unverified");
+    expect(confirmation.message()).toContain("expose every workspace file");
+    await confirmation.accept();
 
     // Side 1 — the keyring head's member list now carries a second, removable
     // member (carol). Assert via the per-member Remove control rather than a

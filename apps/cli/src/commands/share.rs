@@ -24,6 +24,16 @@ pub struct NewShareCommand {
     /// Queue the share if the recipient hasn't set up Opake yet
     #[arg(long)]
     queue: bool,
+
+    /// Authorize one automatic handoff if this not-ready recipient's first
+    /// published bundle is unverified. Bound to the DID resolved now.
+    #[arg(long)]
+    allow_unverified_first_publication: bool,
+
+    /// Confirm the exact currently resolved unverified encryption bundle.
+    /// The command prints the recipient DID before using this acknowledgement.
+    #[arg(long)]
+    approve_unverified: bool,
 }
 
 impl Execute for NewShareCommand {
@@ -44,17 +54,16 @@ impl Execute for NewShareCommand {
 
         match recipient_result {
             Ok(recipient) => {
+                let approval = mgr.share_approval_challenge(&uri, &recipient);
+                if approval.is_some() && !self.approve_unverified {
+                    return Err(anyhow::anyhow!(
+                        "{} has an unverified encryption key. Review DID {} and re-run with --approve-unverified to share to this exact current bundle.",
+                        self.recipient,
+                        recipient.did
+                    ));
+                }
                 let grant_uri = mgr
-                    .share(
-                        &uri,
-                        &recipient.did,
-                        opake_core::crypto::PublicKeyBundle {
-                            x25519: &recipient.x25519_public_key,
-                            ml_kem: &recipient.ml_kem_public_key,
-                        },
-                        "read",
-                        self.note.as_deref(),
-                    )
+                    .share(&uri, &recipient.did, approval, "read", self.note.as_deref())
                     .await?;
 
                 let display = recipient.handle.as_deref().unwrap_or(&recipient.did);
@@ -69,8 +78,24 @@ impl Execute for NewShareCommand {
                 );
 
                 if self.queue {
-                    mgr.create_pending_share(&uri, &self.recipient, "read", self.note.as_deref())
-                        .await?;
+                    if !self.allow_unverified_first_publication {
+                        return Err(anyhow::anyhow!(
+                            "queuing requires --allow-unverified-first-publication: a background runner cannot ask for consent when {} first publishes keys",
+                            self.recipient
+                        ));
+                    }
+
+                    let (recipient_did, _, _) =
+                        resolve::resolve_pds_for_login(&transport, &self.recipient).await?;
+                    mgr.create_pending_share(
+                        &uri,
+                        &self.recipient,
+                        &recipient_did,
+                        true,
+                        "read",
+                        self.note.as_deref(),
+                    )
+                    .await?;
                     println!(
                         "Share queued — it will complete automatically once they \
                          set up Opake (expires in 7 days)."
@@ -133,6 +158,13 @@ impl Execute for RetrySharesCommand {
                 result.still_pending,
                 result.failed
             );
+            for issue in result.verification_errors {
+                let expiry = if issue.expired { " (expired)" } else { "" };
+                println!(
+                    "pending share {} for {}: published key verification failed{}: {}",
+                    issue.uri, issue.recipient_did, expiry, issue.reason
+                );
+            }
         }
 
         Ok(None)

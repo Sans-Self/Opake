@@ -8,6 +8,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64URL, Engine};
 use p256::ecdsa::{signature::Signer, Signature, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::crypto::{CryptoRng, RngCore};
 use crate::error::Error;
@@ -64,10 +65,14 @@ impl DpopKeyPair {
     }
 
     fn signing_key(&self) -> Result<SigningKey, Error> {
-        let bytes = BASE64URL
-            .decode(&self.private_key_b64)
-            .map_err(|e| Error::Auth(format!("invalid DPoP private key: {e}")))?;
-        SigningKey::from_bytes(bytes.as_slice().into())
+        let bytes: Zeroizing<[u8; 32]> = Zeroizing::new(
+            BASE64URL
+                .decode(&self.private_key_b64)
+                .map_err(|e| Error::Auth(format!("invalid DPoP private key: {e}")))?
+                .try_into()
+                .map_err(|_| Error::Auth("invalid DPoP private key length".into()))?,
+        );
+        SigningKey::from_bytes((&*bytes).into())
             .map_err(|e| Error::Auth(format!("invalid DPoP private key: {e}")))
     }
 

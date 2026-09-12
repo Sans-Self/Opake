@@ -577,8 +577,8 @@ mod keyring_authority {
     const KEYRING_HEAD_BOB: &str = "at://did:plc:bob/at.opake.keyring/head";
 
     fn member(did: &str, role: Role) -> KeyringMember {
-        KeyringMember {
-            wrapped_key: WrappedKey {
+        KeyringMember::with_wrap(
+            WrappedKey {
                 did: did.into(),
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
@@ -586,7 +586,13 @@ mod keyring_authority {
                 algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
             role,
-        }
+        )
+    }
+
+    fn approved_member(did: &str, role: Role, approval: &[u8]) -> KeyringMember {
+        let mut member = member(did, role);
+        member.unverified_key_approval = Some(AtBytes::from_raw(approval));
+        member
     }
 
     fn keyring(members: Vec<KeyringMember>, supersedes: Option<&str>) -> Keyring {
@@ -674,6 +680,101 @@ mod keyring_authority {
             }
             other => panic!("expected ChainAuthorityViolation, got: {other:?}"),
         }
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[test]
+    fn accepts_editor_pure_self_removal() {
+        let chain = vec![
+            node(
+                KEYRING_HEAD_BOB,
+                keyring(
+                    vec![
+                        member(DID_A, Role::Manager),
+                        approved_member("did:plc:carol", Role::Viewer, &[7; 32]),
+                    ],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(
+                    vec![
+                        member(DID_A, Role::Manager),
+                        member(DID_B, Role::Editor),
+                        approved_member("did:plc:carol", Role::Viewer, &[7; 32]),
+                    ],
+                    None,
+                ),
+            ),
+        ];
+
+        verify_keyring_chain_authority(&chain).unwrap();
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[test]
+    fn rejects_editor_self_removal_that_changes_remaining_approval() {
+        let chain = vec![
+            node(
+                KEYRING_HEAD_BOB,
+                keyring(
+                    vec![
+                        member(DID_A, Role::Manager),
+                        approved_member("did:plc:carol", Role::Viewer, &[8; 32]),
+                    ],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(
+                    vec![
+                        member(DID_A, Role::Manager),
+                        member(DID_B, Role::Editor),
+                        approved_member("did:plc:carol", Role::Viewer, &[7; 32]),
+                    ],
+                    None,
+                ),
+            ),
+        ];
+
+        assert!(matches!(
+            verify_keyring_chain_authority(&chain),
+            Err(Error::ChainAuthorityViolation { .. })
+        ));
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[test]
+    fn rejects_editor_self_removal_that_changes_remaining_wrap_presence() {
+        let mut carol_without_wrap = member("did:plc:carol", Role::Viewer);
+        carol_without_wrap.wrapped_key = None;
+        let chain = vec![
+            node(
+                KEYRING_HEAD_BOB,
+                keyring(
+                    vec![member(DID_A, Role::Manager), carol_without_wrap],
+                    Some(KEYRING_GENESIS),
+                ),
+            ),
+            node(
+                KEYRING_GENESIS,
+                keyring(
+                    vec![
+                        member(DID_A, Role::Manager),
+                        member(DID_B, Role::Editor),
+                        member("did:plc:carol", Role::Viewer),
+                    ],
+                    None,
+                ),
+            ),
+        ];
+
+        assert!(matches!(
+            verify_keyring_chain_authority(&chain),
+            Err(Error::ChainAuthorityViolation { .. })
+        ));
     }
 
     // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal

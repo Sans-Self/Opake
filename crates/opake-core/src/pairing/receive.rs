@@ -2,15 +2,18 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use zeroize::Zeroizing;
 
 use crate::atproto;
-use crate::client::{Transport, XrpcClient};
+use crate::client::{resolve_did_document, Transport, XrpcClient};
 use crate::crypto::{
     decrypt_blob, unwrap_key, EncryptedPayload, MlKemPrivateKey, PrivateKeyBundle,
     X25519PrivateKey, ML_KEM_SK_LEN,
 };
 use crate::error::Error;
 use crate::records::{
-    PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY,
+    vocabulary::{self, RecordKind},
+    PairResponse, PublicKeyRecord, UnreadableReason, PAIR_RESPONSE_COLLECTION,
+    PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY,
 };
+use crate::resolve::{verify_public_key_record, VerificationState};
 use crate::storage::{Identity, Storage};
 
 use super::cleanup::cleanup_pair_records;
@@ -183,10 +186,31 @@ async fn decrypt_pair_response(
         ))
     })?;
 
+    if identity.did != did {
+        return Err(Error::InvalidRecord(
+            "pair response identity DID does not match the pairing account".to_string(),
+        ));
+    }
+
+    // Resolve the anchor independently of the PDS record. A DID document with
+    // `#opake` turns a bad or stripped record into refusal, never downgrade.
+    let document = resolve_did_document(client.transport(), did).await?;
     let record_entry = client
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await?;
-    let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
+    let published: PublicKeyRecord =
+        vocabulary::classify_record(RecordKind::PublicKey, &record_entry.value).map_err(
+            |reason| match reason {
+                UnreadableReason::Corrupt => Error::InvalidRecord(
+                    "published publicKey/self record is corrupt or unreadable".to_string(),
+                ),
+                UnreadableReason::NeedsNewerClient => Error::InvalidRecord(
+                    "published publicKey/self record requires a newer Opake client".to_string(),
+                ),
+            },
+        )?;
+    let verification =
+        verify_public_key_record(client.transport(), did, &document, &published).await?;
 
     let published_x25519 = published.x25519_public_key.decode().map_err(|e| {
         Error::InvalidRecord(format!(
@@ -218,6 +242,28 @@ async fn decrypt_pair_response(
         return Err(Error::InvalidRecord(
             "received ML-KEM public key does not match published publicKey/self record".to_string(),
         ));
+    }
+
+    if matches!(verification, VerificationState::Verified { .. }) {
+        let published_signing = published
+            .signing_key
+            .as_ref()
+            .ok_or_else(|| {
+                Error::VerificationFailed(
+                    "verified publicKey/self record omitted its signing key".to_string(),
+                )
+            })?
+            .decode()?;
+        let received_signing = identity.verify_key_bytes()?.ok_or_else(|| {
+            Error::VerificationFailed(
+                "paired identity omitted its verification key for a verified account".to_string(),
+            )
+        })?;
+        if published_signing.as_slice() != received_signing {
+            return Err(Error::VerificationFailed(
+                "received signing key does not match verified publicKey/self record".to_string(),
+            ));
+        }
     }
 
     Ok(identity)

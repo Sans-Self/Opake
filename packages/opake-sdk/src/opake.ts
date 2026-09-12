@@ -17,6 +17,8 @@ import type {
   InboxGrant,
   InboxSnapshot,
   InboxWatcher,
+  IdentityOperationResult,
+  OwnVerification,
   MutationResult,
   OpakeInitOptions,
   PendingShareEntry,
@@ -24,6 +26,8 @@ import type {
   ResolvedIdentity,
   WorkspaceEntry,
   WorkspaceMember,
+  WorkspaceMemberAccessStatus,
+  WorkspaceMemberRemoval,
   WorkspaceRole,
   WorkspaceSyncResult,
 } from "./types";
@@ -61,6 +65,41 @@ import {
 // The WASM module types. We import dynamically after init.
 type WasmModule = typeof import("../wasm/opake.js");
 type WasmOpakeContext = import("../wasm/opake.js").OpakeContext;
+type WasmIdentityOperation = import("../wasm/opake.js").IdentityOperation;
+
+/** A live, opaque authorization for one verification-method mutation. */
+export class IdentityOperation {
+  constructor(private readonly inner: WasmIdentityOperation) {}
+
+  async startAuthorization(): Promise<string> {
+    try {
+      return await this.inner.startAuthorization();
+    } catch (error) {
+      throw parseWasmError(error);
+    }
+  }
+
+  async complete(
+    callback: { code: string; state: string; issuer: string },
+  ): Promise<IdentityOperationResult> {
+    try {
+      return (await this.inner.complete(
+        callback.code,
+        callback.state,
+        callback.issuer,
+      )) as IdentityOperationResult;
+    } catch (error) {
+      throw parseWasmError(error);
+    }
+  }
+
+  supplyConfirmation(value: string): void { this.inner.supplyConfirmation(value); }
+  get stage(): string { return this.inner.stage; }
+
+  cancel(): void {
+    this.inner.cancel();
+  }
+}
 
 /** Internal shape of the WASM `WorkspaceWatcher` object. */
 type WasmWorkspaceWatcherHandle = {
@@ -655,12 +694,13 @@ export class Opake {
     keyringUri: string,
     memberDid: string,
     role: WorkspaceRole,
+    confirmedUnverifiedKeys?: Uint8Array,
   ): Promise<MutationResult> {
     // Core resolves the recipient's hybrid public-key bundle internally
     // — fewer byte arrays crossing the WASM boundary, single resolution
     // path on owner + non-owner branches.
     return this.track(() =>
-      this.requireContext().addWorkspaceMember(keyringUri, memberDid, role),
+      this.requireContext().addWorkspaceMember(keyringUri, memberDid, role, confirmedUnverifiedKeys),
     ) as Promise<MutationResult>;
   }
 
@@ -674,12 +714,36 @@ export class Opake {
    */
   @wrapWasmErrors
   @withTokenGuard
-  removeWorkspaceMember(keyringUri: string, memberDid: string): Promise<{ rotation: number }> {
+  removeWorkspaceMember(keyringUri: string, memberDid: string): Promise<WorkspaceMemberRemoval> {
     return this.track(() =>
       this.requireContext().removeWorkspaceMember(keyringUri, memberDid),
-    ) as Promise<{
-      rotation: number;
-    }>;
+    ) as Promise<WorkspaceMemberRemoval>;
+  }
+
+  @wrapWasmErrors
+  @withTokenGuard
+  workspaceMemberApprovalChallenge(keyringUri: string, memberDid: string): Promise<Uint8Array | null> {
+    return this.track(() => this.requireContext().workspaceMemberApprovalChallenge(keyringUri, memberDid)) as Promise<Uint8Array | null>;
+  }
+
+  /** Resolve a member's current verification and approval state for display.
+   * The result is informational only: mutations resolve again before writing. */
+  @wrapWasmErrors
+  @withTokenGuard
+  workspaceMemberAccessStatus(keyringUri: string, memberDid: string): Promise<WorkspaceMemberAccessStatus> {
+    return this.track(() => this.requireContext().workspaceMemberAccessStatus(keyringUri, memberDid)) as Promise<WorkspaceMemberAccessStatus>;
+  }
+
+  @wrapWasmErrors
+  @withTokenGuard
+  repairWorkspaceMemberWrap(keyringUri: string, memberDid: string, approval?: Uint8Array): Promise<MutationResult> {
+    return this.track(() => this.requireContext().repairWorkspaceMemberWrap(keyringUri, memberDid, approval)) as Promise<MutationResult>;
+  }
+
+  @wrapWasmErrors
+  @withTokenGuard
+  approvePendingWorkspaceMember(keyringUri: string, memberDid: string, approval: Uint8Array): Promise<MutationResult> {
+    return this.track(() => this.requireContext().approvePendingWorkspaceMember(keyringUri, memberDid, approval)) as Promise<MutationResult>;
   }
 
   /** Leave a workspace you're a member of. */
@@ -752,6 +816,37 @@ export class Opake {
   @withTokenGuard
   publishPublicKey(): Promise<string> {
     return this.track(() => this.requireContext().publishPublicKey());
+  }
+
+  /** The direct DID check captured while this live account context booted. */
+  get bootVerification(): OwnVerification {
+    return this.requireContext().bootVerification as OwnVerification;
+  }
+
+  /** Re-read the current account's DID document without using host hints. */
+  @wrapWasmErrors
+  checkOwnVerification(): Promise<OwnVerification> {
+    return this.track(() =>
+      this.requireContext().checkOwnVerification() as Promise<OwnVerification>,
+    );
+  }
+
+  /** Start a live setup operation. Its authorization state never enters storage. */
+  @wrapWasmErrors
+  async startVerificationMethodPublication(redirectUri: string): Promise<IdentityOperation> {
+    const handle = await this.track(() =>
+      this.requireContext().startVerificationMethodPublication(redirectUri),
+    );
+    return new IdentityOperation(handle);
+  }
+
+  /** Start a live removal operation. Cancellation drops its transient authority. */
+  @wrapWasmErrors
+  async startVerificationMethodRemoval(redirectUri: string): Promise<IdentityOperation> {
+    const handle = await this.track(() =>
+      this.requireContext().startVerificationMethodRemoval(redirectUri),
+    );
+    return new IdentityOperation(handle);
   }
 
   // ---------------------------------------------------------------------------
@@ -1022,6 +1117,7 @@ export class Opake {
     expired: number;
     still_pending: number;
     failed: number;
+    verificationErrors: readonly import("./types").PendingShareVerificationError[];
   }> {
     return this.track(() => this.requireContext().retryPendingSharesViaOpake());
   }
@@ -1040,6 +1136,26 @@ export class Opake {
     conflicts: number;
   }> {
     return this.track(() => this.requireContext().sweepRotationRewrap());
+  }
+
+  /**
+   * Repair missing current member wraps from live workspace heads when this
+   * account remains an authorized manager. The repair runner never prompts or
+   * manufactures consent; pending approvals remain visible in its outcome.
+   */
+  @wrapWasmErrors
+  @withTokenGuard
+  sweepMemberWrapRepairs(): Promise<{
+    attempted: number;
+    repaired: number;
+    awaitingApproval: number;
+    verificationFailed: number;
+    stale: number;
+    skippedNotManager: number;
+    skippedWithoutCurrentKey: number;
+    errors: number;
+  }> {
+    return this.track(() => this.requireContext().sweepMemberWrapRepairs());
   }
 
   // ---------------------------------------------------------------------------

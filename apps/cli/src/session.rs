@@ -44,6 +44,7 @@ pub async fn build_opake(storage: &FileStorage, did: &str) -> anyhow::Result<Cli
     // workspace mutation would 403 on the genesis-indexing race instead of
     // waiting the window out.
     opake.set_sleep_fn(Box::new(|d| Box::pin(tokio::time::sleep(d))));
+    opake.set_identity_sleep_fn(std::rc::Rc::new(|d| Box::pin(tokio::time::sleep(d))));
 
     if let Ok(url) = std::env::var("OPAKE_INDEXER_URL") {
         opake.set_indexer_url(url);

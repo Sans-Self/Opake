@@ -29,6 +29,8 @@ pub enum VocabularyField {
     ContentEncryptionAlgo,
     /// `at.opake.publicKey` algorithm identifiers (x25519 / ml-kem / ed25519).
     PublicKeyAlgo,
+    /// Public-key record signature algorithm.
+    PublicKeySignatureAlgo,
     /// `pairRequest.algo` (KEM suite) and `pairResponse.algo` (symmetric cipher).
     PairingAlgo,
     /// `keyringMember.role` — plaintext authorization vocabulary.
@@ -42,15 +44,17 @@ impl VocabularyField {
             Self::KeyWrapAlgo => "keyWrapAlgo",
             Self::ContentEncryptionAlgo => "contentEncryptionAlgo",
             Self::PublicKeyAlgo => "publicKeyAlgo",
+            Self::PublicKeySignatureAlgo => "publicKeySignatureAlgo",
             Self::PairingAlgo => "pairingAlgo",
             Self::KeyringMemberRole => "keyringMemberRole",
         }
     }
 
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::KeyWrapAlgo,
         Self::ContentEncryptionAlgo,
         Self::PublicKeyAlgo,
+        Self::PublicKeySignatureAlgo,
         Self::PairingAlgo,
         Self::KeyringMemberRole,
     ];
@@ -273,6 +277,9 @@ impl RecordKind {
             Self::PublicKey => {
                 algo_ok(raw.get("x25519Algo"), VocabularyField::PublicKeyAlgo, version)
                     && algo_ok(raw.get("mlKemAlgo"), VocabularyField::PublicKeyAlgo, version)
+                    && raw.get("signatureAlgo").is_none_or(|v| {
+                        v.as_str().is_some_and(|s| permits(VocabularyField::PublicKeySignatureAlgo, version, s))
+                    })
                     // `signingAlgo` is optional; absent is fine, present must be pinned.
                     && raw.get("signingAlgo").is_none_or(|v| {
                         v.as_str()
@@ -353,7 +360,9 @@ fn members_ok(members: Option<&Value>, version: u32) -> bool {
 }
 
 fn member_ok(member: &Value, version: u32) -> bool {
-    wrapped_key_algo_ok(member.get("wrappedKey"), version)
+    member
+        .get("wrappedKey")
+        .is_none_or(|wrap| wrapped_key_algo_ok(Some(wrap), version))
         && algo_ok(
             member.get("role"),
             VocabularyField::KeyringMemberRole,

@@ -468,3 +468,47 @@ async fn cas_conflict_drives_re_derive_and_skip_not_error() {
 
     assert_eq!(outcome.unwrap(), "skipped: already done");
 }
+
+#[tokio::test]
+async fn repository_revision_cas_reads_commit_then_sends_atomic_create_and_delete() {
+    let mock = MockTransport::new();
+    mock.enqueue(success_response(r#"{"cid":"bafyObservedCommit"}"#));
+    mock.enqueue(success_response(r#"{"results":[{},{}]}"#));
+    let mut client = mock_client(mock.clone());
+
+    let commit = client.repository_commit().await.unwrap();
+    assert_eq!(commit, "bafyObservedCommit");
+    client
+        .apply_writes_conditional(
+            &[
+                ApplyWriteOp::Create {
+                    collection: "at.opake.grant".into(),
+                    rkey: Some("pending-rkey".into()),
+                    record: serde_json::json!({"recipient": "did:plc:recipient"}),
+                },
+                ApplyWriteOp::Delete {
+                    collection: "at.opake.pendingShare".into(),
+                    rkey: "pending-rkey".into(),
+                },
+            ],
+            Some(&commit),
+        )
+        .await
+        .unwrap();
+
+    let requests = mock.requests();
+    assert!(requests[0].url.contains("com.atproto.sync.getLatestCommit"));
+    let RequestBody::Json(body) = requests[1].body.as_ref().unwrap() else {
+        panic!("applyWrites must be JSON")
+    };
+    assert_eq!(body["swapCommit"], "bafyObservedCommit");
+    assert_eq!(
+        body["writes"][0]["$type"],
+        "com.atproto.repo.applyWrites#create"
+    );
+    assert_eq!(body["writes"][0]["rkey"], "pending-rkey");
+    assert_eq!(
+        body["writes"][1]["$type"],
+        "com.atproto.repo.applyWrites#delete"
+    );
+}

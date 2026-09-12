@@ -101,7 +101,7 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     broadcast(Topics.workspace(workspace_id), event_type, payload)
 
     for entry <- record.record_jsonb["members"] || [] do
-      did = get_in(entry, ["wrappedKey", "did"])
+      did = entry["did"]
       if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
     end
 
@@ -144,8 +144,8 @@ defmodule OpakeIndexer.SSE.Broadcaster do
     # subscribe to the workspace topic.
     record = record_jsonb_from(attrs, payload)
 
-    for entry <- (record["members"] || []) do
-      did = get_in(entry, ["wrappedKey", "did"])
+    for entry <- record["members"] || [] do
+      did = entry["did"]
       if is_binary(did), do: broadcast(Topics.personal(did), event_type, payload)
     end
   end

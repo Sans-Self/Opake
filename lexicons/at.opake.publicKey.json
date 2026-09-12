@@ -52,6 +52,15 @@
             "knownValues": ["ed25519"],
             "description": "Signing key algorithm identifier."
           },
+          "signature": {
+            "type": "bytes",
+            "maxLength": 64,
+            "description": "Ed25519 signature over the versioned account-bound public-key transcript."
+          },
+          "signatureAlgo": {
+            "type": "string",
+            "knownValues": ["ed25519"]
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime",

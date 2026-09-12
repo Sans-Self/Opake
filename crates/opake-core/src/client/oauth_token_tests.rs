@@ -27,6 +27,38 @@ fn dpop_key() -> DpopKeyPair {
     DpopKeyPair::generate(&mut OsRng)
 }
 
+#[tokio::test]
+async fn identity_post_uses_temporary_dpop_authorization() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: vec![],
+    });
+    let key = dpop_key();
+    let mut nonce = None;
+    authenticated_json_post(
+        &mock,
+        "https://pds.example/xrpc/com.atproto.identity.requestPlcOperationSignature",
+        None,
+        "temporary-access-token",
+        &key,
+        &mut nonce,
+        1_700_000_000,
+        &mut OsRng,
+    )
+    .await
+    .unwrap();
+
+    let request = mock.requests().pop().unwrap();
+    assert!(request
+        .headers
+        .iter()
+        .any(|(name, value)| name == "Authorization" && value == "DPoP temporary-access-token"));
+    assert!(request.headers.iter().any(|(name, _)| name == "DPoP"));
+    assert!(request.body.is_none());
+}
+
 // -- PAR --
 
 // spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
@@ -328,4 +360,18 @@ fn validate_accepts_atproto_among_multiple_scopes() {
         sub: None,
     };
     validate_token_response(&response, None).unwrap();
+}
+
+#[test]
+fn account_bound_token_rejects_missing_subject() {
+    let response = TokenResponse {
+        access_token: "tok".into(),
+        token_type: "DPoP".into(),
+        refresh_token: Some("refresh".into()),
+        expires_in: None,
+        scope: Some("atproto identity:*".into()),
+        sub: None,
+    };
+    let error = validate_token_response(&response, Some("did:plc:expected")).unwrap_err();
+    assert!(error.to_string().contains("omitted subject"));
 }

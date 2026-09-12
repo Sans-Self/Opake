@@ -76,7 +76,7 @@ defmodule OpakeIndexer.Authority do
   (see the moduledoc). Genesis records (no prior head) skip the check.
 
   `new_members` is the list parsed straight from `record_jsonb["members"]`
-  — each entry has `"wrappedKey" => %{"did" => did}` and `"role"`.
+  — each entry has an explicit `"did"` and `"role"`.
   """
   @spec check_keyring_supersede(String.t(), String.t() | nil, String.t(), [map()]) :: result()
   def check_keyring_supersede(_workspace_id, nil, _author_did, _new_members), do: :ok
@@ -103,26 +103,45 @@ defmodule OpakeIndexer.Authority do
   # A non-manager supersede is a valid leave iff the new member list is
   # exactly the head's list minus the author: author absent, nobody else
   # added or dropped, every remaining role unchanged. Compared on
-  # {did, role} pairs — wrapped-key bytes may legitimately differ.
+  # {did, role, wrap presence, approval} tuples — a self-removal may not alter a
+  # remaining member's key availability or approval while leaving.
   defp pure_self_removal?(workspace_id, author_did, new_members) do
-    case RecordQueries.head_member_roles(workspace_id) do
+    case RecordQueries.head_member_states(workspace_id) do
       nil ->
         false
 
       prior_roles ->
         expected = Map.delete(prior_roles, author_did)
-        member_roles(new_members) == expected
+        member_state(new_members) == expected
     end
   end
 
-  defp member_roles(members) when is_list(members) do
+  defp member_state(members) when is_list(members) do
     Map.new(members, fn
-      %{"wrappedKey" => %{"did" => did}, "role" => role} -> {did, role}
-      _ -> {nil, nil}
+      %{"did" => did, "role" => role} = member ->
+        {did,
+         {role, is_map(member["wrappedKey"]), approval_bytes(member["unverifiedKeyApproval"])}}
+
+      _ ->
+        {nil, nil}
     end)
   end
 
-  defp member_roles(_), do: %{}
+  defp member_state(_), do: %{}
+
+  # Canonical JSON bytes can be padded or unpadded base64.  Approval equality
+  # is over the decoded commitment, while a malformed declaration can never
+  # satisfy a self-removal comparison.
+  defp approval_bytes(nil), do: nil
+
+  defp approval_bytes(%{"$bytes" => encoded}) when is_binary(encoded) do
+    case OpakeIndexer.Auth.Base64.decode(encoded) do
+      {:ok, bytes} when byte_size(bytes) == 32 -> bytes
+      _ -> :invalid
+    end
+  end
+
+  defp approval_bytes(_), do: :invalid
 
   # -- Directory authority --
 

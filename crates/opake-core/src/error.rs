@@ -2,6 +2,15 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("workspace {workspace_id} has no current group key")]
+    CurrentGroupKeyUnavailable { workspace_id: String },
+
+    #[error("wrapping to unverified account {did} requires confirmation of its current keys")]
+    UnverifiedKeyApprovalRequired { did: String },
+
+    #[error("account verification failed: {0}")]
+    VerificationFailed(String),
+
     #[error("encryption failed: {0}")]
     Encryption(String),
 

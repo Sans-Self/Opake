@@ -5,7 +5,7 @@
 // `{ did, role }` view — this module bridges the two and re-exports
 // `WorkspaceRole` so components don't reach across the SDK boundary.
 
-import type { WorkspaceMember, WorkspaceRole } from "@opake/sdk";
+import type { WorkspaceMember, WorkspaceMemberAccessStatus, WorkspaceRole } from "@opake/sdk";
 
 export type { WorkspaceRole };
 
@@ -13,12 +13,54 @@ export type { WorkspaceRole };
 export interface KeyringMemberEntry {
   readonly did: string;
   readonly role: WorkspaceRole;
+  readonly hasCurrentWrap: boolean;
+  readonly hasUnverifiedApproval: boolean;
 }
 
 /** Project a raw `WorkspaceMember` onto the UI-facing `KeyringMemberEntry`. */
 export function toMemberEntry(member: WorkspaceMember): KeyringMemberEntry {
   return {
-    did: member.wrappedKey.did,
+    did: member.did,
     role: member.role,
+    hasCurrentWrap: member.wrappedKey !== undefined,
+    hasUnverifiedApproval: member.unverifiedKeyApproval !== undefined,
   };
+}
+
+/** Human-readable, non-colour status for one freshly inspected member. */
+export function memberAccessLabel(status: WorkspaceMemberAccessStatus | null): string {
+  if (!status) return "Checking current verification";
+  switch (status.verification) {
+    case "verified":
+      return "Verified";
+    case "unverifiedApproved":
+      return "Unverified — current keys approved";
+    case "unverifiedApprovalRequired":
+      return "Unverified — approval of current keys required";
+    case "verificationError":
+      return "Verification error — access changes are refused; no override is available";
+    case "resolutionError":
+      return "Verification unavailable — access changes are refused until current keys resolve";
+    default:
+      return "Checking current verification";
+  }
+}
+
+/** Explain missing-current-wrap state without mistaking it for non-membership. */
+export function missingCurrentWrapLabel(status: WorkspaceMemberAccessStatus | null): string {
+  if (!status) return "Historical access only — checking current verification before repair.";
+  switch (status.verification) {
+    case "verified":
+      return "Historical access only — this member cannot read new files until a manager repairs access.";
+    case "unverifiedApproved":
+      return "Historical access only — their current unverified keys are approved, but a manager must repair access.";
+    case "unverifiedApprovalRequired":
+      return "Historical access only — a manager must approve their current unverified keys before repair.";
+    case "verificationError":
+      return "Historical access only — verification failed. Access changes are refused; no override is available.";
+    case "resolutionError":
+      return "Historical access only — current keys could not be resolved. Access changes are refused until they resolve.";
+    default:
+      return "Historical access only — checking current verification before repair.";
+  }
 }

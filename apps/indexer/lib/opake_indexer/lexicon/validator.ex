@@ -45,6 +45,8 @@ defmodule OpakeIndexer.Lexicon.Validator do
 
   @key_wrap_algo "keyWrapAlgo"
   @content_encryption_algo "contentEncryptionAlgo"
+  @public_key_algo "publicKeyAlgo"
+  @public_key_signature_algo "publicKeySignatureAlgo"
   @keyring_member_role "keyringMemberRole"
 
   @doc """
@@ -56,8 +58,13 @@ defmodule OpakeIndexer.Lexicon.Validator do
   @spec validate(String.t(), term()) :: result()
   def validate(collection, record) do
     case Schema.validate(collection, record) do
-      :ok -> vocabulary_gate(collection, record)
-      {:error, reason} -> {:refused, {:malformed, reason}}
+      :ok ->
+        with :ok <- validate_collection_semantics(collection, record) do
+          vocabulary_gate(collection, record)
+        end
+
+      {:error, reason} ->
+        {:refused, {:malformed, reason}}
     end
   end
 
@@ -106,6 +113,13 @@ defmodule OpakeIndexer.Lexicon.Validator do
       |> Enum.flat_map(fn entry -> member_pairs(entry["members"]) end)
 
     content ++ members ++ history
+  end
+
+  defp vocabulary_pairs("at.opake.publicKey", record) do
+    string_pair(@public_key_algo, record["x25519Algo"]) ++
+      string_pair(@public_key_algo, record["mlKemAlgo"]) ++
+      string_pair(@public_key_algo, record["signingAlgo"]) ++
+      string_pair(@public_key_signature_algo, record["signatureAlgo"])
   end
 
   defp vocabulary_pairs("at.opake.directory", record) do
@@ -163,4 +177,54 @@ defmodule OpakeIndexer.Lexicon.Validator do
 
   defp string_pair(field, value) when is_binary(value), do: [{field, value}]
   defp string_pair(_field, _value), do: []
+
+  # The lexicon walker establishes shape. These rules bind the fields inside a
+  # member and reject duplicate DIDs in every current/history snapshot.
+  defp validate_collection_semantics("at.opake.keyring", record) do
+    with :ok <- validate_member_list(record["members"] || []) do
+      record
+      |> Map.get("keyHistory", [])
+      |> List.wrap()
+      |> Enum.reduce_while(:ok, fn entry, :ok ->
+        case validate_member_list(entry["members"] || []) do
+          :ok -> {:cont, :ok}
+          {:refused, _} = refusal -> {:halt, refusal}
+        end
+      end)
+    end
+  end
+
+  defp validate_collection_semantics(_collection, _record), do: :ok
+
+  defp validate_member_list(members) when is_list(members) do
+    Enum.reduce_while(members, {:ok, MapSet.new()}, fn member, {:ok, dids} ->
+      case validate_member(member, dids) do
+        {:ok, did} -> {:cont, {:ok, MapSet.put(dids, did)}}
+        {:refused, _} = refusal -> {:halt, refusal}
+      end
+    end)
+    |> case do
+      {:ok, _dids} -> :ok
+      {:refused, _} = refusal -> refusal
+    end
+  end
+
+  defp validate_member(%{"did" => did, "role" => _role} = member, dids)
+       when is_binary(did) do
+    cond do
+      not String.starts_with?(did, "did:") ->
+        {:refused, {:malformed, :member_did}}
+
+      MapSet.member?(dids, did) ->
+        {:refused, {:malformed, :duplicate_member_did}}
+
+      match?(%{"did" => wrap_did} when wrap_did != did, member["wrappedKey"]) ->
+        {:refused, {:malformed, :member_wrap_did_mismatch}}
+
+      true ->
+        {:ok, did}
+    end
+  end
+
+  defp validate_member(_member, _dids), do: {:refused, {:malformed, :member_shape}}
 end

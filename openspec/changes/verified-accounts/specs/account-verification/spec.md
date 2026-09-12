@@ -1,8 +1,8 @@
 ## Purpose
 
 Verification is how a client learns that an account's published encryption keys are vouched for by
-a key held outside the record its host serves, in a document derived from a public, append-only
-operation log. A host holding the account's rotation keys can still move that key, but only by
+a key held outside the record its PDS serves, in a document derived from a public, append-only
+operation log. A PLC rotation-key holder can still move that key, but only by
 signing an operation the log records permanently. This capability owns the DID-document verification method,
 the signature over the published key record, the three-valued resolution every consumer performs,
 and what each outcome obliges the caller to do.
@@ -68,7 +68,7 @@ extending the covered set requires a new scheme version. A pinned list is requir
 `spec:record-validity § schema evolution is additive and vocabulary is version-pinned` permits
 optional fields to be added without a version bump — so a transcript defined as "every field"
 would make a conforming client that ignores a newer field compute a different transcript, fail
-verification, and report its counterparty's host as hostile. The scheme version bounds what an
+verification, and report its counterparty's PDS operator as hostile. The scheme version bounds what an
 uncovered field can mean: a consumer at version `<n>` reads only fields covered at `<n>`.
 
 Because a verified account's record carries all eight covered fields, the transcript is
@@ -86,7 +86,7 @@ signing key as their own `#opake`, serve a verbatim copy of that account's recor
 verified with someone else's keys as their wrap target.
 
 The transcript SHALL be built from the record's decoded field values, never from a re-encoding of
-the bytes as received: a host may legitimately alter the serialized form of a record in transit,
+the bytes as received: a PDS may legitimately alter the serialized form of a record in transit,
 so a construction that requires the received bytes to be reproduced exactly does not survive an
 ordinary round trip.
 
@@ -124,7 +124,7 @@ Resolving another account's encryption keys SHALL yield exactly one of three out
 
 The error state SHALL NOT be presented or handled as a degraded form of the unverified state. An
 account that has published a verification method has no legitimate reason to serve a record that
-does not verify under it, so a host that strips or alters the signature is refused rather than
+does not verify under it, so a PDS operator that strips or alters the signature is refused rather than
 silently downgraded to the unverified path.
 
 Resolution SHALL classify a record's version and vocabulary before verifying its signature, so a
@@ -133,14 +133,14 @@ corrupt or future-version record refuses with its own reason
 never reported as an attack.
 
 This rule needs no client-side history. The verification method is served by the DID method, not by
-the account's host, so a host can remove the signature but cannot remove the statement that a
-signature is required. A consumer that cannot resolve the DID document cannot locate the host to
+the account's PDS, so a PDS operator can remove the signature but cannot remove the statement that a
+signature is required. A consumer that cannot resolve the DID document cannot locate the PDS to
 read the record from either, so no resolution outcome exists in which the record is available and
 its verification requirement is not.
 
 #### Scenario: a stripped signature is refused, not downgraded
 
-- **GIVEN** a verified account whose host serves its published record with the `signature` field
+- **GIVEN** a verified account whose PDS serves its published record with the `signature` field
   removed
 - **WHEN** a counterparty resolves its keys
 - **THEN** resolution fails for that account and no content key is wrapped to it, rather than
@@ -148,7 +148,7 @@ its verification requirement is not.
 
 #### Scenario: substituted keys under a stripped signature are refused
 
-- **GIVEN** a verified account whose host serves a substituted encryption bundle with no valid
+- **GIVEN** a verified account whose PDS serves a substituted encryption bundle with no valid
   signature
 - **WHEN** a counterparty resolves its keys
 - **THEN** resolution fails and the substituted bundle is never used as a wrap target
@@ -167,8 +167,8 @@ its verification requirement is not.
 
 ### Requirement: Resolution reads the anchor's history and reports a replacement
 
-A signature verifies against whatever key the DID document currently names, so a host that holds
-an account's rotation keys can replace the verification method with a key it controls, re-sign a
+A signature verifies against whatever key the DID document currently names, so a PLC rotation-key
+holder can replace the verification method with a key it controls, re-sign a
 substituted bundle under it, and resolve as verified. The signature is sound; the anchor moved.
 
 Where the DID method provides an operation history, resolving a verified account SHALL read it and
@@ -231,7 +231,7 @@ pair — the error state SHALL refuse the operation before any wrap is computed.
 Where an operation wraps to **every remaining member** — a group-key rotation — the error state
 SHALL exclude that member from the wrap and SHALL NOT prevent the operation. An operation whose
 purpose is to withdraw access MUST NOT be blockable by any account it is not withdrawing access
-from; otherwise a single host serving an unverifiable record for its own user would permanently
+from; otherwise a single PDS operator serving an unverifiable record for its own user would permanently
 prevent the removal of anyone else. The excluded member SHALL be reported to the operator, and
 SHALL be eligible for repair once their record verifies
 (`spec:background-work § Remaining work is derived from records, never stored`).
@@ -242,12 +242,12 @@ This is a pending decision, not a fourth resolution state or a verification erro
 exclusion SHALL retain membership and historical access; only the intended removal drops a member
 (`spec:workspace-membership § Membership state is the keyring head's member list`).
 
-A host can therefore deny its own user access to new material, which it could already do by serving
+A PDS operator can therefore deny its own user access to new material, which it could already do by serving
 nothing at all. It cannot reach past its own user to block another account's operation.
 
 #### Scenario: an unverifiable member does not block a removal
 
-- **GIVEN** a workspace whose member Bob has a verification method and whose host serves a record
+- **GIVEN** a workspace whose member Bob has a verification method and whose PDS serves a record
   that does not verify
 - **WHEN** a manager removes a different member
 - **THEN** the removal completes, the new group key is wrapped to every member whose keys verify,
@@ -305,7 +305,7 @@ retry (`spec:sharing-grants § A share to a not-yet-ready recipient is queued, n
 
 The confirmation obligation applies to the unverified state only. The error state is refused or
 excluded per the preceding requirement and offers no confirmation, because it is a statement about
-a host's behaviour rather than about an account's setup.
+a PDS operator's behaviour rather than about an account's setup.
 
 Restricting an operation to verified counterparties is not part of this capability.
 
@@ -386,7 +386,7 @@ when a fresh decision is required it SHALL leave the item derivable and report i
 ### Requirement: An account detects and repairs the loss of its own verification method
 
 Account migration replaces an account's verification methods with the credentials the receiving
-host recommends, and that recommendation names only the atproto signing key. Nothing in the
+PDS recommends, and that recommendation names only the atproto signing key. Nothing in the
 protocol requires this — an operation that omitted the verification methods entirely would carry
 them all forward, and one that supplied the full map alongside the new signing key would preserve
 `#opake` — but no account can rely on the tooling performing a migration doing either. A migrated
@@ -402,12 +402,12 @@ removed it; the account is unverified in every case, and the report SHALL name t
 than guess a cause. A verification method present but holding a key the account does not control is
 a substitution, and SHALL be reported as such rather than repaired silently.
 
-Publication requires a rotation key, and the directory accepts a signed operation from any holder
-of one without authenticating the submitter. An account holding its own rotation key therefore
+Publication requires a PLC rotation key, and the directory accepts a signed operation from any holder
+of one without authenticating the submitter. An account holding its own PLC rotation key therefore
 publishes its verification method with no other party's participation. An account holding none must
 ask a rotation-key holder to sign, and that party may decline — leaving no record of the refusal
 anywhere, since no operation is ever submitted. Such an account cannot escape the refusal from
-inside, because acquiring a rotation key is itself an operation the same party must sign
+inside, because acquiring a PLC rotation key is itself an operation the same party must sign
 (`spec:terminology § The parties behind an account are named by what they control`). A client SHALL report a
 refused publication to the owner rather than retrying silently.
 
@@ -429,7 +429,7 @@ refused publication to the owner rather than retrying silently.
 
 #### Scenario: a rotation-key holder that declines to sign is surfaced
 
-- **GIVEN** an account holding no rotation key of its own, whose rotation-key holder refuses the
+- **GIVEN** an account holding no PLC rotation key of its own, whose rotation-key holder refuses the
   identity operation that would publish its verification method
 - **WHEN** the owner attempts to become verified
 - **THEN** the refusal is reported to the owner rather than retried silently

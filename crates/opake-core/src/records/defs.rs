@@ -90,19 +90,82 @@ impl<'de> Deserialize<'de> for Role {
     }
 }
 
-/// A keyring member: wrapped group key paired with a workspace role.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// An admitted member, independent of availability of its current key wrap.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyringMember {
-    pub wrapped_key: WrappedKey,
+    pub did: String,
     pub role: Role,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrapped_key: Option<WrappedKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unverified_key_approval: Option<AtBytes>,
 }
 
 impl KeyringMember {
-    /// The member's DID (shorthand for `self.wrapped_key.did`).
     pub fn did(&self) -> &str {
-        &self.wrapped_key.did
+        &self.did
     }
+
+    /// Construct a newly wrapped entry. This never infers approval.
+    pub fn with_wrap(wrapped_key: WrappedKey, role: Role) -> Self {
+        Self {
+            did: wrapped_key.did.clone(),
+            role,
+            wrapped_key: Some(wrapped_key),
+            unverified_key_approval: None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyringMember {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wire {
+            did: String,
+            role: Role,
+            wrapped_key: Option<WrappedKey>,
+            unverified_key_approval: Option<AtBytes>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        if !wire.did.starts_with("did:") || wire.did.len() < 7 {
+            return Err(serde::de::Error::custom("invalid member DID"));
+        }
+        if wire
+            .wrapped_key
+            .as_ref()
+            .is_some_and(|wrap| wrap.did != wire.did)
+        {
+            return Err(serde::de::Error::custom("member wrap DID mismatch"));
+        }
+        if wire
+            .unverified_key_approval
+            .as_ref()
+            .is_some_and(|approval| approval.decode().map_or(true, |bytes| bytes.len() != 32))
+        {
+            return Err(serde::de::Error::custom(
+                "member approval must contain 32 bytes",
+            ));
+        }
+        Ok(Self {
+            did: wire.did,
+            role: wire.role,
+            wrapped_key: wire.wrapped_key,
+            unverified_key_approval: wire.unverified_key_approval,
+        })
+    }
+}
+
+pub(super) fn deserialize_members<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<KeyringMember>, D::Error> {
+    let members = Vec::<KeyringMember>::deserialize(deserializer)?;
+    let mut seen = std::collections::HashSet::new();
+    if members.iter().any(|member| !seen.insert(&member.did)) {
+        return Err(serde::de::Error::custom("duplicate member DID"));
+    }
+    Ok(members)
 }
 
 /// Describes how a blob's content was symmetrically encrypted, plus one or
@@ -230,5 +293,50 @@ mod tests {
         // Fail-closed: an unknown role matches none of the privileged arms.
         let role = Role::Unknown("manager-plus".to_owned());
         assert!(!matches!(role, Role::Manager));
+    }
+
+    fn member_json() -> serde_json::Value {
+        serde_json::json!({
+            "did": "did:plc:alice",
+            "role": "editor",
+        })
+    }
+
+    #[test]
+    fn member_allows_missing_current_wrap() {
+        let member: KeyringMember = serde_json::from_value(member_json()).unwrap();
+        assert_eq!(member.did(), "did:plc:alice");
+        assert!(member.wrapped_key.is_none());
+        assert!(member.unverified_key_approval.is_none());
+    }
+
+    #[test]
+    fn member_rejects_prior_draft_and_mismatched_wrap() {
+        let prior_draft = serde_json::json!({
+            "wrappedKey": {"did": "did:plc:alice", "ciphertext": {"$bytes": "AAAA"}, "algo": "x25519-mlkem768-hkdf-a256kw-v2"},
+            "role": "editor",
+        });
+        assert!(serde_json::from_value::<KeyringMember>(prior_draft).is_err());
+
+        let mut mismatched = member_json();
+        mismatched["wrappedKey"] = serde_json::json!({
+            "did": "did:plc:bob", "ciphertext": {"$bytes": "AAAA"}, "algo": "x25519-mlkem768-hkdf-a256kw-v2"
+        });
+        assert!(serde_json::from_value::<KeyringMember>(mismatched).is_err());
+    }
+
+    #[test]
+    fn member_rejects_malformed_approval_and_duplicate_did() {
+        let mut malformed = member_json();
+        malformed["unverifiedKeyApproval"] = serde_json::json!({"$bytes": "AAAA"});
+        assert!(serde_json::from_value::<KeyringMember>(malformed).is_err());
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Members(
+            #[serde(deserialize_with = "super::deserialize_members")] Vec<KeyringMember>,
+        );
+        let duplicate = serde_json::json!([member_json(), member_json()]);
+        assert!(serde_json::from_value::<Members>(duplicate).is_err());
     }
 }

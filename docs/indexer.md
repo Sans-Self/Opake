@@ -108,10 +108,10 @@ GET:/api/inbox:1709330400:did:plc:abc123
 1. Parse header — extract DID, timestamp, signature (split from right, DIDs contain colons)
 2. Reject if timestamp is >60 seconds from now (replay protection)
 3. Reject if `?did=` parameter doesn't match authenticated DID (scope enforcement)
-4. Fetch `at.opake.publicKey/self` from the user's PDS
-5. Extract `signingKey` (Ed25519) from the record
-6. Verify signature with Erlang `:crypto` (Ed25519)
-7. Cache verified key in ETS for 5 minutes
+4. Resolve the DID document and fetch `at.opake.publicKey/self` from the user's PDS
+5. Without an `#opake` verification method, use the record's `signingKey` as before. With one, require the record's versioned account-bound Ed25519 signature to verify against the DID method.
+6. Verify the request signature with Erlang `:crypto` (Ed25519)
+7. Resolve this decision freshly for each request. The DID document can add or remove `#opake` independently of the PDS record, so a cached success must not outlive a changed verification state.
 
 ## API Endpoints
 

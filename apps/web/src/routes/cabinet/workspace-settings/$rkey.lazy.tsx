@@ -11,7 +11,7 @@ import {
   SignOutIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
-import type { WorkspaceMember } from "@opake/sdk";
+import type { WorkspaceMember, WorkspaceMemberAccessStatus } from "@opake/sdk";
 import { useWorkspaces } from "@opake/react";
 import { DestructiveConfirmation } from "@/components/DestructiveConfirmation";
 import { PanelShell } from "@/components/cabinet/PanelShell";
@@ -23,7 +23,14 @@ import { toastError, toastSuccess } from "@/stores/toast";
 import { rkeyFromUri } from "@/lib/atUri";
 import { resolveMemberProfile, type MemberProfile } from "@/lib/profileResolution";
 import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
-import { toMemberEntry, type KeyringMemberEntry, type WorkspaceRole } from "@/lib/workspaceSchemas";
+import {
+  memberAccessLabel,
+  missingCurrentWrapLabel,
+  toMemberEntry,
+  type KeyringMemberEntry,
+  type WorkspaceRole,
+} from "@/lib/workspaceSchemas";
+import { admitWorkspaceMember, repairWorkspaceMember } from "@/lib/memberAccessActions";
 import { loading } from "@/stores/app";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +92,12 @@ function WorkspaceSettingsPage() {
 
   // Profile resolution for member rows
   const [profiles, setProfiles] = useState<Readonly<Record<string, MemberProfile | null>>>({});
+  // Every row gets a fresh verification/approval inspection from core. The
+  // record's old approval is intentionally insufficient: it may name a
+  // replaced bundle and therefore must not decide whether we prompt.
+  const [memberStatuses, setMemberStatuses] = useState<
+    Readonly<Record<string, WorkspaceMemberAccessStatus | null>>
+  >({});
 
   // Confirm state (two-click for remove + leave, phrase-typing for delete)
   const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
@@ -93,10 +106,12 @@ function WorkspaceSettingsPage() {
 
   const role = useMemo(() => members.find((m) => m.did === myDid)?.role ?? null, [members, myDid]);
   const isManager = role === "manager";
+  const currentKeyStatusKnown = members.length === 0 || members.some((member) => memberStatuses[member.did]);
+  const hasCurrentWorkspaceKey = isManager && members.some((member) => memberStatuses[member.did]?.canRepair);
   // Federation has no distinct "owner" role; manager == authoritative.
   // Pre-federation `isOwner` was used to allow workspace deletion + some
   // settings — collapse to manager-only for now.
-  const canManage = isManager;
+  const canManage = isManager && hasCurrentWorkspaceKey;
 
   // -----------------------------------------------------------------
   // Loaders
@@ -149,6 +164,26 @@ function WorkspaceSettingsPage() {
       });
     });
   }, [members]);
+
+  useEffect(() => {
+    if (!keyringUri || members.length === 0) return;
+    const controller = new AbortController();
+    const uri = keyringUri;
+    void Promise.all(
+      members.map(async (member) => {
+        try {
+          return [member.did, await getOpake().workspaceMemberAccessStatus(uri, member.did)] as const;
+        } catch {
+          // A status check that cannot complete is deliberately non-actionable.
+          // Mutations retain their own fresh-resolve boundary.
+          return [member.did, null] as const;
+        }
+      }),
+    ).then((statuses) => {
+      if (!controller.signal.aborted) setMemberStatuses(Object.fromEntries(statuses));
+    });
+    return () => controller.abort();
+  }, [keyringUri, members]);
 
   // -----------------------------------------------------------------
   // Handlers
@@ -227,8 +262,16 @@ function WorkspaceSettingsPage() {
       const done = loading("remove-workspace-member");
       (async () => {
         try {
-          await getOpake().removeWorkspaceMember(uri, memberDid);
+          const removal = await getOpake().removeWorkspaceMember(uri, memberDid);
           toastSuccess("Member removed, key rotated");
+          removal.excludedMembers.forEach((excluded) => {
+            const reason = excluded.reason === "verificationFailed"
+              ? "verification failed; no override is available"
+              : excluded.reason === "approvalRequired"
+                ? "needs approval of their current keys"
+                : "could not be resolved for the new key";
+            toastError(`${excluded.did} remains admitted but ${reason}.`);
+          });
           await refreshAfterMemberChange(uri);
         } catch (err) {
           toastError(err instanceof Error ? err.message : "Failed to remove member");
@@ -288,7 +331,15 @@ function WorkspaceSettingsPage() {
           // toast and (b) distinguish RecipientNotReadyError — the recipient
           // exists but hasn't published an Opake public key yet.
           const identity = await resolveRecipient(handle);
-          await getOpake().addWorkspaceMember(uri, identity.did, memberRole);
+          const result = await admitWorkspaceMember(
+            getOpake(),
+            uri,
+            identity.did,
+            memberRole,
+            identity.handle ?? identity.did,
+            window.confirm,
+          );
+          if (result === "cancelled") return;
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
           await refreshAfterMemberChange(uri);
         } catch (err) {
@@ -308,6 +359,45 @@ function WorkspaceSettingsPage() {
     },
     [keyringUri, refreshAfterMemberChange],
   );
+
+  const handleRepair = useCallback(async (member: KeyringMemberEntry) => {
+    if (!keyringUri) return;
+    try {
+      const result = await repairWorkspaceMember(getOpake(), keyringUri, member.did, window.confirm);
+      if (result === "verificationRefused") {
+        toastError("This member's current keys cannot be used. Verification must resolve before access can change.");
+        return;
+      }
+      if (result === "currentKeyUnavailable") {
+        toastError("You do not hold the current workspace key, so you cannot repair access.");
+        return;
+      }
+      if (result === "cancelled") return;
+      await refreshAfterMemberChange(keyringUri);
+      toastSuccess("Member access repaired");
+    } catch (err) { toastError(err instanceof Error ? err.message : "Failed to repair member access"); }
+  }, [keyringUri, refreshAfterMemberChange]);
+
+  const handleApproveOnly = useCallback(async (member: KeyringMemberEntry) => {
+    if (!keyringUri) return;
+    try {
+      const status = await getOpake().workspaceMemberAccessStatus(keyringUri, member.did);
+      if (status.verification === "verificationError" || status.verification === "resolutionError") {
+        toastError("This member's current keys cannot be approved until verification resolves.");
+        return;
+      }
+      if (status.verification === "verified" || status.verification === "unverifiedApproved") {
+        toastError("This member's current keys are already approved for repair.");
+        return;
+      }
+      const approval = await getOpake().workspaceMemberApprovalChallenge(keyringUri, member.did);
+      if (!approval) { toastError("This member is verified and needs no approval."); return; }
+      if (!window.confirm(`Approve ${member.did}'s currently resolved unverified keys? This does not grant a key until a manager repairs access.`)) return;
+      await getOpake().approvePendingWorkspaceMember(keyringUri, member.did, approval);
+      await refreshAfterMemberChange(keyringUri);
+      toastSuccess("Current keys approved; a manager with the workspace key can repair access.");
+    } catch (err) { toastError(err instanceof Error ? err.message : "Failed to approve member keys"); }
+  }, [keyringUri, refreshAfterMemberChange]);
 
   const handleRoleChange = useCallback(
     (memberDid: string, newRole: WorkspaceRole) => {
@@ -458,9 +548,11 @@ function WorkspaceSettingsPage() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-base-content text-sm font-semibold">Members ({members.length})</h2>
-            {canManage && (
+            {isManager && (
               <button
                 onClick={() => addMemberDialogRef.current?.show()}
+                disabled={!canManage || !currentKeyStatusKnown}
+                title={canManage ? undefined : "You need the current workspace key to add members"}
                 className="btn btn-ghost btn-xs gap-1 rounded-lg"
               >
                 <UserPlusIcon size={13} />
@@ -469,6 +561,11 @@ function WorkspaceSettingsPage() {
             )}
           </div>
           {loadError && <p className="text-caption text-error mb-2">{loadError}</p>}
+          {isManager && currentKeyStatusKnown && !hasCurrentWorkspaceKey && (
+            <p className="text-caption text-warning mb-2" role="status">
+              You have historical access only. You can approve an unverified member’s current keys, but you need the current workspace key to add, remove, re-role, or repair members.
+            </p>
+          )}
           <ul className="space-y-1" aria-label="Member list">
             {members.map((member) => (
               <MemberRow
@@ -477,9 +574,13 @@ function WorkspaceSettingsPage() {
                 profile={member.did in profiles ? (profiles[member.did] ?? null) : null}
                 isMe={member.did === myDid}
                 canManage={canManage}
+                canApprove={isManager}
+                status={memberStatuses[member.did] ?? null}
                 confirmingRemove={confirmingRemove === member.did}
                 onRemove={() => handleRemove(member.did)}
                 onRoleChange={(newRole) => handleRoleChange(member.did, newRole)}
+                onRepair={() => void handleRepair(member)}
+                onApprove={() => void handleApproveOnly(member)}
               />
             ))}
           </ul>
@@ -546,22 +647,40 @@ function MemberRow({
   profile,
   isMe,
   canManage,
+  canApprove,
+  status,
   confirmingRemove,
   onRemove,
   onRoleChange,
+  onRepair,
+  onApprove,
 }: {
   readonly member: KeyringMemberEntry;
   readonly profile: MemberProfile | null;
   readonly isMe: boolean;
   readonly canManage: boolean;
+  readonly canApprove: boolean;
+  readonly status: WorkspaceMemberAccessStatus | null;
   readonly confirmingRemove: boolean;
   readonly onRemove: () => void;
   readonly onRoleChange: (role: WorkspaceRole) => void;
+  readonly onRepair: () => void;
+  readonly onApprove: () => void;
 }) {
   const RoleIcon = ROLE_ICON[member.role];
   const displayName = profile?.handle ?? member.did;
   const canRemove = canManage && !isMe;
   const canChangeRole = canManage && !isMe;
+  const missingCurrentWrap = status ? !status.hasCurrentWrap : !member.hasCurrentWrap;
+  const canRepair = canManage
+    && missingCurrentWrap
+    && status?.canRepair === true
+    && (status.verification === "verified"
+      || status.verification === "unverifiedApproved"
+      || status.verification === "unverifiedApprovalRequired");
+  const canApproveCurrentKeys = canApprove
+    && missingCurrentWrap
+    && status?.verification === "unverifiedApprovalRequired";
 
   return (
     <li className="flex items-center gap-3 rounded-lg px-3 py-2.5">
@@ -596,7 +715,17 @@ function MemberRow({
             {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
           </span>
         )}
+        <span className="text-caption text-text-muted" role="status">
+          {memberAccessLabel(status)}
+        </span>
       </div>
+      {missingCurrentWrap && (
+        <div className="text-caption text-warning max-w-52" role="status">
+          {missingCurrentWrapLabel(status)}
+        </div>
+      )}
+      {canRepair && <button onClick={onRepair} className="btn btn-xs">Repair access</button>}
+      {canApproveCurrentKeys && <button onClick={onApprove} className="btn btn-ghost btn-xs">Approve current keys</button>}
       {canRemove && (
         <button
           onClick={onRemove}

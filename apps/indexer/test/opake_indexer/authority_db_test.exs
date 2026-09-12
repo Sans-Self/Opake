@@ -28,7 +28,10 @@ defmodule OpakeIndexer.AuthorityDbTest do
   defp put_record(attrs) do
     {:ok, _} =
       RecordQueries.upsert(
-        Map.merge(%{author_did: "did:plc:alice", cid: "bafy#{attrs.uri}", indexed_at: now()}, attrs)
+        Map.merge(
+          %{author_did: "did:plc:alice", cid: "bafy#{attrs.uri}", indexed_at: now()},
+          attrs
+        )
       )
   end
 
@@ -42,9 +45,9 @@ defmodule OpakeIndexer.AuthorityDbTest do
       workspace_id: @workspace_id,
       record_jsonb: %{
         "members" => [
-          %{"wrappedKey" => %{"did" => "did:plc:alice"}, "role" => "manager"},
-          %{"wrappedKey" => %{"did" => @editor_did}, "role" => "editor"},
-          %{"wrappedKey" => %{"did" => @viewer_did}, "role" => "viewer"}
+          %{"did" => "did:plc:alice", "role" => "manager"},
+          %{"did" => @editor_did, "role" => "editor"},
+          %{"did" => @viewer_did, "role" => "viewer"}
         ]
       }
     })
@@ -142,7 +145,7 @@ defmodule OpakeIndexer.AuthorityDbTest do
         collection: "at.opake.keyring",
         workspace_id: @workspace_id,
         record_jsonb: %{
-          "members" => [%{"wrappedKey" => %{"did" => @editor_did}, "role" => "manager"}]
+          "members" => [%{"did" => @editor_did, "role" => "manager"}]
         }
       })
 
@@ -167,7 +170,20 @@ defmodule OpakeIndexer.AuthorityDbTest do
   end
 
   # Head members are alice (manager), bob (editor), carol (viewer) — see setup.
-  defp member(did, role), do: %{"wrappedKey" => %{"did" => did}, "role" => role}
+  defp member(did, role), do: %{"did" => did, "role" => role}
+
+  defp wrapped_member(did, role, ciphertext, approval) do
+    %{
+      "did" => did,
+      "role" => role,
+      "wrappedKey" => %{
+        "did" => did,
+        "algo" => "x25519-mlkem768-hkdf-a256kw-v2",
+        "ciphertext" => %{"$bytes" => ciphertext}
+      },
+      "unverifiedKeyApproval" => %{"$bytes" => approval}
+    }
+  end
 
   describe "check_keyring_supersede/4 — self-removal (leave)" do
     test "genesis (no prior) skips the check" do
@@ -224,6 +240,46 @@ defmodule OpakeIndexer.AuthorityDbTest do
       assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
                member("did:plc:alice", "manager"),
                member(@editor_did, "editor"),
+               member(@viewer_did, "viewer")
+             ]) == {:rejected, :insufficient_role}
+    end
+
+    test "self-removal may retain a remaining member's wrap with fresh ciphertext" do
+      approval = Base.encode64(:binary.copy(<<7>>, 32))
+
+      put_record(%{
+        uri: @keyring_uri,
+        collection: "at.opake.keyring",
+        workspace_id: @workspace_id,
+        record_jsonb: %{
+          "members" => [
+            wrapped_member("did:plc:alice", "manager", Base.encode64(<<1>>), approval),
+            member(@editor_did, "editor"),
+            member(@viewer_did, "viewer")
+          ]
+        }
+      })
+
+      # Rewrapping is expected to produce different ciphertext bytes. The
+      # leave check preserves its presence, role, and decoded approval.
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               wrapped_member(
+                 "did:plc:alice",
+                 "manager",
+                 Base.encode64(<<2>>),
+                 String.trim_trailing(approval, "=")
+               ),
+               member(@viewer_did, "viewer")
+             ]) == :ok
+    end
+
+    test "self-removal cannot introduce a wrap for a remaining member" do
+      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
+               %{
+                 "did" => "did:plc:alice",
+                 "role" => "manager",
+                 "wrappedKey" => %{"did" => "did:plc:alice"}
+               },
                member(@viewer_did, "viewer")
              ]) == {:rejected, :insufficient_role}
     end
