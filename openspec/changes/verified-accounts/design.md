@@ -1,5 +1,11 @@
 ## Context
 
+Change ownership and coordinated rollout are in [change-map.md](change-map.md). R1/R4
+grace and timeout policy, R2 write-key safety, R3 historical storage, and R5 mutation outcomes
+have separate proposals and task lists. This design retains the verification, consent,
+identity-authorization, and necessary caller-integration decisions; it does not select the
+bounded-history wire layout. The companion sweep guard must accompany missing-wrap exclusion.
+
 See proposal.md — Why. The constraints that shape the approach:
 
 - `did:plc` verification methods accept arbitrary fragment identifiers with no restriction on key
@@ -24,6 +30,10 @@ See proposal.md — Why. The constraints that shape the approach:
   encoding of byte fields without altering their values.
 - Optional fields may be added to a record without a version bump, so any construction that signs
   "the whole record" is unstable across ordinary schema evolution.
+- The locally retained browser/WASM spike (excluded from this spec PR) exercised
+  separate grants, real PLC add/remove, persistence exclusion, and failure cleanup against the
+  local PDS. Its 8 native and 12 browser tests establish feasibility, not production completion:
+  the temporary method reused the atproto public key, and confirmation delivery was simulated.
 
 ## Goals / Non-Goals
 
@@ -91,23 +101,139 @@ aborts.** Refusing the whole operation on any error state would let a single hos
 unverifiable record for its own user, permanently prevent the removal of anyone else from a
 workspace — a liveness attack on forward secrecy delivered by the mechanism meant to strengthen it.
 Excluding the affected member instead confines a host to starving its own user, which it can
-already do by serving nothing. Forward secrecy is unaffected either way: it depends on which key was
-minted, never on who it was wrapped to.
+already do by serving nothing. The removed member does not receive the new group key. The
+separate `rotation-write-safety` contract qualifies what that protects: fresh content keys
+under an unexposed generation, not an instantaneous cutoff for already-encrypted in-flight
+writes or fresh ciphertext encrypted with an old content key the removed member knows.
 
-**Confirmation is captured once per relationship, at the point access is granted.** Re-asking on
-every group-key rotation would produce one prompt per member per removal and convert a deliberate decision
-into routine noise, which is how a prompt stops being read. Where no caller is present at all — the
-pending-share daemon — the confirmation is captured when the share is queued, covering whichever
-state the recipient turns out to have. A background task cannot invent consent and must not proceed
-on a default.
+**Membership and key availability are independent.** The member record becomes required `did`
+and `role`, optional `wrappedKey`, and optional `unverifiedKeyApproval`. Require distinct DIDs
+within each current or historical list; a present wrap must name the containing member and belongs
+only to that list's rotation. The containing `keyHistory` entry already supplies a generation, so
+no second per-wrap generation counter or stale-current-wrap sentinel is needed. Exclusion carries
+the DID, role, and approval but omits the new wrap. The previous member array is archived unchanged;
+omission is a missing delivery, not removal from membership.
 
-**An identity operation is authorized separately from the standing session.** Widening the session
-scope would put authority over the DID document itself into every stored credential, for the sake of
-an operation a person performs twice in an account's life. It would also oblige every existing
-session to re-consent. Requesting a short-lived authorization per operation inverts both: the
-standing scope keeps deriving from the collection registry, nothing re-consents, and the authority
-that can move an account's identity is never at rest anywhere. That it may require authenticating
-again is the point rather than the cost.
+This changes both the domain model and its clients. `GroupKeys` must represent a known current
+rotation without a usable current key, while retaining indexed historical keys. Resolvers,
+listing/keeper builders, and daemon sync must derive rotation 0 from usable history and verify
+genesis before adopting that state. Current-key absence does not remove a member or justify an
+identity placeholder that skipped verification. The live projection adopts the new head and
+rotation even if no current key is available, and adopts a later same-rotation repair without
+reload. Reads use whichever generation they actually possess; operations requiring the missing
+current key fail explicitly rather than silently writing under history. Indexer membership,
+subscriptions, and role checks use explicit DIDs, not wraps. Rollback projects the restored head's
+membership, keys, and approvals independently.
+
+**Confirmation is per relationship and per encryption bundle, never per group-key rotation.**
+The current member entry carries a 32-byte `unverifiedKeyApproval` commitment. Use SHA-256 over
+the existing injective transcript encoder with a distinct versioned label, relationship URI, DID,
+and the two decoded encryption keys and algorithm identifiers; the exact tuple is owned by
+`spec:account-verification § Key-bound approval is carried by the relationship's records`.
+A timestamp-only republication or different JSON byte encoding does not change that tuple.
+This keeps evidence small rather than duplicating a hybrid public-key bundle in every member and
+history snapshot, and avoids introducing a new signing scheme. It is authorization data under the
+same validation and author-authority rules as the relationship, not proof that an untrusted head
+is authoritative. Current-head evidence avoids an additional history search for the consent event;
+it does not remove the existing workspace authority walk.
+
+A changed unverified bundle or missing approval withholds only that member's new wrap. Complete
+the removal, distinguish pending confirmation from verification error, and do not fall back to
+formerly approved keys. A manager's later confirmation can publish the new approval and current
+wrap in one same-rotation supersede, preserving all unrelated entries and history. Approval may
+also be recorded before a repair can complete; another authorized manager's runner can finish
+from records. A non-manager leave preserves remaining approvals and wrap presence, so the
+self-removal exception cannot manufacture approval or act as a repair privilege. Background repair
+re-resolves keys and the current head, never prompts, and leaves missing approval as derivable work.
+It fills the current rotation only; it does not promise to fill every generation skipped while
+the member was excluded.
+
+**Queued permission is one DID-bound first-publication handoff.** The pending record's encrypted
+metadata carries the DID resolved at queue time and an explicit `allowUnverifiedFirstPublication`
+decision. Retain the originally entered recipient for display, but never rebind permission through
+a handle's later owner. The resulting grant's encrypted metadata carries the actual key approval.
+Keep these intent/grant fields encrypted under the document content key; they are authorization
+inputs, not scheduler checkpoints or a device-local trust cache.
+
+Use the existing deterministic pending-share-to-grant rkey mapping, but replace unconditional
+`putRecord` completion: two runners observing different bundles must not overwrite one another's
+grant. Grant creation and consumption of the exact pending intent form a conditional atomic
+same-repository transaction. Obtain a repository revision before reading the intent, then condition
+the transaction on that revision; a concurrent cancellation, intent replacement, completion, or
+unrelated repository write causes safe conflict/re-derivation. Do not assume the current
+`applyWrites` wrapper already exposes this condition: add the repository-revision plumbing and
+prove the local PDS's atomicity/CAS behavior in integration tests before relying on it. A timeout
+after submission leaves an unknown result; reconcile the designated grant and intent rather than
+creating a new grant identity or replaying the first-use permission. Once complete, grant revocation
+has no lingering pending intent to recreate it. Cross-repository transactions and a scheduler
+journal are unnecessary because both records belong to the sharer's repository.
+
+Alternatives rejected: omitting the whole member (accidental removal), carrying an old wrap as
+current (ambiguous generation), blanket re-prompting (routine noise), approving a DID regardless of
+keys (silent substitution), and sequential grant upsert/intent deletion (reusable first-use
+permission across crashes or competing runners).
+
+**An identity operation has separate authority and explicit end-of-operation cleanup.** Widening the standing scope would put authority over the DID
+document itself into every stored credential, for the sake of an operation a person performs twice
+in an account's life, and would oblige every existing session to re-consent. A separate grant
+inverts both: the standing scope keeps deriving from the collection registry, nothing re-consents,
+and no identity-operation credential enters persisted application state. Every handled exit attempts
+revocation and discards locally owned credentials; this does not promise that server-side authority
+ends or that cleanup executes after a page or process is killed.
+
+The grant is not short-lived by request. Its lifetime is the authorization server's to choose, so
+the client attempts revocation rather than waiting for expiry — and an authorization
+server may issue a durable credential the client never asked for, which makes revocation an
+obligation rather than hygiene. The permission the grant carries is the narrowest one that reaches a
+DID-document operation, and it is still broader than the operation: the same permission covers
+handle changes and rotation-key replacement, and no finer one exists to request.
+
+The same OAuth client identity advertises the union of permissions it may request, while each PAR
+carries only the scope needed for that flow. The standing scope remains the registry-derived scope;
+the identity flow requests `atproto identity:*`. Advertising a permission is not granting it to every
+session. Each identity attempt generates its own DPoP key, PKCE verifier, and state, and binds the
+callback issuer, state, and token subject to the expected operation and account. No identity holder
+is reachable from a serializable session or from its proactive refresh machinery.
+
+The measured PDS issued a roughly one-hour access token and a refresh token. On independent grants,
+revoking either token first caused subsequent reads and refreshes to fail. This is evidence about
+that implementation, not a reason to omit either credential from cleanup: attempt refresh revocation
+and access revocation independently, with bounded request timeouts, then erase the owned holder
+regardless of the results. Revocation diagnostics remain separate from submission diagnostics.
+
+**The browser authorizes through a second page while the initiating WASM operation stays live.**
+Serializing `PendingLogin` across a full navigation would make identity authority durable, precisely
+what the separate grant is intended to avoid. Instead the authorizing page returns to a same-origin
+callback that forwards its response through `BroadcastChannel` to the original operation. That
+response contains no PKCE verifier or private DPoP key, and completion validates it before use.
+The callback scrubs its URL and closes itself. Other delivery mechanisms may replace the channel
+without changing the contract; a full-page flow that stores pending identity secrets may not.
+
+The local PDS's opener isolation severed the popup handle while authorization was still live, so
+`popup.closed` is not an abandonment signal on its own. Provide an explicit cancel action and a
+finite operation deadline covering authorization and owner confirmation, plus bounded network and
+cleanup waits. A cancellation flag is checked before each new signing/submission step. An exchange
+that finishes after cancellation can only hand its newly received credentials to cleanup, never
+revive the operation. In-flight submission may already have taken effect: report an unknown outcome
+when no conclusive response exists, re-read the DID before another attempt, and require fresh
+authorization for another mutation. Do not retain a grant for retries or promise rollback.
+
+**The injected network transport is a protocol-I/O exception, not an application credential API.**
+`WasmTransport` already constructs browser-managed requests and reads browser-managed response
+buffers. Keeping the operation holder in Rust does not remove those crossings. The accepted boundary
+is no grant accessor, no token-bearing application result, no serialized pending identity flow, and
+no grant persistence; transient I/O carries the credentials the protocol requires. Private DPoP
+keys remain in WASM. This is consistent with the existing threat model, which does not promise
+protection against same-origin script compromise, and does not claim to zeroize browser buffers.
+
+**The signer's owner confirmation is separate from OAuth consent and from unverified-recipient
+confirmation.** The measured PDS requires a bodyless `requestPlcOperationSignature` POST, followed
+by a confirmation token on `signPlcOperation`, then a separate `submitPlcOperation` call. Keep the
+grant alive through both signing and submission unless abandoned. Present the channel identified
+by the actual signer, if known, without assuming that every deployment uses email or that an accepted
+request proves delivery. The spike read its disposable actor's token from local SQLite because SMTP
+was absent; production must collect the owner's input, and delivery-specific tests must not count
+that fixture shortcut as evidence of delivered mail.
 
 **Confirmation is a person's decision, not the client's.** A machine rule refusing unverified
 counterparties would break every account that has not opted in, and adoption is what makes
@@ -150,33 +276,53 @@ authenticity. Verifying the log would be additive later and requires no change t
   dropping every verified account into the error state indistinguishably from an attack. → The
   encoder's consumers are enumerated and the blast radius is stated in `document-crypto`; a change
   takes the version-bump path.
-- **The identity operation depends on an authorization the authorization server may not offer in a
-  form distinct from the standing session.** → Unresolved; see Open Questions. Nothing else in the
-  change depends on it, so an account that cannot obtain one stays unverified and every other path
-  is unaffected.
+- **A revocation request may be accepted and not acted upon.** → A success response is not evidence
+  that a grant has ended: the revocation specification obliges success for an unrecognised token, so
+  the response cannot distinguish revoked from unrecognised. The obligation is to revoke the
+  credential that actually carries the grant and to treat the response as unverified. Exposure if
+  revocation silently fails is bounded by that credential's own lifetime, which the client does not
+  choose and which may be long.
+- **Closing a page or process can prevent revocation entirely.** → Keep no resumable identity
+  authorization in storage and make no cleanup-on-unload guarantee. Ordinary handled cancellation
+  still performs bounded cleanup; interrupted submissions are reconciled against current DID state
+  before another mutation rather than blindly retried.
+- **A confirmation wait or stalled network request can prolong custody of an identity grant.** →
+  Bound the waits and cleanup, accept cancellation while work is in flight, and reject late
+  completions. The exact finite timeout values are client policy, not OAuth token lifetimes.
+- **An authorization server may remember the permission, so the owner approves it once rather than
+  once per operation.** → The guarantee is about what is retained, not about what is re-asked.
+  Requesting the approval screen again is a parameter a server may honour or ignore, and clearing a
+  remembered approval is not something every server exposes at all. The design therefore claims no
+  per-operation approval, and no interface copy may promise one.
 - **One key signs both the published record and the indexer authentication challenge.** → Domain
   separation in the transcript's context label; any future use adds a distinct label.
 
 ## Migration Plan
 
-The record fields are optional and ignore-safe, so existing records remain readable and a client
-that ignores them behaves exactly as before. The change is **not** purely additive: extending the
-closed vocabulary with a signature algorithm identifier is a schema version bump under
-`spec:record-validity § schema evolution is additive and vocabulary is version-pinned`, and the
-pre-v1 window permits it only when the break is declared. This change declares it.
+This change uses the declared pre-v1 redefinition of `opakeVersion: 1` under
+`spec:record-validity § opakeVersion is a stable protocol contract`. Public-key signature fields
+alone are optional, but required member DIDs, optional current wraps, and approval/intent semantics
+are not ignore-safe. Reset development records and regenerate fixtures with the new draft; no
+legacy-DID inference, inferred consent, shim, or dual-read window. Update clients, indexer, and
+lexicons together. A rollback of this development deployment requires returning the whole stack
+and fixtures to its matching draft, not running old clients against new member records.
+
+The signature vocabulary is included in that declared break. After v1 the structural member change
+would require a new collection NSID, not merely a vocabulary version increment. This specification
+does not authorize deleting any local state during proposal work; resets are implementation and
+deployment tasks.
 
 Accounts become verified individually, each publishing the signed record before the verification
-method that obliges consumers to check it. The OAuth scope change lands with the release and
-requires re-consent. Rollback is publishing an operation that removes the verification method,
-after which the account resolves as unverified and every consumer proceeds as before.
+method that obliges consumers to check it. The standing OAuth scope is unchanged, so no existing
+session re-consents; the identity permission is requested only when an account is made verified or
+returned to unverified. Rollback is publishing an operation that removes the verification method,
+after which the account resolves as unverified and counterparties require matching recorded approval
+or a fresh decision before writing a new wrap; removing verification does not erase relationship approvals.
 
 ## Open Questions
 
-- How an identity operation is authorized in practice, and whether the authorization server offers
-  a short-lived grant distinct from the standing session scope at all. The requirement names the
-  properties the authorization must have rather than a token, because the vocabulary is fixed by
-  the authorization server rather than chosen here. If no distinct grant exists, publication falls
-  back to whatever the server does offer and the obligation never to persist it still binds.
+- Exact finite authorization/confirmation and cleanup timeout values for each client. These tune
+  the bounded-wait policy; they do not permit persistence, renewal, or resuming an abandoned grant.
 - Whether the indexer's own authentication should prefer a verified key when one is available. The
   three-state rule already applies to it as a consumer; whether the credential it accepts is
   additionally bound to the verification method is a separate decision that changes no requirement

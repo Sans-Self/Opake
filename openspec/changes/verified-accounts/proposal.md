@@ -15,6 +15,13 @@ a public, attributable act — without changing where the bundle lives.
 
 ## What Changes
 
+This remains the account-verification change and its required caller integration. The
+scenario review is split into four companion changes rather than folded into this feature:
+`rotation-grace-periods`, `rotation-write-safety`, `bounded-key-history`, and
+`membership-mutation-outcomes`. Ownership, dependencies, rollout gates, and overlapping
+delta sync order are recorded in [change-map.md](change-map.md). Bounded history captures
+approved requirements only; its storage layout and implementation require a separate review.
+
 - An account may publish an `#opake` verification method in its DID document. An account that has
   done so is **verified**; one that has not continues to work unchanged.
 - `at.opake.publicKey` gains optional `signature` and `signatureAlgo` fields. The signature covers a
@@ -30,18 +37,30 @@ a public, attributable act — without changing where the bundle lives.
   affected member and completes, because an operation that withdraws access must not be blockable
   by an account it is not withdrawing access from.
 - Operations that wrap a key to an unverified account surface that fact and require explicit
-  confirmation. Confirmation is captured once per relationship, at the point access is granted, so
-  a later group-key rotation does not ask again. An operation that runs with no caller present captures its
-  confirmation when it is queued.
+  confirmation. Approval is carried in the relationship's records and bound to both encryption keys
+  and algorithms: unchanged keys never re-prompt merely because the group key rotates. Changed or
+  unapproved unverified keys leave that member's new wrap pending, without delaying a removal.
+- Membership has an explicit DID and role independently of an optional current wrap. Excluded
+  members remain admitted, retain historical wraps, and can use historical-only access after the
+  same genesis identity check. Indexer membership and client projections no longer infer removal
+  from a missing wrap.
+- A queued share captures one first-publication permission bound to the resolved recipient DID.
+  Conditional atomic completion consumes the intent and binds the actual keys in the grant, so
+  concurrent runners or retries cannot turn first-use permission into approval of replacement keys.
 - Pairing completion verifies received identity keys against the DID document rather than against
   a record served by the same host that relayed the response.
+- Publishing or removing the verification method obtains operation-only identity authority, with
+  explicit confirmation and cancellation, no persisted continuation, and end-of-operation cleanup.
+  Local disposal is guaranteed on handled exits; server revocation is attempted, not inferred from
+  a successful response or promised after abrupt termination.
 - Migration tooling replaces an account's verification methods with the ones the receiving PDS
   recommends, and those name only the atproto signing key, so a migrated account becomes unverified.
   The protocol does not require this, but no account can rely on the tooling doing otherwise.
   Clients detect the loss against their own DID document and offer to republish.
-- **BREAKING**: the change extends the closed vocabulary list with a signature algorithm
-  identifier, which is a schema version bump. The pre-v1 window permits it; this change declares it
-  rather than claiming to be purely additive.
+- **BREAKING**: signature vocabulary, explicit member identities with optional wraps, and recorded
+  approval semantics redefine the pre-v1 version-1 draft in place. Development records must be
+  regenerated, with no compatibility shim or dual-read window. This is not an additive field change
+  or a structural break that a vocabulary-only version increment could make safe.
 
 The signing key is the account's existing mnemonic-derived Ed25519 key, already published as
 `signingKey` and already derivable on any device holding the phrase. No new derivation path is
@@ -70,22 +89,32 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
   the statement that the signing key is the existing derived Ed25519 key rather than a new one.
 - `auth-pairing`: completion authenticates received keys against the DID document; the published
   record ceases to be the authority for that check.
-- `auth-session`: an identity operation is authorized per operation and never from the standing
-  session, so the scope stays derivable from the collection registry alone and no existing session
-  is obliged to re-consent. The authorization is short-lived, never persisted, and may require the
-  owner to authenticate again.
-- `workspace-membership`: admission resolves the recipient's verification state; removal resolves
-  each remaining member independently and excludes rather than aborts.
+- `auth-session`: an identity operation is authorized by a grant separate from the standing session,
+  so the scope stays derivable from the collection registry alone and no existing session is obliged
+  to re-consent. Every handled exit attempts revocation, including any refresh credential, and
+  discards locally owned credentials independently of the result. The grant never enters persisted
+  state, structurally rather than by discipline. Owner confirmation, bounded abandonment, and
+  interrupted submission are reported without claiming more than the client knows.
+- `wasm-security-boundary`: distinguish transient protocol I/O through the injected transport from
+  the application export surface; the identity flow gains neither credential accessors nor the
+  persisted `PendingLogin` exception, and its owned secret material zeroizes and redacts.
+- `workspace-membership`: explicit DID/role with optional current wrap; admission records approval,
+  removal preserves excluded members, and only managers may renew approval or repair wraps.
+- `workspace-identity`: historical-only adoption still performs genesis derivation, and SSE removal
+  depends on member-DID absence rather than missing wraps.
+- `indexer-consistency`: admitted members without current wraps retain authorized record access.
+- `keyring-tombstones`: rollback restores membership, wrap availability, and approval independently.
 - `key-rotation`: a rotation excludes a member whose keys do not resolve and still completes;
-  forward secrecy holds unconditionally, readability is qualified.
-- `sharing-grants`: grant creation resolves the recipient; the pending-share queue captures its
-  confirmation at queue time and reports an error-state recipient rather than expiring silently.
+  the new key is withheld from the removed member, with confidentiality qualified by the
+  fresh-key/in-flight boundary owned by `rotation-write-safety`; readability is qualified.
+- `sharing-grants`: grant metadata carries key-bound approval; queued first-publication permission
+  is DID-bound and consumed atomically with its designated grant, with explicit error reporting.
 - `background-work`: a task running with no caller present cannot carry a consent obligation, and
   the re-wrap sweep picks up members excluded from a group-key rotation.
-- `document-crypto`: the context-transcript encoder acquires a signature consumer, its consumers
-  are enumerated, and the blast radius of changing it is stated.
-- `record-validity`: the closed vocabulary list gains signature algorithm identifiers, and the
-  version bump that entails is declared.
+- `document-crypto`: the transcript encoder gains signature and approval consumers; historical-only
+  reads work without a current key, while operations requiring that missing key fail explicitly.
+- `record-validity`: signature vocabulary and the structural member/approval break are declared
+  under the pre-v1 reset policy; a missing optional wrap is valid, not a corrupt member.
 - `dev-env`: at least one bootstrapped actor is verified, so all three resolution outcomes are
   reachable hermetically.
 - `e2e-testing`: scenarios that wrap to an unverified counterparty supply the confirmation the
@@ -93,16 +122,20 @@ addressed to, so an untrustworthy directory defeats far more than key authentici
 
 ## Impact
 
-- **Lexicon**: `at.opake.publicKey` gains optional `signature` and `signatureAlgo` fields.
+- **Lexicon and records**: public-key signature fields; explicit keyring member DID, optional wrap
+  and approval commitment; encrypted grant approval and pending-intent DID/first-use permission.
 - **opake-core**: signature construction and verification, DID-document verification-method lookup,
   three-state resolution used by member addition, group-key rotation, grant creation, the pending-share
   daemon, and pairing completion, and the boot-time check of the account's own verification method.
 - **OAuth**: the standing scope is unchanged; publishing and removing a verification method each
-  obtain a separate short-lived authorization that is discarded after use.
+  obtain a separate grant, with revocation attempts and local disposal when the operation ends.
 - **Indexer**: authentication accepts an account with no verification method and refuses one whose
-  verification method is present but whose published record does not verify under it.
+  verification method is present but whose published record does not verify under it. Member lookup,
+  subscriptions, structural validation, and self-removal checks use the new member/approval shape.
 - **Clients**: verification state is displayed wherever a counterparty is named; confirmation is
   required before wrapping to an unverified account; excluded members are reported after a group-key rotation.
+  Identity setup/removal additionally handles the signer's owner-confirmation step and an
+  interruptible, non-persisted browser authorization flow.
 - **Dev-env and e2e**: a verified fixture actor, and a harness affordance for the confirmation.
 - **Issues**: closes the cross-PDS half of #70 for verified counterparties; narrows #57 to accounts
   that have not published a verification method.

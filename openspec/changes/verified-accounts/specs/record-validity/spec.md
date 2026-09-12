@@ -10,6 +10,8 @@ The bump is load-bearing beyond bookkeeping: the signed transcript's context lab
 
 This rule binds from v1 launch; during the pre-v1 window, `opakeVersion: 1` may be redefined in place under the conditions of `§ opakeVersion is a stable protocol contract`.
 
+The member representation and approval semantics in this change are also a declared structural break: required `did`, optional `wrappedKey`, and key-bound approval cannot be treated as ignore-safe additions to the old wrap-keyed member model. This change SHALL use the pre-v1 in-place redefinition of version 1 permitted above, with development state reset and no shim or dual-read window. A vocabulary-only version increment would not make that structural change conforming after v1; after launch it would require the new-NSID path. Unsigned public-key records that otherwise match the new draft remain valid; old member or pending-intent formats SHALL NOT supply implicit identities or approval.
+
 #### Scenario: newer record parses under older schema
 
 - **WHEN** a client supporting schema version N parses a well-formed record with `opakeVersion` N+1 that follows the evolution rules
@@ -39,3 +41,16 @@ This rule binds from v1 launch; during the pre-v1 window, `opakeVersion: 1` may 
 
 - **WHEN** a change adds an optional field whose values are drawn from a registry vocabulary
 - **THEN** it bumps `opakeVersion` and declares the break, rather than shipping as an ignore-safe field addition
+
+
+#### Scenario: old member shape is not silently upgraded
+
+- **GIVEN** a keyring member written under the prior pre-v1 draft with only `wrappedKey` and `role`
+- **WHEN** the new draft validates it
+- **THEN** it is not accepted by inferring the required member DID or consent from the wrap; development state must be regenerated under the declared break
+
+#### Scenario: absent current wrap is a valid member state
+
+- **GIVEN** a new-draft member entry with a valid explicit DID and role, but no current wrap
+- **WHEN** client and indexer validate the keyring
+- **THEN** they accept the absence as key unavailability, not as a missing required cryptographic envelope

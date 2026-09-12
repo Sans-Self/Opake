@@ -233,8 +233,14 @@ SHALL exclude that member from the wrap and SHALL NOT prevent the operation. An 
 purpose is to withdraw access MUST NOT be blockable by any account it is not withdrawing access
 from; otherwise a single host serving an unverifiable record for its own user would permanently
 prevent the removal of anyone else. The excluded member SHALL be reported to the operator, and
-SHALL be re-wrapped once their record verifies
+SHALL be eligible for repair once their record verifies
 (`spec:background-work § Remaining work is derived from records, never stored`).
+
+An unverified remaining member whose resolved encryption keys lack applicable key-bound approval
+SHALL likewise be excluded from the new wrap, without delaying the withdrawal for confirmation.
+This is a pending decision, not a fourth resolution state or a verification error. Both kinds of
+exclusion SHALL retain membership and historical access; only the intended removal drops a member
+(`spec:workspace-membership § Membership state is the keyring head's member list`).
 
 A host can therefore deny its own user access to new material, which it could already do by serving
 nothing at all. It cannot reach past its own user to block another account's operation.
@@ -269,22 +275,33 @@ The caller SHALL be told that the account's keys are not vouched for and SHALL c
 wrap is written. Verification SHALL NOT block the operation on the account's behalf; the decision
 belongs to the person performing it.
 
-Confirmation is captured **once per account per workspace or share relationship**, at the point
-access is granted. A subsequent re-wrap to an account already admitted — a group-key rotation —
-SHALL NOT ask again: the decision to trust that account's keys was taken at admission, and
-repeating it converts a deliberate choice into routine noise.
+Confirmation is captured **once per account per workspace or share relationship for the same
+encryption keys**, at the point access is granted. A subsequent re-wrap to an account already
+admitted — a group-key rotation — SHALL NOT ask again when those keys match the relationship's
+approval: repeating an unchanged decision converts a deliberate choice into routine noise.
 
-The confirmation SHALL NOT expire on a clock. A prompt repeated on a timer presents the caller with
-facts identical to the ones they already answered, which teaches them to dismiss it. It SHALL
-instead be bound to the key material it was given for: where an unverified account's published
-encryption keys differ from those the confirmation was captured against, the confirmation SHALL NOT
-carry, and the caller SHALL be asked again. Nothing anchors an unverified account's keys, so a
-substitution between admission and re-wrap is precisely the event the earlier answer did not cover.
+The confirmation SHALL NOT expire on a clock. It SHALL instead be bound to the key material it
+was given for: where an unverified account's published encryption keys differ from those the
+confirmation was captured against, the confirmation SHALL NOT carry. A new wrap to those keys
+SHALL require a fresh explicit decision from a manager for a workspace or the owner for a share.
+Nothing anchors an unverified account's keys, so a substitution between admission and re-wrap is
+precisely the event the earlier answer did not cover. A changed timestamp, record encoding,
+signature, or other non-encryption field with identical encryption keys and algorithms SHALL NOT
+invalidate approval. An approval SHALL apply only to the exact resolved bundle confirmed;
+re-resolution to different keys before wrapping SHALL require a new decision.
 
-An operation that runs with no caller present SHALL NOT invent consent. Where a queued operation
-will later wrap to an account whose verification state is not yet knowable, the confirmation SHALL
-be captured when the operation is queued, covering the state the recipient turns out to have
-(`spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped`).
+A removal SHALL NOT wait for this fresh decision: it completes while withholding the affected
+member's new wrap and reports the pending confirmation
+(`spec:workspace-membership § Removal rotates the group key; leave does not`). A declined or
+unanswered confirmation SHALL leave the member admitted but without that wrap. A verified result
+continues to follow the verified path and does not manufacture approval for a later unverified one.
+
+An operation that runs with no caller present SHALL NOT invent consent. For a not-yet-ready
+recipient, queue-time confirmation SHALL explicitly authorize one first-publication handoff to
+the resolved recipient DID, including the possibility that the keys will be unverified. This
+exception ends with the first successful grant creation, which binds the actual encryption keys
+used. It SHALL NOT become approval for arbitrary later substitutions or be consumed again by a
+retry (`spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped`).
 
 The confirmation obligation applies to the unverified state only. The error state is refused or
 excluded per the preceding requirement and offers no confirmation, because it is a statement about
@@ -298,17 +315,73 @@ Restricting an operation to verified counterparties is not part of this capabili
 - **WHEN** an operation would wrap a key to them
 - **THEN** the operation surfaces the unverified state and writes nothing until the caller confirms
 
-#### Scenario: a group-key rotation does not re-ask for an admitted member
+#### Scenario: a group-key rotation does not re-ask for unchanged approved keys
 
-- **GIVEN** a workspace member admitted as unverified with the manager's confirmation
+- **GIVEN** a workspace member admitted as unverified with the manager's confirmation and still publishing the same encryption keys and algorithms
 - **WHEN** a later removal rotates the group key
 - **THEN** the new key is wrapped to that member without a further prompt
+
+#### Scenario: either encryption key changing needs new approval
+
+- **GIVEN** approval for an unverified member's hybrid encryption bundle
+- **WHEN** either public key or its algorithm differs on a later resolution
+- **THEN** the approval does not cover that bundle, and no new key is wrapped to it without a fresh explicit decision
+
+#### Scenario: republication of identical encryption keys does not re-prompt
+
+- **GIVEN** an approved unverified recipient republishes the same encryption keys and algorithms with a new timestamp or byte encoding
+- **WHEN** an operation re-wraps a key for that relationship
+- **THEN** the existing approval applies without another prompt
 
 #### Scenario: the error state offers no override
 
 - **GIVEN** a counterparty whose keys resolve as the error state
 - **WHEN** an operation would wrap a key to them
 - **THEN** the operation is refused or the recipient excluded, and no confirmation is offered
+
+### Requirement: Key-bound approval is carried by the relationship's records
+
+Approval of unverified encryption keys SHALL be represented by `unverifiedKeyApproval`, a
+32-byte SHA-256 commitment to the shared context-transcript encoder's closed ordered tuple:
+the label `at.opake.unverified-key-approval:v<n>` using the containing record's declared
+`opakeVersion`, the relationship's scope URI, the recipient DID, `x25519PublicKey`, `x25519Algo`,
+`mlKemPublicKey`, and `mlKemAlgo`. Public-key values SHALL be decoded bytes and algorithms SHALL
+be their validated identifiers. The scope URI SHALL be the workspace genesis URI for membership,
+or the granted document URI for a share. The enclosing record's authorization SHALL additionally
+bind who may establish that relationship. This commitment has a distinct label from signatures
+and key derivation (`spec:document-crypto § Wraps are AEAD-bound to their record context`).
+
+Workspace approval SHALL live on the member's current head entry; share approval SHALL live in
+the grant's encrypted metadata. The evidence SHALL be written with the approved wrap, or by an
+authorized explicit approval mutation for a pending repair. It SHALL be carried through unrelated
+supersedes, including rotations that omit the member's new wrap. A client SHALL recover applicable
+approval from the current authorized relationship record, not from device-local remembered keys,
+a scheduler checkpoint, or a search through older supersedes. Existing record-validity and chain
+authority checks still apply; the commitment is not a signature or a new proof of chain authority.
+
+Only a current workspace manager or the share owner, respectively, SHALL capture or replace that
+relationship's approval. Self-removal SHALL NOT alter remaining members' approvals. A missing
+approval SHALL NOT be inferred from admission, a historical wrap, a prior verified resolution, or
+the existence of a pending item. An unattended runner SHALL use only applicable recorded evidence;
+when a fresh decision is required it SHALL leave the item derivable and report it without prompting.
+
+#### Scenario: another device recovers the same approval
+
+- **GIVEN** a manager approved an unverified member's keys on one device and the head carries that approval
+- **WHEN** another authorized device resolves the same keys during rotation or repair
+- **THEN** it uses the recorded approval without another prompt or a search through older keyring records
+
+#### Scenario: approval does not transfer between relationships
+
+- **GIVEN** approval for one recipient in workspace A
+- **WHEN** the same commitment is copied to workspace B or to another recipient's entry
+- **THEN** it does not match the required tuple and supplies no approval there
+
+#### Scenario: a historical wrap does not supply missing approval
+
+- **GIVEN** an admitted member with historical wraps but no approval in the current head and whose keys now resolve as unverified
+- **WHEN** an unattended runner considers a new wrap
+- **THEN** it writes nothing for that member and reports that explicit approval is required
 
 ### Requirement: An account detects and repairs the loss of its own verification method
 
