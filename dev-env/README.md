@@ -24,29 +24,40 @@ dev-env/
 
 ## Topology
 
-```
-                         edge network (plain bridge)
-                         published: 127.0.0.1:443
-                                   │
-                              ┌────┴────┐
-                              │  Caddy  │  TLS terminator + only host boundary
-                              └────┬────┘  vhosts → pds-{a,b,c}, plc, indexer
-  ══════════════════════════════ internal network (internal: true, no egress) ══
-     11.10.0.0/24 — public-range dark space (see below)
-                                   │
-         ┌──────────┬─────────────┼───────────────┬──────────────┐
-         │          │             │               │              │
-      ┌──┴──┐   ┌───┴───┐    ┌────┴────┐      ┌────┴───┐     ┌────┴────┐
-      │ plc │   │ pds-a │    │  pds-b  │      │ pds-c  │     │ indexer │
-      └──┬──┘   └───┬───┘    └────┬────┘      └────┬───┘     └────┬────┘
-      ┌──┴───┐      └────────┬────┴────────────────┘         ┌────┴─────┐
-      │plc-db│               │  requestCrawl / firehose      │indexer-db│
-      └──────┘          ┌────┴────┐                          └──────────┘
-                        │  relay  │  fan-in (one subscribeRepos upstream)
-                        └────┬────┘
-                        ┌────┴─────┐
-                        │jetstream │  /subscribe :8080  ─────► indexer
-                        └──────────┘
+```mermaid
+flowchart TB
+    subgraph host["host"]
+        PW["Playwright<br/>tests/e2e"]
+        FED["CLI federation tier<br/>tests/federation"]
+        VITE["Vite dev server<br/>127.0.0.1:5199"]
+        PW -->|browser| VITE
+        FED -->|docker compose exec| CLI
+    end
+
+    subgraph devenv["docker: dev-env"]
+        CADDY["Caddy<br/>127.0.0.1:443 · TLS by SNI"]
+        CLI["opake CLI container<br/>bootstrap / devenv-cli.sh"]
+
+        subgraph internal["internal network 11.10.0.0/24 · no egress"]
+            PLC["plc"] --- PLCDB[("plc-db")]
+            PDSA["pds-a<br/>alice · bob"]
+            PDSB["pds-b<br/>carol · dave"]
+            PDSC["pds-c<br/>eve · frank"]
+            RELAY["relay"]
+            JS["jetstream"]
+            IDX["indexer"] --- IDXDB[("indexer-db")]
+        end
+    end
+
+    VITE -->|OAuth · XRPC · SSE| CADDY
+    PW -->|admin API<br/>namespace provisioning| CADDY
+    CADDY --> PDSA & PDSB & PDSC & PLC & IDX
+    CLI -->|plain http| PDSA & PDSB & PDSC
+    PDSA & PDSB & PDSC -->|DID ops| PLC
+    PDSA & PDSB & PDSC -->|subscribeRepos| RELAY
+    RELAY --> JS
+    JS -->|/subscribe| IDX
+    IDX -.->|SSE| CADDY
 ```
 
 DID ops flow PDS → plc; record commits flow PDS → relay → jetstream → indexer →
@@ -110,6 +121,25 @@ artefact that pinned a DID is now stale. The one that bites in practice:
 > no longer exists, so specs fail on a dead session. Force a fresh login with
 > **`E2E_REAUTH=1`** (or delete `tests/e2e/.auth/`) on the first run after a reset.
 
+### Pre-v1 record-shape reset
+
+The verified-accounts draft redefines `opakeVersion: 1` before the protocol
+freeze. Keyring members now require `did` and `role`; `wrappedKey` is optional,
+and `unverifiedKeyApproval` is a 32-byte commitment. Old wrap-only keyrings and
+pending records are intentionally invalid: no client infers a DID or approval
+from a wrap, and there is no compatibility reader.
+
+Apply that break only to an isolated local stack: run `just dev-env-reset`, then
+run the next browser tier with `E2E_REAUTH=1` so it replaces stale auth states.
+Do not reset a stack other developers are using. For ordinary test work, use the
+isolated namespaces supplied by `just e2e-web` and `just e2e-federation`, or
+choose one explicitly when both tiers should exercise the same actors
+(`just e2e-web <namespace>` and `just e2e-federation <namespace>`). Clean only
+that namespace with `just e2e-ns-clean <namespace>`.
+After an isolated reset, confirm the regenerated shape through
+`docker compose run --rm bootstrap /bootstrap/verify-cli.sh`, the indexer
+lexicon tests, and the native/web federation tiers.
+
 ## Images (all pinned)
 
 | Image | Source |
@@ -131,17 +161,22 @@ BuildKit remote context can't satisfy (it checks out without `.git`).
 Six actors, two per PDS, defined in `fixtures/actors.json`. Identities derive
 from fixed BIP-39 mnemonics, so each actor always resolves to the same X25519
 encryption key and republishes the same `at.opake.publicKey/self` across resets.
+Frank is the one `verified: true` fixture: after recovery, `just dev-env-up`
+uses the production verification holder, OAuth identity grant, and the stock
+PDS signer to publish a `#opake` method whose Ed25519 key matches his signed
+public-key record. The same step runs after namespaced provisioning before the
+native federation tier. The other five actors remain deliberately unverified.
 DIDs are *not* stable (see reset blast radius) — always address actors by handle
 and resolve.
 
-| Name | Handle | PDS |
-|------|--------|-----|
-| alice | `alice.pds-a.test` | pds-a |
-| bob | `bob.pds-a.test` | pds-a |
-| carol | `carol.pds-b.test` | pds-b |
-| dave | `dave.pds-b.test` | pds-b |
-| eve | `eve.pds-c.test` | pds-c |
-| frank | `frank.pds-c.test` | pds-c |
+| Name | Handle | PDS | Verification |
+|------|--------|-----|--------------|
+| alice | `alice.pds-a.test` | pds-a | unverified |
+| bob | `bob.pds-a.test` | pds-a | unverified |
+| carol | `carol.pds-b.test` | pds-b | unverified |
+| dave | `dave.pds-b.test` | pds-b | unverified |
+| eve | `eve.pds-c.test` | pds-c | unverified |
+| frank | `frank.pds-c.test` | pds-c | verified |
 
 All share the account password `opake-devenv-pw` (per-actor `password` field,
 env `ACTOR_PASSWORD` as fallback). The 24-word mnemonics are **public test
@@ -176,8 +211,9 @@ Provisioning happens on demand, from the test harness (`tests/e2e/pds-admin.ts`)
 the first time a namespace is used: it runs the same `bootstrap.sh` recipe below
 for the actors that don't resolve yet, so a namespaced actor gets exactly what a
 checked-in one gets — a live account, a published `publicKey/self` derived from
-its mnemonic, and a seeded cabinet (`frank` excepted, as ever). Actors that
-already exist are left alone, records and all.
+its mnemonic, a verified Frank with a real signed PLC method, and a seeded
+cabinet (`frank` excepted, as ever). Actors that already exist are left alone,
+records and all.
 
 Namespaces are individually disposable: `just e2e-ns-clean alpha` deletes that
 namespace's accounts (and with them their records and blobs) and drops its local

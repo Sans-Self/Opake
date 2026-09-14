@@ -22,7 +22,7 @@ pub struct AddMemberParams<'a> {
 ///
 /// The caller must provide the raw group key (loaded from local storage) —
 /// it's needed to wrap a copy for the new member.
-pub async fn add_member(
+async fn add_member(
     client: &mut XrpcClient<impl Transport>,
     params: &AddMemberParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
@@ -72,10 +72,9 @@ pub async fn add_member(
         },
         rng,
     )?;
-    keyring.members.push(KeyringMember {
-        wrapped_key: wrapped,
-        role: params.role.clone(),
-    });
+    keyring
+        .members
+        .push(KeyringMember::with_wrap(wrapped, params.role.clone()));
     keyring.modified_at = Some(params.modified_at.to_string());
 
     trace!("updating keyring record");
@@ -111,16 +110,16 @@ mod tests {
         Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![KeyringMember {
-                wrapped_key: WrappedKey {
+            members: vec![KeyringMember::with_wrap(
+                WrappedKey {
                     did: owner_did.into(),
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
                     algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
-                role: Role::Manager,
-            }],
+                Role::Manager,
+            )],
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata: dummy_encrypted_metadata(),
@@ -189,13 +188,13 @@ mod tests {
             Some(RequestBody::Json(v)) => {
                 let updated: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
                 assert_eq!(updated.members.len(), 2);
-                assert_eq!(updated.members[0].wrapped_key.did, TEST_DID);
-                assert_eq!(updated.members[1].wrapped_key.did, "did:plc:newmember");
+                assert_eq!(updated.members[0].did, TEST_DID);
+                assert_eq!(updated.members[1].did, "did:plc:newmember");
                 assert!(updated.modified_at.is_some());
 
                 // Verify new member can unwrap the group key
                 let unwrapped = crypto::unwrap_key(
-                    &updated.members[1].wrapped_key,
+                    updated.members[1].wrapped_key.as_ref().unwrap(),
                     &new_member.private_keys(),
                     &crypto::WrapContext::Keyring { uri: KEYRING_URI },
                     updated.opake_version,

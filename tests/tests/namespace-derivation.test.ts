@@ -51,6 +51,7 @@ describe("actor namespaces", () => {
       const actors = actorsFor("alpha");
       expect(actors.map((a) => a.name)).toEqual(DEFAULT_ACTORS.map((a) => a.name));
       expect(actors.map((a) => a.pds)).toEqual(DEFAULT_ACTORS.map((a) => a.pds));
+      expect(actors.filter((a) => a.verified).map((a) => a.name)).toEqual(["frank"]);
       expect(actors.map((a) => a.handle)).toEqual([
         "alice-alpha.pds-a.test",
         "bob-alpha.pds-a.test",

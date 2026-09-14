@@ -19,11 +19,9 @@ defmodule OpakeIndexer.Lexicon.Schema do
   fail. This is what lets a well-formed future-version record clear structural
   validation and be relayed verbatim.
 
-  Opaque atproto-encoded scalars (`bytes` → `{"$bytes": ...}`, `cid-link` →
-  `{"$link": ...}`, `blob`, `unknown`) are checked for presence only, not
-  byte-level encoding: over-strict encoding checks are the false-rejection risk
-  the gate must avoid, and the security-relevant floor is the *presence* of the
-  crypto-envelope fields, enforced by the required + recursive-object walk.
+  Byte scalars (`bytes` → `{"$bytes": ...}`) are base64-decoded and checked
+  against their lexicon bounds. Other opaque AT Protocol scalars (`cid-link` →
+  `{"$link": ...}`, `blob`, `unknown`) are presence-checked only.
 
   Union variants are validated strictly: a `$type` outside the schema's declared
   refs is a structural failure, because a new union variant is a new-NSID change
@@ -146,10 +144,20 @@ defmodule OpakeIndexer.Lexicon.Schema do
   defp validate_type(%{"type" => "number"}, value, _nsid) when is_number(value), do: :ok
   defp validate_type(%{"type" => "number"}, value, _nsid), do: {:error, {:not_a_number, value}}
 
+  defp validate_type(%{"type" => "bytes"} = schema, %{"$bytes" => encoded}, _nsid)
+       when is_binary(encoded) do
+    with {:ok, bytes} <- OpakeIndexer.Auth.Base64.decode(encoded),
+         :ok <- check_byte_bounds(schema, byte_size(bytes)) do
+      :ok
+    end
+  end
+
+  defp validate_type(%{"type" => "bytes"}, _value, _nsid), do: {:error, :not_atproto_bytes}
+
   # Opaque atproto-encoded scalars: presence already established by the object
   # walk (non-nil), so any non-nil value passes. See moduledoc.
   defp validate_type(%{"type" => opaque}, _value, _nsid)
-       when opaque in ["bytes", "cid-link", "blob", "unknown"],
+       when opaque in ["cid-link", "blob", "unknown"],
        do: :ok
 
   # Unknown/absent type marker — treat as opaque rather than erroring, so a
@@ -168,6 +176,19 @@ defmodule OpakeIndexer.Lexicon.Schema do
   end
 
   defp validate_object(_schema, _value, _nsid), do: {:error, :not_an_object}
+
+  defp check_byte_bounds(schema, size) do
+    cond do
+      Map.has_key?(schema, "minLength") and size < schema["minLength"] ->
+        {:error, {:below_minimum_byte_length, size}}
+
+      Map.has_key?(schema, "maxLength") and size > schema["maxLength"] ->
+        {:error, {:above_maximum_byte_length, size}}
+
+      true ->
+        :ok
+    end
+  end
 
   defp check_required(required, value) do
     case Enum.find(required, fn field -> is_nil(Map.get(value, field)) end) do

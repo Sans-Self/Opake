@@ -24,7 +24,7 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       %{
         "members" =>
           Enum.map(members_dids, fn did ->
-            %{"wrappedKey" => %{"did" => did}, "role" => "manager"}
+            %{"did" => did, "role" => "manager"}
           end)
       },
       extra
@@ -137,7 +137,9 @@ defmodule OpakeIndexer.FirehoseKeyringDeleteTest do
       subscribe_workspace(@genesis)
       process_delete(head)
 
-      assert_receive {:sse_event, "at.opake.keyring:delete", %{uri: ^head, outcome: "rolled_back"}}
+      assert_receive {:sse_event, "at.opake.keyring:delete",
+                      %{uri: ^head, outcome: "rolled_back"}}
+
       assert %{head_uri: @genesis} = ChainHeadQueries.get(@genesis, "keyring")
     end
 

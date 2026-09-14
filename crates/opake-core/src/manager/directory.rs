@@ -172,7 +172,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             name,
             None,
             &workspace_uri,
-            &ws.key,
+            ws.current_key()?,
             ws.rotation,
             &dir_uri,
             &mut self.opake.rng,

@@ -134,10 +134,7 @@ mod tests {
             t.into(),
         );
         let keyring = Keyring::new(
-            vec![KeyringMember {
-                wrapped_key: dummy_wrapped_key(),
-                role: Role::Manager,
-            }],
+            vec![KeyringMember::with_wrap(dummy_wrapped_key(), Role::Manager)],
             dummy_metadata(),
             t.into(),
         );
@@ -398,6 +395,7 @@ mod tests {
             "opakeVersion": 1,
             "algo": "aes-256-gcm",
             "members": [{
+                "did": "did:plc:test",
                 "wrappedKey": {
                     "did": "did:plc:test",
                     "ciphertext": { "$bytes": "AAAA" },
@@ -420,16 +418,16 @@ mod tests {
     #[test]
     fn keyring_key_history_omitted_when_empty() {
         let keyring = Keyring::new(
-            vec![KeyringMember {
-                wrapped_key: WrappedKey {
+            vec![KeyringMember::with_wrap(
+                WrappedKey {
                     did: "did:plc:test".into(),
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
                     algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
-                role: Role::Manager,
-            }],
+                Role::Manager,
+            )],
             EncryptedMetadata {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
@@ -451,16 +449,16 @@ mod tests {
     #[test]
     fn keyring_supersedes_roundtrips() {
         let mut keyring = Keyring::new(
-            vec![KeyringMember {
-                wrapped_key: WrappedKey {
+            vec![KeyringMember::with_wrap(
+                WrappedKey {
                     did: "did:plc:test".into(),
                     ciphertext: AtBytes {
                         encoded: "AAAA".into(),
                     },
                     algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                 },
-                role: Role::Manager,
-            }],
+                Role::Manager,
+            )],
             EncryptedMetadata {
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),

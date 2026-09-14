@@ -35,6 +35,15 @@ pub fn oauth_scope() -> String {
     parts.join(" ")
 }
 
+/// Permissions declared in our OAuth client metadata.
+///
+/// Metadata states the union this client may request. Individual PARs remain
+/// narrow: standing sessions use [`oauth_scope`], while identity operations
+/// request only `atproto identity:*`.
+pub fn client_metadata_scope() -> String {
+    format!("{} identity:*", oauth_scope())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +92,15 @@ mod tests {
                 "scope missing repo:{collection}",
             );
         }
+    }
+
+    #[test]
+    fn client_metadata_declares_identity_without_widening_standing_scope() {
+        assert!(client_metadata_scope()
+            .split_whitespace()
+            .any(|scope| scope == "identity:*"));
+        assert!(!oauth_scope()
+            .split_whitespace()
+            .any(|scope| scope == "identity:*"));
     }
 }

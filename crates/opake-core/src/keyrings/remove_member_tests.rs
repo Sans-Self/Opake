@@ -30,26 +30,26 @@ fn two_member_keyring() -> (Keyring, ContentKey) {
         crypto::encrypt_metadata(&group_key, &metadata, &meta_context, &mut OsRng).unwrap();
 
     let members = vec![
-        KeyringMember {
-            wrapped_key: WrappedKey {
+        KeyringMember::with_wrap(
+            WrappedKey {
                 did: TEST_DID.into(),
                 ciphertext: AtBytes {
                     encoded: "AAAA".into(),
                 },
                 algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
-            role: Role::Manager,
-        },
-        KeyringMember {
-            wrapped_key: WrappedKey {
+            Role::Manager,
+        ),
+        KeyringMember::with_wrap(
+            WrappedKey {
                 did: "did:plc:bob".into(),
                 ciphertext: AtBytes {
                     encoded: "BBBB".into(),
                 },
                 algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
             },
-            role: Role::Manager,
-        },
+            Role::Manager,
+        ),
     ];
 
     let keyring = Keyring::new(members, encrypted_metadata, "2026-03-01T00:00:00Z".into());
@@ -121,7 +121,7 @@ async fn happy_path_removes_and_rotates() {
         Some(RequestBody::Json(v)) => {
             let updated: Keyring = serde_json::from_value(v["record"].clone()).unwrap();
             assert_eq!(updated.members.len(), 1);
-            assert_eq!(updated.members[0].wrapped_key.did, TEST_DID);
+            assert_eq!(updated.members[0].did, TEST_DID);
             assert_eq!(updated.rotation, 1);
             assert!(updated.modified_at.is_some());
 
@@ -131,11 +131,11 @@ async fn happy_path_removes_and_rotates() {
             // The removed member (bob) should NOT be in history —
             // only the remaining owner's wrapped key is preserved
             assert_eq!(updated.key_history[0].members.len(), 1);
-            assert_eq!(updated.key_history[0].members[0].wrapped_key.did, TEST_DID);
+            assert_eq!(updated.key_history[0].members[0].did, TEST_DID);
 
             // Owner can unwrap the new group key
             let unwrapped = crypto::unwrap_key(
-                &updated.members[0].wrapped_key,
+                updated.members[0].wrapped_key.as_ref().unwrap(),
                 &owner.private_keys(),
                 &crypto::WrapContext::Keyring { uri: KEYRING_URI },
                 updated.opake_version,

@@ -36,6 +36,7 @@ import {
   actorByName,
   actorOnPds,
   cli,
+  cliApprovingUnverified,
   downloadAsMember,
   login,
   memberCount,
@@ -148,7 +149,7 @@ describe.skipIf(testEnv() !== "devenv")("workspace visibility contract", () => {
       // absorbs the window. There is deliberately no `pollUntil` here: a poll
       // would wait out the very gap the requirement puts on the client, and the
       // test would pass against a client that had never learned to retry.
-      const added = await cli(OWNER, ["workspace", "add-member", ws, memberDid]);
+      const added = await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid]);
       expect(
         added.code,
         `add-member on a fresh workspace failed — the client did not absorb the ` +

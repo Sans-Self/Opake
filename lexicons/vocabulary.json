@@ -13,6 +13,10 @@
       "$comment": "at.opake.publicKey x25519Algo / mlKemAlgo / ed25519Algo identifiers.",
       "1": ["x25519", "ml-kem-768", "ed25519"]
     },
+    "publicKeySignatureAlgo": {
+      "$comment": "Pre-v1 verified-accounts redefinition of version 1; no compatibility shim. at.opake.publicKey signatureAlgo.",
+      "1": ["ed25519"]
+    },
     "pairingAlgo": {
       "$comment": "pairRequest.algo (KEM suite) and pairResponse.algo (symmetric cipher).",
       "1": ["x25519-mlkem768", "aes-256-gcm"]

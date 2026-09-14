@@ -55,6 +55,26 @@ Both the CLI and the web frontend talk directly to PDS instances over XRPC. No P
 
 The Indexer fills the atproto "appview" protocol role — it reads the firehose and serves indexed records through a REST API. We call it the indexer because all payloads are ciphertext; it serves no rendered views.
 
+### Identity-operation custody
+
+The normal account session authorizes routine repository work. A mutation of the
+DID document uses a separate, short-lived identity operation with its own
+DPoP key, PKCE verifier, callback state, and `identity:*` grant. Those values
+remain inside the operation and are not fields on a session, a persisted login
+continuation, or an application-facing result. Reloading or terminating the
+initiating client abandons the operation; a later attempt begins a new
+authorization.
+
+WASM uses an injected browser transport for the OAuth and PDS protocol
+requests. Browser networking necessarily handles request bodies and headers
+that contain protocol credentials, including DPoP proofs and access tokens.
+That is transient protocol I/O, not a guarantee that browser-managed buffers
+are secret and not permission for JavaScript to retain or inspect the
+operation's credentials. On handled completion, cancellation, or refusal the
+client attempts bounded revocation for issued credentials and disposes of its
+own copies. A response to revocation does not prove server-side authority has
+ended, and abrupt termination can prevent cleanup entirely.
+
 ## Encryption Model
 
 Every file is encrypted before it leaves your machine. The PDS stores opaque ciphertext.
@@ -102,13 +122,18 @@ Deleting a grant record removes the recipient's wrapped key from the network. Ho
 
 ### Public Key Discovery
 
-AT Protocol DID documents only contain signing keys (secp256k1/P-256), not encryption keys. Opake publishes `at.opake.publicKey/self` singleton records on each user's PDS containing:
+An AT Protocol DID document can carry verification methods. A verified Opake
+account has its usual account method and an Ed25519 `#opake` method; the latter
+verifies the signature on the account's published key record. DID documents do
+not carry the hybrid encryption bundle. Opake publishes that bundle in the
+`at.opake.publicKey/self` singleton record on the account's PDS:
 
 - **X25519 encryption public key** — classical half of the hybrid wrap
 - **ML-KEM-768 encapsulation public key** — post-quantum half of the hybrid wrap
-- **Ed25519 signing public key** — used for Indexer authentication
+- **Ed25519 signing public key** — used for Indexer authentication and covered
+  by the record signature verified through `#opake`
 
-Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. All three keys are published automatically on every `opake login` via an idempotent `putRecord`. The `at.opake.publicKey` lexicon requires both encryption halves; a record missing either fails validation and the consumer rejects it.
+Key discovery is an unauthenticated `getRecord` call — no auth needed to look up someone's public key. All three keys are published automatically on every `opake login` via an idempotent `putRecord`. The `at.opake.publicKey` lexicon requires both encryption halves; a record missing either fails validation and the consumer rejects it. A resolver reports three outcomes: verified when the signed record matches `#opake`, unverified when no `#opake` method exists, and an error for a present but invalid or substituted method. A valid record under a `#opake` key that the DID history shows was replaced remains verified and carries a replacement-history warning. A caller may explicitly approve the exact unverified encryption bundle; it cannot override an error.
 
 ## Identity Derivation
 
@@ -129,6 +154,22 @@ The PBKDF2 salt is `"mnemonic"` per the [BIP-39 specification](https://github.co
 ML-KEM-768 KeyGen is itself deterministic given a 64-byte randomness seed, so the entire identity (all three keypairs) is reproducible from the mnemonic alone — verified by the `derive_kat_pinned` regression test in `crypto/mnemonic_tests.rs`.
 
 The mnemonic is shown once at first login and never stored. Recovery is via `opake recover` (CLI) or the "Use your recovery phrase" flow (web). See [flows/seed-phrase-recovery.md](flows/seed-phrase-recovery.md) for sequence diagrams.
+
+### Verification-method custody
+
+The rotation-key holder can replace or remove `#opake`, and can decline to
+publish it for an account that holds no PLC rotation key of its own. The
+signature therefore proves that the published record matches the DID document
+at resolution time; it does not by itself make the serving PDS independent of
+DID-operation authority.
+
+That boundary is operational. A deployment that needs the account to resist its
+serving infrastructure keeps a PLC rotation key outside that infrastructure and
+lists it at higher DID authority than the service's key. That independent key
+can replace a compromised service key or nullify a replacement only while the
+PLC recovery policy still permits it; the recovery window does not recover
+content keys or plaintext already obtained by a recipient. It also cannot help
+after every independent PLC rotation credential is lost.
 
 ## Workspace Identity
 
@@ -237,7 +278,7 @@ All three are unauthenticated reads — AT Protocol records and blobs are public
 opake-core exposes a domain-driven API through three types:
 
 - **`Opake<T, R, S>`** — Root context. Bundles the authenticated PDS client, identity, RNG, platform time, and storage layer. Owns the storage so it can auto-persist sessions after mutations. A constructed `Opake` always has an Identity: `for_account` returns `Error::IdentityMissing` when the account is authenticated but has no encryption keys yet, and callers route to the bootstrap flows (`recover` or `pair`) to produce one. Key method categories:
-  - **Context:** `file_context(workspace_name?)`, `file_manager(&context)`, `workspace_admin()`, `resolve_workspace(name)`, `did()`, `identity()`, `now()` (the WASM handle exposes a narrower surface — `getDid` / `tokenExpiresAt` only, no session accessor — to keep tokens and DPoP keys from crossing into JS-managed memory)
+  - **Context:** `file_context(workspace_name?)`, `file_manager(&context)`, `workspace_admin()`, `resolve_workspace(name)`, `did()`, `identity()`, `now()` (the WASM handle exposes a narrower surface — `getDid` / `tokenExpiresAt` only, no session accessor — so application code cannot retain session tokens or DPoP keys)
   - **Workspaces:** `create_workspace`, `list_workspaces`, `add_workspace_member`, `leave_workspace`, `unwrap_workspace_key`
   - **Sharing:** `download_from_grant`, `download_as_workspace_member`, `list_pending_shares`, `cancel_pending_share`, `retry_pending_shares`
   - **Identity/account:** `resolve_identity`, `publish_public_key`, `save_identity`, `remove_account`, `get_account_config`, `set_account_config`
@@ -266,7 +307,7 @@ Every public mutation method on `FileManager` and `Opake` uses the `#[signoff]` 
 
 ## WASM Security Boundary
 
-Tokens, DPoP keys, session credentials, and all cryptographic operations live in WASM (opake-core). JS cannot zeroize memory — strings are immutable and garbage-collected on the runtime's schedule — so secret-bearing state must never cross into JS-managed memory. The OAuth login flow itself runs in WASM (`startOAuthLogin`, `completeOAuthLogin`, `loginWithAppPasswordWasm`). JS never calls `session()` for auth state; token expiry is checked via `tokenExpiresAt()` (returns only the timestamp) and refresh runs through `proactiveRefresh()` (calls `refresh_token` directly).
+Application-owned token, DPoP, and session state lives in WASM (opake-core), where the public binding does not expose a session accessor. JS cannot zeroize memory — strings are immutable and garbage-collected on the runtime's schedule — so application code does not receive credential-bearing session or identity-operation objects. The injected browser transport may still transiently handle OAuth codes, token values, DPoP proofs, and headers while making protocol requests; this boundary does not promise secrecy from browser-managed I/O buffers. The OAuth login flow itself runs in WASM (`startOAuthLogin`, `completeOAuthLogin`, `loginWithAppPasswordWasm`). JS never calls `session()` for auth state; token expiry is checked via `tokenExpiresAt()` (returns only the timestamp) and refresh runs through `proactiveRefresh()` (calls `refresh_token` directly).
 
 One deliberate exception: `PendingLogin` state crosses the boundary during redirect flows (the DPoP key sits in sessionStorage while the browser round-trips through the authorization server), bounded by a 10-minute TTL and auto-cleared on read.
 

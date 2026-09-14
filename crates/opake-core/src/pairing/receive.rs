@@ -2,15 +2,18 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use zeroize::Zeroizing;
 
 use crate::atproto;
-use crate::client::{Transport, XrpcClient};
+use crate::client::{resolve_did_document, Transport, XrpcClient};
 use crate::crypto::{
     decrypt_blob, unwrap_key, EncryptedPayload, MlKemPrivateKey, PrivateKeyBundle,
     X25519PrivateKey, ML_KEM_SK_LEN,
 };
 use crate::error::Error;
 use crate::records::{
-    PairResponse, PublicKeyRecord, PAIR_RESPONSE_COLLECTION, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY,
+    vocabulary::{self, RecordKind},
+    PairResponse, PublicKeyRecord, UnreadableReason, PAIR_RESPONSE_COLLECTION,
+    PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY,
 };
+use crate::resolve::{verify_public_key_record, VerificationState};
 use crate::storage::{Identity, Storage};
 
 use super::cleanup::cleanup_pair_records;
@@ -21,6 +24,16 @@ const X25519_PRIV_LEN: usize = 32;
 
 /// Total size of the versioned pair-state blob: `[VERSION(1) || X25519(32) || ML-KEM(2400)]`.
 const PAIR_STATE_LEN: usize = 1 + X25519_PRIV_LEN + ML_KEM_SK_LEN;
+
+/// Result of one pairing poll. A completed response carries the verification
+/// state established while accepting the sender's identity, including a valid
+/// but replaced DID anchor or a DID method with no audit history.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairCompletionResult {
+    pub completed: bool,
+    pub verification: Option<crate::resolve::RecipientVerificationNotice>,
+}
 
 /// Poll once for a pair response matching `request_rkey`.
 ///
@@ -37,7 +50,7 @@ pub async fn try_complete_pair<T, S>(
     storage: &S,
     did: &str,
     request_rkey: &str,
-) -> Result<bool, Error>
+) -> Result<PairCompletionResult, Error>
 where
     T: Transport,
     S: Storage,
@@ -53,10 +66,13 @@ where
 
     let Some((response, response_rkey)) = find_matching_response(&page.records, &request_uri)?
     else {
-        return Ok(false);
+        return Ok(PairCompletionResult {
+            completed: false,
+            verification: None,
+        });
     };
 
-    complete_pair_response(
+    let verification = complete_pair_response(
         client,
         storage,
         did,
@@ -65,7 +81,10 @@ where
         &response_rkey,
     )
     .await?;
-    Ok(true)
+    Ok(PairCompletionResult {
+        completed: true,
+        verification: Some(verification),
+    })
 }
 
 /// Consume a specific pair response: decrypt the Identity, persist it, and
@@ -81,7 +100,7 @@ pub async fn complete_pair_response<T, S>(
     request_rkey: &str,
     response: &PairResponse,
     response_rkey: &str,
-) -> Result<(), Error>
+) -> Result<crate::resolve::RecipientVerificationNotice, Error>
 where
     T: Transport,
     S: Storage,
@@ -107,7 +126,8 @@ where
     let mut mlkem_priv: Zeroizing<[u8; ML_KEM_SK_LEN]> = Zeroizing::new([0u8; ML_KEM_SK_LEN]);
     mlkem_priv.copy_from_slice(mlkem_bytes);
 
-    let identity = decrypt_pair_response(client, did, response, &x25519_priv, &mlkem_priv).await?;
+    let (identity, verification) =
+        decrypt_pair_response(client, did, response, &x25519_priv, &mlkem_priv).await?;
     storage.save_identity(did, &identity).await?;
 
     // Tear-down is best-effort from the caller's perspective — the Identity
@@ -116,7 +136,10 @@ where
     let _ = storage.delete_pair_state(did, request_rkey).await;
     let _ = cleanup_pair_records(client, request_rkey, response_rkey).await;
 
-    Ok(())
+    Ok(crate::resolve::RecipientVerificationNotice {
+        did: did.to_owned(),
+        verification,
+    })
 }
 
 fn find_matching_response(
@@ -146,7 +169,7 @@ async fn decrypt_pair_response(
     response: &PairResponse,
     ephemeral_x25519_private_key: &X25519PrivateKey,
     ephemeral_ml_kem_private_key: &MlKemPrivateKey,
-) -> Result<Identity, Error> {
+) -> Result<(Identity, VerificationState), Error> {
     let bundle = PrivateKeyBundle {
         x25519: ephemeral_x25519_private_key,
         ml_kem: ephemeral_ml_kem_private_key,
@@ -183,10 +206,31 @@ async fn decrypt_pair_response(
         ))
     })?;
 
+    if identity.did != did {
+        return Err(Error::InvalidRecord(
+            "pair response identity DID does not match the pairing account".to_string(),
+        ));
+    }
+
+    // Resolve the anchor independently of the PDS record. A DID document with
+    // `#opake` turns a bad or stripped record into refusal, never downgrade.
+    let document = resolve_did_document(client.transport(), did).await?;
     let record_entry = client
         .get_record(did, PUBLIC_KEY_COLLECTION, PUBLIC_KEY_RKEY)
         .await?;
-    let published: PublicKeyRecord = serde_json::from_value(record_entry.value)?;
+    let published: PublicKeyRecord =
+        vocabulary::classify_record(RecordKind::PublicKey, &record_entry.value).map_err(
+            |reason| match reason {
+                UnreadableReason::Corrupt => Error::InvalidRecord(
+                    "published publicKey/self record is corrupt or unreadable".to_string(),
+                ),
+                UnreadableReason::NeedsNewerClient => Error::InvalidRecord(
+                    "published publicKey/self record requires a newer Opake client".to_string(),
+                ),
+            },
+        )?;
+    let verification =
+        verify_public_key_record(client.transport(), did, &document, &published).await?;
 
     let published_x25519 = published.x25519_public_key.decode().map_err(|e| {
         Error::InvalidRecord(format!(
@@ -220,7 +264,29 @@ async fn decrypt_pair_response(
         ));
     }
 
-    Ok(identity)
+    if matches!(verification, VerificationState::Verified { .. }) {
+        let published_signing = published
+            .signing_key
+            .as_ref()
+            .ok_or_else(|| {
+                Error::VerificationFailed(
+                    "verified publicKey/self record omitted its signing key".to_string(),
+                )
+            })?
+            .decode()?;
+        let received_signing = identity.verify_key_bytes()?.ok_or_else(|| {
+            Error::VerificationFailed(
+                "paired identity omitted its verification key for a verified account".to_string(),
+            )
+        })?;
+        if published_signing.as_slice() != received_signing {
+            return Err(Error::VerificationFailed(
+                "received signing key does not match verified publicKey/self record".to_string(),
+            ));
+        }
+    }
+
+    Ok((identity, verification))
 }
 
 #[cfg(test)]

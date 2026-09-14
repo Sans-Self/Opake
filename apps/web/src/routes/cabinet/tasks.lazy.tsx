@@ -54,7 +54,17 @@ function kindMeta(kind: DaemonTask["kind"]): {
     case "grantHealing":
       return { label: "Grant healing", icon: ShieldCheckIcon, detail: `${kind.healed} healed` };
     case "shareRetry":
-      return { label: "Share retry", icon: ArrowsClockwiseIcon, detail: `${kind.retried} retried` };
+      return {
+        label: "Share retry",
+        icon: ArrowsClockwiseIcon,
+        detail: `${kind.retried} retried`,
+      };
+    case "memberWrapRepair":
+      return {
+        label: "Member access repair",
+        icon: ShieldCheckIcon,
+        detail: `${kind.repaired} repaired; ${kind.awaitingApproval} awaiting approval; ${kind.deferredHumanDecision + kind.deferredVisibility + kind.deferredByBudget} deferred`,
+      };
     case "unknown":
       return { label: "Background task", icon: ArrowsClockwiseIcon };
   }
@@ -75,6 +85,32 @@ function TaskCard({ task }: { readonly task: DaemonTask }) {
 
       {kindDetail && <p className="text-caption text-text-faint mt-1">{kindDetail}</p>}
 
+      {task.kind.type === "shareRetry" && task.kind.verificationErrors.map((issue) => (
+        <p key={issue.uri} className="text-error text-caption mt-1">
+          {issue.recipientDid}: published-key verification failed{issue.expired ? "; queued share expired" : ""}. {issue.reason}
+        </p>
+      ))}
+
+      {task.kind.type === "shareRetry" && task.kind.completionNotices.map((notice) => (
+        <VerificationNotice key={`${notice.did}-${notice.verification.state}`} notice={notice} />
+      ))}
+
+      {task.kind.type === "memberWrapRepair" && (
+        <>
+          {task.kind.verificationFailed > 0 && (
+            <p className="text-error text-caption mt-1">
+              {task.kind.verificationFailed} member key verification failure(s) need attention.
+            </p>
+          )}
+          {task.kind.discoveryDeferred && (
+            <p className="text-warning text-caption mt-1">Repair discovery deferred by this pass’s time budget.</p>
+          )}
+          {task.kind.verificationNotices.map((notice) => (
+            <VerificationNotice key={`${notice.did}-${notice.verification.state}`} notice={notice} />
+          ))}
+        </>
+      )}
+
       {typeof task.status === "object" && "failed" in task.status && (
         <p className="text-error text-caption mt-1">{task.status.failed}</p>
       )}
@@ -84,6 +120,26 @@ function TaskCard({ task }: { readonly task: DaemonTask }) {
       </p>
     </li>
   );
+}
+
+function VerificationNotice({ notice }: { readonly notice: import("@opake/sdk").RecipientVerificationNotice }) {
+  if (notice.verification.state === "unverified") {
+    return <p className="text-caption text-warning mt-1">{notice.did}: unverified keys were explicitly approved.</p>;
+  }
+  if (notice.verification.anchorHistory === "replaced") {
+    return <p className="text-caption text-warning mt-1">{notice.did}: DID verification method changed.</p>;
+  }
+  if (notice.verification.anchorHistory === "noHistory") {
+    return <p className="text-caption text-warning mt-1">{notice.did}: DID method publishes no verification history.</p>;
+  }
+  if (notice.verification.anchorHistory === "unavailable") {
+    return (
+      <p className="text-caption text-warning mt-1">
+        {notice.did}: verification history could not be read, so a replacement cannot be ruled out.
+      </p>
+    );
+  }
+  return null;
 }
 
 function statusLabel(s: TaskStatus): string {

@@ -2,6 +2,7 @@ mod did;
 #[cfg(feature = "dns")]
 mod dns;
 pub mod dpop;
+pub mod identity_operation;
 mod list;
 pub mod oauth_discovery;
 pub mod oauth_token;

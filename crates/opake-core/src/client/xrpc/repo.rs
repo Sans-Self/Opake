@@ -229,6 +229,38 @@ impl<T: Transport> super::XrpcClient<T> {
         &mut self,
         writes: &[ApplyWriteOp],
     ) -> Result<Vec<ApplyWriteResult>, Error> {
+        self.apply_writes_conditional(writes, None).await
+    }
+
+    /// Read the repository commit CID before reading a conditional transaction's inputs.
+    pub async fn repository_commit(&mut self) -> Result<String, Error> {
+        let did = self.did()?.to_owned();
+        let mut request = HttpRequest {
+            method: HttpMethod::Get,
+            url: format!(
+                "{}/xrpc/com.atproto.sync.getLatestCommit?did={}",
+                self.base_url, did
+            ),
+            headers: vec![],
+            body: None,
+        };
+        self.attach_auth(&mut request)?;
+        let response = self.send_checked(request).await?;
+        #[derive(serde::Deserialize)]
+        struct Commit {
+            cid: String,
+        }
+        let commit: Commit = serde_json::from_slice(&response.body)?;
+        Ok(commit.cid)
+    }
+
+    /// Atomically apply writes only if the repository still has the observed commit.
+    /// Read this commit BEFORE reading the records used to derive these writes.
+    pub async fn apply_writes_conditional(
+        &mut self,
+        writes: &[ApplyWriteOp],
+        swap_commit: Option<&str>,
+    ) -> Result<Vec<ApplyWriteResult>, Error> {
         trace!("applying {} writes atomically", writes.len());
         let did = self.did()?.to_owned();
 
@@ -268,10 +300,13 @@ impl<T: Transport> super::XrpcClient<T> {
             })
             .collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "repo": did,
             "writes": ops,
         });
+        if let Some(cid) = swap_commit {
+            body["swapCommit"] = cid.into();
+        }
 
         let mut request = HttpRequest {
             method: HttpMethod::Post,

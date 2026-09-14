@@ -9,6 +9,7 @@ import {
 } from "@/lib/pairing";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import { useAppStore } from "@/stores/app";
+import { toastSuccess } from "@/stores/toast";
 
 // Module-level dedup promise: StrictMode double-mounts would otherwise
 // fire two createPairRequest calls in rapid succession. Both would write
@@ -88,12 +89,22 @@ function PairRequestPage() {
       });
 
       try {
-        await awaitPairCompletion(info.rkey, { signal: controller.signal });
+        const completion = await awaitPairCompletion(info.rkey, { signal: controller.signal });
         if (isAborted()) return;
         // Approval received — the request is consumed, so there's nothing left
         // to cancel on teardown.
         outstandingRkeyRef.current = null;
         setState({ step: "receiving" });
+        if (completion.verification?.verification.state === "verified") {
+          const { did, verification } = completion.verification;
+          if (verification.anchorHistory === "replaced") {
+            toastSuccess(`${did}'s DID verification key was replaced.`);
+          } else if (verification.anchorHistory === "noHistory") {
+            toastSuccess(`${did}'s DID method publishes no verification history.`);
+          } else if (verification.anchorHistory === "unavailable") {
+            toastSuccess(`${did}'s verification history could not be read, so a replacement cannot be ruled out.`);
+          }
+        }
         await useAuthStore.getState().finalizePairing();
         setState({ step: "success" });
         setTimeout(() => navigate({ to: "/cabinet" }), 1500);

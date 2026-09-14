@@ -14,6 +14,14 @@
 //
 // spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
 // spec:background-work § Concurrency is resolved per record by compare-and-swap
+//
+// No daemon schedules this sweep. Since members may be admitted without a
+// current wrap, a document sweep cannot infer from a `Workspace` key alone that
+// every admitted member holds the live key, and replacing a document's sole
+// wrap would strip historical-only members of access they legitimately have.
+// Re-enabling it requires a fresh-head, per-item exclusion guard at the write
+// boundary; until then the planner is kept for its tests and nothing else.
+// spec:workspace-membership § Membership state is the keyring head's member list
 
 use base64::Engine;
 use log::trace;
@@ -96,7 +104,12 @@ pub fn plan_rewrap(
         .decode()
         .map_err(|e| Error::Decryption(format!("rewrap: invalid wrapped content key: {e}")))?;
     let content_key = crate::crypto::unwrap_content_key_from_keyring(&wrapped_bytes, old_key)?;
-    let new_wrapped = crate::crypto::wrap_content_key_for_keyring(&content_key, head.current)?;
+    let current = head
+        .current
+        .ok_or_else(|| Error::CurrentGroupKeyUnavailable {
+            workspace_id: workspace_id.to_owned(),
+        })?;
+    let new_wrapped = crate::crypto::wrap_content_key_for_keyring(&content_key, current)?;
 
     let mut rewrapped = document.clone();
     rewrapped.encryption = records::Encryption::Keyring(records::KeyringEncryption {
@@ -119,7 +132,8 @@ pub fn plan_rewrap(
 /// A CAS conflict returns [`RewrapItem::Conflict`], not an error: the record
 /// changed under us — almost always another runner finished it first — so the
 /// runner re-derives (finds nothing to do) and skips.
-pub async fn rewrap_document_to_head<T: Transport>(
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn rewrap_document_to_head<T: Transport>(
     client: &mut XrpcClient<T>,
     workspace_id: &str,
     doc_uri: &str,

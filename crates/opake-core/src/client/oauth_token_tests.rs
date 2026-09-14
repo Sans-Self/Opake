@@ -27,6 +27,38 @@ fn dpop_key() -> DpopKeyPair {
     DpopKeyPair::generate(&mut OsRng)
 }
 
+#[tokio::test]
+async fn identity_post_uses_temporary_dpop_authorization() {
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: vec![],
+    });
+    let key = dpop_key();
+    let mut nonce = None;
+    authenticated_json_post(
+        &mock,
+        "https://pds.example/xrpc/com.atproto.identity.requestPlcOperationSignature",
+        None,
+        "temporary-access-token",
+        &key,
+        &mut nonce,
+        1_700_000_000,
+        &mut OsRng,
+    )
+    .await
+    .unwrap();
+
+    let request = mock.requests().pop().unwrap();
+    assert!(request
+        .headers
+        .iter()
+        .any(|(name, value)| name == "Authorization" && value == "DPoP temporary-access-token"));
+    assert!(request.headers.iter().any(|(name, _)| name == "DPoP"));
+    assert!(request.body.is_none());
+}
+
 // -- PAR --
 
 // spec:auth-session § OAuth login is DPoP-bound with PKCE and CSRF protection end to end
@@ -84,6 +116,129 @@ fn authorization_url_encodes_params() {
     assert!(url.starts_with("https://auth.example/authorize?"));
     assert!(url.contains("client_id="));
     assert!(url.contains("request_uri="));
+}
+
+#[test]
+fn loopback_client_id_declares_possible_identity_scope_while_par_stays_narrow() {
+    let client_id = build_client_id("http://127.0.0.1:9999/callback");
+    assert!(client_id.contains("identity%3A%2A"));
+    assert!(!crate::scope::oauth_scope()
+        .split_whitespace()
+        .any(|scope| scope == "identity:*"));
+}
+
+// This bridge is deliberately ignored: the browser fixture sends a newly
+// issued, test-held DPoP key and token only on this test's stdin. It exercises
+// the production revocation helper against the stock local PDS without adding
+// a product credential accessor or persisting test credentials.
+#[cfg(feature = "reqwest-transport")]
+#[derive(serde::Deserialize)]
+struct LivePdsRevocationInput {
+    token: String,
+    client_id: String,
+    dpop_key: DpopKeyPair,
+}
+
+#[cfg(feature = "reqwest-transport")]
+#[derive(Clone)]
+struct LocalPdsTransport(reqwest::Client);
+
+#[cfg(feature = "reqwest-transport")]
+impl LocalPdsTransport {
+    fn new() -> Self {
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], 443));
+        let client = reqwest::Client::builder()
+            .resolve("pds-a.test", address)
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("local PDS test client");
+        Self(client)
+    }
+}
+
+#[cfg(feature = "reqwest-transport")]
+impl Transport for LocalPdsTransport {
+    async fn send(&self, request: HttpRequest) -> Result<HttpResponse, crate::error::Error> {
+        let mut builder = match request.method {
+            HttpMethod::Get => self.0.get(&request.url),
+            HttpMethod::Post => self.0.post(&request.url),
+        };
+        for (name, value) in request.headers {
+            builder = builder.header(name, value);
+        }
+        if let Some(body) = request.body {
+            builder = match body {
+                RequestBody::Json(value) => builder.json(&value),
+                RequestBody::Bytes { data, content_type } => {
+                    builder.header("Content-Type", content_type).body(data)
+                }
+                RequestBody::Form(params) => builder
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(RequestBody::encode_form(&params)),
+            };
+        }
+        let response = builder
+            .send()
+            .await
+            .map_err(|error| crate::error::Error::Xrpc {
+                status: error.status().map(|status| status.as_u16()).unwrap_or(0),
+                message: error.to_string(),
+            })?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|error| crate::error::Error::Xrpc {
+                status,
+                message: error.to_string(),
+            })?;
+        Ok(HttpResponse {
+            status,
+            headers,
+            body: body.to_vec(),
+        })
+    }
+}
+
+/// Test-only stdin bridge for the real-PDS browser fixture.
+#[cfg(feature = "reqwest-transport")]
+#[tokio::test]
+#[ignore = "requires a fresh real-PDS grant supplied over stdin by the e2e fixture"]
+async fn live_pds_revocation_from_stdin() {
+    use std::io::Read as _;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .expect("read fixture credentials from stdin");
+    let input: LivePdsRevocationInput =
+        serde_json::from_str(&input).expect("parse fixture credentials from stdin");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_secs() as i64;
+    revoke_temporary_token(
+        &LocalPdsTransport::new(),
+        "https://pds-a.test/oauth/revoke",
+        &input.token,
+        &input.client_id,
+        &input.dpop_key,
+        &mut None,
+        timestamp,
+        &mut OsRng,
+    )
+    .await
+    .expect("production temporary-token revocation succeeds");
 }
 
 // -- exchange_code --
@@ -328,4 +483,18 @@ fn validate_accepts_atproto_among_multiple_scopes() {
         sub: None,
     };
     validate_token_response(&response, None).unwrap();
+}
+
+#[test]
+fn account_bound_token_rejects_missing_subject() {
+    let response = TokenResponse {
+        access_token: "tok".into(),
+        token_type: "DPoP".into(),
+        refresh_token: Some("refresh".into()),
+        expires_in: None,
+        scope: Some("atproto identity:*".into()),
+        sub: None,
+    };
+    let error = validate_token_response(&response, Some("did:plc:expected")).unwrap_err();
+    assert!(error.to_string().contains("omitted subject"));
 }

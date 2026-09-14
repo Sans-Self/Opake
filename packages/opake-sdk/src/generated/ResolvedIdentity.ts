@@ -6,4 +6,4 @@
  * `opake_core::resolve::ResolvedIdentity`. Public keys serialize as
  * `Uint8Array` for direct use in wrap operations.
  */
-export type ResolvedIdentityDto = { did: string, handle: string | null, pdsUrl: string, x25519PublicKey: Uint8Array, x25519Algo: string, mlKemPublicKey: Uint8Array, mlKemAlgo: string, };
+export type ResolvedIdentityDto = { did: string, handle: string | null, pdsUrl: string, x25519PublicKey: Uint8Array, x25519Algo: string, mlKemPublicKey: Uint8Array, mlKemAlgo: string, verification: string, anchorHistory: string | null, };

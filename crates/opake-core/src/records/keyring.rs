@@ -7,6 +7,7 @@ use super::{EncryptedMetadata, KeyringMember, SCHEMA_VERSION};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyHistoryEntry {
     pub rotation: u64,
+    #[serde(deserialize_with = "super::defs::deserialize_members")]
     pub members: Vec<KeyringMember>,
 }
 
@@ -15,6 +16,7 @@ pub struct KeyHistoryEntry {
 pub struct Keyring {
     pub opake_version: u32,
     pub algo: String,
+    #[serde(deserialize_with = "super::defs::deserialize_members")]
     pub members: Vec<KeyringMember>,
     #[serde(default)]
     pub rotation: u64,

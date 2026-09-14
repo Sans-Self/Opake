@@ -127,6 +127,7 @@ mod keyring_supersede {
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::dummy_encrypted_metadata;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     const ALICE_DID: &str = "did:plc:alice";
     const BOB_DID: &str = "did:plc:bob";
@@ -194,15 +195,17 @@ mod keyring_supersede {
             algo: "aes-256-gcm".into(),
             members: members
                 .into_iter()
-                .map(|(did, role)| KeyringMember {
-                    wrapped_key: WrappedKey {
-                        did: did.into(),
-                        ciphertext: AtBytes {
-                            encoded: "AAAA".into(),
+                .map(|(did, role)| {
+                    KeyringMember::with_wrap(
+                        WrappedKey {
+                            did: did.into(),
+                            ciphertext: AtBytes {
+                                encoded: "AAAA".into(),
+                            },
+                            algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
                         },
-                        algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
-                    },
-                    role,
+                        role,
+                    )
                 })
                 .collect(),
             rotation: 0,
@@ -235,6 +238,14 @@ mod keyring_supersede {
     }
 
     fn opake_for(did: &str, mock: MockTransport) -> Opake<MockTransport, OsRng, NoopStorage> {
+        opake_for_identity(did, Identity::generate(did, &mut OsRng), mock)
+    }
+
+    fn opake_for_identity(
+        did: &str,
+        identity: Identity,
+        mock: MockTransport,
+    ) -> Opake<MockTransport, OsRng, NoopStorage> {
         let session = Session::Legacy(LegacySession {
             did: did.into(),
             handle: "test.handle".into(),
@@ -242,7 +253,6 @@ mod keyring_supersede {
             refresh_jwt: "test-refresh".into(),
         });
         let client = XrpcClient::with_session(mock, format!("https://pds.{did}"), session);
-        let identity = Identity::generate(did, &mut OsRng);
         let mut opake = Opake::new(
             client,
             did.into(),
@@ -254,6 +264,184 @@ mod keyring_supersede {
         .unwrap();
         opake.set_indexer_url(INDEXER_URL.into());
         opake
+    }
+
+    /// Construct a real rotation-0 keyring fixture.  The URI is derived from
+    /// the group key, every member wrap is bound to that URI, and metadata is
+    /// encrypted under the same key.  Membership mutation tests must not use
+    /// placeholder wraps: production checks unwrap the live head before a
+    /// mutation and removal decrypts/re-encrypts this metadata.
+    fn real_genesis_keyring(
+        owner_did: &str,
+        members: Vec<(&str, Role, &Identity)>,
+    ) -> (String, crate::crypto::ContentKey, Keyring) {
+        use crate::crypto::{
+            encrypt_metadata, generate_content_key, wrap_key, KeyringMetadata, PublicKeyBundle,
+            SealContext, SealType, WrapContext,
+        };
+
+        let mut rng = OsRng;
+        let group_key = generate_content_key(&mut rng);
+        let tag = crate::crypto::derive_workspace_identity_tag(&group_key, owner_did);
+        let workspace_id = format!("at://{owner_did}/at.opake.keyring/{tag}");
+        let members = members
+            .into_iter()
+            .map(|(did, role, identity)| {
+                let x25519 = identity.x25519_public_key_bytes().unwrap();
+                let ml_kem = identity.ml_kem_public_key_bytes().unwrap();
+                let wrapped = wrap_key(
+                    &group_key,
+                    &PublicKeyBundle {
+                        x25519: &x25519,
+                        ml_kem: &ml_kem,
+                    },
+                    did,
+                    &WrapContext::Keyring { uri: &workspace_id },
+                    &mut rng,
+                )
+                .unwrap();
+                KeyringMember::with_wrap(wrapped, role)
+            })
+            .collect();
+        let metadata = encrypt_metadata(
+            &group_key,
+            &KeyringMetadata {
+                name: "fixture workspace".into(),
+                description: Some("real encrypted fixture".into()),
+                icon: None,
+            },
+            &SealContext::new(&workspace_id, SealType::KeyringMetadata),
+            &mut rng,
+        )
+        .unwrap();
+        (
+            workspace_id,
+            group_key,
+            Keyring::new(members, metadata, "2026-09-12T00:00:00Z".into()),
+        )
+    }
+
+    /// Build a genuine later head for repair tests: its current wraps and
+    /// metadata use `current_key`, while rotation 0 preserves the original
+    /// genesis members with their independently usable wraps.
+    fn real_rotated_head(
+        workspace_uri: &str,
+        genesis: &Keyring,
+        current_key: &crate::crypto::ContentKey,
+        members: Vec<(&str, Role, &Identity)>,
+    ) -> Keyring {
+        use crate::crypto::{
+            encrypt_metadata, wrap_key, KeyringMetadata, PublicKeyBundle, SealContext, SealType,
+            WrapContext,
+        };
+
+        let mut rng = OsRng;
+        let members = members
+            .into_iter()
+            .map(|(did, role, identity)| {
+                let x25519 = identity.x25519_public_key_bytes().unwrap();
+                let ml_kem = identity.ml_kem_public_key_bytes().unwrap();
+                KeyringMember::with_wrap(
+                    wrap_key(
+                        current_key,
+                        &PublicKeyBundle {
+                            x25519: &x25519,
+                            ml_kem: &ml_kem,
+                        },
+                        did,
+                        &WrapContext::Keyring { uri: workspace_uri },
+                        &mut rng,
+                    )
+                    .unwrap(),
+                    role,
+                )
+            })
+            .collect();
+        Keyring {
+            opake_version: genesis.opake_version,
+            algo: genesis.algo.clone(),
+            members,
+            // Skip rotation 1 deliberately: a repair at rotation 2 must not
+            // pretend it supplied a generation the member never received.
+            rotation: 2,
+            key_history: vec![crate::records::KeyHistoryEntry {
+                rotation: genesis.rotation,
+                members: genesis.members.clone(),
+            }],
+            encrypted_metadata: encrypt_metadata(
+                current_key,
+                &KeyringMetadata {
+                    name: "fixture workspace rotation 2".into(),
+                    description: None,
+                    icon: None,
+                },
+                &SealContext::new(workspace_uri, SealType::KeyringMetadata),
+                &mut rng,
+            )
+            .unwrap(),
+            supersedes: Some(workspace_uri.into()),
+            supersedes_cid: None,
+            lineage: Some(workspace_uri.into()),
+            created_at: "2026-09-12T00:00:01Z".into(),
+            modified_at: Some("2026-09-12T00:00:01Z".into()),
+        }
+    }
+
+    /// Queue the exact indexer/DID/PDS chain walk performed by membership
+    /// mutations.  A same-rotation head has a real genesis predecessor;
+    /// genesis-only fixtures use the same record for both inputs.
+    fn enqueue_real_head(
+        mock: &MockTransport,
+        workspace_id: &str,
+        head_uri: &str,
+        head_cid: &str,
+        head: &Keyring,
+        genesis: &Keyring,
+    ) {
+        mock.enqueue(chain_head_response(head_uri, head_cid));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(head_uri, head_cid, head));
+        if head_uri != workspace_id {
+            mock.enqueue(get_keyring_response(workspace_id, "bafygenesis", genesis));
+        }
+    }
+
+    fn anchored_did_doc_response(did: &str, pds_url: &str, anchor: &[u8; 32]) -> HttpResponse {
+        let multibase = crate::client::encode_ed25519_did_key(anchor);
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "id": did,
+                "alsoKnownAs": [],
+                "service": [{
+                    "id": "#atproto_pds",
+                    "type": "AtprotoPersonalDataServer",
+                    "serviceEndpoint": pds_url,
+                }],
+                "verificationMethod": [{
+                    "id": format!("{did}#opake"),
+                    "controller": did,
+                    "type": "Multikey",
+                    "publicKeyMultibase": multibase.strip_prefix("did:key:").unwrap(),
+                }],
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn written_keyring(mock: &MockTransport) -> Keyring {
+        let create = mock
+            .requests()
+            .into_iter()
+            .find(|request| request.url.contains("createRecord"))
+            .expect("keyring supersede write");
+        match create.body {
+            Some(RequestBody::Json(body)) => {
+                serde_json::from_value(body["record"].clone()).unwrap()
+            }
+            _ => panic!("keyring supersede must carry a JSON record"),
+        }
     }
 
     /// Happy path for `update_member_role`: manager promotes an existing
@@ -614,6 +802,28 @@ mod keyring_supersede {
         }
     }
 
+    fn public_key_response_for_bundle(uri: &str, x25519: &[u8], ml_kem: &[u8]) -> HttpResponse {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": uri,
+                "cid": "bafypubkey",
+                "value": {
+                    "opakeVersion": SCHEMA_VERSION,
+                    "x25519PublicKey": { "$bytes": b64.encode(x25519) },
+                    "x25519Algo": "x25519",
+                    "mlKemPublicKey": { "$bytes": b64.encode(ml_kem) },
+                    "mlKemAlgo": "ml-kem-768",
+                    "createdAt": "2026-03-01T00:00:00Z",
+                },
+            }))
+            .unwrap(),
+        }
+    }
+
     /// Admission grants the full history: for every retained rotation the
     /// admitting manager still holds, the joiner's supersede gains a wrapped
     /// copy of that historical key — so documents written under prior
@@ -627,24 +837,51 @@ mod keyring_supersede {
 
         let prior_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3abc");
 
-        // Prior head at rotation 1 with one retained rotation-0 key in history.
-        let mut prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
-        prior.rotation = 1;
-        prior.key_history.push(KeyHistoryEntry {
-            rotation: 0,
-            members: prior.members.clone(),
-        });
-        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
-
         // The keys the admitting manager holds and extends to the joiner.
         let current_key = generate_content_key(&mut OsRng);
         let historical_key = generate_content_key(&mut OsRng);
+
+        let mock = MockTransport::new();
+        let mut opake = opake_for(ALICE_DID, mock.clone());
+        let alice = opake.identity();
+        let alice_public_keys = crate::crypto::PublicKeyBundle {
+            x25519: &alice.x25519_public_key_bytes().unwrap(),
+            ml_kem: &alice.ml_kem_public_key_bytes().unwrap(),
+        };
+        let context = WrapContext::Keyring { uri: WORKSPACE_ID };
+        let current_wrap = crypto::wrap_key(
+            &current_key,
+            &alice_public_keys,
+            ALICE_DID,
+            &context,
+            &mut OsRng,
+        )
+        .unwrap();
+        let historical_wrap = crypto::wrap_key(
+            &historical_key,
+            &alice_public_keys,
+            ALICE_DID,
+            &context,
+            &mut OsRng,
+        )
+        .unwrap();
+
+        // Prior head at rotation 1 with real current and rotation-0 wraps
+        // for the manager. Admission validates the live current head before
+        // it will use a caller-supplied group key.
+        let mut prior = as_supersede(keyring_with_members(vec![(ALICE_DID, Role::Manager)]));
+        prior.members = vec![KeyringMember::with_wrap(current_wrap, Role::Manager)];
+        prior.rotation = 1;
+        prior.key_history.push(KeyHistoryEntry {
+            rotation: 0,
+            members: vec![KeyringMember::with_wrap(historical_wrap, Role::Manager)],
+        });
+        let genesis = genesis_keyring(vec![(ALICE_DID, Role::Manager)]);
 
         // The joiner's identity — its published keys are what the manager
         // wraps to, and its private keys are what we unwrap with to verify.
         let joiner = Identity::generate(NEW_DID, &mut OsRng);
 
-        let mock = MockTransport::new();
         // fetch_keyring_chain_head
         mock.enqueue(chain_head_response(&prior_head_uri, "bafyhead"));
         mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
@@ -660,7 +897,6 @@ mod keyring_supersede {
         let new_uri = format!("at://{ALICE_DID}/at.opake.keyring/3addmember");
         mock.enqueue(create_record_response(&new_uri, "bafynew"));
 
-        let mut opake = opake_for(ALICE_DID, mock.clone());
         let historical_keys = vec![HistoricalKey {
             rotation: 0,
             key: historical_key.clone(),
@@ -672,6 +908,17 @@ mod keyring_supersede {
                 &historical_keys,
                 NEW_DID,
                 Role::Editor,
+                Some(crate::crypto::unverified_key_approval(
+                    SCHEMA_VERSION,
+                    WORKSPACE_ID,
+                    NEW_DID,
+                    &crate::crypto::EncryptionKeyFields {
+                        x25519_public_key: &joiner.x25519_public_key_bytes().unwrap(),
+                        x25519_algo: "x25519",
+                        ml_kem_public_key: &joiner.ml_kem_public_key_bytes().unwrap(),
+                        ml_kem_algo: "ml-kem-768",
+                    },
+                )),
             )
             .await
             .unwrap();
@@ -702,8 +949,13 @@ mod keyring_supersede {
             .iter()
             .find(|m| m.did() == NEW_DID)
             .expect("joiner in current members");
-        let unwrapped_current =
-            crypto::unwrap_key(&member.wrapped_key, &bundle, &ctx, written.opake_version).unwrap();
+        let unwrapped_current = crypto::unwrap_key(
+            member.wrapped_key.as_ref().unwrap(),
+            &bundle,
+            &ctx,
+            written.opake_version,
+        )
+        .unwrap();
         assert_eq!(unwrapped_current.0, current_key.0);
 
         // And the joiner is in the rotation-0 history entry, unwrapping to the
@@ -719,13 +971,1042 @@ mod keyring_supersede {
             .find(|m| m.did() == NEW_DID)
             .expect("joiner granted rotation-0 history wrap");
         let unwrapped_hist = crypto::unwrap_key(
-            &hist_member.wrapped_key,
+            hist_member.wrapped_key.as_ref().unwrap(),
             &bundle,
             &ctx,
             written.opake_version,
         )
         .unwrap();
         assert_eq!(unwrapped_hist.0, historical_key.0);
+    }
+
+    // spec:workspace-membership § Adding a member is a manager-authored supersede
+    #[tokio::test]
+    async fn add_member_refuses_verification_failure_before_any_supersede_write() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let recipient = Identity::generate(NEW_DID, &mut OsRng);
+        let (workspace_uri, group_key, genesis) =
+            real_genesis_keyring(ALICE_DID, vec![(ALICE_DID, Role::Manager, &alice)]);
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafygenesis",
+            &genesis,
+            &genesis,
+        );
+
+        // An #opake method makes an unsigned public-key record a hard
+        // verification failure, rather than a confirmation candidate.
+        let anchor = crate::crypto::Ed25519SigningKey::from_bytes(&[71; 32])
+            .verifying_key()
+            .to_bytes();
+        mock.enqueue(anchored_did_doc_response(
+            NEW_DID,
+            "https://pds.newjoiner",
+            &anchor,
+        ));
+        mock.enqueue(public_key_response(
+            &format!("at://{NEW_DID}/at.opake.publicKey/self"),
+            &recipient,
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let err = opake
+            .add_workspace_member(&workspace_id, &group_key, &[], NEW_DID, Role::Editor, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::error::Error::VerificationFailed(_)));
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("createRecord")),
+            "a verification failure must be refused before any keyring write"
+        );
+    }
+
+    fn approval_for_unverified_member(
+        workspace_uri: &str,
+        member_did: &str,
+        identity: &Identity,
+    ) -> [u8; 32] {
+        crate::crypto::unverified_key_approval(
+            SCHEMA_VERSION,
+            workspace_uri,
+            member_did,
+            &crate::crypto::EncryptionKeyFields {
+                x25519_public_key: &identity.x25519_public_key_bytes().unwrap(),
+                x25519_algo: "x25519",
+                ml_kem_public_key: &identity.ml_kem_public_key_bytes().unwrap(),
+                ml_kem_algo: "ml-kem-768",
+            },
+        )
+    }
+
+    // spec:workspace-membership § Membership state is the keyring head's member list
+    #[tokio::test]
+    async fn manager_without_current_wrap_can_approve_unverified_member_without_re_admission() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+        // Approval is a manager-authorized head mutation, not a group-key
+        // operation. A manager retained with historical access can therefore
+        // record consent for another manager to repair later.
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == ALICE_DID)
+            .unwrap()
+            .wrapped_key = None;
+        let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+        // Approval resolution is network I/O; the live head is checked again
+        // immediately before the same-rotation supersede is written.
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3approval"),
+            "bafyapproval",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake
+            .approve_pending_workspace_member(&workspace_id, carol_did, approval)
+            .await
+            .unwrap();
+
+        let written = written_keyring(&mock);
+        let carol_entry = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        assert!(carol_entry.wrapped_key.is_none());
+        assert_eq!(
+            carol_entry
+                .unverified_key_approval
+                .as_ref()
+                .unwrap()
+                .decode()
+                .unwrap(),
+            approval
+        );
+        assert_eq!(written.rotation, head.rotation);
+    }
+
+    // spec:workspace-membership § Membership state is the keyring head's member list
+    #[tokio::test]
+    async fn restored_head_does_not_borrow_approval_from_deleted_repair() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, mut restored_head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let original_wrap = restored_head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key
+            .take();
+
+        // First observe a repair head with a matching approval. The indexer
+        // then rolls that distinct superseding head back to the prior genesis
+        // record. Fresh status must be rebuilt from the restored record, not
+        // from the now-deleted repair snapshot.
+        let mut deleted_repair = restored_head.clone();
+        let repaired_member = deleted_repair
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        repaired_member.wrapped_key = original_wrap;
+        repaired_member.unverified_key_approval = Some(AtBytes::from_raw(
+            &approval_for_unverified_member(&workspace_uri, carol_did, &carol),
+        ));
+        deleted_repair.supersedes = Some(workspace_uri.clone());
+        deleted_repair.supersedes_cid = Some("bafygenesis".into());
+        deleted_repair.lineage = Some(workspace_uri.clone());
+        let repair_uri = format!("at://{ALICE_DID}/at.opake.keyring/3repair");
+
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &repair_uri,
+            "bafyrepair",
+            &deleted_repair,
+            &restored_head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyrestored",
+            &restored_head,
+            &restored_head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let repaired_status = opake
+            .workspace_member_access_status(&workspace_id, carol_did)
+            .await
+            .unwrap();
+        assert_eq!(
+            repaired_status.verification,
+            MemberVerificationStatus::UnverifiedApproved,
+            "the pre-rollback repair genuinely carried an approval"
+        );
+        assert!(
+            repaired_status.has_current_wrap,
+            "the repair genuinely restored Carol's current wrap"
+        );
+
+        let status = opake
+            .workspace_member_access_status(&workspace_id, carol_did)
+            .await
+            .unwrap();
+
+        assert!(!status.has_current_wrap);
+        assert_eq!(
+            status.verification,
+            MemberVerificationStatus::UnverifiedApprovalRequired
+        );
+        assert!(status.can_repair);
+    }
+
+    // spec:account-verification § Key-bound approval is carried by the relationship's records
+    #[tokio::test]
+    async fn approval_refuses_either_unverified_encryption_key_substitution() {
+        let carol_did = "did:plc:carol";
+        for changed_half in ["x25519", "ml-kem"] {
+            let alice = Identity::generate(ALICE_DID, &mut OsRng);
+            let approved = Identity::generate(carol_did, &mut OsRng);
+            let replacement = Identity::generate(carol_did, &mut OsRng);
+            let (workspace_uri, _, mut head) = real_genesis_keyring(
+                ALICE_DID,
+                vec![
+                    (ALICE_DID, Role::Manager, &alice),
+                    (carol_did, Role::Editor, &approved),
+                ],
+            );
+            head.members
+                .iter_mut()
+                .find(|member| member.did() == carol_did)
+                .unwrap()
+                .wrapped_key = None;
+            let approval = approval_for_unverified_member(&workspace_uri, carol_did, &approved);
+            let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+            let mock = MockTransport::new();
+            enqueue_real_head(
+                &mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+            let approved_x = approved.x25519_public_key_bytes().unwrap();
+            let approved_ml = approved.ml_kem_public_key_bytes().unwrap();
+            let replacement_x = replacement.x25519_public_key_bytes().unwrap();
+            let replacement_ml = replacement.ml_kem_public_key_bytes().unwrap();
+            mock.enqueue(public_key_response_for_bundle(
+                &format!("at://{carol_did}/at.opake.publicKey/self"),
+                if changed_half == "x25519" {
+                    &replacement_x
+                } else {
+                    &approved_x
+                },
+                if changed_half == "ml-kem" {
+                    &replacement_ml
+                } else {
+                    &approved_ml
+                },
+            ));
+
+            let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+            let err = opake
+                .approve_pending_workspace_member(&workspace_id, carol_did, approval)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                crate::error::Error::UnverifiedKeyApprovalRequired { .. }
+            ));
+            assert!(
+                !mock
+                    .requests()
+                    .iter()
+                    .any(|request| request.url.contains("createRecord")),
+                "{changed_half} substitution must not write an approval"
+            );
+        }
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[tokio::test]
+    async fn non_manager_cannot_approve_or_repair_another_members_wrap() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, group_key, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        let mut opake = opake_for_identity(BOB_DID, bob, mock.clone());
+        let err = opake
+            .repair_workspace_member_wrap(&workspace_id, &group_key, carol_did, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::error::Error::Auth(_)));
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("createRecord")),
+            "a non-manager must not write a repair"
+        );
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[tokio::test]
+    async fn same_rotation_repair_wraps_only_the_pending_member_and_preserves_the_head() {
+        use crate::crypto::{PrivateKeyBundle, WrapContext};
+
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, genesis) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let group_key = crate::crypto::generate_content_key(&mut OsRng);
+        let mut head = real_rotated_head(
+            &workspace_uri,
+            &genesis,
+            &group_key,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+        let pending = head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        pending.wrapped_key = None;
+        pending.unverified_key_approval = Some(AtBytes::from_raw(&approval));
+        let bob_before = serde_json::to_value(
+            head.members
+                .iter()
+                .find(|member| member.did() == BOB_DID)
+                .unwrap(),
+        )
+        .unwrap();
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3rotation2");
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &head_uri,
+            "bafyhead",
+            &head,
+            &genesis,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &head_uri,
+            "bafyhead",
+            &head,
+            &genesis,
+        );
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3repair"),
+            "bafyrepair",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake
+            .repair_workspace_member_wrap(&workspace_id, &group_key, carol_did, None)
+            .await
+            .unwrap();
+        let written = written_keyring(&mock);
+        assert_eq!(written.rotation, head.rotation, "repair is same-rotation");
+        assert_eq!(
+            serde_json::to_value(&written.key_history).unwrap(),
+            serde_json::to_value(&head.key_history).unwrap(),
+            "repair preserves the real historical wraps verbatim"
+        );
+        assert!(
+            written.key_history.iter().all(|entry| entry.rotation != 1),
+            "repair at rotation 2 must not claim the missing rotation 1 was repaired"
+        );
+        assert_eq!(
+            serde_json::to_value(
+                written
+                    .members
+                    .iter()
+                    .find(|member| member.did() == BOB_DID)
+                    .unwrap(),
+            )
+            .unwrap(),
+            bob_before,
+            "unrelated member entry must be carried verbatim"
+        );
+        let carol_wrap = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key
+            .as_ref()
+            .expect("repair supplies only Carol's missing current wrap");
+        let x25519 = carol.x25519_private_key_bytes().unwrap();
+        let ml_kem = carol.ml_kem_private_key_bytes().unwrap();
+        let unwrapped = crate::crypto::unwrap_key(
+            carol_wrap,
+            &PrivateKeyBundle {
+                x25519: &x25519,
+                ml_kem: &ml_kem,
+            },
+            &WrapContext::Keyring {
+                uri: &workspace_uri,
+            },
+            written.opake_version,
+        )
+        .unwrap();
+        assert_eq!(unwrapped.0, group_key.0);
+    }
+
+    // spec:key-rotation § The rotation event is synchronous and self-sufficient
+    #[tokio::test]
+    async fn same_rotation_repair_rejects_stale_head_without_readding_removed_member() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, group_key, mut prior) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+        let pending = prior
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        pending.wrapped_key = None;
+        pending.unverified_key_approval = Some(AtBytes::from_raw(&approval));
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let stale_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3pending");
+        let mut stale_head = prior.clone();
+        stale_head.supersedes = Some(workspace_uri.clone());
+        stale_head.lineage = Some(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &stale_head_uri,
+            "bafystale",
+            &stale_head,
+            &prior,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+        // Carol was removed while the public-key lookup was in flight.  The
+        // second chain resolution returns that newer, real head; repair must
+        // fail rather than overwrite it or re-add Carol from `stale_head`.
+        let removed_head_uri = format!("at://{ALICE_DID}/at.opake.keyring/3removed");
+        let mut removed_head = stale_head.clone();
+        removed_head
+            .members
+            .retain(|member| member.did() != carol_did);
+        removed_head.supersedes = Some(workspace_uri.clone());
+        removed_head.lineage = Some(workspace_uri.clone());
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &removed_head_uri,
+            "bafyremoved",
+            &removed_head,
+            &prior,
+        );
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let err = opake
+            .repair_workspace_member_wrap(&workspace_id, &group_key, carol_did, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::error::Error::CasConflict(_)));
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("createRecord")),
+            "stale repair must not overwrite a removal or re-add its member"
+        );
+    }
+
+    // spec:key-rotation § The rotation event is synchronous and self-sufficient
+    #[tokio::test]
+    async fn removal_excludes_unverifiable_member_keeps_history_and_withholds_new_key() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, group_key, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .unverified_key_approval = Some(AtBytes::from_raw(&approval));
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        // Carol's published record is unsigned even though her DID document
+        // requires it.  This is a resolution error, so removal must continue
+        // without a new Carol wrap rather than let her host veto Bob's removal.
+        let anchor = crate::crypto::Ed25519SigningKey::from_bytes(&[72; 32])
+            .verifying_key()
+            .to_bytes();
+        mock.enqueue(anchored_did_doc_response(
+            carol_did,
+            "https://pds.carol",
+            &anchor,
+        ));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3removal"),
+            "bafyremoval",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake
+            .remove_workspace_member(&workspace_id, &group_key, BOB_DID)
+            .await
+            .unwrap();
+        assert_eq!(outcome.rotation, head.rotation + 1);
+        assert_eq!(outcome.excluded_members.len(), 1);
+        assert_eq!(outcome.excluded_members[0].did, carol_did);
+        assert!(matches!(
+            outcome.excluded_members[0].reason,
+            ExcludedMemberReason::VerificationFailed
+        ));
+
+        let written = written_keyring(&mock);
+        assert!(
+            written.members.iter().all(|member| member.did() != BOB_DID),
+            "removed member must not remain in the current head"
+        );
+        let carol_current = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .expect("excluded member remains admitted by DID and role");
+        assert!(matches!(carol_current.role, Role::Editor));
+        assert!(carol_current.wrapped_key.is_none());
+        assert_eq!(
+            carol_current
+                .unverified_key_approval
+                .as_ref()
+                .unwrap()
+                .decode()
+                .unwrap(),
+            approval,
+            "an exclusion preserves the relationship's prior approval"
+        );
+        let historical_carol = written
+            .key_history
+            .iter()
+            .find(|entry| entry.rotation == head.rotation)
+            .and_then(|entry| {
+                entry
+                    .members
+                    .iter()
+                    .find(|member| member.did() == carol_did)
+            })
+            .expect("Carol's old real wrap remains in historical membership");
+        assert!(historical_carol.wrapped_key.is_some());
+        assert!(
+            written
+                .key_history
+                .iter()
+                .all(|entry| entry.members.iter().all(|member| member.did() != BOB_DID)),
+            "removed member must not receive a historical snapshot in the new head"
+        );
+        assert!(
+            Opake::<MockTransport, OsRng, NoopStorage>::try_unwrap_workspace_key(
+                &written.members,
+                carol_did,
+                &workspace_uri,
+                &carol.owned_private_keys().unwrap().bundle(),
+                written.opake_version,
+            )
+            .unwrap()
+            .is_none(),
+            "a retained DID never receives an old wrap copied as the new generation"
+        );
+        assert!(matches!(
+            Opake::<MockTransport, OsRng, NoopStorage>::try_unwrap_workspace_key(
+                &written.members,
+                BOB_DID,
+                &workspace_uri,
+                &bob.owned_private_keys().unwrap().bundle(),
+                written.opake_version,
+            ),
+            Err(crate::error::Error::NotFound(_))
+        ));
+    }
+
+    // A transient PLC audit outage for a beneficiary leaves her signature
+    // verified against the current DID document; only the replacement question
+    // goes unanswered. She keeps her re-wrap and the operator is told the
+    // history could not be read.
+    // spec: account-verification § Resolution reads the anchor's history and reports a replacement
+    #[tokio::test]
+    async fn removal_rewraps_beneficiary_whose_plc_audit_is_temporarily_unavailable() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, group_key, head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        let signing = crate::crypto::Ed25519SigningKey::from_bytes(&[73; 32]);
+        let anchor = signing.verifying_key().to_bytes();
+        mock.enqueue(anchored_did_doc_response(
+            carol_did,
+            "https://pds.carol",
+            &anchor,
+        ));
+        let mut signed_record = crate::records::PublicKeyRecord::new(
+            &carol.x25519_public_key_bytes().unwrap(),
+            &carol.ml_kem_public_key_bytes().unwrap(),
+            "2026-04-01T00:00:00Z",
+        );
+        signed_record.sign(carol_did, &signing).unwrap();
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": format!("at://{carol_did}/at.opake.publicKey/self"),
+                "cid": "bafypubkey",
+                "value": signed_record,
+            }))
+            .unwrap(),
+        });
+        mock.enqueue(HttpResponse {
+            status: 503,
+            headers: vec![],
+            body: b"temporary PLC audit outage".to_vec(),
+        });
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3removal"),
+            "bafyremoval",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake
+            .remove_workspace_member(&workspace_id, &group_key, BOB_DID)
+            .await
+            .unwrap();
+
+        assert!(
+            outcome.excluded_members.is_empty(),
+            "an unreadable audit history is a notice, not an exclusion: {:?}",
+            outcome.excluded_members,
+        );
+        assert!(
+            outcome
+                .verification_notices
+                .iter()
+                .any(|notice| notice.did == carol_did
+                    && notice.verification
+                        == crate::resolve::VerificationState::Verified {
+                            anchor_history: crate::resolve::AnchorHistory::Unavailable
+                        }),
+            "the operator is told the replacement history could not be read"
+        );
+        let written = written_keyring(&mock);
+        assert!(written.members.iter().all(|member| member.did() != BOB_DID));
+        let carol_after = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .expect("a verified beneficiary stays admitted");
+        assert!(
+            carol_after.wrapped_key.is_some(),
+            "a verified beneficiary is re-wrapped even when the audit history is unavailable"
+        );
+        assert!(
+            written
+                .key_history
+                .iter()
+                .any(|entry| entry.members.iter().any(|member| member.did() == carol_did)),
+            "the completed removal preserves Carol's historical wrap record"
+        );
+        assert!(
+            mock.requests()
+                .iter()
+                .any(|request| request.url.ends_with(&format!("/{carol_did}/log/audit"))),
+            "the transient failure must be the PLC audit request, not the recipient PDS lookup"
+        );
+    }
+
+    // spec:key-rotation § The rotation event is synchronous and self-sufficient
+    #[tokio::test]
+    async fn removal_rewraps_only_the_unchanged_approved_unverified_bundle() {
+        let carol_did = "did:plc:carol";
+        for bundle in ["unchanged", "x25519-changed", "ml-kem-changed"] {
+            let alice = Identity::generate(ALICE_DID, &mut OsRng);
+            let bob = Identity::generate(BOB_DID, &mut OsRng);
+            let carol = Identity::generate(carol_did, &mut OsRng);
+            let replacement = Identity::generate(carol_did, &mut OsRng);
+            let (workspace_uri, group_key, mut head) = real_genesis_keyring(
+                ALICE_DID,
+                vec![
+                    (ALICE_DID, Role::Manager, &alice),
+                    (BOB_DID, Role::Editor, &bob),
+                    (carol_did, Role::Editor, &carol),
+                ],
+            );
+            let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+            head.members
+                .iter_mut()
+                .find(|member| member.did() == carol_did)
+                .unwrap()
+                .unverified_key_approval = Some(AtBytes::from_raw(&approval));
+            let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+            let mock = MockTransport::new();
+            enqueue_real_head(
+                &mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+            let x25519 = carol.x25519_public_key_bytes().unwrap();
+            let ml_kem = carol.ml_kem_public_key_bytes().unwrap();
+            let replacement_x25519 = replacement.x25519_public_key_bytes().unwrap();
+            let replacement_ml_kem = replacement.ml_kem_public_key_bytes().unwrap();
+            mock.enqueue(public_key_response_for_bundle(
+                &format!("at://{carol_did}/at.opake.publicKey/self"),
+                if bundle == "x25519-changed" {
+                    &replacement_x25519
+                } else {
+                    &x25519
+                },
+                if bundle == "ml-kem-changed" {
+                    &replacement_ml_kem
+                } else {
+                    &ml_kem
+                },
+            ));
+            mock.enqueue(create_record_response(
+                &format!("at://{ALICE_DID}/at.opake.keyring/3{bundle}"),
+                "bafyrotation",
+            ));
+
+            let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+            let outcome = opake
+                .remove_workspace_member(&workspace_id, &group_key, BOB_DID)
+                .await
+                .unwrap();
+            let written = written_keyring(&mock);
+            let carol_current = written
+                .members
+                .iter()
+                .find(|member| member.did() == carol_did)
+                .unwrap();
+            if bundle == "unchanged" {
+                assert!(outcome.excluded_members.is_empty());
+                let private_keys = carol.owned_private_keys().unwrap();
+                let unwrapped = crate::crypto::unwrap_key(
+                    carol_current.wrapped_key.as_ref().unwrap(),
+                    &private_keys.bundle(),
+                    &crate::crypto::WrapContext::Keyring {
+                        uri: &workspace_uri,
+                    },
+                    written.opake_version,
+                )
+                .unwrap();
+                assert_eq!(unwrapped.0, outcome.group_key.0);
+                assert_eq!(
+                    carol_current
+                        .unverified_key_approval
+                        .as_ref()
+                        .unwrap()
+                        .decode()
+                        .unwrap(),
+                    approval
+                );
+            } else {
+                assert!(carol_current.wrapped_key.is_none());
+                assert!(matches!(
+                    outcome.excluded_members.as_slice(),
+                    [ExcludedMember {
+                        did,
+                        reason: ExcludedMemberReason::ApprovalRequired,
+                    }] if did == carol_did
+                ));
+            }
+        }
+    }
+
+    // spec:workspace-membership § Removal rotates the group key; leave does not
+    #[tokio::test]
+    async fn removal_self_wrap_uses_local_identity_without_counterparty_approval() {
+        use crate::crypto::{PrivateKeyBundle, WrapContext};
+
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let (workspace_uri, group_key, genesis) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+            ],
+        );
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafygenesis",
+            &genesis,
+            &genesis,
+        );
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3selfwrap"),
+            "bafyselfwrap",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake
+            .remove_workspace_member(&workspace_id, &group_key, BOB_DID)
+            .await
+            .unwrap();
+        let written = written_keyring(&mock);
+        let alice_entry = written
+            .members
+            .iter()
+            .find(|member| member.did() == ALICE_DID)
+            .unwrap();
+        assert!(alice_entry.unverified_key_approval.is_none());
+        let x25519 = opake.identity().x25519_private_key_bytes().unwrap();
+        let ml_kem = opake.identity().ml_kem_private_key_bytes().unwrap();
+        let unwrapped = crate::crypto::unwrap_key(
+            alice_entry.wrapped_key.as_ref().unwrap(),
+            &PrivateKeyBundle {
+                x25519: &x25519,
+                ml_kem: &ml_kem,
+            },
+            &WrapContext::Keyring {
+                uri: &workspace_uri,
+            },
+            written.opake_version,
+        )
+        .unwrap();
+        assert_eq!(unwrapped.0, outcome.group_key.0);
+        assert!(
+            mock.requests()
+                .iter()
+                .all(|request| !request.url.contains("at.opake.publicKey")),
+            "the author self-wrap must use local keys and make no approval-resolution request"
+        );
+    }
+
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[tokio::test]
+    async fn editor_self_removal_carries_remaining_wrap_presence_and_approval_verbatim() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let carol_before = head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        carol_before.wrapped_key = None;
+        let approval = approval_for_unverified_member(&workspace_uri, carol_did, &carol);
+        carol_before.unverified_key_approval = Some(AtBytes::from_raw(&approval));
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        mock.enqueue(create_record_response(
+            &format!("at://{BOB_DID}/at.opake.keyring/3leave"),
+            "bafyleave",
+        ));
+
+        let mut opake = opake_for_identity(BOB_DID, bob, mock.clone());
+        opake.leave_workspace(&workspace_id).await.unwrap();
+        let written = written_keyring(&mock);
+        assert!(written.members.iter().all(|member| member.did() != BOB_DID));
+        let carol_after = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .unwrap();
+        assert!(carol_after.wrapped_key.is_none());
+        assert_eq!(
+            carol_after
+                .unverified_key_approval
+                .as_ref()
+                .unwrap()
+                .decode()
+                .unwrap(),
+            approval
+        );
+        assert_eq!(written.rotation, head.rotation);
+        assert_eq!(
+            serde_json::to_value(&written.key_history).unwrap(),
+            serde_json::to_value(&head.key_history).unwrap()
+        );
     }
 
     /// A member list for a workspace hosted on another PDS was fetched with
@@ -832,10 +2113,7 @@ mod keyring_supersede {
             record: Keyring {
                 opake_version: SCHEMA_VERSION,
                 algo: "aes-256-gcm".into(),
-                members: vec![KeyringMember {
-                    wrapped_key: wrapped,
-                    role: Role::Manager,
-                }],
+                members: vec![KeyringMember::with_wrap(wrapped, Role::Manager)],
                 rotation: 0,
                 key_history: Vec::new(),
                 encrypted_metadata,
@@ -933,6 +2211,443 @@ mod keyring_supersede {
             );
         }
     }
+
+    /// A verification-driven exclusion can remove a member's current wrap
+    /// while retaining their rotation-zero wrap in `keyHistory`. A download of
+    /// pre-exclusion content must return that historical key for the CLI cache;
+    /// returning `ws.current_key()` would reject a successful historical read.
+    // spec:workspace-membership § Removal rotates the group key; leave does not
+    #[tokio::test]
+    #[allow(non_snake_case)] // bug__ regression-naming convention
+    async fn bug__historical_member_download_returns_document_rotation_key() {
+        use crate::crypto::{
+            encrypt_blob, encrypt_metadata, generate_content_key, wrap_content_key_for_keyring,
+            DocumentMetadata, SealContext, SealType,
+        };
+        use crate::records::{
+            BlobRef, CidLink, Document, Encryption, KeyringEncryption, KeyringRef,
+        };
+        use base64::Engine;
+
+        const DOC_URI: &str = "at://did:plc:alice/at.opake.document/historical";
+        const HEAD_URI: &str = "at://did:plc:alice/at.opake.keyring/current-head";
+
+        let mock = MockTransport::new();
+        let member = Identity::generate(BOB_DID, &mut OsRng);
+        let owner = Identity::generate(ALICE_DID, &mut OsRng);
+        let mut opake = opake_for_identity(BOB_DID, member, mock.clone());
+        let member_identity = opake.identity();
+
+        let (workspace_id, historical_group_key, genesis) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &owner),
+                (BOB_DID, Role::Editor, member_identity),
+            ],
+        );
+        let current_group_key = generate_content_key(&mut OsRng);
+        let mut head = real_rotated_head(
+            &workspace_id,
+            &genesis,
+            &current_group_key,
+            vec![(ALICE_DID, Role::Manager, &owner)],
+        );
+        head.members.push(KeyringMember {
+            did: BOB_DID.into(),
+            role: Role::Editor,
+            wrapped_key: None,
+            unverified_key_approval: Some(AtBytes {
+                encoded: base64::engine::general_purpose::STANDARD.encode([0u8; 32]),
+            }),
+        });
+        assert!(head
+            .members
+            .iter()
+            .find(|member| member.did() == BOB_DID)
+            .is_some_and(|member| member.wrapped_key.is_none()));
+
+        let content_key = generate_content_key(&mut OsRng);
+        let blob = encrypt_blob(
+            &content_key,
+            b"historical workspace content",
+            &SealContext::new(DOC_URI, SealType::DocumentBlob),
+            &mut OsRng,
+        )
+        .unwrap();
+        let metadata = encrypt_metadata(
+            &content_key,
+            &DocumentMetadata {
+                name: "historical.txt".into(),
+                mime_type: Some("text/plain".into()),
+                size: Some(28),
+                tags: vec![],
+                description: None,
+            },
+            &SealContext::new(DOC_URI, SealType::DocumentMetadata),
+            &mut OsRng,
+        )
+        .unwrap();
+        let wrapped_content_key =
+            wrap_content_key_for_keyring(&content_key, &historical_group_key).unwrap();
+        let document = Document::new(
+            BlobRef {
+                blob_type: "blob".into(),
+                reference: CidLink {
+                    cid: "bafyhistoricalblob".into(),
+                },
+                mime_type: "application/octet-stream".into(),
+                size: blob.ciphertext.len() as u64,
+            },
+            Encryption::Keyring(KeyringEncryption {
+                keyring_ref: KeyringRef {
+                    keyring: workspace_id.clone(),
+                    wrapped_content_key: AtBytes {
+                        encoded: base64::engine::general_purpose::STANDARD
+                            .encode(wrapped_content_key),
+                    },
+                    rotation: 0,
+                },
+                algo: "aes-256-gcm".into(),
+                nonce: AtBytes {
+                    encoded: base64::engine::general_purpose::STANDARD.encode(blob.nonce),
+                },
+            }),
+            metadata,
+            "2026-09-12T00:00:02Z".into(),
+        )
+        .with_workspace_id(workspace_id.clone());
+        let document_response = || HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": DOC_URI,
+                "cid": "bafydoc",
+                "value": document,
+            }))
+            .unwrap(),
+        };
+
+        // document reference, indexer head + keyring chain, workspace
+        // resolution, then the actual document/blob download.
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(document_response());
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "workspace_id": workspace_id,
+                "keyring": { "head_uri": HEAD_URI, "head_cid": "bafyhead" },
+                "root_directory": null,
+            }))
+            .unwrap(),
+        });
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(HEAD_URI, "bafyhead", &head));
+        mock.enqueue(get_keyring_response(&workspace_id, "bafygenesis", &genesis));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(get_keyring_response(HEAD_URI, "bafyhead", &head));
+        mock.enqueue(did_doc_response(ALICE_DID, "https://pds.did-plc-alice"));
+        mock.enqueue(document_response());
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: blob.ciphertext.clone(),
+        });
+
+        let result = opake.download_as_workspace_member(DOC_URI).await.unwrap();
+        assert_eq!(result.plaintext, b"historical workspace content");
+        assert_eq!(result.rotation, 0);
+        assert_eq!(result.group_key.0, historical_group_key.0);
+    }
+    // -----------------------------------------------------------------
+    // Unattended member-wrap repair sweep
+    // -----------------------------------------------------------------
+
+    /// `/api/keyrings` answering with the caller's member workspaces.
+    fn member_workspaces_response(workspaces: Vec<serde_json::Value>) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({ "workspaces": workspaces })).unwrap(),
+        }
+    }
+
+    fn workspace_envelope(uri: &str, keyring: &Keyring) -> serde_json::Value {
+        serde_json::json!({
+            "uri": uri,
+            "record": keyring,
+            "indexedAt": "2026-09-12T00:00:01Z",
+        })
+    }
+
+    /// A chain-head answer for a workspace the indexer has not consumed yet —
+    /// the visibility gap the repair path retries and eventually times out on.
+    fn unindexed_chain_head_response() -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "workspace_id": WORKSPACE_ID,
+                "keyring": null,
+                "root_directory": null,
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn not_found_response() -> HttpResponse {
+        HttpResponse {
+            status: 404,
+            headers: vec![],
+            body: br#"{"error":"NotFound","message":"no such DID"}"#.to_vec(),
+        }
+    }
+
+    /// `fn() -> u64` carries no state, so each sweep test that needs a moving
+    /// clock owns a static only it writes.
+    static HUMAN_DEFERRAL_CLOCK_MICROS: AtomicU64 = AtomicU64::new(1_700_000_000_000_000);
+    static VISIBILITY_CLOCK_MICROS: AtomicU64 = AtomicU64::new(1_700_000_000_000_000);
+
+    fn human_deferral_now_micros() -> u64 {
+        HUMAN_DEFERRAL_CLOCK_MICROS.load(Ordering::SeqCst)
+    }
+
+    fn visibility_now_micros() -> u64 {
+        VISIBILITY_CLOCK_MICROS.load(Ordering::SeqCst)
+    }
+
+    /// The unattended runner never supplies a confirmation, so a member whose
+    /// keys need one is not work the next tick can make progress on. Re-asking
+    /// the network every pass would spend a resolution round-trip per member
+    /// per tick for an answer only a human changes.
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[tokio::test]
+    async fn sweep_holds_a_member_awaiting_a_decision_until_the_backoff_expires() {
+        HUMAN_DEFERRAL_CLOCK_MICROS.store(1_700_000_000_000_000, Ordering::SeqCst);
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        // Admitted, no current wrap, and no recorded approval for the keys the
+        // resolver will return: exactly the state a manager must decide on.
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let mock = MockTransport::new();
+        let enqueue_candidate_pass = |mock: &MockTransport| {
+            mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+                &workspace_uri,
+                &head,
+            )]));
+            enqueue_real_head(
+                mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+            mock.enqueue(public_key_response(
+                &format!("at://{carol_did}/at.opake.publicKey/self"),
+                &carol,
+            ));
+        };
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake.now_micros_fn = human_deferral_now_micros;
+
+        enqueue_candidate_pass(&mock);
+        let first = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(first.attempted, 1);
+        assert_eq!(first.awaiting_approval, 1);
+        assert_eq!(first.deferred_human_decision, 0);
+        let after_first = mock.requests().len();
+
+        mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+            &workspace_uri,
+            &head,
+        )]));
+        let second = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(second.attempted, 0, "deferred member is not re-resolved");
+        assert_eq!(second.deferred_human_decision, 1);
+        assert_eq!(
+            mock.requests().len(),
+            after_first + 1,
+            "a held member costs the discovery call and nothing else"
+        );
+
+        HUMAN_DEFERRAL_CLOCK_MICROS.fetch_add(
+            MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS + 1,
+            Ordering::SeqCst,
+        );
+        enqueue_candidate_pass(&mock);
+        let third = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(
+            third.attempted, 1,
+            "the hold expires rather than persisting"
+        );
+        assert_eq!(third.awaiting_approval, 1);
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("createRecord")),
+            "the unattended runner never writes without a decision"
+        );
+    }
+
+    /// One workspace whose head the indexer has not caught up on must not cost
+    /// every other workspace its pass — the runner's unit of deferral is the
+    /// head, not the sweep.
+    // spec:background-work § Remaining work is derived from records, never stored
+    #[tokio::test]
+    async fn sweep_defers_only_the_head_whose_visibility_window_expires() {
+        VISIBILITY_CLOCK_MICROS.store(1_700_000_000_000_000, Ordering::SeqCst);
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let dave_did = "did:plc:dave";
+        let dave = Identity::generate(dave_did, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+
+        let (stuck_uri, _, mut stuck_head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (dave_did, Role::Editor, &dave),
+            ],
+        );
+        stuck_head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == dave_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let (healthy_uri, _, mut healthy_head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        healthy_head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let mock = MockTransport::new();
+        mock.enqueue(member_workspaces_response(vec![
+            workspace_envelope(&stuck_uri, &stuck_head),
+            workspace_envelope(&healthy_uri, &healthy_head),
+        ]));
+        // The stuck head answers "not indexed yet" until the retry window is
+        // spent; the injected sleeper is what advances the clock past it.
+        mock.enqueue(unindexed_chain_head_response());
+        mock.enqueue(unindexed_chain_head_response());
+        enqueue_real_head(
+            &mock,
+            &healthy_uri,
+            &healthy_uri,
+            "bafyhealthy",
+            &healthy_head,
+            &healthy_head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake.now_micros_fn = visibility_now_micros;
+        opake.set_sleep_fn(Box::new(|_| {
+            VISIBILITY_CLOCK_MICROS.fetch_add(20 * 1_000_000, Ordering::SeqCst);
+            Box::pin(async {})
+        }));
+
+        let outcome = opake.sweep_member_wrap_repairs().await.unwrap();
+
+        assert_eq!(outcome.deferred_visibility, 1);
+        assert_eq!(
+            outcome.attempted, 2,
+            "the timed-out head does not end the pass"
+        );
+        assert_eq!(
+            outcome.awaiting_approval, 1,
+            "the second workspace was still resolved"
+        );
+        assert!(
+            mock.requests()
+                .iter()
+                .any(|request| request.url.contains(carol_did)),
+            "the workspace behind the stuck one must still be reached"
+        );
+    }
+
+    /// The count limit is what keeps one large workspace from monopolizing a
+    /// pass. Beyond it the remaining candidates are reported as deferred work,
+    /// not attempted and not dropped.
+    // spec:background-work § Remaining work is derived from records, never stored
+    #[tokio::test]
+    async fn sweep_stops_at_the_per_pass_count_limit_and_reports_the_remainder() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let (workspace_uri, _, mut head) =
+            real_genesis_keyring(ALICE_DID, vec![(ALICE_DID, Role::Manager, &alice)]);
+        let overflow_did = format!("did:plc:pending{MAX_MEMBER_WRAP_REPAIRS_PER_PASS}");
+        for index in 0..=MAX_MEMBER_WRAP_REPAIRS_PER_PASS {
+            head.members.push(KeyringMember {
+                did: format!("did:plc:pending{index}"),
+                role: Role::Editor,
+                wrapped_key: None,
+                unverified_key_approval: None,
+            });
+        }
+
+        let mock = MockTransport::new();
+        mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+            &workspace_uri,
+            &head,
+        )]));
+        // Each attempt re-reads the head, then fails to resolve the member.
+        // What the attempt costs is irrelevant here; that a 33rd is never
+        // started is the property.
+        for _ in 0..MAX_MEMBER_WRAP_REPAIRS_PER_PASS {
+            enqueue_real_head(
+                &mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(not_found_response());
+        }
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake.sweep_member_wrap_repairs().await.unwrap();
+
+        assert_eq!(outcome.attempted, MAX_MEMBER_WRAP_REPAIRS_PER_PASS);
+        assert_eq!(outcome.deferred_by_budget, 1);
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains(&overflow_did)),
+            "the candidate past the limit must not be touched this pass"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,10 +2716,7 @@ mod workspace_resolution {
         let keyring = Keyring {
             opake_version: SCHEMA_VERSION,
             algo: "aes-256-gcm".into(),
-            members: vec![KeyringMember {
-                wrapped_key: wrapped,
-                role: Role::Manager,
-            }],
+            members: vec![KeyringMember::with_wrap(wrapped, Role::Manager)],
             rotation: 0,
             key_history: Vec::new(),
             encrypted_metadata,
@@ -1106,5 +2818,240 @@ mod workspace_resolution {
             }
             other => panic!("expected VisibilityTimeout, got {other:?}"),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pending-share listing
+// ---------------------------------------------------------------------------
+
+mod pending_share_listing {
+    use super::*;
+    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
+    use crate::crypto::PendingShareMetadata;
+    use crate::records::{
+        AtBytes, BlobRef, CidLink, DirectEncryption, Document, Encryption, EncryptionEnvelope,
+        PendingShare, WrappedKey,
+    };
+    use crate::storage::Identity;
+    use crate::test_utils::{dummy_encrypted_metadata, TestKeys};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+    const OWNER_DID: &str = "did:plc:pendingowner";
+    const DOC_URI: &str = "at://did:plc:pendingowner/at.opake.document/3doc";
+
+    fn opake_for_identity(
+        identity: Identity,
+        mock: MockTransport,
+    ) -> Opake<MockTransport, OsRng, NoopStorage> {
+        let session = Session::Legacy(LegacySession {
+            did: OWNER_DID.into(),
+            handle: "test.handle".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        });
+        let client = XrpcClient::with_session(mock, format!("https://pds.{OWNER_DID}"), session);
+        Opake::new(
+            client,
+            OWNER_DID.into(),
+            identity,
+            OsRng,
+            NoopStorage,
+            test_now_micros,
+        )
+        .unwrap()
+    }
+
+    fn json_response(body: serde_json::Value) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&body).unwrap(),
+        }
+    }
+
+    fn list_response(records: Vec<(&str, PendingShare)>) -> HttpResponse {
+        json_response(serde_json::json!({
+            "records": records
+                .into_iter()
+                .map(|(uri, record)| serde_json::json!({
+                    "uri": uri,
+                    "cid": "bafypending",
+                    "value": record,
+                }))
+                .collect::<Vec<_>>(),
+        }))
+    }
+
+    fn document_response(wrapped_key: WrappedKey) -> HttpResponse {
+        let doc = Document::new(
+            BlobRef {
+                blob_type: "blob".into(),
+                reference: CidLink {
+                    cid: "bafyblob".into(),
+                },
+                mime_type: "application/octet-stream".into(),
+                size: 16,
+            },
+            Encryption::Direct(DirectEncryption {
+                envelope: EncryptionEnvelope {
+                    algo: "aes-256-gcm".into(),
+                    nonce: AtBytes {
+                        encoded: BASE64.encode([0u8; 12]),
+                    },
+                    keys: vec![wrapped_key],
+                },
+            }),
+            dummy_encrypted_metadata(),
+            "2026-03-01T00:00:00Z".into(),
+        );
+        json_response(serde_json::json!({
+            "uri": DOC_URI,
+            "cid": "bafydoc",
+            "value": doc,
+        }))
+    }
+
+    fn pending_share(content_key: &crate::crypto::ContentKey, recipient_did: &str) -> PendingShare {
+        let metadata = PendingShareMetadata {
+            permissions: Some("read".into()),
+            note: None,
+            recipient_did: recipient_did.into(),
+            allow_unverified_first_publication: true,
+        };
+        let context =
+            crate::crypto::SealContext::new(DOC_URI, crate::crypto::SealType::PendingShareMetadata);
+        let encrypted_metadata =
+            crate::crypto::encrypt_metadata(content_key, &metadata, &context, &mut OsRng).unwrap();
+        PendingShare::new(
+            DOC_URI.into(),
+            recipient_did.into(),
+            encrypted_metadata,
+            "2026-03-01T00:00:00Z".into(),
+        )
+    }
+
+    /// Queued intents against the same document share one content key. Fetching
+    /// it per entry turns a queue of n shares on one file into n PDS round
+    /// trips for a listing the owner asked for once.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_fetches_one_content_key_per_document() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+        let wrapped_key = crate::crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            OWNER_DID,
+            &crate::crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3one",
+                pending_share(&content_key, "did:plc:first"),
+            ),
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3two",
+                pending_share(&content_key, "did:plc:second"),
+            ),
+        ]));
+        mock.enqueue(document_response(wrapped_key));
+
+        let mut opake = opake_for_identity(keys.identity, mock.clone());
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].recipient_did.as_deref(), Some("did:plc:first"));
+        assert_eq!(entries[1].recipient_did.as_deref(), Some("did:plc:second"));
+        assert!(entries.iter().all(|e| e.recipient_did_error.is_none()));
+
+        let fetches = mock
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("getRecord"))
+            .count();
+        assert_eq!(fetches, 1, "expected one content-key fetch per document");
+    }
+
+    /// A single corrupt intent must not silently vanish from the listing, nor
+    /// take its siblings' readable DIDs with it.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_reports_a_cause_for_an_unreadable_intent() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+        let wrapped_key = crate::crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            OWNER_DID,
+            &crate::crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+
+        // Sealed under a key that is not this document's: a well-formed
+        // envelope the owner's content key cannot open.
+        let foreign_key = crate::crypto::generate_content_key(&mut OsRng);
+        let corrupt = pending_share(&foreign_key, "did:plc:unreadable");
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3bad",
+                corrupt,
+            ),
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3good",
+                pending_share(&content_key, "did:plc:sibling"),
+            ),
+        ]));
+        mock.enqueue(document_response(wrapped_key));
+
+        let mut opake = opake_for_identity(keys.identity, mock);
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].recipient_did, None);
+        assert_eq!(
+            entries[0].recipient_did_error.as_deref(),
+            Some("the queued intent metadata could not be decrypted")
+        );
+        assert_eq!(entries[1].recipient_did.as_deref(), Some("did:plc:sibling"));
+        assert_eq!(entries[1].recipient_did_error, None);
+    }
+
+    /// A PDS that will not serve the document leaves the queue readable but
+    /// the DIDs unknown; the owner is told which of the two happened.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_distinguishes_a_transport_failure_from_a_corrupt_intent() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![(
+            "at://did:plc:pendingowner/at.opake.pendingShare/3one",
+            pending_share(&content_key, "did:plc:first"),
+        )]));
+        mock.enqueue(HttpResponse {
+            status: 500,
+            headers: vec![],
+            body: br#"{"error":"InternalServerError","message":"boom"}"#.to_vec(),
+        });
+
+        let mut opake = opake_for_identity(keys.identity, mock);
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].recipient_did, None);
+        let reason = entries[0].recipient_did_error.as_deref().unwrap();
+        assert!(
+            reason.starts_with("the document record could not be fetched"),
+            "got: {reason}"
+        );
     }
 }

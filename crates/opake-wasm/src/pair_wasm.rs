@@ -58,16 +58,15 @@ pub async fn create_pair_request_js(
 
 /// Poll once for a pair response matching `request_rkey`.
 ///
-/// Returns `true` if a response was found and pairing completed — the
-/// Identity is now persisted to Storage and `Opake.init` will succeed.
-/// Returns `false` if nothing matched yet; the SDK's `awaitPairCompletion`
-/// wraps this in a `setTimeout` loop.
+/// Returns completion and the verification state established for the paired
+/// identity. The identity is persisted to Storage before a completed result is
+/// returned; the SDK's `awaitPairCompletion` wraps polling in a timeout loop.
 #[wasm_bindgen(js_name = tryCompletePair)]
 pub async fn try_complete_pair_js(
     did: String,
     storage_adapter: JsStorageAdapter,
     request_rkey: String,
-) -> Result<bool, JsError> {
+) -> Result<JsValue, JsError> {
     let storage = JsStorage::new(storage_adapter);
     let mut client = authenticated_client(&storage, &did, WasmTransport::new())
         .await
@@ -78,7 +77,7 @@ pub async fn try_complete_pair_js(
         .map_err(wasm_err)?;
 
     persist_if_refreshed(&storage, &did, &client).await?;
-    Ok(result)
+    to_js(&result)
 }
 
 /// Cancel an in-flight pair request. Wipes the ephemeral key from Storage

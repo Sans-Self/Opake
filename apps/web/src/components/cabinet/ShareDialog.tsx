@@ -1,7 +1,13 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { ShareNetworkIcon } from "@phosphor-icons/react";
 import { useFileManager } from "@opake/react";
-import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
+import type { PendingShareRecipient, ResolvedIdentity } from "@opake/sdk";
+import {
+  recipientVerificationLabel,
+  toastWriteVerificationNotice,
+  resolveRecipient,
+  RecipientNotReadyError,
+} from "@/lib/sharing";
 import { useAuthStore } from "@/stores/auth";
 import { toastSuccess, toastError } from "@/stores/toast";
 import { MODAL_TRANSITION_MS } from "@/components/ConfirmDialog";
@@ -21,9 +27,17 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
     "idle" | "resolving" | "sharing" | "notReady" | "queuing" | "done" | "error"
   >("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [resolvedRecipient, setResolvedRecipient] = useState<Pick<
+    ResolvedIdentity,
+    "did" | "verification" | "anchorHistory"
+  > | null>(null);
   // The recipient input as entered when resolution said RecipientNotReady —
   // queuing must target exactly what the user confirmed the warning for.
-  const [notReadyRecipient, setNotReadyRecipient] = useState<string | null>(null);
+  const [notReadyRecipient, setNotReadyRecipient] = useState<{
+    display: string;
+    did: string;
+    challenge: PendingShareRecipient;
+  } | null>(null);
 
   const session = useAuthStore((s) => s.session);
   // Sharing is cabinet-only (gated upstream via allowSharing).
@@ -37,9 +51,11 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       setRecipientHandle("");
       setStatus("idle");
       setErrorMessage("");
+      setResolvedRecipient(null);
+      notReadyRecipient?.challenge.dispose();
       setNotReadyRecipient(null);
     }, MODAL_TRANSITION_MS);
-  }, []);
+  }, [notReadyRecipient]);
 
   useImperativeHandle(ref, () => ({
     show: (uri: string, name: string) => {
@@ -48,6 +64,8 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       setRecipientHandle("");
       setStatus("idle");
       setErrorMessage("");
+      setResolvedRecipient(null);
+      notReadyRecipient?.challenge.dispose();
       setNotReadyRecipient(null);
       dialogRef.current?.showModal();
       // Focus the input after dialog opens
@@ -68,6 +86,11 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
       // Resolve recipient — may throw RecipientNotReadyError
       try {
         const resolved = await resolveRecipient(recipient);
+        setResolvedRecipient({
+          did: resolved.did,
+          verification: resolved.verification,
+          anchorHistory: resolved.anchorHistory,
+        });
 
         if (resolved.did === session.did) {
           throw new Error("You can't share a file with yourself");
@@ -75,20 +98,32 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
 
         setStatus("sharing");
 
-        // Core handles: fetch document → unwrap key → wrap to recipient → create grant
-        await fileManager.share(
-          documentUri,
-          resolved.did,
-          resolved.x25519PublicKey,
-          resolved.mlKemPublicKey,
-          "read",
-        );
+        const challenge = await fileManager.shareApprovalChallenge(documentUri, resolved.did);
+        const approved =
+          !challenge.confirmation ||
+          window.confirm(
+            `${resolved.handle ?? challenge.did} has an unverified encryption key. Whoever runs their PDS could substitute it and read this document. Share it anyway?`,
+          );
+        if (!approved) {
+          setStatus("idle");
+          return;
+        }
+        const confirmation = challenge.confirmation;
+
+        // The WASM boundary resolves again before writing and rejects this
+        // confirmation if the current bundle changed in the meantime.
+        const write = await fileManager.share(documentUri, challenge.did, confirmation, "read");
+        toastWriteVerificationNotice(challenge.did, write.verification);
       } catch (resolveError) {
         if (resolveError instanceof RecipientNotReadyError) {
           // Never queue silently: surface the warning and let queuing be an
           // explicit second step.
           // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
-          setNotReadyRecipient(recipient);
+          const challenge = await fileManager.preparePendingShareRecipient(documentUri, recipient);
+          // Snapshot the DID before handing the opaque challenge to the write.
+          // `createPendingShare` consumes that handle synchronously, while this
+          // warning remains visible during the asynchronous write.
+          setNotReadyRecipient({ display: recipient, did: challenge.did, challenge });
           setStatus("notReady");
           return;
         }
@@ -113,18 +148,53 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   const handleQueueShare = useCallback(async () => {
     if (!documentUri || !notReadyRecipient || !fileManager) return;
 
+    const approved = window.confirm(
+      `${notReadyRecipient.display} (${notReadyRecipient.did}) has not published encryption keys. Their first keys may be unverified, so whoever runs their PDS could substitute them and read this document. Queue one automatic share to those first keys?`,
+    );
+    if (!approved) {
+      notReadyRecipient.challenge.dispose();
+      setNotReadyRecipient(null);
+      setStatus("idle");
+      return;
+    }
+
     setStatus("queuing");
     try {
-      await fileManager.createPendingShare(documentUri, notReadyRecipient, "read", null);
+      await fileManager.createPendingShare(
+        documentUri,
+        notReadyRecipient.challenge,
+        true,
+        "read",
+        null,
+      );
       setStatus("done");
       toastSuccess(
-        `Share queued for ${notReadyRecipient} — completes automatically once they set up Opake (expires in 7 days).`,
+        `Share queued for ${notReadyRecipient.display} — completes automatically once they set up Opake (expires in 7 days).`,
       );
       dismiss();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to queue share";
-      setErrorMessage(message);
-      setStatus("error");
+      // The SDK consumes and frees a challenge for every write attempt. Replace
+      // it before offering another explicit consent interaction.
+      try {
+        const replacement = await fileManager.preparePendingShareRecipient(
+          documentUri,
+          notReadyRecipient.display,
+        );
+        setNotReadyRecipient({
+          display: notReadyRecipient.display,
+          did: replacement.did,
+          challenge: replacement,
+        });
+        setErrorMessage(`${message}. Confirm the refreshed recipient warning to retry.`);
+        setStatus("notReady");
+      } catch (refreshError) {
+        setNotReadyRecipient(null);
+        setErrorMessage(
+          refreshError instanceof Error ? refreshError.message : message,
+        );
+        setStatus("error");
+      }
       toastError(message);
     }
   }, [documentUri, notReadyRecipient, fileManager, dismiss]);
@@ -132,7 +202,7 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
   const busy = status === "resolving" || status === "sharing" || status === "queuing";
 
   return (
-    <dialog ref={dialogRef} className="modal" aria-label="Share file">
+    <dialog ref={dialogRef} className="modal" aria-label="Share file" onClose={dismiss}>
       <div className="modal-box max-w-sm">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="bg-primary/10 flex size-11 items-center justify-center rounded-full">
@@ -181,14 +251,19 @@ export const ShareDialog = forwardRef<ShareDialogHandle>(function ShareDialog(_,
           {status === "resolving" && (
             <p className="text-text-muted mt-1 text-xs">Resolving recipient…</p>
           )}
+          {resolvedRecipient && (
+            <p className="text-text-muted mt-1 text-xs" role="status" aria-live="polite">
+              {recipientVerificationLabel(resolvedRecipient)}
+            </p>
+          )}
           {status === "sharing" && <p className="text-text-muted mt-1 text-xs">Creating grant…</p>}
           {(status === "notReady" || status === "queuing") && notReadyRecipient && (
             <div className="alert alert-warning mt-3 items-start gap-2 rounded-lg p-3" role="alert">
               <p className="text-xs">
-                <span className="font-medium">{notReadyRecipient}</span> hasn't set up Opake yet,
-                so they can't receive this share until they publish an encryption key. You can
-                queue the share — it completes automatically once they join and expires after 7
-                days.
+                <span className="font-medium">{notReadyRecipient.display}</span> (
+                {notReadyRecipient.did}) hasn't set up Opake yet, so they can't receive
+                this share until they publish an encryption key. You can queue one automatic share
+                when they publish their first keys, which may be unverified. It expires after 7 days.
               </p>
             </div>
           )}

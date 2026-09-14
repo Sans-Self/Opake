@@ -120,10 +120,15 @@ per-user salting redundant.
 |-----|---------|
 | **X25519 keypair** | Classical half of encryption. The private half participates in ECDH to unwrap content keys sent to you. The public half is published on your PDS so others can wrap to you. |
 | **ML-KEM-768 keypair** | Post-quantum half of encryption. The private half decapsulates the post-quantum component of every wrapped key. The 1184-byte public half is published on your PDS alongside the X25519 key. |
-| **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and (eventually) record envelopes. The public half is published alongside the encryption keys so services can verify signatures. |
+| **Ed25519 keypair** | Signing. The private half signs indexer auth tokens and the published key record. The public half is published alongside the encryption keys so services can verify signatures. |
 
 All three public halves live in a single `at.opake.publicKey/self` record on your PDS — a
-singleton, republished on every login so it stays current.
+singleton, republished on every login so it stays current. The X25519 and ML-KEM keys let other
+people encrypt to you. Your Ed25519 key also signs the published encryption bundle. When you choose
+to publish its matching `#opake` verification method in your DID document, other Opake clients can
+verify that signature before wrapping a key to the bundle. The signature names your DID and the
+decoded key values, so a server cannot move the same signed record to another account or break it
+by changing JSON formatting.
 
 ## Where Are My Keys Stored?
 

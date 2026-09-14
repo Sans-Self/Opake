@@ -82,7 +82,7 @@ enum HeldTree {
     Workspace {
         tree: DirectoryTree,
         /// Current rotation's group key.
-        group_key: ContentKey,
+        group_key: Option<ContentKey>,
         /// Last-seen rotation counter from the keyring record. A forward
         /// bump drives in-place adoption of the new group key.
         rotation: u64,
@@ -198,7 +198,7 @@ impl TreeKeeper {
         &mut self,
         keyring_uri: String,
         tree: DirectoryTree,
-        group_key: ContentKey,
+        group_key: impl Into<Option<ContentKey>>,
         rotation: u64,
         historical_keys: Vec<crate::workspace::HistoricalKey>,
         x25519_private_key: X25519PrivateKey,
@@ -208,7 +208,7 @@ impl TreeKeeper {
             keyring_uri,
             HeldTree::Workspace {
                 tree,
-                group_key,
+                group_key: group_key.into(),
                 rotation,
                 historical_keys,
                 keys: Box::new(HybridPrivateKeys {
@@ -406,8 +406,8 @@ impl TreeKeeper {
     /// so the projection after the event equals what a fresh bootstrap
     /// would produce, with no reload. Returns `true` when the rotation was
     /// adopted (watchers should be notified), `false` for an uninstalled
-    /// workspace, a non-advancing rotation, or a caller who was rotated
-    /// out (unwrap fails).
+    /// workspace, an unchanged authoritative head, or a caller who was
+    /// rotated out (unwrap fails).
     ///
     /// spec:key-rotation § Live projections adopt a rotation completely
     fn adopt_keyring_rotation(
@@ -428,19 +428,6 @@ impl TreeKeeper {
             return false;
         };
 
-        if new_rotation <= *rotation {
-            if new_rotation < *rotation {
-                log::debug!(
-                    "[tree_keeper] ignoring backward keyring rotation on {keyring_uri}: held={}, received={new_rotation}",
-                    *rotation
-                );
-            }
-            // Equal rotation: a metadata-only supersede (rename, or an
-            // add/remove that didn't rotate). Nothing key-derived changes
-            // on the directory tree.
-            return false;
-        }
-
         let record = &envelope.record;
         let anchor = record.lineage_anchor(envelope.uri.as_str());
         let bundle = crate::crypto::PrivateKeyBundle {
@@ -458,18 +445,25 @@ impl TreeKeeper {
             );
             return false;
         };
-        let new_group_key = match crate::crypto::unwrap_key(
-            &my_member.wrapped_key,
-            &bundle,
-            &crate::crypto::WrapContext::Keyring { uri: anchor },
-            record.opake_version,
-        ) {
+        let new_group_key = match my_member
+            .wrapped_key
+            .as_ref()
+            .map(|wrap| {
+                crate::crypto::unwrap_key(
+                    wrap,
+                    &bundle,
+                    &crate::crypto::WrapContext::Keyring { uri: anchor },
+                    record.opake_version,
+                )
+            })
+            .transpose()
+        {
             Ok(key) => key,
             Err(e) => {
                 log::warn!(
-                    "[tree_keeper] failed to unwrap rotated group key for {keyring_uri}: {e}"
+                    "[tree_keeper] failed to unwrap current group key for {keyring_uri}; adopting historical-only after identity proof: {e}"
                 );
-                return false;
+                None
             }
         };
 
@@ -478,6 +472,32 @@ impl TreeKeeper {
         // the record archives it without threading in-memory state.
         let new_historical =
             crate::workspace::derive_historical_keys(record, did, envelope.uri.as_str(), &bundle);
+        if !crate::workspace::verify_workspace_identity(
+            record,
+            anchor,
+            new_group_key.as_ref(),
+            &new_historical,
+        ) {
+            log::warn!("[tree_keeper] refusing unverified workspace identity for {keyring_uri}");
+            return false;
+        }
+
+        // Upserts are indexer-resolved chain heads.  A delete can roll the
+        // chain back to an older rotation, or undo a same-rotation repair by
+        // restoring a head without our wrap.  Treating the rotation number as
+        // a monotonic event sequence would retain key material from that
+        // deleted head.  Only an identical key state is a metadata-only
+        // supersede and can be ignored.
+        let same_current =
+            group_key.as_ref().map(|key| key.0) == new_group_key.as_ref().map(|key| key.0);
+        let same_history = historical_keys.len() == new_historical.len()
+            && historical_keys
+                .iter()
+                .zip(&new_historical)
+                .all(|(held, next)| held.rotation == next.rotation && held.key.0 == next.key.0);
+        if *rotation == new_rotation && same_current && same_history {
+            return false;
+        }
 
         *group_key = new_group_key;
         *rotation = new_rotation;
@@ -487,7 +507,7 @@ impl TreeKeeper {
         // leaving them invalidated at "?".
         let view = crate::workspace::GroupKeys {
             current_rotation: *rotation,
-            current: group_key,
+            current: group_key.as_ref(),
             historical: historical_keys,
         };
         let keys_map = HashMap::from([(keyring_uri.to_string(), view)]);
@@ -545,7 +565,7 @@ impl TreeKeeper {
                 } => {
                     let view = crate::workspace::GroupKeys {
                         current_rotation: *rotation,
-                        current: group_key,
+                        current: group_key.as_ref(),
                         historical: historical_keys,
                     };
                     let mut keys_map = HashMap::new();

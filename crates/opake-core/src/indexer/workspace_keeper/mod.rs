@@ -24,10 +24,9 @@
 //! When an `SseEvent::KeyringUpsert` arrives for a keyring this client
 //! is no longer a member of (DID absent from the member list),
 //! [`try_build_entry`] returns [`EntryOutcome::NotMember`] and the
-//! consumer deletes the workspace from the keeper. Transient key-unwrap
-//! failures return an entry with `name = None` rather than a delete —
-//! the workspace stays visible and self-corrects on the next event. A
-//! record whose declared identity fails the derivation check returns
+//! consumer deletes the workspace from the keeper. A malformed or
+//! undecryptable current member wrap is signalled as unreadable and does
+//! not render a partial entry. A record whose declared identity fails the derivation check returns
 //! [`EntryOutcome::IdentityMismatch`], which maps to no keeper operation
 //! at all. See [`apply_keyring_record`] for the canonical dispatch logic.
 //!
@@ -282,6 +281,16 @@ impl WorkspaceKeeper {
         match outcome {
             EntryOutcome::Entry(e) => self.upsert(e),
             EntryOutcome::NotMember => self.delete(workspace_id),
+            EntryOutcome::Unreadable { uri } => {
+                let removed = self.entries.remove(workspace_id).is_some();
+                let changed = self.unreadable.get(&uri) != Some(&UnreadableReason::Corrupt);
+                if changed {
+                    self.unreadable.insert(uri, UnreadableReason::Corrupt);
+                }
+                if removed || changed {
+                    self.notify();
+                }
+            }
             // spec: workspace-identity § Identity adoption verifies by derivation
             EntryOutcome::IdentityMismatch => {}
         }
@@ -388,6 +397,10 @@ pub enum EntryOutcome {
     /// A direct-PDS keeper hydration path (none today) would need to
     /// re-establish that authority corroboration before honoring a delete.
     NotMember,
+    /// The caller is a member, but their current encrypted group-key wrap is
+    /// malformed or cannot be authenticated. It must be surfaced separately
+    /// from absence so every adoption path fails closed in the same way.
+    Unreadable { uri: String },
     /// The declared lineage anchor failed the identity derivation check.
     /// The record is dropped silently: no keeper operation, no rendered
     /// artifact, trace-level logging only.
@@ -402,21 +415,19 @@ impl EntryOutcome {
     pub fn entry(self) -> Option<WorkspaceEntry> {
         match self {
             EntryOutcome::Entry(e) => Some(e),
-            EntryOutcome::NotMember | EntryOutcome::IdentityMismatch => None,
+            EntryOutcome::NotMember
+            | EntryOutcome::Unreadable { .. }
+            | EntryOutcome::IdentityMismatch => None,
         }
     }
 }
 
 /// Construct a [`WorkspaceEntry`] from raw keyring fields.
 ///
-/// Key-unwrap failures (corrupt data, key material mismatch) return an
-/// `Entry` with `name`/`description`/`icon` as `None`. The workspace
-/// stays visible in the sidebar, just unnamed — matches the pre-refactor
-/// `list_workspaces` behavior. A later SSE event or full bootstrap will
-/// reconcile once the underlying issue resolves. An unverifiable-but-
-/// locked entry is acceptable there because the identity check below
-/// requires unwrapped key material to run at all; what it can never do
-/// is displace a verified entry with decrypted state.
+/// A corrupt or undecryptable current member wrap returns
+/// [`EntryOutcome::Unreadable`]. It is never treated as an empty group key or
+/// rendered as a nameless workspace; bootstrap and SSE both surface the same
+/// distinct unreadable signal. A later valid head can replace that signal.
 ///
 /// The metadata-decrypt step is independently best-effort: if the member
 /// list unwraps but the encrypted metadata blob can't be decoded, the
@@ -440,35 +451,36 @@ pub fn try_build_entry(
     // the head — unwrapping with `head_uri` breaks the moment the workspace
     // supersedes (add/remove member). `lineage_anchor` resolves the right URI
     // from the record itself.
-    let group_key = match crypto::unwrap_key(
-        &my_member.wrapped_key,
-        private_keys,
-        &crypto::WrapContext::Keyring {
-            uri: keyring.lineage_anchor(head_uri),
+    let historical =
+        crate::workspace::derive_historical_keys(keyring, my_did, head_uri, private_keys);
+    let group_key = match my_member.wrapped_key.as_ref() {
+        None => None,
+        Some(wrap) => match crypto::unwrap_key(
+            wrap,
+            private_keys,
+            &crypto::WrapContext::Keyring {
+                uri: keyring.lineage_anchor(head_uri),
+            },
+            keyring.opake_version,
+        ) {
+            Ok(key) => Some(key),
+            Err(error) => {
+                log::warn!("keyring at {head_uri} has an unreadable current member wrap: {error}");
+                return EntryOutcome::Unreadable {
+                    uri: head_uri.to_owned(),
+                };
+            }
         },
-        keyring.opake_version,
-    ) {
-        Ok(k) => k,
-        Err(_) => {
-            return EntryOutcome::Entry(WorkspaceEntry {
-                workspace_id: workspace_id.to_string(),
-                head_uri: head_uri.to_string(),
-                rotation: keyring.rotation,
-                member_count,
-                created_at: Some(keyring.created_at.clone()),
-                name: None,
-                description: None,
-                icon: None,
-                my_role: Some(my_role.to_string()),
-            });
-        }
     };
 
     let anchor = keyring.lineage_anchor(head_uri);
-    let historical =
-        crate::workspace::derive_historical_keys(keyring, my_did, head_uri, private_keys);
     // spec: workspace-identity § Identity adoption verifies by derivation
-    if !crate::workspace::verify_workspace_identity(keyring, anchor, &group_key, &historical) {
+    if !crate::workspace::verify_workspace_identity(
+        keyring,
+        anchor,
+        group_key.as_ref(),
+        &historical,
+    ) {
         log::trace!("keyring at {head_uri} failed identity derivation for {anchor}; dropped");
         return EntryOutcome::IdentityMismatch;
     }
@@ -477,13 +489,16 @@ pub fn try_build_entry(
         keyring.lineage_anchor(head_uri),
         crypto::SealType::KeyringMetadata,
     );
-    let (name, description, icon) = match crypto::decrypt_metadata::<KeyringMetadata>(
-        &group_key,
-        &keyring.encrypted_metadata,
-        &metadata_context,
-    ) {
-        Ok(meta) => (Some(meta.name), meta.description, meta.icon),
-        Err(_) => (None, None, None),
+    let (name, description, icon) = match group_key.as_ref().and_then(|key| {
+        crypto::decrypt_metadata::<KeyringMetadata>(
+            key,
+            &keyring.encrypted_metadata,
+            &metadata_context,
+        )
+        .ok()
+    }) {
+        Some(meta) => (Some(meta.name), meta.description, meta.icon),
+        None => (None, None, None),
     };
 
     EntryOutcome::Entry(WorkspaceEntry {

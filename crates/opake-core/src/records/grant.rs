@@ -14,6 +14,13 @@ pub struct Grant {
 }
 
 impl Grant {
+    /// The `opakeVersion` every grant this build writes declares. Approval
+    /// commitments carried in grant metadata are labelled with the containing
+    /// record's version, so callers compute them against this constant rather
+    /// than against the recipient's public-key record.
+    /// spec:account-verification § Key-bound approval is carried by the relationship's records
+    pub const RECORD_VERSION: u32 = SCHEMA_VERSION;
+
     pub fn new(
         document: String,
         recipient: String,
@@ -22,7 +29,7 @@ impl Grant {
         created_at: String,
     ) -> Self {
         Self {
-            opake_version: SCHEMA_VERSION,
+            opake_version: Self::RECORD_VERSION,
             document,
             recipient,
             wrapped_key,

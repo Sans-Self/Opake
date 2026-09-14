@@ -4,13 +4,14 @@
 // workspace-bound FileManager before touching the network. These tests pin
 // that guard: a workspace-context call errors and writes no record.
 
-use crate::client::{LegacySession, Session, XrpcClient};
-use crate::crypto::{generate_content_key, OsRng};
+use crate::client::{encode_ed25519_did_key, HttpResponse, LegacySession, Session, XrpcClient};
+use crate::crypto::{generate_content_key, Ed25519SigningKey, OsRng};
 use crate::error::Error;
 use crate::manager::types::FileContext;
 use crate::opake::Opake;
+use crate::records::PublicKeyRecord;
 use crate::storage::{Identity, NoopStorage};
-use crate::test_utils::{MockTransport, TestKeys};
+use crate::test_utils::MockTransport;
 use crate::workspace::Workspace;
 
 const CALLER_DID: &str = "did:plc:caller";
@@ -59,15 +60,8 @@ async fn share_from_workspace_context_is_refused_and_writes_nothing() {
     let ctx = workspace_context();
     let mut mgr = opake.file_manager(&ctx);
 
-    let recipient = TestKeys::generate("did:plc:recipient");
     let err = mgr
-        .share(
-            DOC_URI,
-            "did:plc:recipient",
-            recipient.public_keys(),
-            "read",
-            None,
-        )
+        .share(DOC_URI, "did:plc:recipient", None, "read", None)
         .await
         .unwrap_err();
 
@@ -86,6 +80,59 @@ async fn share_from_workspace_context_is_refused_and_writes_nothing() {
     );
 }
 
+#[tokio::test]
+async fn fresh_share_resolution_refuses_an_anchored_record_with_stripped_signature() {
+    let mock = MockTransport::new();
+    let recipient_keys = crate::test_utils::TestKeys::generate("did:plc:recipient");
+    let signing = Ed25519SigningKey::from_bytes(&[9; 32]);
+    let did_key = encode_ed25519_did_key(&signing.verifying_key().to_bytes());
+    let unsigned = PublicKeyRecord::new(
+        &recipient_keys.x25519_pub,
+        &recipient_keys.ml_kem_pub,
+        "2026-09-12T00:00:00Z",
+    );
+
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: serde_json::json!({
+            "id": "did:plc:recipient",
+            "service": [{"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://recipient.test"}],
+            "verificationMethod": [{"id": "did:plc:recipient#opake", "controller": "did:plc:recipient", "type": "Multikey", "publicKeyMultibase": did_key.strip_prefix("did:key:").unwrap()}]
+        }).to_string().into_bytes(),
+    });
+    mock.enqueue(HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: serde_json::json!({
+            "uri": "at://did:plc:recipient/at.opake.publicKey/self",
+            "cid": "bafyunsigned",
+            "value": unsigned
+        })
+        .to_string()
+        .into_bytes(),
+    });
+
+    let mut opake = opake_with_mock(mock.clone());
+    let ctx = opake.cabinet_context().unwrap();
+    let mut mgr = opake.file_manager(&ctx);
+    let err = mgr
+        .share(DOC_URI, "did:plc:recipient", None, "read", None)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::VerificationFailed(_)));
+    let requests = mock.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "must not fetch content key or write grant"
+    );
+    assert!(requests
+        .iter()
+        .all(|request| !request.url.contains("createRecord")));
+}
+
 // spec:sharing-grants § Sharing is cabinet-only
 #[tokio::test]
 async fn create_pending_share_from_workspace_context_is_refused_and_writes_nothing() {
@@ -95,7 +142,18 @@ async fn create_pending_share_from_workspace_context_is_refused_and_writes_nothi
     let mut mgr = opake.file_manager(&ctx);
 
     let err = mgr
-        .create_pending_share(DOC_URI, "alice.bsky.social", "read", None)
+        .create_pending_share(
+            DOC_URI,
+            &crate::manager::PendingShareRecipient {
+                recipient: "alice.bsky.social".into(),
+                did: "did:plc:alice".into(),
+                document_uri: DOC_URI.into(),
+                owner_did: OWNER_DID.into(),
+            },
+            true,
+            "read",
+            None,
+        )
         .await
         .unwrap_err();
 
@@ -108,4 +166,31 @@ async fn create_pending_share_from_workspace_context_is_refused_and_writes_nothi
         "refused pending share must not touch the PDS, got: {:?}",
         mock.requests(),
     );
+}
+
+#[tokio::test]
+async fn declined_first_publication_permission_does_not_enqueue() {
+    let mock = MockTransport::new();
+    let mut opake = opake_with_mock(mock.clone());
+    let ctx = opake.cabinet_context().unwrap();
+    let mut mgr = opake.file_manager(&ctx);
+
+    let err = mgr
+        .create_pending_share(
+            DOC_URI,
+            &crate::manager::PendingShareRecipient {
+                recipient: "recipient.test".into(),
+                did: "did:plc:recipient".into(),
+                document_uri: DOC_URI.into(),
+                owner_did: CALLER_DID.into(),
+            },
+            false,
+            "read",
+            None,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::UnverifiedKeyApprovalRequired { .. }));
+    assert!(mock.requests().is_empty(), "declining must write nothing");
 }

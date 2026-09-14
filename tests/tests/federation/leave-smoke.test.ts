@@ -14,6 +14,7 @@ import { testEnv } from "../../helpers/pds.js";
 import {
   actorOnPds,
   cli,
+  cliApprovingUnverified,
   deleteKeyringRecord,
   login,
   memberCount,
@@ -75,7 +76,7 @@ describe.skipIf(testEnv() !== "devenv")("federation smoke", () => {
       // membership check (visibility-contract.test.ts pins the no-poll path).
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
-      const added = await cli(OWNER, ["workspace", "add-member", ws, memberDid]);
+      const added = await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid]);
       expect(added.code).toBe(0);
 
       // Both sides converge on the two-member head: the member now sees the
@@ -111,7 +112,7 @@ describe.skipIf(testEnv() !== "devenv")("federation smoke", () => {
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       // Supersede past genesis so the deleted record is not the head.
-      const added = await cli(OWNER, ["workspace", "add-member", ws, memberDid]);
+      const added = await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid]);
       expect(added.code).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),

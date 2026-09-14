@@ -30,8 +30,135 @@ use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::Role;
+use crate::resolve::RecipientVerificationNotice;
 use crate::storage::{Identity, Storage};
 use crate::workspace::{Workspace, WorkspaceId};
+use futures_util::future::{select, Either, FutureExt};
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+/// Bound unattended repair work so a large workspace cannot monopolize a
+/// daemon pass. An explicit user-triggered repair does not use this limit.
+const MAX_MEMBER_WRAP_REPAIRS_PER_PASS: usize = 32;
+/// Retry a transient indexer visibility gap on a later pass, rather than on
+/// every daemon tick for the same observed keyring head.
+const MEMBER_WRAP_VISIBILITY_BACKOFF_MICROS: u64 = 20 * 60 * 1_000_000;
+const MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS: u64 = 20 * 60 * 1_000_000;
+/// Upper wall-clock budget for one unattended repair scan. An individual
+/// network operation retains its own bounded visibility retry; this prevents
+/// a pass from starting further work once earlier candidates used the budget.
+const MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS: u64 = 2 * 60 * 1_000_000;
+/// A slow beneficiary directory must not prevent a manager from revoking a
+/// different member. Timed-out beneficiaries remain admitted without a new
+/// wrap and retain their historical entry for a later repair.
+const MEMBER_REMOVAL_RECIPIENT_RESOLUTION_BUDGET_MICROS: u64 = 10 * 1_000_000;
+
+fn rotate_member_wrap_workspaces<T>(workspaces: &mut [T], cursor: &mut usize) {
+    if workspaces.is_empty() {
+        return;
+    }
+    let start = *cursor % workspaces.len();
+    workspaces.rotate_left(start);
+    *cursor = (start + 1) % workspaces.len();
+}
+
+fn member_wrap_deferral_is_active(
+    deferrals: &HashMap<String, u64>,
+    key: &str,
+    now_micros: u64,
+) -> bool {
+    deferrals
+        .get(key)
+        .is_some_and(|retry_at| *retry_at > now_micros)
+}
+
+fn retain_live_member_wrap_deferrals(
+    deferrals: &mut HashMap<String, u64>,
+    live_heads: &HashSet<String>,
+) {
+    deferrals.retain(|member_key, _| {
+        live_heads
+            .iter()
+            .any(|head| member_key.starts_with(&format!("{head}\u{1f}")))
+    });
+}
+
+async fn within_member_wrap_budget<F>(
+    timer: Option<crate::client::identity_operation::IdentitySleepFn>,
+    remaining: Duration,
+    future: F,
+) -> Option<F::Output>
+where
+    F: std::future::Future,
+{
+    let Some(timer) = timer else {
+        return Some(future.await);
+    };
+    match select(future.boxed_local(), timer(remaining).boxed_local()).await {
+        Either::Left((result, _)) => Some(result),
+        Either::Right((_, _)) => None,
+    }
+}
+
+#[cfg(test)]
+mod member_wrap_repair_scheduler_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[test]
+    fn next_pass_starts_at_next_workspace_after_early_failures() {
+        let mut cursor = 0;
+        let mut first_pass = vec!["stuck", "healthy"];
+        rotate_member_wrap_workspaces(&mut first_pass, &mut cursor);
+        assert_eq!(first_pass, ["stuck", "healthy"]);
+
+        let mut next_pass = vec!["stuck", "healthy"];
+        rotate_member_wrap_workspaces(&mut next_pass, &mut cursor);
+        assert_eq!(next_pass, ["healthy", "stuck"]);
+    }
+
+    #[test]
+    fn human_cooldown_expires_and_allows_recheck() {
+        let key = "at://owner/kr/head\u{1f}did:plc:member";
+        let mut deferrals = HashMap::new();
+        deferrals.insert(key.to_owned(), 1_000);
+
+        assert!(member_wrap_deferral_is_active(&deferrals, key, 999));
+        assert!(!member_wrap_deferral_is_active(&deferrals, key, 1_000));
+    }
+
+    #[test]
+    fn changed_head_invalidates_human_cooldown() {
+        let old_key = "at://owner/kr/old\u{1f}did:plc:member";
+        let mut deferrals = HashMap::new();
+        deferrals.insert(old_key.to_owned(), u64::MAX);
+        let live_heads = HashSet::from(["at://owner/kr/new".to_owned()]);
+
+        retain_live_member_wrap_deferrals(&mut deferrals, &live_heads);
+        assert!(!member_wrap_deferral_is_active(&deferrals, old_key, 0));
+    }
+
+    #[tokio::test]
+    async fn pass_timer_defers_a_stuck_discovery_or_candidate() {
+        let observed_micros = Rc::new(Cell::new(0_u64));
+        let observed_for_timer = Rc::clone(&observed_micros);
+        let timer: crate::client::identity_operation::IdentitySleepFn = Rc::new(move |duration| {
+            observed_for_timer.set(duration.as_micros() as u64);
+            Box::pin(async {})
+        });
+
+        let result: Option<()> = within_member_wrap_budget(
+            Some(timer),
+            Duration::from_micros(123),
+            std::future::pending(),
+        )
+        .await;
+
+        assert_eq!(result, None);
+        assert_eq!(observed_micros.get(), 123);
+    }
+}
 
 /// Pick the head URI of the workspace whose decrypted name is `name`.
 ///
@@ -99,6 +226,19 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     /// a bare test context), the visibility-gap retry degrades to a single
     /// attempt rather than fabricating a runtime dependency inside core.
     pub(crate) sleep_fn: Option<crate::indexer::retry::SleepFn>,
+    /// Cloneable platform sleep for bounded, independently owned identity
+    /// operations. Unlike the indexer retry sleeper, an operation must retain
+    /// this after it leaves `Opake`, so the callback uses an `Rc`-backed type.
+    pub(crate) identity_sleep_fn: Option<crate::client::identity_operation::IdentitySleepFn>,
+    /// Ephemeral scheduling-only cache for missing wraps that need a human
+    /// confirmation. It is keyed by the observed head and never authorizes
+    /// membership or survives an `Opake` instance.
+    member_wrap_human_deferrals: HashMap<String, u64>,
+    /// Earliest retry time for a head that was temporarily not visible.
+    member_wrap_visibility_backoff: HashMap<String, u64>,
+    /// Start each background pass at the next workspace so a repeatedly
+    /// failing early workspace cannot consume every bounded slot forever.
+    member_wrap_workspace_cursor: usize,
 }
 
 /// Indexer URL baked into the binary at compile time.
@@ -145,11 +285,113 @@ pub struct CreatedWorkspace {
     pub key: ContentKey,
 }
 
+/// Why a member remained admitted but received no wrap in a removal rotation.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExcludedMemberReason {
+    /// A verified account's published record failed its DID-document check.
+    VerificationFailed,
+    /// An unverified bundle lacks matching recorded approval and can be
+    /// repaired only after a manager confirms the freshly resolved bundle.
+    ApprovalRequired,
+    /// The recipient could not be resolved at all; no override is offered
+    /// until a later resolution produces a concrete state.
+    ResolutionFailed,
+}
+
+/// Fresh, non-secret state used by clients to explain a member's current
+/// access. It deliberately derives approval from the live head and current
+/// recipient bundle; an approval copied from an older member snapshot must
+/// never decide whether a new confirmation is shown.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMemberAccessStatus {
+    pub did: String,
+    pub has_current_wrap: bool,
+    pub verification: MemberVerificationStatus,
+    /// Whether the caller is a manager and can presently unwrap the live
+    /// group key. Approval can still be recorded without this capability.
+    pub can_repair: bool,
+}
+
+/// The verification and approval result for one freshly resolved member.
+#[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MemberVerificationStatus {
+    Verified,
+    /// The current unverified bundle exactly matches the approval on the
+    /// live head, so a repair does not need another confirmation.
+    UnverifiedApproved,
+    /// The current unverified bundle needs a manager's explicit approval.
+    UnverifiedApprovalRequired,
+    /// A DID-document verification failure is a refusal, never an approval
+    /// prompt or override opportunity.
+    VerificationError,
+    /// The recipient could not be resolved well enough to determine whether
+    /// an approval applies. This also offers no override until it resolves.
+    ResolutionError,
+}
+
+/// A member deliberately excluded from a new group-key generation.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExcludedMember {
+    pub did: String,
+    pub reason: ExcludedMemberReason,
+}
+
+/// Result of a manager-authored removal rotation. `excluded_members` remain
+/// admitted but received no wrap for the new generation, so callers can name
+/// the repair that is required without mistaking them for removals.
+#[derive(Debug)]
+pub struct WorkspaceMemberRemoval {
+    pub group_key: ContentKey,
+    pub rotation: u64,
+    pub excluded_members: Vec<ExcludedMember>,
+    /// Fresh verification states observed while producing the new member
+    /// wraps. These are notices only; verified replacement/no-history states
+    /// never create a second approval requirement.
+    pub verification_notices: Vec<RecipientVerificationNotice>,
+}
+
+/// Result of a membership write that resolved a recipient bundle at its final
+/// write boundary. The notice is intentionally the full verification state so
+/// clients can distinguish no history from an unverified bundle.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMemberWriteResult {
+    pub verification_notice: RecipientVerificationNotice,
+}
+
+/// Aggregate result of an unattended missing-member-wrap repair pass. It
+/// contains no group keys or approval commitments; all remaining work is
+/// still represented by the live keyring head.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberWrapRepairOutcome {
+    pub attempted: usize,
+    pub repaired: usize,
+    pub awaiting_approval: usize,
+    pub verification_failed: usize,
+    pub stale: usize,
+    pub deferred_human_decision: usize,
+    pub deferred_visibility: usize,
+    pub deferred_by_budget: usize,
+    /// The full-list discovery itself exceeded the pass timer, so no repair
+    /// candidates were started this pass.
+    pub discovery_deferred: bool,
+    /// Final resolver states for wraps actually repaired in this pass.
+    pub verification_notices: Vec<RecipientVerificationNotice>,
+    pub skipped_not_manager: usize,
+    pub skipped_without_current_key: usize,
+    pub errors: usize,
+}
+
 /// Result of a first-time cross-PDS member download.
 ///
-/// Carries the decrypted bytes plus the keyring rkey and rotation so the
-/// caller can cache the group key for subsequent downloads under the same
-/// workspace.
+/// Carries the decrypted bytes plus the document's keyring rotation so the
+/// caller can cache the key that actually decrypted this document. That key
+/// may be historical when the member has no current wrap.
 #[derive(Debug)]
 pub struct KeyringDownloadResult {
     pub filename: String,
@@ -180,6 +422,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             config_indexer_url: None,
             cached_private_keys,
             sleep_fn: None,
+            identity_sleep_fn: None,
+            member_wrap_human_deferrals: HashMap::new(),
+            member_wrap_visibility_backoff: HashMap::new(),
+            member_wrap_workspace_cursor: 0,
         })
     }
 
@@ -191,6 +437,138 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// degrades to a single attempt.
     pub fn set_sleep_fn(&mut self, sleep_fn: crate::indexer::retry::SleepFn) {
         self.sleep_fn = Some(sleep_fn);
+    }
+
+    /// Install the platform timer used to bound identity authorization and
+    /// cleanup I/O. The operation owns a clone, allowing its cancellation
+    /// handle to remain usable while an async completion method is suspended.
+    pub fn set_identity_sleep_fn(
+        &mut self,
+        sleep_fn: crate::client::identity_operation::IdentitySleepFn,
+    ) {
+        self.identity_sleep_fn = Some(sleep_fn);
+    }
+
+    /// Resolve this account's DID document directly and classify the local
+    /// verification method. Bootstrap surfaces this result; it never uses PDS
+    /// recommended credentials, which cannot report a foreign substitution.
+    pub async fn check_own_verification(
+        &self,
+    ) -> Result<crate::resolve::SelfVerificationState, Error> {
+        let key = self
+            .identity
+            .verify_key_bytes()?
+            .ok_or(Error::IdentityMissing)?;
+        crate::resolve::check_own_verification(self.client.transport(), &self.did, &key).await
+    }
+
+    /// The bootstrap path must not wait indefinitely on the public DID
+    /// directory. Platforms that install an identity timer receive an explicit
+    /// timeout error which clients surface as an unavailable self-check.
+    pub async fn check_own_verification_bounded(
+        &self,
+    ) -> Result<crate::resolve::SelfVerificationState, Error> {
+        let sleep = self.identity_sleep_fn.clone().ok_or_else(|| {
+            Error::Auth("identity self-check requires an injected platform timer".into())
+        })?;
+        crate::client::identity_operation::bounded(&sleep, self.check_own_verification()).await?
+    }
+
+    /// Create an opaque, unpersisted operation that will publish this device's
+    /// Ed25519 verification key. Construction is synchronous so an interface
+    /// can retain its cancellation handle before OAuth discovery begins.
+    pub fn new_verification_method_publication(
+        &mut self,
+        redirect_uri: String,
+    ) -> Result<
+        (
+            crate::client::identity_operation::IdentityOperation<T>,
+            crate::client::identity_operation::IdentityOperationCancellation,
+        ),
+        Error,
+    >
+    where
+        T: Clone,
+    {
+        let key = self
+            .identity
+            .verify_key_bytes()?
+            .ok_or(Error::IdentityMissing)?;
+        self.new_verification_method_operation(
+            redirect_uri,
+            crate::client::identity_operation::VerificationMethodChange::Publish(key),
+        )
+    }
+
+    /// Publish the signed public-key record before creating the PLC operation
+    /// that would make that signature mandatory for counterparties. Callers
+    /// should retain the returned cancellation handle before starting OAuth.
+    pub async fn prepare_verification_method_publication(
+        &mut self,
+        redirect_uri: String,
+    ) -> Result<
+        (
+            crate::client::identity_operation::IdentityOperation<T>,
+            crate::client::identity_operation::IdentityOperationCancellation,
+        ),
+        Error,
+    >
+    where
+        T: Clone,
+    {
+        self.publish_public_key().await?;
+        self.new_verification_method_publication(redirect_uri)
+    }
+
+    /// Create an opaque, unpersisted operation that will remove `#opake`.
+    pub fn new_verification_method_removal(
+        &mut self,
+        redirect_uri: String,
+    ) -> Result<
+        (
+            crate::client::identity_operation::IdentityOperation<T>,
+            crate::client::identity_operation::IdentityOperationCancellation,
+        ),
+        Error,
+    >
+    where
+        T: Clone,
+    {
+        self.new_verification_method_operation(
+            redirect_uri,
+            crate::client::identity_operation::VerificationMethodChange::Remove,
+        )
+    }
+
+    fn new_verification_method_operation(
+        &mut self,
+        redirect_uri: String,
+        change: crate::client::identity_operation::VerificationMethodChange,
+    ) -> Result<
+        (
+            crate::client::identity_operation::IdentityOperation<T>,
+            crate::client::identity_operation::IdentityOperationCancellation,
+        ),
+        Error,
+    >
+    where
+        T: Clone,
+    {
+        let sleep = self.identity_sleep_fn.clone().ok_or_else(|| {
+            Error::Auth("identity operations require an injected platform timer".into())
+        })?;
+        Ok(crate::client::identity_operation::IdentityOperation::new(
+            self.client.transport().clone(),
+            crate::client::identity_operation::IdentityOperationConfig {
+                pds_url: self.client.base_url().to_owned(),
+                did: self.did.clone(),
+                redirect_uri,
+                change,
+                now_micros: self.now_micros_fn,
+                sleep,
+            },
+            &mut self.rng,
+        ))
     }
 
     // -- Factory --
@@ -422,27 +800,30 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             // what every downstream consumer — chain lookups, doc refs,
             // cache keys — must key on.
             let workspace_id = keyring.lineage_anchor(keyring_uri).to_string();
-            let group_key = Self::unwrap_workspace_key(
+            let group_key = Self::try_unwrap_workspace_key(
                 &keyring.members,
                 &self.did,
                 &workspace_id,
                 &private_keys.bundle(),
                 keyring.opake_version,
             )?;
-            let name =
-                keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
-                    .unwrap_or_default();
             let historical_keys = crate::workspace::derive_historical_keys(
                 &keyring,
                 &self.did,
                 &workspace_id,
                 &private_keys.bundle(),
             );
+            let name = group_key
+                .as_ref()
+                .and_then(|key| {
+                    keyrings::decrypt_keyring_name_from_record(&keyring, key, &workspace_id)
+                })
+                .unwrap_or_default();
             // spec: workspace-identity § Identity adoption verifies by derivation
             if !crate::workspace::verify_workspace_identity(
                 &keyring,
                 &workspace_id,
-                &group_key,
+                group_key.as_ref(),
                 &historical_keys,
             ) {
                 return Err(Error::WorkspaceIdentityMismatch {
@@ -521,17 +902,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // Stable (genesis) identity — the wrap anchor and the id every
         // downstream consumer keys on. See resolve_workspace_by_uri.
         let workspace_id = keyring.lineage_anchor(keyring_uri).to_string();
-        let group_key = Self::unwrap_workspace_key(
+        let group_key = Self::try_unwrap_workspace_key(
             &keyring.members,
             &self.did,
             &workspace_id,
             &private_keys.bundle(),
             keyring.opake_version,
         )?;
-
-        // Decrypt metadata for the workspace name
-        let name = keyrings::decrypt_keyring_name_from_record(&keyring, &group_key, &workspace_id)
-            .unwrap_or_default();
 
         let historical_keys = crate::workspace::derive_historical_keys(
             &keyring,
@@ -540,11 +917,21 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             &private_keys.bundle(),
         );
 
+        // Current metadata is encrypted under the current key. A
+        // historical-only member still adopts the workspace, with its name
+        // populated once a current wrap is repaired.
+        let name = group_key
+            .as_ref()
+            .and_then(|key| {
+                keyrings::decrypt_keyring_name_from_record(&keyring, key, &workspace_id)
+            })
+            .unwrap_or_default();
+
         // spec: workspace-identity § Identity adoption verifies by derivation
         if !crate::workspace::verify_workspace_identity(
             &keyring,
             &workspace_id,
-            &group_key,
+            group_key.as_ref(),
             &historical_keys,
         ) {
             return Err(Error::WorkspaceIdentityMismatch {
@@ -782,7 +1169,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         // Member wraps anchor to the stable (genesis) workspace_id, not the
         // head — the same context resolve_workspace_by_uri uses.
-        let group_key = match Self::unwrap_workspace_key(
+        let group_key = match Self::try_unwrap_workspace_key(
             &envelope.record.members,
             &self.did,
             &workspace_id,
@@ -814,7 +1201,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         if !crate::workspace::verify_workspace_identity(
             &envelope.record,
             &workspace_id,
-            &group_key,
+            group_key.as_ref(),
             &historical_keys,
         ) {
             return WorkspaceSyncResult {
@@ -1026,6 +1413,107 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         Ok(MutationOutcome::Applied)
     }
 
+    /// Inspect the confirmation token required to wrap a workspace key to an
+    /// unverified recipient. The caller presents this token to the user, then
+    /// passes it to [`Self::add_workspace_member`]; that mutation resolves
+    /// again and rejects a token bound to any replaced bundle.
+    pub async fn workspace_member_approval_challenge(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        member_did: &str,
+    ) -> Result<Option<[u8; 32]>, Error> {
+        let (_, _, head) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let resolved = self.resolve_identity(member_did).await?;
+        match resolved.verification {
+            crate::resolve::VerificationState::Verified { .. } => Ok(None),
+            crate::resolve::VerificationState::Unverified => {
+                Ok(Some(crate::crypto::unverified_key_approval(
+                    head.opake_version,
+                    workspace_id.as_str(),
+                    &resolved.did,
+                    &crate::crypto::EncryptionKeyFields {
+                        x25519_public_key: &resolved.x25519_public_key,
+                        x25519_algo: &resolved.x25519_algo,
+                        ml_kem_public_key: &resolved.ml_kem_public_key,
+                        ml_kem_algo: &resolved.ml_kem_algo,
+                    },
+                )))
+            }
+        }
+    }
+
+    /// Inspect an admitted member against the live keyring head. This is an
+    /// inspection convenience for clients; every mutation still resolves and
+    /// compares the recipient again immediately before it writes.
+    pub async fn workspace_member_access_status(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        member_did: &str,
+    ) -> Result<WorkspaceMemberAccessStatus, Error> {
+        let (_, _, head) = self.fetch_keyring_chain_head(workspace_id).await?;
+        let member = head
+            .members
+            .iter()
+            .find(|member| member.did() == member_did)
+            .ok_or_else(|| Error::NotFound(format!("no member entry for DID {member_did}")))?;
+        let has_current_wrap = member.wrapped_key.is_some();
+        let recorded_approval = member.unverified_key_approval.clone();
+
+        let is_manager = head
+            .members
+            .iter()
+            .any(|member| member.did() == self.did && matches!(member.role, Role::Manager));
+        let private_keys = self.private_keys_from_cache();
+        let can_repair = is_manager
+            && Self::try_unwrap_workspace_key(
+                &head.members,
+                &self.did,
+                workspace_id.as_str(),
+                &private_keys.bundle(),
+                head.opake_version,
+            )
+            .is_ok_and(|key| key.is_some());
+
+        let verification = match self.resolve_identity(member_did).await {
+            Ok(resolved) => match resolved.verification {
+                crate::resolve::VerificationState::Verified { .. } => {
+                    MemberVerificationStatus::Verified
+                }
+                crate::resolve::VerificationState::Unverified => {
+                    let expected = crate::crypto::unverified_key_approval(
+                        head.opake_version,
+                        workspace_id.as_str(),
+                        member_did,
+                        &crate::crypto::EncryptionKeyFields {
+                            x25519_public_key: &resolved.x25519_public_key,
+                            x25519_algo: &resolved.x25519_algo,
+                            ml_kem_public_key: &resolved.ml_kem_public_key,
+                            ml_kem_algo: &resolved.ml_kem_algo,
+                        },
+                    );
+                    let approved = recorded_approval
+                        .as_ref()
+                        .and_then(|approval| approval.decode().ok())
+                        .is_some_and(|approval| approval.as_slice() == expected);
+                    if approved {
+                        MemberVerificationStatus::UnverifiedApproved
+                    } else {
+                        MemberVerificationStatus::UnverifiedApprovalRequired
+                    }
+                }
+            },
+            Err(Error::VerificationFailed(_)) => MemberVerificationStatus::VerificationError,
+            Err(_) => MemberVerificationStatus::ResolutionError,
+        };
+
+        Ok(WorkspaceMemberAccessStatus {
+            did: member_did.to_owned(),
+            has_current_wrap,
+            verification,
+            can_repair,
+        })
+    }
+
     /// Add a member to a workspace via curatorial keyring supersede.
     ///
     /// Federation model: any manager can author. The caller's PDS receives
@@ -1047,17 +1535,56 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         historical_keys: &[crate::workspace::HistoricalKey],
         member_did: &str,
         role: Role,
-    ) -> Result<MutationOutcome, Error> {
+        confirmed_unverified_keys: Option<[u8; 32]>,
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
         let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
+        // The caller's Workspace can lag the live head. Never label an old
+        // group key as this head's current generation: re-unwrap our current
+        // head wrap and require it to match before authoring any new wraps.
+        let private_keys = self.private_keys_from_cache();
+        let head_key = Self::unwrap_workspace_key(
+            &prior.members,
+            &self.did,
+            workspace_id.as_str(),
+            &private_keys.bundle(),
+            prior.opake_version,
+        )?;
+        if head_key.0 != key.0 {
+            return Err(Error::CurrentGroupKeyUnavailable {
+                workspace_id: workspace_id.as_str().to_owned(),
+            });
+        }
 
+        let resolved = self.resolve_identity(member_did).await?;
+        let member_did = resolved.did.as_str();
         if prior.members.iter().any(|m| m.did() == member_did) {
             return Err(Error::InvalidRecord(format!(
                 "{member_did} is already a member of this workspace"
             )));
         }
-
-        let resolved = self.resolve_identity(member_did).await?;
+        let approval = match &resolved.verification {
+            crate::resolve::VerificationState::Verified { .. } => None,
+            crate::resolve::VerificationState::Unverified => {
+                let expected = crate::crypto::unverified_key_approval(
+                    prior.opake_version,
+                    workspace_id.as_str(),
+                    member_did,
+                    &crate::crypto::EncryptionKeyFields {
+                        x25519_public_key: &resolved.x25519_public_key,
+                        x25519_algo: &resolved.x25519_algo,
+                        ml_kem_public_key: &resolved.ml_kem_public_key,
+                        ml_kem_algo: &resolved.ml_kem_algo,
+                    },
+                );
+                if confirmed_unverified_keys != Some(expected) {
+                    return Err(Error::UnverifiedKeyApprovalRequired {
+                        did: member_did.to_owned(),
+                    });
+                }
+                Some(crate::records::AtBytes::from_raw(&expected))
+            }
+        };
         let member_public_keys = PublicKeyBundle {
             x25519: &resolved.x25519_public_key,
             ml_kem: &resolved.ml_kem_public_key,
@@ -1078,10 +1605,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         )?;
 
         let mut new_record = prior;
-        new_record.members.push(crate::records::KeyringMember {
-            wrapped_key: wrapped,
-            role: role.clone(),
-        });
+        let mut member = crate::records::KeyringMember::with_wrap(wrapped, role.clone());
+        member.unverified_key_approval = approval;
+        new_record.members.push(member);
 
         // Admission grants the full history, not just the current key: for
         // every retained rotation the admitting manager can still unwrap,
@@ -1106,14 +1632,347 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 &wrap_ctx,
                 &mut self.rng,
             )?;
-            entry.members.push(crate::records::KeyringMember {
-                wrapped_key: wrapped_historical,
-                role: role.clone(),
-            });
+            entry.members.push(crate::records::KeyringMember::with_wrap(
+                wrapped_historical,
+                role.clone(),
+            ));
         }
 
         self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
-            .await
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: member_did.to_owned(),
+                verification: resolved.verification,
+            },
+        })
+    }
+
+    /// Fill a missing *current* wrap for an admitted member. Repair is a
+    /// manager-authored same-rotation supersede: it preserves every other
+    /// member entry and all history, and it re-resolves immediately before
+    /// writing so stale work cannot re-add a removed member or approve a
+    /// replacement bundle.
+    pub async fn repair_workspace_member_wrap(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        key: &ContentKey,
+        member_did: &str,
+        confirmed_unverified_keys: Option<[u8; 32]>,
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
+        let private_keys = self.private_keys_from_cache();
+        let head_key = Self::unwrap_workspace_key(
+            &prior.members,
+            &self.did,
+            workspace_id.as_str(),
+            &private_keys.bundle(),
+            prior.opake_version,
+        )?;
+        if head_key.0 != key.0 {
+            return Err(Error::CurrentGroupKeyUnavailable {
+                workspace_id: workspace_id.as_str().to_owned(),
+            });
+        }
+
+        let position = prior
+            .members
+            .iter()
+            .position(|member| member.did() == member_did)
+            .ok_or_else(|| Error::NotFound(format!("no member entry for DID {member_did}")))?;
+        if prior.members[position].wrapped_key.is_some() {
+            return Err(Error::InvalidRecord(format!(
+                "{member_did} already has a current group-key wrap"
+            )));
+        }
+
+        let resolved = self.resolve_identity(member_did).await?;
+        let resolved_did = resolved.did.as_str();
+        if resolved_did != member_did {
+            return Err(Error::InvalidRecord(
+                "member DID changed during repair".into(),
+            ));
+        }
+        let approval = match &resolved.verification {
+            crate::resolve::VerificationState::Verified { .. } => {
+                prior.members[position].unverified_key_approval.clone()
+            }
+            crate::resolve::VerificationState::Unverified => {
+                let expected = crate::crypto::unverified_key_approval(
+                    prior.opake_version,
+                    workspace_id.as_str(),
+                    member_did,
+                    &crate::crypto::EncryptionKeyFields {
+                        x25519_public_key: &resolved.x25519_public_key,
+                        x25519_algo: &resolved.x25519_algo,
+                        ml_kem_public_key: &resolved.ml_kem_public_key,
+                        ml_kem_algo: &resolved.ml_kem_algo,
+                    },
+                );
+                let recorded = prior.members[position]
+                    .unverified_key_approval
+                    .as_ref()
+                    .and_then(|bytes| bytes.decode().ok())
+                    .is_some_and(|bytes| bytes.as_slice() == expected);
+                if recorded {
+                    prior.members[position].unverified_key_approval.clone()
+                } else if confirmed_unverified_keys == Some(expected) {
+                    Some(crate::records::AtBytes::from_raw(&expected))
+                } else {
+                    return Err(Error::UnverifiedKeyApprovalRequired {
+                        did: member_did.to_owned(),
+                    });
+                }
+            }
+        };
+        // Resolution is network I/O. Do not write the snapshot fetched before
+        // it: a concurrent removal or approval update must be re-derived,
+        // never overwritten by stale repair work.
+        let (live_uri, live_cid, _) = self.fetch_keyring_chain_head(workspace_id).await?;
+        if live_uri != prior_uri || live_cid != prior_cid {
+            return Err(Error::CasConflict(
+                "keyring head changed while resolving member repair".into(),
+            ));
+        }
+        let wrapped = crate::crypto::wrap_key(
+            key,
+            &PublicKeyBundle {
+                x25519: &resolved.x25519_public_key,
+                ml_kem: &resolved.ml_kem_public_key,
+            },
+            member_did,
+            &crate::crypto::WrapContext::Keyring {
+                uri: workspace_id.as_str(),
+            },
+            &mut self.rng,
+        )?;
+        let mut new_record = prior;
+        new_record.members[position].wrapped_key = Some(wrapped);
+        new_record.members[position].unverified_key_approval = approval;
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: resolved_did.to_owned(),
+                verification: resolved.verification,
+            },
+        })
+    }
+
+    /// Record an explicit approval for an admitted unverified member without
+    /// supplying a group-key wrap. This lets another manager with the current
+    /// key perform the later same-rotation repair, while the approval itself
+    /// remains an ordinary manager-authorized head mutation.
+    pub async fn approve_pending_workspace_member(
+        &mut self,
+        workspace_id: &WorkspaceId,
+        member_did: &str,
+        confirmed_unverified_keys: [u8; 32],
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
+        let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
+        self.require_manager(&prior)?;
+        let position = prior
+            .members
+            .iter()
+            .position(|member| member.did() == member_did)
+            .ok_or_else(|| Error::NotFound(format!("no member entry for DID {member_did}")))?;
+        let resolved = self.resolve_identity(member_did).await?;
+        if !matches!(
+            &resolved.verification,
+            crate::resolve::VerificationState::Unverified
+        ) {
+            return Err(Error::InvalidRecord(
+                "verified members do not need unverified-key approval".into(),
+            ));
+        }
+        let expected = crate::crypto::unverified_key_approval(
+            prior.opake_version,
+            workspace_id.as_str(),
+            member_did,
+            &crate::crypto::EncryptionKeyFields {
+                x25519_public_key: &resolved.x25519_public_key,
+                x25519_algo: &resolved.x25519_algo,
+                ml_kem_public_key: &resolved.ml_kem_public_key,
+                ml_kem_algo: &resolved.ml_kem_algo,
+            },
+        );
+        if confirmed_unverified_keys != expected {
+            return Err(Error::UnverifiedKeyApprovalRequired {
+                did: member_did.to_owned(),
+            });
+        }
+        let (live_uri, live_cid, _) = self.fetch_keyring_chain_head(workspace_id).await?;
+        if live_uri != prior_uri || live_cid != prior_cid {
+            return Err(Error::CasConflict(
+                "keyring head changed while approving member keys".into(),
+            ));
+        }
+        let mut new_record = prior;
+        new_record.members[position].unverified_key_approval =
+            Some(crate::records::AtBytes::from_raw(&expected));
+        self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: resolved.did,
+                verification: resolved.verification,
+            },
+        })
+    }
+
+    /// Re-derive and repair missing current member wraps for every workspace
+    /// where this account is presently a manager and holds the live group key.
+    ///
+    /// This unattended path never supplies a confirmation. Each candidate is
+    /// re-read by [`Self::repair_workspace_member_wrap`], which permits a
+    /// verified bundle or an unchanged recorded approval only, and rejects a
+    /// head that changed while the recipient was resolved. Work that cannot
+    /// run remains represented by the missing head wrap for a later pass.
+    /// Deferrals are in-memory scheduling hints keyed by the observed head:
+    /// a changed head or an explicit repair always re-evaluates authority.
+    // spec:background-work § Remaining work is derived from records, never stored
+    pub async fn sweep_member_wrap_repairs(&mut self) -> Result<MemberWrapRepairOutcome, Error> {
+        let pass_started = (self.now_micros_fn)();
+        let discovery_timer = self.identity_sleep_fn.clone();
+        let discovery = self.discover_member_workspaces();
+        let Some(discovery) = within_member_wrap_budget(
+            discovery_timer,
+            Duration::from_micros(MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS),
+            discovery,
+        )
+        .await
+        else {
+            return Ok(MemberWrapRepairOutcome {
+                discovery_deferred: true,
+                ..MemberWrapRepairOutcome::default()
+            });
+        };
+        let workspaces = discovery?;
+        let private_keys = self.private_keys_from_cache();
+        let mut outcome = MemberWrapRepairOutcome::default();
+        let now = pass_started;
+        let live_heads: HashSet<String> = workspaces
+            .iter()
+            .map(|workspace| workspace.uri.clone())
+            .collect();
+        retain_live_member_wrap_deferrals(&mut self.member_wrap_human_deferrals, &live_heads);
+        self.member_wrap_visibility_backoff
+            .retain(|head, _| live_heads.contains(head));
+        let mut repair_budget = MAX_MEMBER_WRAP_REPAIRS_PER_PASS;
+        let mut workspaces = workspaces;
+        if !workspaces.is_empty() {
+            rotate_member_wrap_workspaces(&mut workspaces, &mut self.member_wrap_workspace_cursor);
+        }
+
+        for workspace in workspaces {
+            let workspace_id = workspace.workspace_id();
+            if !workspace
+                .record
+                .members
+                .iter()
+                .any(|member| member.did() == self.did && matches!(member.role, Role::Manager))
+            {
+                outcome.skipped_not_manager += 1;
+                continue;
+            }
+            let key = match Self::try_unwrap_workspace_key(
+                &workspace.record.members,
+                &self.did,
+                workspace_id.as_str(),
+                &private_keys.bundle(),
+                workspace.record.opake_version,
+            ) {
+                Ok(Some(key)) => key,
+                Ok(None) | Err(_) => {
+                    outcome.skipped_without_current_key += 1;
+                    continue;
+                }
+            };
+            let missing_members: Vec<String> = workspace
+                .record
+                .members
+                .iter()
+                .filter(|member| member.wrapped_key.is_none())
+                .map(|member| member.did().to_owned())
+                .collect();
+
+            let head_uri = workspace.uri.clone();
+            if member_wrap_deferral_is_active(&self.member_wrap_visibility_backoff, &head_uri, now)
+            {
+                outcome.deferred_visibility += missing_members.len();
+                continue;
+            }
+
+            for (member_index, member_did) in missing_members.iter().enumerate() {
+                if repair_budget == 0
+                    || (self.now_micros_fn)().saturating_sub(now)
+                        >= MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS
+                {
+                    outcome.deferred_by_budget += missing_members.len() - member_index;
+                    break;
+                }
+                let member_key = format!("{head_uri}\u{1f}{member_did}");
+                if member_wrap_deferral_is_active(
+                    &self.member_wrap_human_deferrals,
+                    &member_key,
+                    now,
+                ) {
+                    outcome.deferred_human_decision += 1;
+                    continue;
+                }
+                repair_budget -= 1;
+                outcome.attempted += 1;
+                let remaining = MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS
+                    .saturating_sub((self.now_micros_fn)().saturating_sub(now));
+                let timer = self.identity_sleep_fn.clone();
+                let repair =
+                    self.repair_workspace_member_wrap(&workspace_id, &key, member_did, None);
+                let repair_result =
+                    within_member_wrap_budget(timer, Duration::from_micros(remaining), repair)
+                        .await;
+                let Some(repair_result) = repair_result else {
+                    outcome.deferred_by_budget += missing_members.len() - member_index;
+                    break;
+                };
+                match repair_result {
+                    Ok(write) => {
+                        outcome.repaired += 1;
+                        outcome.verification_notices.push(write.verification_notice);
+                    }
+                    Err(Error::UnverifiedKeyApprovalRequired { .. }) => {
+                        outcome.awaiting_approval += 1;
+                        self.member_wrap_human_deferrals.insert(
+                            member_key,
+                            now.saturating_add(MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS),
+                        );
+                    }
+                    Err(Error::VerificationFailed(_)) => outcome.verification_failed += 1,
+                    Err(Error::VisibilityTimeout { .. }) => {
+                        outcome.deferred_visibility += missing_members.len() - member_index;
+                        self.member_wrap_visibility_backoff.insert(
+                            head_uri.clone(),
+                            now.saturating_add(MEMBER_WRAP_VISIBILITY_BACKOFF_MICROS),
+                        );
+                        break;
+                    }
+                    // A changed head, including a removed member, is never
+                    // rebased by the runner. The next pass re-derives it.
+                    Err(Error::CasConflict(_)) | Err(Error::NotFound(_)) => outcome.stale += 1,
+                    Err(error) => {
+                        outcome.errors += 1;
+                        log::warn!(
+                            "member-wrap-repair: workspace={} member={} failed: {error}",
+                            workspace_id,
+                            member_did
+                        );
+                    }
+                }
+            }
+        }
+
+        self.auto_persist_session().await?;
+        Ok(outcome)
     }
 
     /// Leave a workspace via self-removal keyring supersede.
@@ -1204,7 +2063,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         workspace_id: &WorkspaceId,
         group_key: &ContentKey,
         member_did: &str,
-    ) -> Result<(ContentKey, u64), Error> {
+    ) -> Result<WorkspaceMemberRemoval, Error> {
         use crate::crypto::{generate_content_key, wrap_key, WrapContext};
         use crate::records::{KeyHistoryEntry, KeyringMember};
 
@@ -1224,45 +2083,118 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let new_group_key = generate_content_key(&mut self.rng);
         let new_rotation = prior.rotation + 1;
 
-        let remaining_dids: Vec<&str> = prior
+        let mut excluded_members = Vec::new();
+        let mut verification_notices = Vec::new();
+        let mut new_members: Vec<KeyringMember> = Vec::with_capacity(prior.members.len() - 1);
+        for prior_member in prior
             .members
             .iter()
-            .filter(|m| m.did() != member_did)
-            .map(|m| m.did())
-            .collect();
-
-        let mut remaining_keys = Vec::with_capacity(remaining_dids.len());
-        for did in &remaining_dids {
-            let identity = self.resolve_identity(did).await?;
-            remaining_keys.push((identity.x25519_public_key, identity.ml_kem_public_key));
-        }
-
-        let mut new_members: Vec<KeyringMember> = Vec::with_capacity(remaining_dids.len());
-        for (i, did) in remaining_dids.iter().enumerate() {
-            let public_keys = PublicKeyBundle {
-                x25519: &remaining_keys[i].0,
-                ml_kem: &remaining_keys[i].1,
+            .filter(|member| member.did() != member_did)
+        {
+            // Begin from the actual head entry. This retains DID, role and any
+            // key-bound approval, then clears the old generation's wrap before
+            // attempting a fresh resolution.
+            let mut member = prior_member.clone();
+            member.wrapped_key = None;
+            // The author already possesses their local identity keys. Their
+            // self-wrap does not grant access to another account and must not
+            // be withheld merely because their public record is unverified:
+            // genesis correctly carries no invented counterparty approval.
+            if member.did() == self.did {
+                let x25519 = self.identity.x25519_public_key_bytes()?;
+                let ml_kem = self.identity.ml_kem_public_key_bytes()?;
+                member.wrapped_key = Some(wrap_key(
+                    &new_group_key,
+                    &PublicKeyBundle {
+                        x25519: &x25519,
+                        ml_kem: &ml_kem,
+                    },
+                    member.did(),
+                    &WrapContext::Keyring {
+                        uri: workspace_id.as_str(),
+                    },
+                    &mut self.rng,
+                )?);
+                new_members.push(member);
+                continue;
+            }
+            let timer = self.identity_sleep_fn.clone();
+            let resolution = within_member_wrap_budget(
+                timer,
+                Duration::from_micros(MEMBER_REMOVAL_RECIPIENT_RESOLUTION_BUDGET_MICROS),
+                self.resolve_identity(member.did()),
+            )
+            .await;
+            let resolved = match resolution {
+                Some(Ok(resolved)) => resolved,
+                Some(Err(error)) => {
+                    let reason = if matches!(error, Error::VerificationFailed(_)) {
+                        ExcludedMemberReason::VerificationFailed
+                    } else {
+                        ExcludedMemberReason::ResolutionFailed
+                    };
+                    excluded_members.push(ExcludedMember {
+                        did: member.did.clone(),
+                        reason,
+                    });
+                    new_members.push(member);
+                    continue;
+                }
+                None => {
+                    excluded_members.push(ExcludedMember {
+                        did: member.did.clone(),
+                        reason: ExcludedMemberReason::ResolutionFailed,
+                    });
+                    new_members.push(member);
+                    continue;
+                }
             };
-            let wrapped = wrap_key(
+            let permitted = match &resolved.verification {
+                crate::resolve::VerificationState::Verified { .. } => true,
+                crate::resolve::VerificationState::Unverified => {
+                    let expected = crate::crypto::unverified_key_approval(
+                        prior.opake_version,
+                        workspace_id.as_str(),
+                        member.did(),
+                        &crate::crypto::EncryptionKeyFields {
+                            x25519_public_key: &resolved.x25519_public_key,
+                            x25519_algo: &resolved.x25519_algo,
+                            ml_kem_public_key: &resolved.ml_kem_public_key,
+                            ml_kem_algo: &resolved.ml_kem_algo,
+                        },
+                    );
+                    member
+                        .unverified_key_approval
+                        .as_ref()
+                        .and_then(|approval| approval.decode().ok())
+                        .is_some_and(|approval| approval.as_slice() == expected)
+                }
+            };
+            verification_notices.push(RecipientVerificationNotice {
+                did: resolved.did.clone(),
+                verification: resolved.verification.clone(),
+            });
+            if !permitted {
+                excluded_members.push(ExcludedMember {
+                    did: member.did.clone(),
+                    reason: ExcludedMemberReason::ApprovalRequired,
+                });
+                new_members.push(member);
+                continue;
+            }
+            member.wrapped_key = Some(wrap_key(
                 &new_group_key,
-                &public_keys,
-                did,
+                &PublicKeyBundle {
+                    x25519: &resolved.x25519_public_key,
+                    ml_kem: &resolved.ml_kem_public_key,
+                },
+                member.did(),
                 &WrapContext::Keyring {
                     uri: workspace_id.as_str(),
                 },
                 &mut self.rng,
-            )?;
-            // Roles carry forward unchanged for remaining members.
-            let prior_role = prior
-                .members
-                .iter()
-                .find(|m| m.did() == *did)
-                .map(|m| m.role.clone())
-                .unwrap_or(Role::Editor);
-            new_members.push(KeyringMember {
-                wrapped_key: wrapped,
-                role: prior_role,
-            });
+            )?);
+            new_members.push(member);
         }
 
         let mut new_record = crate::records::Keyring {
@@ -1283,7 +2215,12 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         // under it remain decryptable by remaining members.
         new_record.key_history.push(KeyHistoryEntry {
             rotation: prior.rotation,
-            members: prior.members.clone(),
+            members: prior
+                .members
+                .iter()
+                .filter(|member| member.did() != member_did)
+                .cloned()
+                .collect(),
         });
 
         // Re-encrypt metadata under new group key so old wrap is not
@@ -1299,7 +2236,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
         self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
             .await?;
-        Ok((new_group_key, new_rotation))
+        if !excluded_members.is_empty() {
+            log::warn!(
+                "workspace rotation excluded {} members without a new wrap",
+                excluded_members.len()
+            );
+        }
+        Ok(WorkspaceMemberRemoval {
+            group_key: new_group_key,
+            rotation: new_rotation,
+            excluded_members,
+            verification_notices,
+        })
     }
 
     /// Update workspace metadata (name, description, icon) via keyring
@@ -1431,19 +2379,44 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         private_keys: &crate::crypto::PrivateKeyBundle<'_>,
         declared_version: u32,
     ) -> Result<ContentKey, Error> {
+        Self::try_unwrap_workspace_key(
+            members,
+            did,
+            lineage_anchor,
+            private_keys,
+            declared_version,
+        )?
+        .ok_or_else(|| Error::CurrentGroupKeyUnavailable {
+            workspace_id: lineage_anchor.to_owned(),
+        })
+    }
+
+    /// Like [`Self::unwrap_workspace_key`], but models an admitted member
+    /// without a current wrap as historical-only rather than as a corrupted
+    /// record. Callers must still derive rotation 0 before adopting it.
+    pub fn try_unwrap_workspace_key(
+        members: &[crate::records::KeyringMember],
+        did: &str,
+        lineage_anchor: &str,
+        private_keys: &crate::crypto::PrivateKeyBundle<'_>,
+        declared_version: u32,
+    ) -> Result<Option<ContentKey>, Error> {
         let member = members
             .iter()
             .find(|m| m.did() == did)
             .ok_or_else(|| Error::NotFound(format!("no member entry for DID {did}")))?;
-        Ok(crate::crypto::unwrap_key(
-            &member.wrapped_key,
+        let Some(wrapped_key) = member.wrapped_key.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some(crate::crypto::unwrap_key(
+            wrapped_key,
             private_keys,
             &crate::crypto::WrapContext::Keyring {
                 uri: lineage_anchor,
             },
             // Transcript derives from the keyring's own declared version.
             declared_version,
-        )?)
+        )?))
     }
 
     // -- Indexer helpers --
@@ -1569,10 +2542,62 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     // -- Sharing (pending shares) --
 
     /// List pending (queued) outgoing shares.
+    ///
+    /// The authorized DID lives inside each intent's encrypted metadata, so
+    /// exposing it costs a content-key fetch per document. Entries whose DID
+    /// cannot be read are still listed, carrying the cause: an owner deciding
+    /// whether to cancel a queued share needs to know whether the PDS was
+    /// unreachable, the key is gone, or the intent itself is corrupt.
+    ///
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
     pub async fn list_pending_shares(
         &mut self,
     ) -> Result<Vec<crate::sharing::PendingShareEntry>, Error> {
-        let result = crate::sharing::list_pending_shares(&mut self.client).await;
+        let private_keys = self.private_keys_from_cache();
+        let mut result = crate::sharing::list_pending_shares(&mut self.client).await;
+        if let Ok(entries) = &mut result {
+            // Several intents routinely queue against the same document, and
+            // each content-key fetch is its own PDS round trip.
+            let mut content_keys: std::collections::HashMap<
+                String,
+                Result<crate::crypto::ContentKey, String>,
+            > = std::collections::HashMap::new();
+            for entry in entries {
+                if !content_keys.contains_key(&entry.document) {
+                    let fetched = crate::documents::fetch_content_key(
+                        &mut self.client,
+                        &self.did,
+                        &private_keys.bundle(),
+                        &entry.document,
+                    )
+                    .await
+                    .map_err(|error| describe_content_key_failure(&error));
+                    content_keys.insert(entry.document.clone(), fetched);
+                }
+                let content_key = match &content_keys[&entry.document] {
+                    Ok(content_key) => content_key,
+                    Err(reason) => {
+                        entry.recipient_did_error = Some(reason.clone());
+                        continue;
+                    }
+                };
+                let context = crate::crypto::SealContext::new(
+                    &entry.document,
+                    crate::crypto::SealType::PendingShareMetadata,
+                );
+                match crate::crypto::decrypt_metadata::<crate::crypto::PendingShareMetadata>(
+                    content_key,
+                    &entry.encrypted_metadata,
+                    &context,
+                ) {
+                    Ok(metadata) => entry.recipient_did = Some(metadata.recipient_did),
+                    Err(_) => {
+                        entry.recipient_did_error =
+                            Some("the queued intent metadata could not be decrypted".into());
+                    }
+                }
+            }
+        }
         self.signoff(result).await
     }
 
@@ -1685,7 +2710,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<KeyringDownloadResult, Error> {
         // Peek the keyring reference (stable workspace id) the document was
         // encrypted against, then resolve that workspace at its current head.
-        let (workspace_id, _doc_rotation) =
+        let (workspace_id, doc_rotation) =
             crate::documents::fetch_document_keyring_ref(self.client.transport(), document_uri)
                 .await?;
         let workspace_id = WorkspaceId::from_resolved(workspace_id);
@@ -1700,12 +2725,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         .await?;
 
         let keyring_rkey = atproto::parse_at_uri(workspace_id.as_str())?.rkey;
+        let group_key = ws
+            .key_for_rotation(doc_rotation)
+            .ok_or_else(|| Error::CurrentGroupKeyUnavailable {
+                workspace_id: workspace_id.as_str().to_owned(),
+            })?
+            .clone();
         Ok(KeyringDownloadResult {
             filename,
             plaintext,
-            group_key: ws.key.clone(),
+            group_key,
             keyring_rkey,
-            rotation: ws.rotation,
+            rotation: doc_rotation,
         })
     }
 
@@ -1722,18 +2753,30 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         crate::resolve::resolve_identity(self.client.transport(), pds_url, handle_or_did).await
     }
 
+    /// Resolve an entered handle or DID to its DID even when it has not yet
+    /// published an Opake public key. Pending-share intent binds this DID;
+    /// callers must never retain a mutable handle as authority.
+    pub async fn resolve_recipient_did(&self, handle_or_did: &str) -> Result<String, Error> {
+        let (did, _, _) =
+            crate::resolve::resolve_pds_for_login(self.client.transport(), handle_or_did).await?;
+        Ok(did)
+    }
+
     /// Publish or update the caller's public key record on the PDS.
     pub async fn publish_public_key(&mut self) -> Result<String, Error> {
         let identity = &self.identity;
         let pubkey = identity.x25519_public_key_bytes()?;
         let mlkem_pubkey = identity.ml_kem_public_key_bytes()?;
-        let signing_key = identity.verify_key_bytes()?;
+        let signing_key = identity
+            .signing_key_bytes()?
+            .ok_or_else(|| Error::Auth("identity is missing Ed25519 signing key".into()))?;
+        let signing_key = crate::crypto::Ed25519SigningKey::from_bytes(&signing_key);
         let now = self.now();
         let result = crate::resolve::publish_public_key(
             &mut self.client,
             &pubkey,
             &mlkem_pubkey,
-            signing_key.as_ref(),
+            &signing_key,
             &now,
         )
         .await;
@@ -1802,123 +2845,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Re-wrap sweep (background hygiene) --
 
-    /// Re-wrap every document the caller owns whose content-key wrap trails
-    /// its workspace's current rotation, bounding the key-history walk readers
-    /// perform after a rotation.
-    ///
-    /// The work set is derived purely from records — the caller's own
-    /// `at.opake.document` records, each compared against its workspace head
-    /// resolved at sweep time. Each re-wrap is an independent CAS write
-    /// conditioned on the record's current CID, so a duplicate or interrupted
-    /// runner re-derives exactly the unmigrated remainder and a document
-    /// another runner already migrated is skipped on a CAS conflict. Never
-    /// required for correctness — a workspace that is never swept stays fully
-    /// readable, it just accrues a longer history walk (`spec:key-rotation §
-    /// Unbounded key history is the accepted cost of unswept workspaces`).
-    ///
-    /// spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
-    pub async fn sweep_owned_documents_rewrap(
-        &mut self,
-    ) -> Result<crate::rewrap::RewrapOutcome, Error> {
-        use crate::rewrap::{rewrap_document_to_head, RewrapItem};
-
-        let doc_uris = self.list_own_document_uris().await?;
-        // Resolved workspace heads, cached per keyring so a workspace is only
-        // resolved once even when it holds many documents.
-        let mut heads: std::collections::HashMap<String, Workspace> =
-            std::collections::HashMap::new();
-        let mut outcome = crate::rewrap::RewrapOutcome::default();
-
-        for doc_uri in &doc_uris {
-            // Peek at the record to learn which workspace it belongs to; a
-            // document with no keyring encryption is not this sweep's concern.
-            let Some(workspace_id) = self.document_keyring_uri(doc_uri).await? else {
-                outcome.not_applicable += 1;
-                continue;
-            };
-
-            if !heads.contains_key(&workspace_id) {
-                // Re-resolve the head per keyring at sweep time. A rotation
-                // that lands mid-sweep leaves later documents re-derivable on
-                // the next pass — never a write onto a superseded rotation.
-                match self.resolve_head_workspace(&workspace_id).await {
-                    Ok(ws) => {
-                        heads.insert(workspace_id.clone(), ws);
-                    }
-                    Err(e) => {
-                        log::warn!("rewrap: failed to resolve head for {workspace_id}: {e}");
-                        continue;
-                    }
-                }
-            }
-            let head = heads[&workspace_id].group_keys();
-
-            match rewrap_document_to_head(&mut self.client, &workspace_id, doc_uri, head).await {
-                Ok(RewrapItem::Rewrapped) => outcome.rewrapped += 1,
-                Ok(RewrapItem::AlreadyCurrent) => outcome.already_current += 1,
-                Ok(RewrapItem::Conflict) => outcome.conflicts += 1,
-                Ok(RewrapItem::NotApplicable) => outcome.not_applicable += 1,
-                Err(e) => {
-                    log::warn!("rewrap: {doc_uri} failed: {e}");
-                }
-            }
-        }
-
-        self.auto_persist_session().await?;
-        Ok(outcome)
-    }
-
-    /// The keyring (workspace) URI a document is encrypted for, or `None` if
-    /// it is not keyring-encrypted. One lightweight record read.
-    async fn document_keyring_uri(&mut self, doc_uri: &str) -> Result<Option<String>, Error> {
-        let at_uri = atproto::parse_at_uri(doc_uri)?;
-        let entry = self
-            .client
-            .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
-            .await?;
-        let document: crate::records::Document = serde_json::from_value(entry.value)?;
-        Ok(match document.encryption {
-            crate::records::Encryption::Keyring(ke) => Some(ke.keyring_ref.keyring),
-            crate::records::Encryption::Direct(_) => None,
-        })
-    }
-
-    /// Resolve a workspace to its current chain head by genesis (workspace) URI
-    /// — walk to the head, then unwrap the head group key + history.
-    async fn resolve_head_workspace(&mut self, workspace_id: &str) -> Result<Workspace, Error> {
-        let id = WorkspaceId::from_resolved(workspace_id.to_string());
-        let (head_uri, _, _) = self.fetch_keyring_chain_head(&id).await?;
-        self.resolve_workspace_by_uri(&head_uri).await
-    }
-
-    /// List the AT-URIs of every `at.opake.document` record in the caller's
-    /// own repo. The re-wrap sweep's candidate set is derived from these.
-    /// spec:background-work § Remaining work is derived from records, never stored
-    pub async fn list_own_document_uris(&mut self) -> Result<Vec<String>, Error> {
-        let mut uris = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = self
-                .client
-                .list_records(
-                    crate::documents::DOCUMENT_COLLECTION,
-                    Some(100),
-                    cursor.as_deref(),
-                )
-                .await?;
-            if page.records.is_empty() {
-                break;
-            }
-            uris.extend(page.records.iter().map(|r| r.uri.clone()));
-            match page.cursor {
-                Some(next) => cursor = Some(next),
-                None => break,
-            }
-        }
-        self.auto_persist_session().await?;
-        Ok(uris)
-    }
-
     // -- Purge --
 
     /// Delete all records in a collection. Returns the number of records deleted.
@@ -1965,6 +2891,23 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<crate::client::RecordEntry, Error> {
         let result = self.client.get_record(did, collection, rkey).await;
         self.signoff(result).await
+    }
+}
+
+/// Short owner-facing cause for a content key a listing could not obtain.
+///
+/// The distinction that matters to the owner is retry-shaped: a transport
+/// failure is worth trying again, an unavailable key is not.
+fn describe_content_key_failure(error: &Error) -> String {
+    match error {
+        Error::Xrpc { .. }
+        | Error::Indexer { .. }
+        | Error::Auth(_)
+        | Error::NotFound(_)
+        | Error::VisibilityTimeout { .. } => {
+            format!("the document record could not be fetched: {error}")
+        }
+        _ => format!("the document content key is unavailable: {error}"),
     }
 }
 

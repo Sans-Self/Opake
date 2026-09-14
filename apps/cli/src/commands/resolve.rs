@@ -2,7 +2,7 @@ use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use clap::Args;
 use opake_core::client::Session;
-use opake_core::resolve;
+use opake_core::resolve::{self, AnchorHistory};
 
 use crate::commands::Execute;
 use crate::session::CommandContext;
@@ -36,7 +36,77 @@ impl Execute for ResolveCommand {
             identity.ml_kem_public_key.len()
         );
         println!("  ML-KEM algo: {}", identity.ml_kem_algo);
+        for line in verification_status_lines(&identity.verification) {
+            println!("  {line}");
+        }
 
         Ok(None)
+    }
+}
+
+fn verification_status_lines(verification: &resolve::VerificationState) -> [&'static str; 2] {
+    match verification {
+        resolve::VerificationState::Unverified => [
+            "Verification: Unverified",
+            "Verification method history: no verification method is published",
+        ],
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::Replaced,
+        } => [
+            "Verification: Verified",
+            "Verification method history: the verification key was replaced",
+        ],
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::NotReplaced,
+        } => [
+            "Verification: Verified",
+            "Verification method history: no replacement was found",
+        ],
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::NoHistory,
+        } => [
+            "Verification: Verified",
+            "Verification method history: this DID method publishes none",
+        ],
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::Unavailable,
+        } => [
+            "Verification: Verified",
+            "Verification method history: unavailable; replacement is unknown",
+        ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prints_absent_unreadable_and_unpublished_history_distinctly() {
+        assert_eq!(
+            verification_status_lines(&resolve::VerificationState::Unverified),
+            [
+                "Verification: Unverified",
+                "Verification method history: no verification method is published",
+            ]
+        );
+        assert_eq!(
+            verification_status_lines(&resolve::VerificationState::Verified {
+                anchor_history: AnchorHistory::NoHistory
+            }),
+            [
+                "Verification: Verified",
+                "Verification method history: this DID method publishes none",
+            ]
+        );
+        assert_eq!(
+            verification_status_lines(&resolve::VerificationState::Verified {
+                anchor_history: AnchorHistory::Unavailable
+            }),
+            [
+                "Verification: Verified",
+                "Verification method history: unavailable; replacement is unknown",
+            ]
+        );
     }
 }

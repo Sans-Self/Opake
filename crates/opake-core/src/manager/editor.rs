@@ -70,7 +70,7 @@ impl DecryptionKeys {
         let current = self.group_key.as_ref()?;
         Some(crate::workspace::GroupKeys {
             current_rotation: self.current_rotation,
-            current,
+            current: Some(current),
             historical: &self.historical_keys,
         })
     }
@@ -175,7 +175,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let (workspace_uri, group_key, rotation, historical) = match &self.context {
             FileContext::Workspace(ws) => (
                 ws.uri.clone(),
-                ws.key.clone(),
+                ws.current_key()?.clone(),
                 ws.rotation,
                 ws.historical_keys.clone(),
             ),
@@ -194,7 +194,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         let (metadata, original_anchor, original_cid) = {
             let group_keys = GroupKeys {
                 current_rotation: rotation,
-                current: &group_key,
+                current: Some(&group_key),
                 historical: &historical,
             };
             documents::fetch_keyring_document_metadata(
@@ -278,7 +278,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 did: self.opake.did.clone(),
                 x25519_private_key: Zeroizing::new(*self.opake.cached_private_keys.x25519),
                 ml_kem_private_key: Zeroizing::new(*self.opake.cached_private_keys.ml_kem),
-                group_key: Some(ws.key.clone()),
+                group_key: ws.key.clone(),
                 current_rotation: ws.rotation,
                 historical_keys: ws.historical_keys.clone(),
             }),

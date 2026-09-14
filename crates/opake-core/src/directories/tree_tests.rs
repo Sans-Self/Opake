@@ -597,7 +597,7 @@ fn decrypt_names_with_group_keys_decrypts_keyring_directories() {
     let historical: Vec<crate::workspace::HistoricalKey> = Vec::new();
     let view = crate::workspace::GroupKeys {
         current_rotation: 0,
-        current: &group_key,
+        current: Some(&group_key),
         historical: &historical,
     };
     let mut group_keys = HashMap::new();
@@ -639,7 +639,7 @@ fn decrypt_names_with_group_keys_handles_mixed_encryption() {
     let historical: Vec<crate::workspace::HistoricalKey> = Vec::new();
     let view = crate::workspace::GroupKeys {
         current_rotation: 0,
-        current: &group_key,
+        current: Some(&group_key),
         historical: &historical,
     };
     let mut group_keys = HashMap::new();

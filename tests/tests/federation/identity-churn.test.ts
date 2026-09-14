@@ -26,6 +26,7 @@ import {
   actorByName,
   actorOnPds,
   cli,
+  cliApprovingUnverified,
   downloadAsMember,
   headUri,
   login,
@@ -97,7 +98,7 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       // First supersede: the head record is now a different URI from genesis.
-      const added1 = await cli(OWNER, ["workspace", "add-member", ws, memberDid]);
+      const added1 = await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid]);
       expect(added1.code).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
@@ -111,7 +112,7 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       // check must carry the genesis URI. A head-keyed call resolves to no
       // `chain_heads` row, is answered `workspace_not_indexed`, and retries to
       // a visibility timeout; success here is the genesis-keyed path.
-      const added2 = await cli(OWNER, ["workspace", "add-member", ws, lateDid]);
+      const added2 = await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, lateDid]);
       expect(added2.code).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 3),
@@ -140,11 +141,15 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       // Churn the head two supersedes past genesis with two adds.
-      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
       ).toBe(true);
-      expect((await cli(OWNER, ["workspace", "add-member", ws, lateDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, lateDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 3),
       ).toBe(true);
@@ -189,11 +194,15 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
       // supersede when leaving is one they never authored and never saw
       // created. Their leave has to find the workspace by its genesis identity;
       // nothing they hold locally points at it.
-      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
       ).toBe(true);
-      expect((await cli(OWNER, ["workspace", "add-member", ws, lateDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, lateDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 3),
       ).toBe(true);
@@ -246,11 +255,15 @@ describe.skipIf(testEnv() !== "devenv")("workspace-identity churn", () => {
 
       // Two supersedes: the late member joins only at the second, well past
       // genesis, so membership authority must be read at the live head.
-      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 2),
       ).toBe(true);
-      expect((await cli(OWNER, ["workspace", "add-member", ws, lateDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, lateDid])).code,
+      ).toBe(0);
       expect(
         await pollUntil(async () => (await memberCount(OWNER, ws)) === 3),
       ).toBe(true);

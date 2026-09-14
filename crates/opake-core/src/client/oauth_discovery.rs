@@ -41,6 +41,11 @@ pub struct AuthorizationServerMetadata {
     pub issuer: String,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
+    /// RFC 7009 endpoint used to dispose a temporary identity grant. Some
+    /// servers do not advertise one; callers report that cleanup could not be
+    /// attempted rather than retaining the credential.
+    #[serde(default)]
+    pub revocation_endpoint: Option<String>,
     #[serde(default)]
     pub pushed_authorization_request_endpoint: Option<String>,
     #[serde(default)]
@@ -138,9 +143,10 @@ impl AuthorizationServerMetadata {
 // ---------------------------------------------------------------------------
 
 /// A PKCE code verifier + challenge pair (S256 method).
-#[derive(Debug, Clone)]
+#[derive(Clone, crate::RedactedDebug)]
 pub struct PkceChallenge {
     /// The raw verifier string (sent with the token exchange).
+    #[redact]
     pub verifier: String,
     /// The S256 challenge (sent with the authorization request).
     pub challenge: String,

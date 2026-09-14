@@ -70,8 +70,8 @@ fn record_entry(uri: &str, cid: &str, value: &impl serde::Serialize) -> serde_js
 }
 
 fn member(did: &str, role: Role) -> KeyringMember {
-    KeyringMember {
-        wrapped_key: WrappedKey {
+    KeyringMember::with_wrap(
+        WrappedKey {
             did: did.into(),
             ciphertext: AtBytes {
                 encoded: "AAAA".into(),
@@ -79,7 +79,7 @@ fn member(did: &str, role: Role) -> KeyringMember {
             algo: "x25519-mlkem768-hkdf-a256kw-v2".into(),
         },
         role,
-    }
+    )
 }
 
 fn keyring(members: Vec<KeyringMember>, supersedes: Option<&str>) -> Keyring {

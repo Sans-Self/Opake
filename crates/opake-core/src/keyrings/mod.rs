@@ -5,18 +5,20 @@
 // their content key wrapped under GK. Adding a member gives them access to
 // all documents under that keyring without per-document changes.
 
+#[cfg(test)]
 mod add_member;
 mod create;
 mod list;
+#[cfg(test)]
 mod remove_member;
 
-pub use add_member::{add_member, AddMemberParams};
 pub use create::{create_keyring, CreateKeyringParams};
 pub use list::{list_keyrings, KeyringEntry};
-pub use remove_member::remove_member;
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
+#[cfg(test)]
 use crate::error::Error;
+#[cfg(test)]
 use crate::records::{Keyring, SCHEMA_VERSION};
 
 pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
@@ -34,7 +36,8 @@ pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
 ///
 /// A structurally corrupt keyring never reaches this guard — it fails the
 /// typed parse at fetch and the write is refused there, before any re-wrap.
-pub(crate) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(), Error> {
+#[cfg(test)]
+pub(super) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(), Error> {
     if keyring.opake_version > SCHEMA_VERSION {
         return Err(Error::ChainLinkNeedsNewerClient {
             uri: uri.to_owned(),
@@ -98,8 +101,11 @@ pub fn decrypt_indexer_workspace_name(
 ) -> Option<String> {
     let keyring = &envelope.record;
     let member = keyring.members.iter().find(|m| m.did() == did)?;
+    // A listed member can legitimately lack the current wrap after an
+    // exclusion. Name metadata is current-key encrypted, so leave it
+    // unavailable rather than panicking or treating the member as absent.
     let group_key = crypto::unwrap_key(
-        &member.wrapped_key,
+        member.wrapped_key.as_ref()?,
         private_keys,
         // Member wraps are anchored to the workspace's stable (genesis) URI,
         // which survives supersedes — not the head URI in `envelope.uri`.
@@ -164,10 +170,7 @@ mod indexer_workspace_tests {
         )
         .expect("encrypt_metadata");
 
-        let member_record = KeyringMember {
-            wrapped_key: wrapped,
-            role: crate::records::Role::Editor,
-        };
+        let member_record = KeyringMember::with_wrap(wrapped, crate::records::Role::Editor);
 
         IndexerEnvelope {
             uri: uri.into(),
