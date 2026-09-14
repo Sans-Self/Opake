@@ -20,6 +20,7 @@ export interface DevenvActor {
   readonly name: string;
   readonly handle: string;
   readonly pds: string;
+  readonly verified?: boolean;
   readonly mnemonic: string;
   readonly password: string;
 }

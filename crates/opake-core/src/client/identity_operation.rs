@@ -23,8 +23,9 @@ use super::oauth_discovery::{
     discover_authorization_server, generate_pkce, AuthorizationServerMetadata, PkceChallenge,
 };
 use super::oauth_token::{
-    authenticated_json_post, build_authorization_url, build_client_id, exchange_code_unvalidated,
-    pushed_authorization_request, revoke_temporary_token, validate_token_response,
+    authenticated_bytes_post, authenticated_json_post, build_authorization_url, build_client_id,
+    exchange_code_unvalidated, pushed_authorization_request, revoke_temporary_token,
+    validate_token_response,
 };
 use super::transport::Transport;
 
@@ -74,7 +75,9 @@ pub enum VerificationMethodChange {
 }
 
 /// Owner-supplied confirmation for the signer. It is accepted only by the
-/// operation driver and zeroized when consumed or dropped.
+/// operation driver, which zeroizes its own copies: this holder and the
+/// serialized signing request it builds. The transport's copy of that request
+/// is protocol I/O and carries no zeroization claim.
 pub struct OwnerConfirmation(Zeroizing<String>);
 
 impl OwnerConfirmation {
@@ -566,10 +569,10 @@ impl<T: Transport> IdentityOperation<T> {
         );
         let signer_response = bounded(
             &self.sleep,
-            authenticated_json_post(
+            authenticated_bytes_post(
                 &self.transport,
                 &sign_url,
-                Some(body),
+                &body,
                 access_token,
                 &self.dpop_key,
                 &mut self.dpop_nonce,
@@ -645,11 +648,14 @@ impl<T: Transport> IdentityOperation<T> {
         }
     }
 
+    /// Serialize the `signPlcOperation` body straight into a zeroizing buffer.
+    /// The confirmation token never becomes an intermediate `serde_json::Value`
+    /// or `String`; the non-secret PLC fields are assembled separately.
     fn sign_request_body(
         &self,
         mut state: serde_json::Value,
         token: &str,
-    ) -> Result<serde_json::Value, Error> {
+    ) -> Result<Zeroizing<Vec<u8>>, Error> {
         let state = state
             .as_object_mut()
             .ok_or_else(|| Error::InvalidRecord("malformed PLC state".into()))?;
@@ -674,12 +680,24 @@ impl<T: Transport> IdentityOperation<T> {
             }
         }
         let methods = serde_json::Value::Object(methods.clone());
-        let rotation_keys = state.get("rotationKeys").cloned();
-        let also_known_as = state.get("alsoKnownAs").cloned();
-        let services = state.get("services").cloned();
-        Ok(
-            serde_json::json!({"token": token, "rotationKeys": rotation_keys, "alsoKnownAs": also_known_as, "verificationMethods": methods, "services": services}),
-        )
+        let mut public_fields = serde_json::Map::new();
+        public_fields.insert("verificationMethods".into(), methods);
+        for field in ["rotationKeys", "alsoKnownAs", "services"] {
+            if let Some(value) = state.get(field).cloned() {
+                public_fields.insert(field.into(), value);
+            }
+        }
+        let serialize_error = |e: serde_json::Error| Error::InvalidRecord(e.to_string());
+        let public_json = serde_json::to_vec(&serde_json::Value::Object(public_fields))
+            .map_err(serialize_error)?;
+        let mut body = Zeroizing::new(Vec::with_capacity(public_json.len() + token.len() + 16));
+        body.extend_from_slice(br#"{"token":"#);
+        serde_json::to_writer(&mut *body, token).map_err(serialize_error)?;
+        body.push(b',');
+        // `public_json` always opens with `{` and is non-empty (it carries
+        // verificationMethods), so splicing after the brace yields one object.
+        body.extend_from_slice(&public_json[1..]);
+        Ok(body)
     }
 
     async fn cleanup_tokens(
@@ -691,12 +709,14 @@ impl<T: Transport> IdentityOperation<T> {
             return IdentityCleanup::Unavailable;
         };
         let mut rng = crate::crypto::OsRng;
+        let client_id = build_client_id(&self.redirect_uri);
         let access = bounded(
             &self.sleep,
             revoke_temporary_token(
                 &self.transport,
                 endpoint,
                 &tokens.access_token,
+                &client_id,
                 &self.dpop_key,
                 &mut self.dpop_nonce,
                 (self.now_micros)() as i64 / 1_000_000,
@@ -712,6 +732,7 @@ impl<T: Transport> IdentityOperation<T> {
                         &self.transport,
                         endpoint,
                         token,
+                        &client_id,
                         &self.dpop_key,
                         &mut self.dpop_nonce,
                         (self.now_micros)() as i64 / 1_000_000,
@@ -780,7 +801,18 @@ impl<T: Transport> IdentityOperation<T> {
     }
 }
 
-async fn bounded<F>(sleep: &IdentitySleepFn, future: F) -> Result<F::Output, Error>
+/// Message carried by the error `bounded` raises when the timer wins. It is
+/// part of the contract: a caller that must tell "the directory is slow" from
+/// "resolution failed" has no other discriminant, since both arrive as
+/// `Error::Auth`.
+pub const IDENTITY_NETWORK_TIMEOUT_MESSAGE: &str = "identity operation network timeout";
+
+/// Whether an error is the timeout raised by a bounded identity operation.
+pub fn is_identity_network_timeout(error: &Error) -> bool {
+    matches!(error, Error::Auth(message) if message == IDENTITY_NETWORK_TIMEOUT_MESSAGE)
+}
+
+pub(crate) async fn bounded<F>(sleep: &IdentitySleepFn, future: F) -> Result<F::Output, Error>
 where
     F: Future,
 {
@@ -788,7 +820,7 @@ where
     let timer = sleep(IDENTITY_NETWORK_TIMEOUT).boxed_local();
     match select(request, timer).await {
         Either::Left((value, _)) => Ok(value),
-        Either::Right((_, _)) => Err(Error::Auth("identity operation network timeout".into())),
+        Either::Right((_, _)) => Err(Error::Auth(IDENTITY_NETWORK_TIMEOUT_MESSAGE.into())),
     }
 }
 
@@ -1354,9 +1386,11 @@ mod tests {
             "confirmation request is bodyless"
         );
         assert!(requests[4].url.ends_with("signPlcOperation"));
-        let Some(RequestBody::Json(sign_body)) = &requests[4].body else {
+        let Some(RequestBody::Bytes { data, content_type }) = &requests[4].body else {
             panic!("sign request must carry the complete PLC operation body");
         };
+        assert_eq!(content_type, "application/json");
+        let sign_body: serde_json::Value = serde_json::from_slice(data).unwrap();
         let methods = sign_body["verificationMethods"].as_object().unwrap();
         assert_eq!(methods["atproto"], "did:key:zexisting");
         assert_eq!(methods["unrelated"], "did:key:zunrelated");
@@ -1364,6 +1398,15 @@ mod tests {
         assert!(requests[5].url.ends_with("submitPlcOperation"));
         assert!(requests[6].url.ends_with("/revoke"));
         assert!(requests[7].url.ends_with("/revoke"));
+        for request in &requests[6..8] {
+            let Some(RequestBody::Form(form)) = &request.body else {
+                panic!("revocation must use a form body");
+            };
+            assert!(form.iter().any(|(name, _)| name == "token"));
+            assert!(form
+                .iter()
+                .any(|(name, value)| name == "client_id" && value.contains("identity%3A%2A")));
+        }
 
         // Completion does not leave pending state, PKCE, state, or a usable
         // private DPoP key in an opaque holder retained for result inspection.
@@ -1687,10 +1730,47 @@ mod tests {
             "alsoKnownAs": ["at://alice.test"],
             "verificationMethods": {"atproto": "did:key:zexisting", "other": "did:key:zother"},
             "services": {"atproto_pds": {"type": "AtprotoPersonalDataServer", "endpoint": "https://pds.example.test"}}
-        }), "confirmation").unwrap();
+        }), "confirm\"ation").unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["token"], "confirm\"ation");
         let methods = body.get("verificationMethods").unwrap();
         assert_eq!(methods.get("atproto").unwrap(), "did:key:zexisting");
         assert_eq!(methods.get("other").unwrap(), "did:key:zother");
         assert!(methods.get("opake").is_some());
+        let minimal = operation
+            .sign_request_body(
+                serde_json::json!({
+                    "verificationMethods": {"atproto": "did:key:zexisting"}
+                }),
+                "confirmation",
+            )
+            .unwrap();
+        let minimal: serde_json::Value = serde_json::from_slice(&minimal).unwrap();
+        assert!(minimal.get("rotationKeys").is_none());
+        assert!(minimal.get("alsoKnownAs").is_none());
+        assert!(minimal.get("services").is_none());
+    }
+
+    #[tokio::test]
+    async fn bounded_self_check_returns_before_a_stalled_directory_request() {
+        let result = bounded(&immediate_sleep(), std::future::pending::<()>()).await;
+        assert!(matches!(result, Err(Error::Auth(message)) if message.contains("network timeout")));
+    }
+
+    /// A stalled directory and a failed resolution both surface as
+    /// `Error::Auth`; only the timeout is worth retrying, so clients need to
+    /// tell them apart without matching on prose.
+    #[tokio::test]
+    async fn bounded_timeout_is_distinguishable_from_other_auth_failures() {
+        let timeout = bounded(&immediate_sleep(), std::future::pending::<()>())
+            .await
+            .unwrap_err();
+        assert!(is_identity_network_timeout(&timeout));
+        assert!(!is_identity_network_timeout(&Error::Auth(
+            "identity self-check requires an injected platform timer".into()
+        )));
+        assert!(!is_identity_network_timeout(&Error::NotFound(
+            IDENTITY_NETWORK_TIMEOUT_MESSAGE.into()
+        )));
     }
 }

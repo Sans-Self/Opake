@@ -19,6 +19,13 @@ const uint8Array = z.instanceof(Uint8Array);
 // on the Rust DTO, so this schema reads camelCase fields directly. Both halves
 // of the recipient's hybrid public-key bundle are exposed so callers can wrap
 // to them via `share` / `addWorkspaceMember` / `approvePairRequest`.
+export const anchorHistorySchema = z.enum([
+  "notReplaced",
+  "replaced",
+  "noHistory",
+  "unavailable",
+]);
+
 export const resolvedIdentitySchema = z
   .object({
     did: z.string(),
@@ -29,7 +36,7 @@ export const resolvedIdentitySchema = z
     mlKemPublicKey: uint8Array,
     mlKemAlgo: z.string(),
     verification: z.enum(["verified", "unverified"]),
-    keyReplaced: z.boolean().nullable().optional(),
+    anchorHistory: anchorHistorySchema.nullable().optional(),
   })
   .transform((r) => ({
     did: r.did,
@@ -40,7 +47,7 @@ export const resolvedIdentitySchema = z
     mlKemPublicKey: r.mlKemPublicKey,
     mlKemAlgo: r.mlKemAlgo,
     verification: r.verification,
-    keyReplaced: r.keyReplaced ?? null,
+    anchorHistory: r.anchorHistory ?? null,
   }));
 
 export type ResolvedIdentity = z.output<typeof resolvedIdentitySchema>;
@@ -345,12 +352,16 @@ export const pendingShareEntrySchema = z
     document: z.string(),
     recipient: z.string(),
     created_at: z.string(),
+    recipient_did: z.string().nullable(),
+    recipient_did_error: z.string().nullable(),
   })
   .transform((r) => ({
     uri: r.uri,
     document: r.document,
     recipient: r.recipient,
     createdAt: r.created_at,
+    recipientDid: r.recipient_did,
+    recipientDidError: r.recipient_did_error,
   }));
 
 export type PendingShareEntry = z.output<typeof pendingShareEntrySchema>;

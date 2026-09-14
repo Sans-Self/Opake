@@ -170,7 +170,7 @@ e2e-cli:
 # default because membership scenarios mutate fixture accounts. Pass another
 # namespace (`just e2e-web alpha`) to run separately.
 e2e-web ns="e2e-web": _dev-env-check
-    cd tests && E2E_ACTOR_NS={{ ns }} bunx playwright test --project=e2e
+    cd tests && OPAKE_TEST_ENV=devenv E2E_ACTOR_NS={{ ns }} bunx playwright test --project=e2e
 
 # Rebuild the dev-env CLI image iff the working-tree CLI sources changed since
 # it was baked. The federation tier runs the compiled binary baked into that

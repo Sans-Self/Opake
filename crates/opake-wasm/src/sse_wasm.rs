@@ -707,12 +707,18 @@ async fn fetch_workspace_entries(
 
     let bundle = private_keys.bundle();
     // spec: workspace-identity § Identity adoption verifies by derivation
-    let entries = fetched
-        .workspaces
-        .iter()
-        .filter_map(|envelope| wk::try_build_entry(envelope, &did, &bundle).entry())
-        .collect();
-    Ok((entries, fetched.unreadable))
+    let mut entries = Vec::new();
+    let mut unreadable = fetched.unreadable;
+    for envelope in &fetched.workspaces {
+        match wk::try_build_entry(envelope, &did, &bundle) {
+            wk::EntryOutcome::Entry(entry) => entries.push(entry),
+            wk::EntryOutcome::Unreadable { uri } => {
+                unreadable.push(opake_core::records::UnreadableRef::corrupt(Some(uri)))
+            }
+            wk::EntryOutcome::NotMember | wk::EntryOutcome::IdentityMismatch => {}
+        }
+    }
+    Ok((entries, unreadable))
 }
 
 /// Close the workspace gate and replay buffered keyring events onto the

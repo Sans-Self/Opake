@@ -10,6 +10,7 @@ use serde::Deserialize;
 use super::transport::*;
 use super::xrpc::{check_response, RecordEntry, RecordPage};
 use crate::error::Error;
+use crate::resolve::AnchorHistory;
 
 // ---------------------------------------------------------------------------
 // DID document types
@@ -149,37 +150,60 @@ pub fn encode_ed25519_did_key(key: &[u8; 32]) -> String {
     )
 }
 
-/// Read authoritative active PLC operations. No separate remembered-key cache exists:
-/// this result travels with the same resolved identity and expires with it.
-/// `None` means the DID method publishes no operation history.
-pub async fn opake_key_replaced(
+/// An audit response status that says the directory could not answer, as
+/// opposed to answering that the account is absent or the request was bad.
+/// Status `0` is what the transports report for a connection failure or a
+/// timeout.
+fn audit_transport_unavailable(status: u16) -> bool {
+    status == 0 || status == 429 || status >= 500
+}
+
+/// Read the PLC audit history. No separate remembered-key cache exists: this
+/// result travels with the same resolved identity and expires with it.
+pub async fn opake_anchor_history(
     transport: &impl Transport,
     did: &str,
     current: &[u8; 32],
-) -> Result<Option<bool>, Error> {
+) -> Result<AnchorHistory, Error> {
     if did.starts_with("did:web:") {
-        return Ok(None);
+        return Ok(AnchorHistory::NoHistory);
     }
     if !did.starts_with("did:plc:") {
         return Err(Error::InvalidRecord(
             "unsupported DID history method".into(),
         ));
     }
-    let response = transport
+    // A directory that cannot answer leaves the replacement question open;
+    // it does not answer it in the negative, and it does not undo a signature
+    // that already verified against the current document.
+    // spec: account-verification § Resolution reads the anchor's history and reports a replacement
+    let response = match transport
         .send(HttpRequest {
             method: HttpMethod::Get,
-            url: format!("{}/{did}/log", plc_directory_url()),
+            url: format!("{}/{did}/log/audit", plc_directory_url()),
             headers: vec![],
             body: None,
         })
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return Ok(AnchorHistory::Unavailable),
+    };
+    if audit_transport_unavailable(response.status) {
+        return Ok(AnchorHistory::Unavailable);
+    }
     check_response(&response)?;
-    // `/:did/log` is the PLC directory's current (non-nullified) operation
-    // chain. Do not use `/log/audit`: a recovery can nullify an attacker
-    // branch, and that branch must not keep reporting a replacement.
+    // Replacement is an ever-observed security notice. The active log can
+    // omit a nullified branch within PLC's recovery window, while the audit
+    // endpoint retains accepted operations from that branch. The current DID
+    // document remains authoritative for the key used to verify this record.
     let operations: Vec<serde_json::Value> = serde_json::from_slice(&response.body)?;
     let mut replaced = false;
-    for operation in operations {
+    for envelope in operations {
+        let operation = envelope
+            .get("operation")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| Error::InvalidRecord("malformed PLC audit operation envelope".into()))?;
         let Some(methods) = operation.get("verificationMethods") else {
             // Legacy genesis operations have no verification-method map.
             continue;
@@ -197,7 +221,11 @@ pub async fn opake_key_replaced(
             replaced |= key != *current;
         }
     }
-    Ok(Some(replaced))
+    Ok(if replaced {
+        AnchorHistory::Replaced
+    } else {
+        AnchorHistory::NotReplaced
+    })
 }
 
 /// Read the authoritative current PLC state used to construct a replacement
@@ -495,18 +523,66 @@ pub async fn resolve_did_document(
     Ok(document)
 }
 
-/// Build the URL to fetch a DID document (PLC directory or did:web .well-known).
+/// Build the URL to fetch a DID document (PLC directory or did:web).
+///
+/// `did:web` follows the method's Read operation: the method-specific
+/// identifier is a colon-separated path whose segments are percent-decoded and
+/// rejoined with `/`. A bare authority resolves to `/.well-known/did.json`; any
+/// further segments resolve to `<path>/did.json` with no well-known prefix. A
+/// port is carried as a percent-encoded colon (`example.com%3A3000`).
 pub fn did_document_url(did: &str) -> Result<String, Error> {
     if did.starts_with("did:plc:") {
         let base = plc_directory_url();
         Ok(format!("{base}/{did}"))
-    } else if let Some(domain) = did.strip_prefix("did:web:") {
-        Ok(format!("https://{domain}/.well-known/did.json"))
+    } else if let Some(identifier) = did.strip_prefix("did:web:") {
+        did_web_url(identifier, did)
     } else {
         Err(Error::InvalidRecord(format!(
             "unsupported DID method: {did}"
         )))
     }
+}
+
+fn did_web_url(identifier: &str, did: &str) -> Result<String, Error> {
+    let invalid = || Error::InvalidRecord(format!("malformed did:web identifier: {did}"));
+    if identifier.is_empty() {
+        return Err(invalid());
+    }
+
+    let mut segments = Vec::new();
+    for segment in identifier.split(':') {
+        let decoded = percent_decode(segment).ok_or_else(invalid)?;
+        if decoded.is_empty() || decoded.contains(['/', '?', '#', '@']) {
+            return Err(invalid());
+        }
+        segments.push(decoded);
+    }
+
+    let path = segments.join("/");
+    if segments.len() == 1 {
+        Ok(format!("https://{path}/.well-known/did.json"))
+    } else {
+        Ok(format!("https://{path}/did.json"))
+    }
+}
+
+/// Percent-decode one `did:web` path segment. Returns `None` when an escape is
+/// truncated or not two hex digits, or when the result is not valid UTF-8.
+fn percent_decode(segment: &str) -> Option<String> {
+    let mut out = Vec::with_capacity(segment.len());
+    let mut bytes = segment.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = bytes.next()?;
+            let low = bytes.next()?;
+            let high = (high as char).to_digit(16)?;
+            let low = (low as char).to_digit(16)?;
+            out.push((high * 16 + low) as u8);
+        } else {
+            out.push(byte);
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 /// Extract the handle from a DID document's `alsoKnownAs` field.

@@ -13,6 +13,12 @@
 
 import { actorNamespace } from "../e2e/namespace.js";
 import { provisionNamespace } from "../e2e/pds-admin.js";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
+const TESTS_DIR = fileURLToPath(new URL("..", import.meta.url));
 
 export default async function setup(): Promise<void> {
   if (process.env.OPAKE_TEST_ENV !== "devenv") return;
@@ -23,5 +29,24 @@ export default async function setup(): Promise<void> {
     provisioned.length > 0
       ? `[federation] provisioned namespace ${ns}: ${provisioned.join(", ")}`
       : `[federation] namespace ${ns} already provisioned`,
+  );
+  // The browser setup drives the product identity-operation holder, OAuth
+  // grant, and stock PDS signer. The resulting `#opake` method is durable
+  // fixture state that this native tier then consumes; it is never fabricated
+  // by the federation harness.
+  await run(
+    "bunx",
+    [
+      "playwright",
+      "test",
+      "e2e/verified-fixture.setup.ts",
+      "--project=verified-fixture",
+    ],
+    {
+      cwd: TESTS_DIR,
+      env: { ...process.env, OPAKE_TEST_ENV: "devenv", E2E_ACTOR_NS: ns },
+      timeout: 300_000,
+      maxBuffer: 8 * 1024 * 1024,
+    },
   );
 }

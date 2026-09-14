@@ -72,7 +72,7 @@ describe("VerificationSettings operation lifetime", () => {
     const factory = vi.fn(); setup(factory);
     render(<VerificationSettings />);
     fireEvent.click(screen.getByRole("button", { name: "Set up verification" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(factory).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("The verification popup was blocked.");
   });
@@ -113,7 +113,45 @@ describe("VerificationSettings operation lifetime", () => {
     expect(factory).toHaveBeenCalledOnce();
     view.unmount();
     expect(live.cancel).toHaveBeenCalledOnce();
+    await act(async () => {
+      live.completeDeferred.resolve({
+        mutation: "Unknown",
+        cleanup: "Failed",
+        reconciliation: "Unavailable",
+      });
+    });
+    expect(toastError).toHaveBeenCalledWith(
+      "The submission outcome is unknown; inspect the current verification state before retrying.",
+    );
+    expect(toastError).toHaveBeenCalledWith("Temporary authorization cleanup encountered a failure.");
+  });
+
+  it("offers explicit removal for a substituted method", () => {
+    setup(vi.fn());
+    getOpake.mockReturnValue({
+      ...getOpake(),
+      bootVerification: { state: "substitution" },
+    });
+    render(<VerificationSettings />);
+    expect(screen.getByRole("button", { name: "Remove substituted verification method" })).toBeTruthy();
+  });
+
+  it("refreshes the mounted view after a cancelled completion settles", async () => {
+    const live = operation();
+    const checkOwnVerification = vi.fn(async () => ({ state: "substitution" }));
+    getOpake.mockReturnValue({
+      bootVerification: { state: "absent" },
+      checkOwnVerification,
+      startVerificationMethodPublication: vi.fn(async () => live),
+      startVerificationMethodRemoval: vi.fn(),
+    });
+    render(<VerificationSettings />);
+    await openAndReady();
+    await act(async () => { FakeBroadcastChannel.instances.at(-1)?.emit({ type: "callback", code: "c", state: "s", issuer: "https://as.test" }); });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel verification" }));
     await act(async () => { live.completeDeferred.resolve({ mutation: "Canceled", cleanup: "Attempted", reconciliation: null }); });
+    expect(checkOwnVerification).toHaveBeenCalled();
+    expect(screen.getByText(/published verification method uses a key/)).toBeTruthy();
   });
 
   it("cancels an unattended callback at the finite deadline", async () => {

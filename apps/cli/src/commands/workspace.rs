@@ -7,7 +7,7 @@ use opake_core::client::{ReqwestTransport, Session};
 use opake_core::keyrings;
 use opake_core::opake::{MemberVerificationStatus, WorkspaceMemberAccessStatus};
 use opake_core::records::Role;
-use opake_core::resolve;
+use opake_core::resolve::{self, AnchorHistory, RecipientVerificationNotice, VerificationState};
 
 use crate::commands::Execute;
 use crate::keyring_store;
@@ -245,7 +245,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
         &resolved.did,
         "admission",
         args.approve_unverified,
-        crate::prompt::confirm,
+        confirm_unverified_bundle,
     )? {
         ApprovalDecision::Approved(approval) => Some(approval),
         ApprovalDecision::NotRequired => None,
@@ -254,7 +254,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
             return Ok(None);
         }
     };
-    opake
+    let write = opake
         .add_workspace_member(
             &workspace.id(),
             current_key,
@@ -267,6 +267,7 @@ async fn add_member(ctx: &CommandContext, args: AddMemberArgs) -> Result<Option<
 
     let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
     println!("added {} to {} ({})", display, args.workspace, args.role);
+    print_recipient_verification_notice(&write.verification_notice);
     Ok(None)
 }
 
@@ -301,16 +302,17 @@ async fn approve_member(ctx: &CommandContext, args: ApproveMemberArgs) -> Result
         &member_did,
         "approval",
         args.approve_unverified,
-        crate::prompt::confirm,
+        confirm_unverified_bundle,
     )?
     else {
         eprintln!("cancelled");
         return Ok(None);
     };
-    opake
+    let write = opake
         .approve_pending_workspace_member(&workspace.id(), &member_did, approval)
         .await?;
     println!("approved {}'s current unverified key bundle", member_did);
+    print_recipient_verification_notice(&write.verification_notice);
     Ok(None)
 }
 
@@ -346,7 +348,7 @@ async fn repair_member(ctx: &CommandContext, args: RepairMemberArgs) -> Result<O
                 &member_did,
                 "repair",
                 args.approve_unverified,
-                crate::prompt::confirm,
+                confirm_unverified_bundle,
             )? {
                 ApprovalDecision::Approved(approval) => Some(approval),
                 ApprovalDecision::NotRequired => None,
@@ -360,10 +362,11 @@ async fn repair_member(ctx: &CommandContext, args: RepairMemberArgs) -> Result<O
             return member_action_refusal(&status, "repair");
         }
     };
-    opake
+    let write = opake
         .repair_workspace_member_wrap(&workspace.id(), current_key, &member_did, approval)
         .await?;
     println!("repaired {}'s current workspace-key wrap", member_did);
+    print_recipient_verification_notice(&write.verification_notice);
     Ok(None)
 }
 
@@ -402,6 +405,35 @@ fn member_status_line(status: &WorkspaceMemberAccessStatus) -> String {
     format!("{}: {}; {}", status.did, verification, access)
 }
 
+fn print_recipient_verification_notice(notice: &RecipientVerificationNotice) {
+    match notice.verification {
+        VerificationState::Unverified => {
+            println!(
+                "{}'s unverified encryption keys were explicitly approved.",
+                notice.did
+            )
+        }
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::Replaced,
+        } => println!("{}'s DID verification method has changed.", notice.did),
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::NotReplaced,
+        } => {}
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::NoHistory,
+        } => println!(
+            "{}'s DID method publishes no verification history.",
+            notice.did
+        ),
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::Unavailable,
+        } => println!(
+            "{}'s verification history could not be read, so a replacement cannot be ruled out.",
+            notice.did
+        ),
+    }
+}
+
 fn member_action_refusal(
     status: &WorkspaceMemberAccessStatus,
     action: &str,
@@ -437,6 +469,22 @@ enum ApprovalDecision {
     NotRequired,
     Approved([u8; 32]),
     Cancelled,
+}
+
+/// Interactive confirmation for an unverified encryption bundle. Without a
+/// terminal there is no one to answer the prompt, so admission is refused
+/// rather than silently cancelled: an unattended caller must pass
+/// `--approve-unverified` to authorize the exact current bundle, never have a
+/// decline reported to it as success.
+/// spec:account-verification § Wrapping a key to an unverified account requires explicit confirmation
+fn confirm_unverified_bundle(prompt: &str) -> Result<bool> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "{prompt}\nNo terminal is available to confirm; pass --approve-unverified to authorize this exact current bundle."
+        );
+    }
+    crate::prompt::confirm(prompt)
 }
 
 fn decide_unverified_approval(
@@ -492,15 +540,18 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     let workspace = opake.resolve_workspace(&args.workspace).await?;
     let at_uri = atproto::parse_at_uri(&workspace.uri)?;
 
-    let resolved = opake.resolve_identity(&args.member).await?;
-    let display = resolved.handle.as_deref().unwrap_or(&resolved.did);
+    // Removal revokes workspace access and rotates keys; it never needs the
+    // target's encryption bundle. Resolve only the stable DID so a corrupt or
+    // unavailable target publicKey cannot block a manager from revoking it.
+    let member_did = resolve_member_did(&args.member).await?;
+    let display = format!("{} ({member_did})", args.member);
 
     if !args.yes {
         let kr_record = opake
             .get_record(&at_uri.authority, &at_uri.collection, &at_uri.rkey)
             .await?;
         let kr: opake_core::records::Keyring = serde_json::from_value(kr_record.value)?;
-        if !kr.members.iter().any(|m| m.did() == resolved.did) {
+        if !kr.members.iter().any(|m| m.did() == member_did) {
             anyhow::bail!("{} is not a member of {}", display, args.workspace);
         }
 
@@ -526,7 +577,7 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     // keys + handles the rotation internally; CLI no longer needs the
     // pre-resolution dance the legacy in-place flow required.
     let mut admin = opake.workspace_admin(&workspace);
-    let removal = admin.remove_member(&resolved.did).await?;
+    let removal = admin.remove_member(&member_did).await?;
 
     keyring_store::save_group_key(
         &ctx.storage,
@@ -537,6 +588,9 @@ async fn remove_member(ctx: &CommandContext, args: RemoveMemberArgs) -> Result<O
     )?;
 
     println!("removed {} from {} (key rotated)", display, args.workspace);
+    for notice in &removal.verification_notices {
+        print_recipient_verification_notice(notice);
+    }
     if !removal.excluded_members.is_empty() {
         for member in &removal.excluded_members {
             match member.reason {

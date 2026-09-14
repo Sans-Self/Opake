@@ -43,13 +43,12 @@ defmodule OpakeIndexer.AuthorityDbTest do
       uri: @keyring_uri,
       collection: "at.opake.keyring",
       workspace_id: @workspace_id,
-      record_jsonb: %{
-        "members" => [
+      record_jsonb:
+        head_fields([
           %{"did" => "did:plc:alice", "role" => "manager"},
           %{"did" => @editor_did, "role" => "editor"},
           %{"did" => @viewer_did, "role" => "viewer"}
-        ]
-      }
+        ])
     })
 
     {:ok, _} = ChainHeadQueries.create(@workspace_id, "keyring", @keyring_uri, "bafykeyring")
@@ -185,109 +184,223 @@ defmodule OpakeIndexer.AuthorityDbTest do
     }
   end
 
+  # The head keyring as the Rust client actually writes it: a leave carries
+  # every field of the prior record verbatim apart from the departing member.
+  defp head_fields(members) do
+    %{
+      "opakeVersion" => 1,
+      "algo" => "aes-256-gcm",
+      "rotation" => 4,
+      "keyHistory" => [%{"rotation" => 3, "members" => []}],
+      "encryptedMetadata" => %{
+        "ciphertext" => %{"$bytes" => "Y2lwaGVy"},
+        "nonce" => %{"$bytes" => "bm9uY2U"}
+      },
+      "members" => members
+    }
+  end
+
+  defp leave_record(members), do: head_fields(members)
+
   describe "check_keyring_supersede/4 — self-removal (leave)" do
     test "genesis (no prior) skips the check" do
-      assert Authority.check_keyring_supersede(@workspace_id, nil, "did:plc:anyone", []) == :ok
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               nil,
+               "did:plc:anyone",
+               leave_record([])
+             ) == :ok
     end
 
     test "manager supersede passes regardless of member changes" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, "did:plc:alice", [
-               member("did:plc:alice", "manager")
-             ]) == :ok
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               "did:plc:alice",
+               leave_record([member("did:plc:alice", "manager")])
+             ) == :ok
     end
 
     # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
     test "editor leaving passes: prior list minus exactly themselves" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               member("did:plc:alice", "manager"),
-               member(@viewer_did, "viewer")
-             ]) == :ok
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([member("did:plc:alice", "manager"), member(@viewer_did, "viewer")])
+             ) == :ok
     end
 
     # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
     test "viewer leaving passes" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @viewer_did, [
-               member("did:plc:alice", "manager"),
-               member(@editor_did, "editor")
-             ]) == :ok
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @viewer_did,
+               leave_record([member("did:plc:alice", "manager"), member(@editor_did, "editor")])
+             ) == :ok
+    end
+
+    # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    test "a complete leave record carrying every client-emitted field is accepted" do
+      record =
+        [member("did:plc:alice", "manager"), member(@viewer_did, "viewer")]
+        |> leave_record()
+        |> Map.merge(%{
+          "supersedes" => @keyring_uri,
+          "supersedesCid" => %{"$link" => "bafykeyring"},
+          "lineage" => @workspace_id,
+          "createdAt" => "2026-09-12T10:00:00Z"
+        })
+
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               record
+             ) == :ok
     end
 
     # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
     test "editor dropping someone else alongside themselves is rejected" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               member("did:plc:alice", "manager")
-             ]) == {:rejected, :insufficient_role}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([member("did:plc:alice", "manager")])
+             ) == {:rejected, :insufficient_role}
     end
 
     # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
     test "editor re-roling a remaining member while leaving is rejected" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               member("did:plc:alice", "manager"),
-               member(@viewer_did, "editor")
-             ]) == {:rejected, :insufficient_role}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([member("did:plc:alice", "manager"), member(@viewer_did, "editor")])
+             ) == {:rejected, :insufficient_role}
     end
 
     # spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
     test "editor adding a member while leaving is rejected" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               member("did:plc:alice", "manager"),
-               member(@viewer_did, "viewer"),
-               member("did:plc:mallory", "editor")
-             ]) == {:rejected, :insufficient_role}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([
+                 member("did:plc:alice", "manager"),
+                 member(@viewer_did, "viewer"),
+                 member("did:plc:mallory", "editor")
+               ])
+             ) == {:rejected, :insufficient_role}
     end
 
     test "editor supersede that keeps themselves is rejected" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               member("did:plc:alice", "manager"),
-               member(@editor_did, "editor"),
-               member(@viewer_did, "viewer")
-             ]) == {:rejected, :insufficient_role}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([
+                 member("did:plc:alice", "manager"),
+                 member(@editor_did, "editor"),
+                 member(@viewer_did, "viewer")
+               ])
+             ) == {:rejected, :insufficient_role}
     end
 
-    test "self-removal may retain a remaining member's wrap with fresh ciphertext" do
+    test "self-removal cannot replace a remaining member's wrap ciphertext" do
       approval = Base.encode64(:binary.copy(<<7>>, 32))
 
       put_record(%{
         uri: @keyring_uri,
         collection: "at.opake.keyring",
         workspace_id: @workspace_id,
-        record_jsonb: %{
-          "members" => [
+        record_jsonb:
+          head_fields([
             wrapped_member("did:plc:alice", "manager", Base.encode64(<<1>>), approval),
             member(@editor_did, "editor"),
             member(@viewer_did, "viewer")
-          ]
-        }
+          ])
       })
 
-      # Rewrapping is expected to produce different ciphertext bytes. The
-      # leave check preserves its presence, role, and decoded approval.
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               wrapped_member(
-                 "did:plc:alice",
-                 "manager",
-                 Base.encode64(<<2>>),
-                 String.trim_trailing(approval, "=")
-               ),
-               member(@viewer_did, "viewer")
-             ]) == :ok
+      # Rewrapping needs manager authority. A leave carries each remaining
+      # member's actual wrapped bytes verbatim (apart from base64 rendering).
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([
+                 wrapped_member(
+                   "did:plc:alice",
+                   "manager",
+                   Base.encode64(<<2>>),
+                   String.trim_trailing(approval, "=")
+                 ),
+                 member(@viewer_did, "viewer")
+               ])
+             ) == {:rejected, :insufficient_role}
+    end
+
+    test "self-removal cannot poison rotation, history, metadata, or future fields" do
+      prior =
+        [
+          member("did:plc:alice", "manager"),
+          member(@editor_did, "editor"),
+          member(@viewer_did, "viewer")
+        ]
+        |> head_fields()
+        |> Map.put("futureSecurityField", %{"nested" => true})
+
+      put_record(%{
+        uri: @keyring_uri,
+        collection: "at.opake.keyring",
+        workspace_id: @workspace_id,
+        record_jsonb: prior
+      })
+
+      poisoned =
+        prior
+        |> Map.put("rotation", 9_999)
+        |> Map.put("keyHistory", [])
+        |> Map.put("encryptedMetadata", %{
+          "ciphertext" => %{"$bytes" => "cG9pc29u"},
+          "nonce" => %{"$bytes" => "bm9uY2U"}
+        })
+        |> Map.put("futureSecurityField", %{"nested" => false})
+        |> Map.put("members", [member("did:plc:alice", "manager"), member(@viewer_did, "viewer")])
+        |> Map.put("supersedes", @keyring_uri)
+
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               poisoned
+             ) == {:rejected, :insufficient_role}
     end
 
     test "self-removal cannot introduce a wrap for a remaining member" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, @editor_did, [
-               %{
-                 "did" => "did:plc:alice",
-                 "role" => "manager",
-                 "wrappedKey" => %{"did" => "did:plc:alice"}
-               },
-               member(@viewer_did, "viewer")
-             ]) == {:rejected, :insufficient_role}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               @editor_did,
+               leave_record([
+                 %{
+                   "did" => "did:plc:alice",
+                   "role" => "manager",
+                   "wrappedKey" => %{"did" => "did:plc:alice"}
+                 },
+                 member(@viewer_did, "viewer")
+               ])
+             ) == {:rejected, :insufficient_role}
     end
 
     test "non-member is rejected" do
-      assert Authority.check_keyring_supersede(@workspace_id, @keyring_uri, "did:plc:stranger", [
-               member("did:plc:alice", "manager")
-             ]) == {:rejected, :not_a_member}
+      assert Authority.check_keyring_supersede(
+               @workspace_id,
+               @keyring_uri,
+               "did:plc:stranger",
+               leave_record([member("did:plc:alice", "manager")])
+             ) == {:rejected, :not_a_member}
     end
   end
 end

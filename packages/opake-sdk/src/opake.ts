@@ -28,6 +28,7 @@ import type {
   WorkspaceMember,
   WorkspaceMemberAccessStatus,
   WorkspaceMemberRemoval,
+  WorkspaceMemberWriteResult,
   WorkspaceRole,
   WorkspaceSyncResult,
 } from "./types";
@@ -695,13 +696,13 @@ export class Opake {
     memberDid: string,
     role: WorkspaceRole,
     confirmedUnverifiedKeys?: Uint8Array,
-  ): Promise<MutationResult> {
+  ): Promise<WorkspaceMemberWriteResult> {
     // Core resolves the recipient's hybrid public-key bundle internally
     // — fewer byte arrays crossing the WASM boundary, single resolution
     // path on owner + non-owner branches.
     return this.track(() =>
       this.requireContext().addWorkspaceMember(keyringUri, memberDid, role, confirmedUnverifiedKeys),
-    ) as Promise<MutationResult>;
+    ) as Promise<WorkspaceMemberWriteResult>;
   }
 
   /**
@@ -736,14 +737,14 @@ export class Opake {
 
   @wrapWasmErrors
   @withTokenGuard
-  repairWorkspaceMemberWrap(keyringUri: string, memberDid: string, approval?: Uint8Array): Promise<MutationResult> {
-    return this.track(() => this.requireContext().repairWorkspaceMemberWrap(keyringUri, memberDid, approval)) as Promise<MutationResult>;
+  repairWorkspaceMemberWrap(keyringUri: string, memberDid: string, approval?: Uint8Array): Promise<WorkspaceMemberWriteResult> {
+    return this.track(() => this.requireContext().repairWorkspaceMemberWrap(keyringUri, memberDid, approval)) as Promise<WorkspaceMemberWriteResult>;
   }
 
   @wrapWasmErrors
   @withTokenGuard
-  approvePendingWorkspaceMember(keyringUri: string, memberDid: string, approval: Uint8Array): Promise<MutationResult> {
-    return this.track(() => this.requireContext().approvePendingWorkspaceMember(keyringUri, memberDid, approval)) as Promise<MutationResult>;
+  approvePendingWorkspaceMember(keyringUri: string, memberDid: string, approval: Uint8Array): Promise<WorkspaceMemberWriteResult> {
+    return this.track(() => this.requireContext().approvePendingWorkspaceMember(keyringUri, memberDid, approval)) as Promise<WorkspaceMemberWriteResult>;
   }
 
   /** Leave a workspace you're a member of. */
@@ -1118,24 +1119,9 @@ export class Opake {
     still_pending: number;
     failed: number;
     verificationErrors: readonly import("./types").PendingShareVerificationError[];
+    completionNotices: readonly import("./types").RecipientVerificationNotice[];
   }> {
     return this.track(() => this.requireContext().retryPendingSharesViaOpake());
-  }
-
-  /**
-   * Re-wrap the caller's documents from historical group keys to the current
-   * rotation. Opportunistic background hygiene — never required for
-   * correctness; a workspace left unswept stays fully readable, it just
-   * accrues a longer key-history walk.
-   */
-  @wrapWasmErrors
-  @withTokenGuard
-  sweepRotationRewrap(): Promise<{
-    rewrapped: number;
-    already_current: number;
-    conflicts: number;
-  }> {
-    return this.track(() => this.requireContext().sweepRotationRewrap());
   }
 
   /**
@@ -1151,6 +1137,11 @@ export class Opake {
     awaitingApproval: number;
     verificationFailed: number;
     stale: number;
+    deferredHumanDecision: number;
+    deferredVisibility: number;
+    deferredByBudget: number;
+    discoveryDeferred: boolean;
+    verificationNotices: readonly import("./types").RecipientVerificationNotice[];
     skippedNotManager: number;
     skippedWithoutCurrentKey: number;
     errors: number;
@@ -1345,7 +1336,7 @@ export class Opake {
     did: string,
     requestRkey: string,
     options?: AwaitPairOptions,
-  ): Promise<void> {
+  ): Promise<import("./types").PairCompletionResult> {
     return pairingAwait(storage, did, requestRkey, options);
   }
 

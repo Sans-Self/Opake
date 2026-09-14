@@ -146,10 +146,12 @@ export async function ensureVerifiedActor(
   browser: Browser,
   actorName: string,
 ): Promise<VerifiedActor> {
-  if (actorNamespace() === "") {
-    throw new Error("ensureVerifiedActor requires a nonempty E2E_ACTOR_NS");
-  }
   const owner = actor(actorName);
+  if (actorNamespace() === "" && !owner.verified) {
+    throw new Error(
+      "verification may mutate only a manifest-verified actor in the default fixture namespace",
+    );
+  }
   const context = await browser.newContext({
     storageState: authFile(owner.name),
     ignoreHTTPSErrors: true,
@@ -167,6 +169,7 @@ export async function ensureVerifiedActor(
     }
     await expect(remove).toBeVisible({ timeout: 30_000 });
     await assertPublishedAnchor(owner);
+    assertNoEscape();
 
     return {
       page,

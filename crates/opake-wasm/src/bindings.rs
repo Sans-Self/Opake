@@ -305,10 +305,23 @@ pub struct ResolvedIdentityDto {
     #[cfg_attr(feature = "ts-bindings", ts(type = "Uint8Array"))]
     pub ml_kem_public_key: Vec<u8>,
     pub ml_kem_algo: String,
-    /// Resolution is a live safety decision, distinct from any relationship
-    /// approval recorded on a workspace member entry.
     pub verification: String,
-    pub key_replaced: Option<bool>,
+    // `null` for an unverified account; otherwise one of `notReplaced`,
+    // `replaced`, `noHistory`, `unavailable`. A plain comment: ts-rs emits
+    // `///` docs inside its object literal.
+    pub anchor_history: Option<String>,
+}
+
+/// The camelCase wire spelling of an anchor-history outcome, matching what
+/// `AnchorHistory`'s own serde emits inside a verification notice.
+fn anchor_history_wire(history: opake_core::resolve::AnchorHistory) -> &'static str {
+    use opake_core::resolve::AnchorHistory;
+    match history {
+        AnchorHistory::NotReplaced => "notReplaced",
+        AnchorHistory::Replaced => "replaced",
+        AnchorHistory::NoHistory => "noHistory",
+        AnchorHistory::Unavailable => "unavailable",
+    }
 }
 
 impl From<&ResolvedIdentity> for ResolvedIdentityDto {
@@ -325,8 +338,10 @@ impl From<&ResolvedIdentity> for ResolvedIdentityDto {
                 opake_core::resolve::VerificationState::Verified { .. } => "verified".into(),
                 opake_core::resolve::VerificationState::Unverified => "unverified".into(),
             },
-            key_replaced: match &r.verification {
-                opake_core::resolve::VerificationState::Verified { key_replaced } => *key_replaced,
+            anchor_history: match &r.verification {
+                opake_core::resolve::VerificationState::Verified { anchor_history } => {
+                    Some(anchor_history_wire(*anchor_history).into())
+                }
                 opake_core::resolve::VerificationState::Unverified => None,
             },
         }
@@ -649,6 +664,10 @@ pub struct PendingShareEntryDto {
     pub document: String,
     pub recipient: String,
     pub created_at: String,
+    pub recipient_did: Option<String>,
+    /// Cause for an absent `recipient_did`. An entry the owner cannot read is
+    /// still an entry they may want to cancel, so the reason travels with it.
+    pub recipient_did_error: Option<String>,
 }
 
 impl From<&PendingShareEntry> for PendingShareEntryDto {
@@ -658,6 +677,8 @@ impl From<&PendingShareEntry> for PendingShareEntryDto {
             document: p.document.clone(),
             recipient: p.recipient.clone(),
             created_at: p.created_at.clone(),
+            recipient_did: p.recipient_did.clone(),
+            recipient_did_error: p.recipient_did_error.clone(),
         }
     }
 }

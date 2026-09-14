@@ -80,7 +80,7 @@ export const keyringRecordShape = `{
   "opakeVersion": 1,
   "members": [
     { "did": "did:plc:alice", "role": "manager", "wrappedKey": {...} },
-    { "did": "did:plc:bob", "role": "editor", "wrappedKey": {...}, "unverifiedKeyApproval": "<32-byte commitment>" },
+    { "did": "did:plc:bob", "role": "editor", "wrappedKey": {...}, "unverifiedKeyApproval": {"$bytes": "<base64 32-byte commitment>"} },
     { "did": "did:plc:carol", "role": "viewer" } // current wrap and approval are optional
   ],
   "rotation": 3,

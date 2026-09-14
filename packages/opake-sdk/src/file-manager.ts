@@ -12,6 +12,7 @@ import type {
   DownloadResult,
   DeleteRecursiveResult,
   GrantEntry,
+  ShareWriteResult,
 } from "./types";
 import type { DocumentMetadataResolution } from "./schemas";
 import { parseWasmError, wrapWasmErrors } from "./errors";
@@ -63,13 +64,15 @@ type WasmFileManager = {
     note: string | null,
   ): Promise<unknown>;
   shareApprovalChallenge(documentUri: string, recipient: string): Promise<unknown>;
-  resolveRecipientDid(recipient: string): Promise<string>;
+  preparePendingShareRecipient(
+    documentUri: string,
+    recipient: string,
+  ): Promise<WasmPendingShareRecipient>;
   revokeShare(grantUri: string): Promise<void>;
   listShares(): Promise<unknown>;
   createPendingShare(
     documentUri: string,
-    recipient: string,
-    recipientDid: string,
+    recipient: WasmPendingShareRecipient,
     allowUnverifiedFirstPublication: boolean,
     permissions: string,
     note: string | null,
@@ -80,6 +83,45 @@ type WasmFileManager = {
   ): Promise<WasmDirectoryWatcher>;
   free(): void;
 };
+
+/** Opaque WASM-held DID resolution for a queued first-publication handoff. */
+type WasmPendingShareRecipient = { readonly did: string; free(): void };
+
+/**
+ * A recipient resolved inside WASM for a pending-share confirmation.
+ *
+ * The DID is read-only display data for the queue-time consent warning. Retain
+ * this value only until the user accepts or declines that warning, then pass
+ * it to `createPendingShare`.
+ */
+export class PendingShareRecipient {
+  private handle: WasmPendingShareRecipient | null;
+
+  /** @internal — obtain one from `preparePendingShareRecipient`. */
+  constructor(handle: WasmPendingShareRecipient) {
+    this.handle = handle;
+  }
+
+  /** The exact DID that this queued consent will authorize. */
+  get did(): string {
+    if (!this.handle) throw new Error("PendingShareRecipient has already been consumed");
+    return this.handle.did;
+  }
+
+  /** @internal */
+  take(): WasmPendingShareRecipient {
+    if (!this.handle) throw new Error("PendingShareRecipient has already been consumed");
+    const handle = this.handle;
+    this.handle = null;
+    return handle;
+  }
+
+  /** Discard an unaccepted queue-time resolution. */
+  dispose(): void {
+    this.handle?.free();
+    this.handle = null;
+  }
+}
 
 /** WASM DirectoryWatcher handle — returned by watchDirectory. */
 type WasmDirectoryWatcher = {
@@ -588,7 +630,7 @@ export class FileManager {
     confirmedUnverifiedKeys: Uint8Array | null,
     permissions: string,
     note?: string,
-  ): Promise<MutationResult> {
+  ): Promise<ShareWriteResult> {
     return this.track(() =>
       this.requireHandle().share(
         documentUri,
@@ -597,7 +639,7 @@ export class FileManager {
         permissions,
         note ?? null,
       ),
-    ) as Promise<MutationResult>;
+    ) as Promise<ShareWriteResult>;
   }
 
   /**
@@ -651,10 +693,8 @@ export class FileManager {
    * record is deleted. Pending shares expire after 7 days.
    *
    * @param documentUri - URI of the document to share.
-   * @param recipient - Recipient's handle or DID as entered by the user.
-   * @param recipientDid - DID resolved from `recipient` while the target was
-   * known to exist. This binds first-publication consent against handle
-   * reassignment.
+   * @param recipient - An opaque WASM-held recipient resolution returned by
+   * `preparePendingShareRecipient` for this explicit consent interaction.
    * @param allowUnverifiedFirstPublication - Explicit first-publication
    * permission bound to the DID resolved from `recipient`.
    * @param permissions - Access role (typically `"read"`).
@@ -664,17 +704,19 @@ export class FileManager {
   @wrapWasmErrors
   createPendingShare(
     documentUri: string,
-    recipient: string,
-    recipientDid: string,
+    recipient: PendingShareRecipient,
     allowUnverifiedFirstPublication: boolean,
     permissions: string,
     note: string | null,
   ): Promise<string> {
+    // The WASM method takes the recipient by value: wasm-bindgen moves it out
+    // of the JS wrapper, so the handle is consumed (and freed) by the call
+    // itself. Freeing it again here would touch a null pointer.
+    const wasmRecipient = recipient.take();
     return this.track(() =>
       this.requireHandle().createPendingShare(
         documentUri,
-        recipient,
-        recipientDid,
+        wasmRecipient,
         allowUnverifiedFirstPublication,
         permissions,
         note,
@@ -682,10 +724,17 @@ export class FileManager {
     );
   }
 
-  /** Resolve the DID to bind into a pending-share first-publication intent. */
+  /** Resolve a pending-share recipient inside WASM for explicit queue consent. */
   @wrapWasmErrors
-  resolveRecipientDid(recipient: string): Promise<string> {
-    return this.track(() => this.requireHandle().resolveRecipientDid(recipient));
+  preparePendingShareRecipient(
+    documentUri: string,
+    recipient: string,
+  ): Promise<PendingShareRecipient> {
+    return this.track(() =>
+      this.requireHandle().preparePendingShareRecipient(documentUri, recipient).then((handle) =>
+        new PendingShareRecipient(handle),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------

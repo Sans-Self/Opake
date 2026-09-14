@@ -411,11 +411,14 @@ try {
 } catch (err) {
   if (err instanceof OpakeError && err.kind === "RecipientNotReady") {
     // The target has a valid atproto identity but hasn't published an
-    // Opake public key yet (hasn't used Opake). Queue a pending share;
-    // the daemon will retry until they sign up or it expires (7 days).
-    // This true belongs only in an explicit first-publication consent action.
-    const recipientDid = await fm.resolveRecipientDid(handleOrDid);
-    await fm.createPendingShare(documentUri, handleOrDid, recipientDid, true, "read", null);
+    // Opake public key yet. Resolve and retain the exact DID inside WASM for
+    // the consent interaction; a handle cannot be rebound afterwards.
+    const pending = await fm.preparePendingShareRecipient(documentUri, handleOrDid);
+    if (window.confirm(\`Queue one automatic share for \${pending.did}'s first keys? They may be unverified.\`)) {
+      await fm.createPendingShare(documentUri, pending, true, "read", null);
+    } else {
+      pending.dispose();
+    }
     return;
   }
   throw err;

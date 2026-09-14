@@ -161,17 +161,22 @@ BuildKit remote context can't satisfy (it checks out without `.git`).
 Six actors, two per PDS, defined in `fixtures/actors.json`. Identities derive
 from fixed BIP-39 mnemonics, so each actor always resolves to the same X25519
 encryption key and republishes the same `at.opake.publicKey/self` across resets.
+Frank is the one `verified: true` fixture: after recovery, `just dev-env-up`
+uses the production verification holder, OAuth identity grant, and the stock
+PDS signer to publish a `#opake` method whose Ed25519 key matches his signed
+public-key record. The same step runs after namespaced provisioning before the
+native federation tier. The other five actors remain deliberately unverified.
 DIDs are *not* stable (see reset blast radius) — always address actors by handle
 and resolve.
 
-| Name | Handle | PDS |
-|------|--------|-----|
-| alice | `alice.pds-a.test` | pds-a |
-| bob | `bob.pds-a.test` | pds-a |
-| carol | `carol.pds-b.test` | pds-b |
-| dave | `dave.pds-b.test` | pds-b |
-| eve | `eve.pds-c.test` | pds-c |
-| frank | `frank.pds-c.test` | pds-c |
+| Name | Handle | PDS | Verification |
+|------|--------|-----|--------------|
+| alice | `alice.pds-a.test` | pds-a | unverified |
+| bob | `bob.pds-a.test` | pds-a | unverified |
+| carol | `carol.pds-b.test` | pds-b | unverified |
+| dave | `dave.pds-b.test` | pds-b | unverified |
+| eve | `eve.pds-c.test` | pds-c | unverified |
+| frank | `frank.pds-c.test` | pds-c | verified |
 
 All share the account password `opake-devenv-pw` (per-actor `password` field,
 env `ACTOR_PASSWORD` as fallback). The 24-word mnemonics are **public test
@@ -206,8 +211,9 @@ Provisioning happens on demand, from the test harness (`tests/e2e/pds-admin.ts`)
 the first time a namespace is used: it runs the same `bootstrap.sh` recipe below
 for the actors that don't resolve yet, so a namespaced actor gets exactly what a
 checked-in one gets — a live account, a published `publicKey/self` derived from
-its mnemonic, and a seeded cabinet (`frank` excepted, as ever). Actors that
-already exist are left alone, records and all.
+its mnemonic, a verified Frank with a real signed PLC method, and a seeded
+cabinet (`frank` excepted, as ever). Actors that already exist are left alone,
+records and all.
 
 Namespaces are individually disposable: `just e2e-ns-clean alpha` deletes that
 namespace's accounts (and with them their records and blobs) and drops its local

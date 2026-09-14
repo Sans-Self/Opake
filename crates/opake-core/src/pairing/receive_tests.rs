@@ -325,6 +325,7 @@ async fn bug__pair_response_with_pds_unpadded_base64_decrypts() {
     .await
     .unwrap();
 
+    let (received, _) = received;
     assert_eq!(received.did, sender.identity.did);
     assert_eq!(
         received.x25519_private_key,
@@ -408,7 +409,10 @@ async fn verified_pairing_refuses_unsigned_record_before_identity_is_saved() {
     let error = complete_pair_response(&mut client, &storage, TEST_DID, "rk1", &response, "rk2")
         .await
         .unwrap_err();
-    assert!(matches!(error, Error::VerificationFailed(_)));
+    assert!(
+        matches!(error, Error::VerificationFailed(_)),
+        "unexpected error: {error:?}"
+    );
     assert_eq!(*storage.saved_identities.lock().unwrap(), 0);
 }
 
@@ -458,7 +462,13 @@ async fn verified_pairing_refuses_received_signing_key_substitution_before_ident
         status: 200,
         headers: vec![],
         body: serde_json::json!([
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&anchor)}}
+            {
+                "nullified": false,
+                "operation": {
+                    "type": "plc_operation",
+                    "verificationMethods": {"opake": did_key(&anchor)}
+                }
+            }
         ])
         .to_string()
         .into_bytes(),
@@ -468,6 +478,9 @@ async fn verified_pairing_refuses_received_signing_key_substitution_before_ident
     let error = complete_pair_response(&mut client, &storage, TEST_DID, "rk1", &response, "rk2")
         .await
         .unwrap_err();
-    assert!(matches!(error, Error::VerificationFailed(_)));
+    assert!(
+        matches!(error, Error::VerificationFailed(_)),
+        "unexpected error: {error:?}"
+    );
     assert_eq!(*storage.saved_identities.lock().unwrap(), 0);
 }

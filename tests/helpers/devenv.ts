@@ -126,7 +126,7 @@ const standingRefreshFingerprint = process.argv[2] || "";
   if (!response.ok) throw new Error("could not resolve fixture handle");
   const { did } = await response.json();
   const db = new Database("/pds/account.sqlite", { readonly: true });
-  const rows = db.prepare("select scope, currentRefreshToken from token where did = ?").all(did);
+  const rows = db.prepare("select id, scope, clientId, currentRefreshToken from token where did = ?").all(did);
   db.close();
   const scopes = rows.map((row) => typeof row.scope === "string" ? row.scope.split(/\s+/) : []);
   const standingIndex = rows.findIndex((row) =>
@@ -138,17 +138,29 @@ const standingRefreshFingerprint = process.argv[2] || "";
     tokenCount: rows.length,
     hasIdentityScope: scopes.some((scope) => scope.includes("identity:*")),
     identityTokenCount: scopes.filter((scope) => scope.includes("identity:*")).length,
+    identityTokenIds: rows
+      .filter((row, index) => scopes[index].includes("identity:*"))
+      .map((row) => String(row.id)),
     standingTokenFound: standingIndex >= 0,
     standingHasIdentityScope: standingScope.includes("identity:*"),
+    standingScope: standingIndex < 0 ? null : String(rows[standingIndex].scope ?? ""),
+    standingClientId: standingIndex < 0 ? null : String(rows[standingIndex].clientId ?? ""),
   }));
 })().catch((error) => { console.error(String(error)); process.exit(1); });
 `;
 
+function requireVerificationFixtureActor(actor: string): void {
+  const fixture = actorByName(actor);
+  if (actorNamespace() === "" && !fixture.verified) {
+    throw new Error(
+      "PLC owner-confirmation fixtures may mutate only a manifest-verified default actor",
+    );
+  }
+}
+
 function requireIsolatedActorNamespace(): void {
   if (actorNamespace() === "") {
-    throw new Error(
-      "PLC owner-confirmation fixtures require E2E_ACTOR_NS; refusing default fixture actors",
-    );
+    throw new Error("OAuth scope fixtures require E2E_ACTOR_NS");
   }
 }
 
@@ -185,7 +197,7 @@ export async function awaitPlcOwnerConfirmation(
   notBeforeMs: number,
   { timeoutMs = 20_000, intervalMs = 200 }: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<PlcOwnerConfirmation> {
-  requireIsolatedActorNamespace();
+  requireVerificationFixtureActor(actor);
   const fixture = actorByName(actor);
   const deadline = Date.now() + timeoutMs;
   let lastFailure = "no plc_operation token was present";
@@ -228,7 +240,7 @@ export async function awaitPlcOwnerConfirmation(
 
 /** Current PLC operation log, obtained from the local directory without host DNS. */
 export async function plcOperationLog(actor: string): Promise<readonly Record<string, unknown>[]> {
-  requireIsolatedActorNamespace();
+  requireVerificationFixtureActor(actor);
   const fixture = actorByName(actor);
   const res = await docker(
     [
@@ -255,7 +267,7 @@ export async function plcOperationLog(actor: string): Promise<readonly Record<st
 
 /** Authoritative current DID document from the local PLC directory. */
 export async function plcDidDocument(actor: string): Promise<Record<string, unknown>> {
-  requireIsolatedActorNamespace();
+  requireVerificationFixtureActor(actor);
   const fixture = actorByName(actor);
   const res = await docker(
     [
@@ -288,8 +300,14 @@ export async function pdsOAuthScopeSummary(
   readonly tokenCount: number;
   readonly hasIdentityScope: boolean;
   readonly identityTokenCount: number;
+  /** Opaque PDS token-row identifiers; credentials never leave the PDS. */
+  readonly identityTokenIds: readonly string[];
   readonly standingTokenFound: boolean;
   readonly standingHasIdentityScope: boolean;
+  /** Exact scope the PDS recorded for the standing session, or null if absent. */
+  readonly standingScope: string | null;
+  /** The loopback client_id the standing authorization request carried. */
+  readonly standingClientId: string | null;
 }> {
   requireIsolatedActorNamespace();
   const fixture = actorByName(actor);
@@ -315,15 +333,22 @@ export async function pdsOAuthScopeSummary(
     tokenCount?: unknown;
     hasIdentityScope?: unknown;
     identityTokenCount?: unknown;
+    identityTokenIds?: unknown;
     standingTokenFound?: unknown;
     standingHasIdentityScope?: unknown;
+    standingScope?: unknown;
+    standingClientId?: unknown;
   };
   if (
     typeof summary.tokenCount !== "number" ||
     typeof summary.hasIdentityScope !== "boolean" ||
     typeof summary.identityTokenCount !== "number" ||
+    !Array.isArray(summary.identityTokenIds) ||
+    !summary.identityTokenIds.every((id) => typeof id === "string") ||
     typeof summary.standingTokenFound !== "boolean" ||
-    typeof summary.standingHasIdentityScope !== "boolean"
+    typeof summary.standingHasIdentityScope !== "boolean" ||
+    !(summary.standingScope === null || typeof summary.standingScope === "string") ||
+    !(summary.standingClientId === null || typeof summary.standingClientId === "string")
   ) {
     throw new Error(`OAuth scope summary for ${actor} was malformed`);
   }
@@ -331,8 +356,11 @@ export async function pdsOAuthScopeSummary(
     tokenCount: summary.tokenCount,
     hasIdentityScope: summary.hasIdentityScope,
     identityTokenCount: summary.identityTokenCount,
+    identityTokenIds: summary.identityTokenIds,
     standingTokenFound: summary.standingTokenFound,
     standingHasIdentityScope: summary.standingHasIdentityScope,
+    standingScope: summary.standingScope,
+    standingClientId: summary.standingClientId,
   };
 }
 

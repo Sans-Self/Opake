@@ -61,6 +61,11 @@ async fn print_status(ctx: &CommandContext) -> Result<()> {
                 "Verification method: substitution (the published key is not this device's key)"
             )
         }
+        SelfVerificationState::Malformed => {
+            println!(
+                "Verification method: malformed (the published method cannot be read as a key this client supports)"
+            )
+        }
     }
     Ok(())
 }

@@ -54,6 +54,13 @@ pub struct GrantMetadata {
     /// SHA-256 approval of this unverified recipient's exact encryption bundle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unverified_key_approval: Option<[u8; 32]>,
+    /// Exact one-use pending-share record consumed to create this grant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_share_uri: Option<String>,
+    /// Domain-separated commitment to the exact pending record bytes. This
+    /// distinguishes a replacement intent that reused the same record rkey.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_share_commitment: Option<[u8; 32]>,
 }
 
 /// Encrypted, one-use intent for a recipient who has not yet published keys.
@@ -137,7 +144,14 @@ pub fn decrypt_metadata<T: DeserializeOwned>(
         .nonce
         .decode()
         .map_err(|e| Error::Decryption(format!("invalid metadata nonce: {e}")))?;
-
+    // `Nonce::from_slice` panics on a wrong length; a served record is
+    // untrusted input and must fail as a decryption error instead.
+    let nonce_bytes: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
+        Error::Decryption(format!(
+            "invalid metadata nonce length: {} bytes",
+            nonce_bytes.len()
+        ))
+    })?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key.0));

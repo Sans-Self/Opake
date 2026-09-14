@@ -20,6 +20,10 @@ pub enum SealType {
     KeyringMetadata,
     DirectoryMetadata,
     GrantMetadata,
+    /// A one-use queued-share intent. This is intentionally distinct from a
+    /// grant: both use the document content key, but an intent ciphertext
+    /// must never authenticate as a completed authorization record.
+    PendingShareMetadata,
     PairIdentity,
 }
 
@@ -31,6 +35,7 @@ impl SealType {
             SealType::KeyringMetadata => "keyring-metadata",
             SealType::DirectoryMetadata => "directory-metadata",
             SealType::GrantMetadata => "grant-metadata",
+            SealType::PendingShareMetadata => "pending-share-metadata",
             SealType::PairIdentity => "pair-identity",
         }
     }

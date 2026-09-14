@@ -13,24 +13,54 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
 
   require Logger
 
+  alias OpakeIndexer.Lexicon.Vocabulary
+
+  # Compressed encodings of curve25519-dalek's `constants::EIGHT_TORSION`
+  # (the eight canonical small-order points), followed by the six
+  # non-canonical spellings of those same points that a decoder reducing
+  # modulo p accepts: the sign-bit variants of 1 and 0, and p, p+1 with and
+  # without the sign bit. OTP's `:crypto.verify` accepts the identity
+  # public-key/R forgery, whereas Rust's `VerifyingKey::verify_strict`
+  # rejects any small-order point.
+  @small_order_ed25519_points for hex <- ~w(
+                                0100000000000000000000000000000000000000000000000000000000000000
+                                c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a
+                                0000000000000000000000000000000000000000000000000000000000000080
+                                26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05
+                                ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+                                26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85
+                                0000000000000000000000000000000000000000000000000000000000000000
+                                c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa
+                                0100000000000000000000000000000000000000000000000000000000000080
+                                ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+                                edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+                                edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+                                eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+                                eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+                              ),
+                                  do: Base.decode16!(hex, case: :lower)
+
   @impl true
-  def fetch_signing_key(did) do
+  @spec fetch_authentication_decision(String.t()) ::
+          {:ok, OpakeIndexer.Auth.KeyFetcherBehaviour.decision()} | {:error, term()}
+  def fetch_authentication_decision(did) do
     with {:ok, did_doc} <- resolve_did_document(did),
          {:ok, pds_url} <- extract_pds_url(did_doc),
          {:ok, record} <- fetch_public_key_record(pds_url, did),
-         {:ok, pubkey_bytes} <- validate_record(did, did_doc, record) do
-      {:ok, pubkey_bytes}
+         {:ok, pubkey_bytes, verified} <- validate_record_with_verification(did, did_doc, record),
+         {:ok, anchor_history} <- read_anchor_history(did, did_doc, pubkey_bytes) do
+      {:ok, %{key: pubkey_bytes, verified: verified, anchor_history: anchor_history}}
     end
   end
 
   defp resolve_did_document("did:plc:" <> _ = did) do
     url = "#{plc_directory_url()}/#{did}"
-    fetch_json(url)
+    fetch_json(url, :did_document)
   end
 
   defp resolve_did_document("did:web:" <> host) do
     url = "https://#{host}/.well-known/did.json"
-    fetch_json(url)
+    fetch_json(url, :did_document)
   end
 
   defp resolve_did_document(_did), do: {:error, "unsupported DID method"}
@@ -54,44 +84,79 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
       "#{pds_url}/xrpc/com.atproto.repo.getRecord?" <>
         URI.encode_query(repo: did, collection: "at.opake.publicKey", rkey: "self")
 
-    with {:ok, %{"value" => record}} <- fetch_json(url), do: {:ok, record}
-  end
-
-  defp validate_record(did, did_doc, record) do
-    # Classify the declared schema and algorithms before considering whether a
-    # DID document has an anchor.  An absent anchor permits an explicitly
-    # unverified first publication, not an unknown record format.
-    with :ok <- validate_encryption_bundle(record),
-         {:ok, signing} <- decode_bytes(get_in(record, ["signingKey", "$bytes"]), 32),
-         {:ok, anchor} <- opake_anchor(did_doc, did) do
-      if is_nil(anchor),
-        do: {:ok, signing},
-        else: verify_anchored_record(record, did, signing, anchor)
+    case fetch_json(url, :public_key_record) do
+      {:ok, %{"value" => record}} when is_map(record) -> {:ok, record}
+      {:ok, _} -> {:error, {:invalid, :public_key_record_missing}}
+      error -> error
     end
   end
+
+  @doc false
+  # Pure boundary for signed-record regression vectors. An absent anchor keeps
+  # the explicitly unverified first-publication contract: a future record only
+  # needs a valid signing key. An account that declares #opake must present the
+  # v1 account-bound signature the indexer knows how to verify.
+  def validate_record(did, did_doc, record) when is_map(record) do
+    with {:ok, signing, _verified} <- validate_record_with_verification(did, did_doc, record) do
+      {:ok, signing}
+    end
+  end
+
+  defp validate_record_with_verification(did, did_doc, record) when is_map(record) do
+    with {:ok, signing} <- decode_bytes(get_in(record, ["signingKey", "$bytes"]), 32),
+         {:ok, anchor} <- opake_anchor(did_doc, did) do
+      cond do
+        not is_nil(anchor) ->
+          with :ok <- validate_encryption_bundle(record),
+               {:ok, ^signing} <- verify_anchored_record(record, did, signing, anchor) do
+            {:ok, signing, true}
+          end
+
+        # An unverified record of a version this build understands still has
+        # to present a well-formed encryption bundle; only a record from a
+        # future version is authenticated on its signing key alone.
+        understood_version?(record) ->
+          with :ok <- validate_encryption_bundle(record), do: {:ok, signing, false}
+
+        true ->
+          {:ok, signing, false}
+      end
+    end
+  end
+
+  defp validate_record_with_verification(_, _, _), do: {:error, {:invalid, :public_key_record}}
+
+  defp understood_version?(%{"opakeVersion" => version}) when is_integer(version),
+    do: version <= 1
+
+  defp understood_version?(_), do: true
 
   defp validate_encryption_bundle(%{"opakeVersion" => version})
        when is_integer(version) and version > 1,
-       do: {:error, "unsupported newer public-key record version"}
+       do: {:error, {:invalid, :unsupported_anchored_public_key_version}}
 
-  defp validate_encryption_bundle(
-         %{"opakeVersion" => 1, "x25519Algo" => "x25519", "mlKemAlgo" => "ml-kem-768"} = record
-       ) do
-    with {:ok, _} <- decode_bytes(get_in(record, ["x25519PublicKey", "$bytes"]), 32),
+  defp validate_encryption_bundle(%{"opakeVersion" => version} = record) when version == 1 do
+    with true <- Vocabulary.permits?("publicKeyAlgo", version, record["x25519Algo"]),
+         true <- Vocabulary.permits?("publicKeyAlgo", version, record["mlKemAlgo"]),
+         true <- optional_vocabulary?("publicKeyAlgo", version, record["signingAlgo"]),
+         true <- optional_vocabulary?("publicKeySignatureAlgo", version, record["signatureAlgo"]),
+         {:ok, _} <- decode_bytes(get_in(record, ["x25519PublicKey", "$bytes"]), 32),
          {:ok, _} <- decode_bytes(get_in(record, ["mlKemPublicKey", "$bytes"]), 1184),
-         true <- record["signingAlgo"] in [nil, "ed25519"],
-         true <- record["signatureAlgo"] in [nil, "ed25519"],
          true <- is_binary(record["createdAt"]) do
       :ok
     else
-      _ -> {:error, "invalid public-key record"}
+      _ -> {:error, {:invalid, :public_key_record}}
     end
   end
 
-  defp validate_encryption_bundle(%{"opakeVersion" => 1}),
-    do: {:error, "invalid public-key record vocabulary"}
+  defp validate_encryption_bundle(_), do: {:error, {:invalid, :public_key_record_version}}
 
-  defp validate_encryption_bundle(_), do: {:error, "invalid public-key record version"}
+  defp optional_vocabulary?(_field, _version, nil), do: true
+
+  defp optional_vocabulary?(field, version, value) when is_binary(value),
+    do: Vocabulary.permits?(field, version, value)
+
+  defp optional_vocabulary?(_field, _version, _value), do: false
 
   defp verify_anchored_record(record, did, signing, anchor) do
     with "ed25519" <- record["signingAlgo"],
@@ -111,11 +176,11 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
           record["createdAt"]
         ])
 
-      if :crypto.verify(:eddsa, :none, transcript, signature, [anchor, :ed25519]),
+      if strict_ed25519_verify(anchor, transcript, signature),
         do: {:ok, signing},
-        else: {:error, "invalid account public-key signature"}
+        else: {:error, {:invalid, :account_public_key_signature}}
     else
-      _ -> {:error, "invalid account public-key signature"}
+      _ -> {:error, {:invalid, :account_public_key_signature}}
     end
   end
 
@@ -200,27 +265,153 @@ defmodule OpakeIndexer.Auth.KeyFetcher do
 
   defp decode_bytes(_, _), do: {:error, "missing byte field"}
 
+  @doc false
+  # Public so the shared cross-language vectors exercise the production
+  # verifier rather than a re-implementation of it.
+  @spec strict_ed25519_verify(binary(), binary(), binary()) :: boolean()
+  def strict_ed25519_verify(pubkey, message, signature)
+      when byte_size(pubkey) == 32 and byte_size(signature) == 64 do
+    <<r::binary-size(32), _s::binary-size(32)>> = signature
+
+    not small_order_point?(pubkey) and not small_order_point?(r) and
+      :crypto.verify(:eddsa, :none, message, signature, [pubkey, :ed25519])
+  rescue
+    _ -> false
+  end
+
+  def strict_ed25519_verify(_, _, _), do: false
+
+  defp small_order_point?(point), do: point in @small_order_ed25519_points
+
+  @doc false
+  # Exposed so regression vectors run against the production list rather than
+  # a hand-copied excerpt of it.
+  @spec small_order_points() :: [binary()]
+  def small_order_points, do: @small_order_ed25519_points
+
   defp plc_directory_url do
     Application.fetch_env!(:opake_indexer, :plc_directory_url)
   end
 
-  defp fetch_json(url) do
+  # The history result is a notice, never a source of current authority. We
+  # still read it with the same cache lifetime as the signing-key decision so
+  # all account resolvers consume the required audit history. A transport
+  # failure on the audit log leaves a verified account verified: the history is
+  # reported as unreadable rather than as an absence of replacement.
+  defp read_anchor_history("did:plc:" <> _ = did, did_doc, signing) do
+    case opake_anchor(did_doc, did) do
+      {:ok, nil} ->
+        {:ok, :no_history}
+
+      {:ok, _anchor} ->
+        url = "#{plc_directory_url()}/#{did}/log/audit"
+
+        case fetch_json(url, :plc_audit_history) do
+          {:ok, operations} when is_list(operations) ->
+            history_notice(did, operations, signing)
+
+          {:ok, _} ->
+            {:error, {:invalid, :plc_audit_history}}
+
+          {:error, {:unavailable, _source}} ->
+            {:ok, :unavailable}
+
+          error ->
+            error
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp read_anchor_history("did:web:" <> _, _did_doc, _signing), do: {:ok, :no_history}
+
+  defp read_anchor_history(_, _did_doc, _signing),
+    do: {:error, {:invalid, :unsupported_did_method}}
+
+  @doc false
+  @spec history_notice(String.t(), [map()], binary()) ::
+          {:ok, OpakeIndexer.Auth.KeyFetcherBehaviour.anchor_history()} | {:error, term()}
+  def history_notice("did:web:" <> _, _operations, _current), do: {:ok, :no_history}
+
+  def history_notice("did:plc:" <> _, operations, current),
+    do: audit_anchor_history(operations, current)
+
+  def history_notice(_, _operations, _current), do: {:error, {:invalid, :unsupported_did_method}}
+
+  @doc false
+  @spec audit_anchor_history([map()], binary()) ::
+          {:ok, :replaced | :not_replaced} | {:error, term()}
+  def audit_anchor_history(operations, current)
+      when is_list(operations) and byte_size(current) == 32 do
+    Enum.reduce_while(operations, {:ok, false}, fn envelope, {:ok, replaced} ->
+      case envelope do
+        %{"operation" => operation} when is_map(operation) ->
+          case operation do
+            %{"verificationMethods" => methods} when is_map(methods) ->
+              case Map.fetch(methods, "opake") do
+                :error ->
+                  {:cont, {:ok, replaced}}
+
+                {:ok, "did:key:z" <> encoded} ->
+                  case decode_ed25519_multibase(encoded) do
+                    {:ok, key} -> {:cont, {:ok, replaced or key != current}}
+                    _ -> {:halt, {:error, {:invalid, :plc_audit_history}}}
+                  end
+
+                {:ok, _} ->
+                  {:halt, {:error, {:invalid, :plc_audit_history}}}
+              end
+
+            %{"verificationMethods" => _} ->
+              {:halt, {:error, {:invalid, :plc_audit_history}}}
+
+            %{} ->
+              {:cont, {:ok, replaced}}
+          end
+
+        _ ->
+          {:halt, {:error, {:invalid, :plc_audit_history}}}
+      end
+    end)
+    |> case do
+      {:ok, true} -> {:ok, :replaced}
+      {:ok, false} -> {:ok, :not_replaced}
+      error -> error
+    end
+  end
+
+  def audit_anchor_history(_, _), do: {:error, {:invalid, :plc_audit_history}}
+
+  defp fetch_json(url, source) do
     case Req.get(url) do
       {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: 200, body: body}}
+      when is_list(body) and source == :plc_audit_history ->
         {:ok, body}
 
       # PLC directory returns application/did+ld+json which Req doesn't auto-decode
       {:ok, %Req.Response{status: 200, body: body}} when is_binary(body) ->
         case Jason.decode(body) do
           {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
-          _ -> {:error, "failed to decode JSON from #{url}"}
+          {:ok, decoded} when is_list(decoded) and source == :plc_audit_history -> {:ok, decoded}
+          _ -> {:error, {:invalid, source}}
         end
 
-      {:ok, %Req.Response{status: status}} ->
-        {:error, "HTTP #{status} from #{url}"}
+      {:ok, %Req.Response{status: status}} when status >= 500 ->
+        {:error, {:unavailable, source}}
 
-      {:error, reason} ->
-        {:error, "failed to fetch #{url}: #{inspect(reason)}"}
+      {:ok, %Req.Response{status: 429}} ->
+        {:error, {:unavailable, source}}
+
+      {:ok, %Req.Response{}} ->
+        {:error, {:invalid, source}}
+
+      {:error, _reason} ->
+        {:error, {:unavailable, source}}
     end
   end
 end

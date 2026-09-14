@@ -233,6 +233,7 @@ impl PublicKeyRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn record() -> PublicKeyRecord {
         PublicKeyRecord::new(&[7; 32], &[8; 1184], "2026-09-12T00:00:00Z")
     }
@@ -327,6 +328,94 @@ mod tests {
             .verify_signature("did:plc:alice", &anchor)
             .is_err());
     }
+
+    // Both verifiers are held to one accept/reject boundary: this asserts the
+    // Rust half, `KeyFetcherTest` asserts the indexer's.
+    #[test]
+    fn strict_ed25519_matches_the_shared_adversarial_vectors() {
+        const FIXTURE: &str =
+            include_str!("../../../../tests/vectors/ed25519-signature-vectors.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(FIXTURE).expect("the shared Ed25519 vectors are malformed");
+
+        let hex = |value: &serde_json::Value| -> Vec<u8> {
+            let text = value.as_str().expect("vector fields are hex strings");
+            text.as_bytes()
+                .chunks(2)
+                .map(|pair| {
+                    u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
+                        .expect("vector fields are hex strings")
+                })
+                .collect()
+        };
+
+        let vectors = fixture["vectors"].as_array().expect("vectors is a list");
+        assert!(
+            vectors.iter().any(|vector| vector["expected"] == "accept"),
+            "the fixture must prove agreement on acceptance, not only on rejection"
+        );
+
+        for vector in vectors {
+            let name = vector["name"].as_str().unwrap();
+            let public_key: [u8; 32] = hex(&vector["publicKeyHex"])
+                .try_into()
+                .unwrap_or_else(|_| panic!("{name}: public key is 32 bytes"));
+            let signature = hex(&vector["signatureHex"]);
+            let message = hex(&vector["messageHex"]);
+
+            let accepted = opake_crypto::Ed25519VerifyingKey::from_bytes(&public_key)
+                .ok()
+                .zip(opake_crypto::Ed25519Signature::from_slice(&signature).ok())
+                .is_some_and(|(key, signature)| key.verify_strict(&message, &signature).is_ok());
+
+            match vector["expected"].as_str() {
+                Some("accept") => assert!(accepted, "{name} should verify"),
+                Some("reject") => assert!(!accepted, "{name} should not verify"),
+                other => panic!("{name}: unknown expectation {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn strict_ed25519_rejects_every_shared_small_order_point() {
+        const FIXTURE: &str =
+            include_str!("../../../../tests/vectors/ed25519-signature-vectors.json");
+        let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let points = fixture["smallOrderPointsHex"]
+            .as_array()
+            .expect("smallOrderPointsHex is a list");
+        assert_eq!(points.len(), 14);
+
+        // A small-order key paired with a small-order R and S = 0 verifies
+        // under a permissive verifier for any transcript at all. Signing the
+        // record with the point as its declared key must stay unforgeable.
+        for point in points {
+            let bytes: [u8; 32] = point
+                .as_str()
+                .unwrap()
+                .as_bytes()
+                .chunks(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("small-order points are 32 bytes");
+
+            let mut forgery = record();
+            forgery.signing_key = Some(AtBytes::from_raw(&bytes));
+            forgery.signing_algo = Some(ED25519_ALGO.into());
+            forgery.signature_algo = Some(ED25519_ALGO.into());
+            let mut signature = [0u8; 64];
+            signature[..32].copy_from_slice(&bytes);
+            forgery.signature = Some(AtBytes::from_raw(&signature));
+
+            assert!(
+                forgery.verify_signature("did:plc:alice", &bytes).is_err(),
+                "small-order point {} was accepted as a signing key",
+                point.as_str().unwrap()
+            );
+        }
+    }
+
     #[test]
     fn json_encoding_and_extensions_do_not_change_signature_or_approval() {
         let key = opake_crypto::Ed25519SigningKey::from_bytes(&[42; 32]);

@@ -7,12 +7,21 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { TaskRecord, TaskStore } from "@opake/daemon";
+import type {
+  AnchorHistory,
+  PendingShareVerificationError,
+  RecipientVerificationNotice,
+} from "@opake/sdk";
 
-interface PendingShareVerificationError {
-  readonly uri: string;
-  readonly recipientDid: string;
-  readonly reason: string;
-  readonly expired: boolean;
+const ANCHOR_HISTORIES: readonly AnchorHistory[] = [
+  "notReplaced",
+  "replaced",
+  "noHistory",
+  "unavailable",
+];
+
+function isAnchorHistory(value: unknown): value is AnchorHistory {
+  return ANCHOR_HISTORIES.some((history) => history === value);
 }
 
 // ---------------------------------------------------------------------------
@@ -26,6 +35,18 @@ export type DaemonTaskKind =
       readonly type: "shareRetry";
       readonly retried: number;
       readonly verificationErrors: PendingShareVerificationError[];
+      readonly completionNotices: RecipientVerificationNotice[];
+    }
+  | {
+      readonly type: "memberWrapRepair";
+      readonly repaired: number;
+      readonly verificationNotices: RecipientVerificationNotice[];
+      readonly awaitingApproval: number;
+      readonly verificationFailed: number;
+      readonly deferredHumanDecision: number;
+      readonly deferredVisibility: number;
+      readonly deferredByBudget: number;
+      readonly discoveryDeferred: boolean;
     }
   | { readonly type: "unknown"; readonly raw: Readonly<Record<string, unknown>> };
 
@@ -43,7 +64,7 @@ export interface DaemonTask {
 // TaskRecord → DaemonTask mapping (validated, not cast)
 // ---------------------------------------------------------------------------
 
-function mapKind(raw: Readonly<Record<string, unknown>>): DaemonTaskKind {
+export function mapTaskKind(raw: Readonly<Record<string, unknown>>): DaemonTaskKind {
   const type = raw.type;
   switch (type) {
     case "pairCleanup":
@@ -72,16 +93,49 @@ function mapKind(raw: Readonly<Record<string, unknown>>): DaemonTaskKind {
               }];
             })
           : [],
+        completionNotices: verificationNotices(raw.completionNotices),
+      };
+    case "memberWrapRepair":
+      return {
+        type: "memberWrapRepair",
+        repaired: numberField(raw.repaired),
+        verificationNotices: verificationNotices(raw.verificationNotices),
+        awaitingApproval: numberField(raw.awaitingApproval),
+        verificationFailed: numberField(raw.verificationFailed),
+        deferredHumanDecision: numberField(raw.deferredHumanDecision),
+        deferredVisibility: numberField(raw.deferredVisibility),
+        deferredByBudget: numberField(raw.deferredByBudget),
+        discoveryDeferred: raw.discoveryDeferred === true,
       };
     default:
       return { type: "unknown", raw };
   }
 }
 
+function numberField(value: unknown): number {
+  return typeof value === "number" ? value : 0;
+}
+
+function verificationNotices(value: unknown): RecipientVerificationNotice[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((notice): readonly RecipientVerificationNotice[] => {
+    if (notice === null || typeof notice !== "object" || Array.isArray(notice)) return [];
+    const item = notice as Record<string, unknown>;
+    const verification = item.verification;
+    if (typeof item.did !== "string" || verification === null || typeof verification !== "object") return [];
+    const state = verification as Record<string, unknown>;
+    if (state.state === "unverified") return [{ did: item.did, verification: { state: "unverified" } }];
+    if (state.state === "verified" && isAnchorHistory(state.anchorHistory)) {
+      return [{ did: item.did, verification: { state: "verified", anchorHistory: state.anchorHistory } }];
+    }
+    return [];
+  });
+}
+
 function recordToTask(record: TaskRecord): DaemonTask {
   return {
     id: record.id,
-    kind: mapKind(record.kind),
+    kind: mapTaskKind(record.kind),
     status: record.status,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,

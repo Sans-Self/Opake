@@ -5,4 +5,9 @@
  * `opake_core::sharing::pending::PendingShareEntry`; drops the
  * encrypted metadata envelope (kept opaque on the JS side).
  */
-export type PendingShareEntryDto = { uri: string, document: string, recipient: string, created_at: string, };
+export type PendingShareEntryDto = { uri: string, document: string, recipient: string, created_at: string, recipient_did: string | null, 
+/**
+ * Cause for an absent `recipient_did`. An entry the owner cannot read is
+ * still an entry they may want to cancel, so the reason travels with it.
+ */
+recipient_did_error: string | null, };

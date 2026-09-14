@@ -573,6 +573,7 @@ describe.skipIf(testEnv() !== "devenv")("pending-share queue", () => {
       },
     ]);
     expect(staleReplacement.status, JSON.stringify(staleReplacement.json)).not.toBe(200);
+    expect(staleReplacement.json).toMatchObject({ error: "InvalidSwap" });
     expect(await repositoryRecord(owner, GRANT_COLLECTION, replacement.rkey)).toBeNull();
     expect(await repositoryRecord(owner, PENDING_COLLECTION, replacement.rkey)).not.toBeNull();
 
@@ -596,6 +597,7 @@ describe.skipIf(testEnv() !== "devenv")("pending-share queue", () => {
       },
     ]);
     expect(staleCancel.status, JSON.stringify(staleCancel.json)).not.toBe(200);
+    expect(staleCancel.json).toMatchObject({ error: "InvalidSwap" });
     expect(await repositoryRecord(owner, GRANT_COLLECTION, cancelled.rkey)).toBeNull();
     expect(await repositoryRecord(owner, PENDING_COLLECTION, cancelled.rkey)).toBeNull();
 
@@ -620,6 +622,7 @@ describe.skipIf(testEnv() !== "devenv")("pending-share queue", () => {
       },
     ]);
     expect(staleUnrelated.status, JSON.stringify(staleUnrelated.json)).not.toBe(200);
+    expect(staleUnrelated.json).toMatchObject({ error: "InvalidSwap" });
     expect(await repositoryRecord(owner, GRANT_COLLECTION, conflicted.rkey)).toBeNull();
     expect(await repositoryRecord(owner, PENDING_COLLECTION, conflicted.rkey)).not.toBeNull();
     expect(await repositoryRecord(owner, PENDING_COLLECTION, unrelated.rkey)).not.toBeNull();
@@ -645,6 +648,7 @@ describe.skipIf(testEnv() !== "devenv")("pending-share queue", () => {
       },
     ]);
     expect(staleCollision.status, JSON.stringify(staleCollision.json)).not.toBe(200);
+    expect(staleCollision.json).toMatchObject({ error: "InvalidSwap" });
     expect(await repositoryRecord(owner, PENDING_COLLECTION, collision.rkey)).not.toBeNull();
 
     // The second write fails because it collides with the donor grant. The

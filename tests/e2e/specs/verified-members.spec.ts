@@ -76,11 +76,11 @@ test("verified admission needs no confirmation; unverified and verification-erro
   test.setTimeout(300_000);
   const alice = actor("alice");
   const carol = actor("carol");
-  const eve = actor("eve");
+  const dave = actor("dave");
   const workspace = `verified-members-${uniq()}`;
-  const eveDid = await getDid(eve);
+  const daveDid = await getDid(dave);
   const carolDid = await getDid(carol);
-  const verified = await ensureVerifiedActor(browser, eve.name);
+  const verified = await ensureVerifiedActor(browser, dave.name);
   const alicePage = await newActorPage(browser, alice.name);
   let originalPublicKey: unknown | null = null;
 
@@ -105,9 +105,9 @@ test("verified admission needs no confirmation; unverified and verification-erro
       void dialog.dismiss();
     };
     alicePage.on("dialog", recordUnexpected);
-    await addMember(alicePage, eve.handle);
+    await addMember(alicePage, dave.handle);
     const members = alicePage.getByRole("list", { name: "Member list" });
-    await expectMemberAdded(alicePage, eveDid);
+    await expectMemberAdded(alicePage, daveDid);
     alicePage.off("dialog", recordUnexpected);
     expect(unexpected).toHaveLength(0);
 
@@ -124,10 +124,10 @@ test("verified admission needs no confirmation; unverified and verification-erro
 
     // Break only the already-verified member's record. Its DID method remains,
     // so this is VerificationError rather than an unverified downgrade.
-    originalPublicKey = await publishedPublicKey(eve);
+    originalPublicKey = await publishedPublicKey(dave);
     if (!originalPublicKey) throw new Error("verified fixture lost its public-key record");
     await putRepositoryRecord(
-      eve,
+      dave,
       "at.opake.publicKey",
       "self",
       corruptSignature(originalPublicKey),
@@ -149,14 +149,14 @@ test("verified admission needs no confirmation; unverified and verification-erro
         .getByRole("region", { name: "Notifications" })
         .getByRole("status")
         .filter({
-          hasText: `${eveDid} remains admitted but verification failed; no override is available.`,
+          hasText: `${daveDid} remains admitted but verification failed; no override is available.`,
         }),
     ).toBeVisible({ timeout: 30_000 });
 
     // Restore the signed record before opening Eve's client. The previous
     // corrupted record was deliberately a VerificationError; the indexer
     // correctly refuses it, so it cannot prove historical membership delivery.
-    await putRepositoryRecord(eve, "at.opake.publicKey", "self", originalPublicKey);
+    await putRepositoryRecord(dave, "at.opake.publicKey", "self", originalPublicKey);
     originalPublicKey = null;
 
     // Eve retains its membership and historical wrap despite lacking the
@@ -170,7 +170,7 @@ test("verified admission needs no confirmation; unverified and verification-erro
     }).toPass({ timeout: 60_000, intervals: [2_000, 3_000, 5_000] });
   } finally {
     if (originalPublicKey) {
-      await putRepositoryRecord(eve, "at.opake.publicKey", "self", originalPublicKey);
+      await putRepositoryRecord(dave, "at.opake.publicKey", "self", originalPublicKey);
     }
     await alicePage.context().close();
     await verified.cleanup();

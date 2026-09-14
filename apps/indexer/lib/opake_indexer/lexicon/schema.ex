@@ -19,11 +19,9 @@ defmodule OpakeIndexer.Lexicon.Schema do
   fail. This is what lets a well-formed future-version record clear structural
   validation and be relayed verbatim.
 
-  Opaque atproto-encoded scalars (`bytes` → `{"$bytes": ...}`, `cid-link` →
-  `{"$link": ...}`, `blob`, `unknown`) are checked for presence only, not
-  byte-level encoding: over-strict encoding checks are the false-rejection risk
-  the gate must avoid, and the security-relevant floor is the *presence* of the
-  crypto-envelope fields, enforced by the required + recursive-object walk.
+  Byte scalars (`bytes` → `{"$bytes": ...}`) are base64-decoded and checked
+  against their lexicon bounds. Other opaque AT Protocol scalars (`cid-link` →
+  `{"$link": ...}`, `blob`, `unknown`) are presence-checked only.
 
   Union variants are validated strictly: a `$type` outside the schema's declared
   refs is a structural failure, because a new union variant is a new-NSID change

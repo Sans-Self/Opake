@@ -42,6 +42,8 @@ describe("auth store", () => {
         did: "did:plc:test",
         handle: "test.bsky.social",
         pdsUrl: "https://pds.test",
+        avatarUrl: null,
+        bannerUrl: null,
       },
       identity: { status: "ready" },
     });

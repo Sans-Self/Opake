@@ -20,6 +20,7 @@ mod types;
 mod upload;
 
 pub use admin::WorkspaceAdmin;
+pub use sharing::{PendingShareRecipient, ShareWriteResult};
 pub use types::{
     DocumentMetadataResolution, DownloadResult, FileContext, MutationOutcome,
     ResolvedDocumentMetadata, UploadRequest, UploadResult,

@@ -190,7 +190,7 @@ defmodule OpakeIndexer.Firehose do
                workspace_id,
                prior_uri,
                attrs.author_did,
-               attrs.record_jsonb["members"] || []
+               attrs.record_jsonb
              ),
            {:ok, _} <- upsert_record(attrs, now) do
         chain_outcome =

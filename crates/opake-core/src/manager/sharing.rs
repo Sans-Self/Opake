@@ -9,6 +9,38 @@ use crate::storage::Storage;
 use super::types::FileContext;
 use super::FileManager;
 
+/// An opaque, queue-time recipient resolution for a pending share.
+///
+/// The entered handle is only display data. The resolved DID may be displayed
+/// to the owner, but callers cannot replace the account approved between the
+/// warning and the one-use handoff.
+#[derive(Debug)]
+pub struct PendingShareRecipient {
+    recipient: String,
+    did: String,
+    document_uri: String,
+    owner_did: String,
+}
+
+/// What was actually written by a direct share. This is derived from the
+/// final resolution immediately before wrapping, rather than an earlier UI
+/// inspection.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareWriteResult {
+    pub uri: String,
+    pub recipient_did: String,
+    pub verification: VerificationState,
+}
+
+impl PendingShareRecipient {
+    /// The DID the queue will authorize. Native clients may display this with
+    /// their explicit first-publication confirmation.
+    pub fn did(&self) -> &str {
+        &self.did
+    }
+}
+
 impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> {
     /// Inspect the exact approval required to share with an unverified
     /// resolved recipient. `None` means their DID document verified the
@@ -20,7 +52,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     ) -> Option<[u8; 32]> {
         match recipient.verification {
             VerificationState::Verified { .. } => None,
-            VerificationState::Unverified => Some(recipient.unverified_key_approval(document_uri)),
+            VerificationState::Unverified => Some(recipient.unverified_key_approval_for_version(
+                crate::records::Grant::RECORD_VERSION,
+                document_uri,
+            )),
         }
     }
 
@@ -29,7 +64,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// Cabinet only. Fetches the document's content key, wraps it to the
     /// recipient's hybrid public-key bundle, and creates a grant record.
     ///
-    /// Returns the grant AT-URI.
+    /// Returns the grant URI and verification state observed for the actual
+    /// wrapped key.
     #[::opake_derive::signoff]
     pub async fn share(
         &mut self,
@@ -38,7 +74,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         confirmed_unverified_keys: Option<[u8; 32]>,
         permissions: &str,
         note: Option<&str>,
-    ) -> Result<String, Error> {
+    ) -> Result<ShareWriteResult, Error> {
         let FileContext::Cabinet(ref cabinet) = self.context else {
             return Err(Error::InvalidRecord(
                 "sharing is only supported from the cabinet".into(),
@@ -53,10 +89,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
 
         // The confirmation is checked against this exact, freshly resolved
         // bundle. A stale token cannot survive key substitution.
-        let unverified_key_approval = match recipient.verification {
+        let unverified_key_approval = match &recipient.verification {
             VerificationState::Verified { .. } => None,
             VerificationState::Unverified => {
-                let expected = recipient.unverified_key_approval(document_uri);
+                let expected = recipient.unverified_key_approval_for_version(
+                    crate::records::Grant::RECORD_VERSION,
+                    document_uri,
+                );
                 if confirmed_unverified_keys != Some(expected) {
                     return Err(Error::UnverifiedKeyApprovalRequired {
                         did: recipient.did.clone(),
@@ -76,7 +115,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
         )
         .await?;
 
-        sharing::create_grant(
+        let uri = sharing::create_grant(
             &mut self.opake.client,
             &GrantParams {
                 document_uri,
@@ -89,11 +128,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
                 permissions,
                 note,
                 unverified_key_approval,
+                pending_share_uri: None,
+                pending_share_commitment: None,
                 created_at: &now,
             },
             &mut self.opake.rng,
         )
-        .await
+        .await?;
+        Ok(ShareWriteResult {
+            uri,
+            recipient_did: recipient.did,
+            verification: recipient.verification,
+        })
     }
 
     /// Revoke a grant (delete the grant record). Cabinet only.
@@ -114,12 +160,33 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
     /// `pendingShare` record encrypted with the grant metadata the daemon
     /// needs to reconstruct the grant once the recipient publishes their
     /// public key.
+    /// Resolve the recipient at the same security boundary that will create
+    /// the queued intent. The returned challenge must be passed unchanged to
+    /// [`Self::create_pending_share`] after explicit first-publication consent.
+    pub async fn prepare_pending_share_recipient(
+        &self,
+        document_uri: &str,
+        recipient: &str,
+    ) -> Result<PendingShareRecipient, Error> {
+        let FileContext::Cabinet(ref cabinet) = self.context else {
+            return Err(Error::InvalidRecord(
+                "pending shares are only supported from the cabinet".into(),
+            ));
+        };
+        let did = self.opake.resolve_recipient_did(recipient).await?;
+        Ok(PendingShareRecipient {
+            recipient: recipient.to_owned(),
+            did,
+            document_uri: document_uri.to_owned(),
+            owner_did: cabinet.did.clone(),
+        })
+    }
+
     #[::opake_derive::signoff]
     pub async fn create_pending_share(
         &mut self,
         document_uri: &str,
-        recipient: &str,
-        recipient_did: &str,
+        recipient: &PendingShareRecipient,
         allow_unverified_first_publication: bool,
         permissions: &str,
         note: Option<&str>,
@@ -130,9 +197,15 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             ));
         };
 
+        if recipient.document_uri != document_uri || recipient.owner_did != cabinet.did {
+            return Err(Error::InvalidRecord(
+                "pending-share recipient challenge belongs to a different document or owner".into(),
+            ));
+        }
+
         if !allow_unverified_first_publication {
             return Err(Error::UnverifiedKeyApprovalRequired {
-                did: recipient_did.to_owned(),
+                did: recipient.did.clone(),
             });
         }
 
@@ -150,8 +223,8 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> FileManager<'_, T, R, S> 
             &mut self.opake.client,
             &content_key,
             document_uri,
-            recipient,
-            recipient_did,
+            &recipient.recipient,
+            &recipient.did,
             allow_unverified_first_publication,
             permissions,
             note,

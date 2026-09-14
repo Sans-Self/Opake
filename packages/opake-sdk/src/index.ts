@@ -71,13 +71,20 @@ export {
   type WorkspaceRole,
   type WorkspaceMember,
   type WorkspaceMemberAccessStatus,
+  type WorkspaceMemberRemoval,
+  type WorkspaceMemberWriteResult,
+  type ExcludedWorkspaceMember,
+  type ExcludedMemberReason,
   type WorkspaceEntry,
   type ResolvedIdentity,
+  type AnchorHistory,
   type WorkspaceSyncResult,
+  type PairCompletionResult,
   type PairRequestResult,
   type PendingPairRequest,
 } from "./types";
 export type { AwaitPairOptions } from "./pairing";
+export { PendingShareRecipient } from "./file-manager";
 export {
   type TaskDef,
   type GrantEntry,
@@ -86,6 +93,8 @@ export {
   type ResolvedGrantMetadata,
   type PendingShareEntry,
   type PendingShareVerificationError,
+  type RecipientVerificationNotice,
+  type ShareWriteResult,
 } from "./types";
 
 // Real-time event streaming is WASM-owned:

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use opake_core::client::Session;
 use opake_core::error::Error;
-use opake_core::resolve;
+use opake_core::resolve::{self, AnchorHistory};
 
 use crate::commands::Execute;
 use crate::session::CommandContext;
@@ -62,12 +62,13 @@ impl Execute for NewShareCommand {
                         recipient.did
                     ));
                 }
-                let grant_uri = mgr
+                let write = mgr
                     .share(&uri, &recipient.did, approval, "read", self.note.as_deref())
                     .await?;
 
                 let display = recipient.handle.as_deref().unwrap_or(&recipient.did);
-                println!("shared with {} → {}", display, grant_uri);
+                println!("shared with {} → {}", display, write.uri);
+                print_verification_notice(&write.recipient_did, &write.verification);
             }
             Err(Error::RecipientNotReady(_)) => {
                 // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
@@ -78,19 +79,20 @@ impl Execute for NewShareCommand {
                 );
 
                 if self.queue {
+                    let pending_recipient = mgr
+                        .prepare_pending_share_recipient(&uri, &self.recipient)
+                        .await?;
                     if !self.allow_unverified_first_publication {
                         return Err(anyhow::anyhow!(
-                            "queuing requires --allow-unverified-first-publication: a background runner cannot ask for consent when {} first publishes keys",
-                            self.recipient
+                            "queuing requires --allow-unverified-first-publication: a background runner cannot ask for consent when {} ({}) first publishes keys",
+                            self.recipient,
+                            pending_recipient.did(),
                         ));
                     }
 
-                    let (recipient_did, _, _) =
-                        resolve::resolve_pds_for_login(&transport, &self.recipient).await?;
                     mgr.create_pending_share(
                         &uri,
-                        &self.recipient,
-                        &recipient_did,
+                        &pending_recipient,
                         true,
                         "read",
                         self.note.as_deref(),
@@ -125,9 +127,14 @@ impl Execute for PendingSharesCommand {
         } else {
             for entry in &entries {
                 let age = age_display(&entry.created_at);
+                let bound_did = match (&entry.recipient_did, &entry.recipient_did_error) {
+                    (Some(did), _) => did.clone(),
+                    (None, Some(cause)) => format!("unreadable DID: {cause}"),
+                    (None, None) => "unreadable DID".to_owned(),
+                };
                 println!(
-                    "  {} → {} ({}, {})",
-                    entry.document, entry.recipient, age, entry.uri
+                    "  {} → {} [{}] ({}, {})",
+                    entry.document, entry.recipient, bound_did, age, entry.uri
                 );
             }
             println!("\n{} pending share(s)", entries.len());
@@ -165,9 +172,38 @@ impl Execute for RetrySharesCommand {
                     issue.uri, issue.recipient_did, expiry, issue.reason
                 );
             }
+            for notice in result.completion_notices {
+                print_verification_notice(&notice.did, &notice.verification);
+            }
         }
 
         Ok(None)
+    }
+}
+
+fn print_verification_notice(did: &str, verification: &resolve::VerificationState) {
+    match verification {
+        resolve::VerificationState::Unverified => {
+            println!("{did}: shared using explicitly approved unverified encryption keys");
+        }
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::Replaced,
+        } => println!("{did}: verification method has changed"),
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::NoHistory,
+        } => {
+            println!("{did}: this DID method publishes no verification history to read");
+        }
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::Unavailable,
+        } => {
+            println!(
+                "{did}: verification history could not be read; a replacement cannot be ruled out"
+            );
+        }
+        resolve::VerificationState::Verified {
+            anchor_history: AnchorHistory::NotReplaced,
+        } => {}
     }
 }
 

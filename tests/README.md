@@ -71,3 +71,17 @@ and that two concurrent namespaced runs stay isolated. They drive whole
 Playwright runs as child processes, in namespaces of their own, and are slow by
 nature. They are deliberately outside `--project=e2e`, so a product run never
 recursively spawns suites.
+
+
+### Measured execution envelope
+
+The dev-env e2e tiers run against one shared hermetic stack. Measured on a clean
+reset (2026-09-12): the Playwright tier is ~140 s at 4 workers, the CLI
+federation tier ~171 s (deliberately serial — concurrent supersedes can resolve
+the same indexed head before either is visible). Cross-client assertions wait on
+PDS → firehose → indexer → SSE propagation; under parallel load that pipeline can
+miss a fixed visibility window, so the Playwright project retries a spec as a
+whole (`retries` in `playwright.config.ts`) instead of inflating per-assertion
+timeouts. A real defect fails every retry; only propagation-timing contention is
+absorbed. If the tier's wall-clock grows materially past this envelope, that is a
+stack-capacity signal, not a reason to raise timeouts.

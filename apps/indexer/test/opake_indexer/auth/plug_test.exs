@@ -10,6 +10,14 @@ defmodule OpakeIndexer.Auth.PlugTest do
     :ok
   end
 
+  # Each test gets its own source IP so the per-IP rate limiter (shared
+  # across the whole suite run, not per-file) never trips on a burst of
+  # requests from this file alone.
+  setup %{conn: conn} do
+    ip = "10.0.1.#{System.unique_integer([:positive])}"
+    {:ok, conn: Plug.Conn.put_req_header(conn, "x-forwarded-for", ip)}
+  end
+
   test "rejects missing authorization header", %{conn: conn} do
     conn = get(conn, "/api/inbox?did=did:plc:test")
 
@@ -45,6 +53,33 @@ defmodule OpakeIndexer.Auth.PlugTest do
     assert json_response(conn, 200)
   end
 
+  # A decision verified against the DID document's #opake anchor is accepted
+  # and surfaced on the conn, through the real cache and plug.
+  test "accepts an account verified against its #opake anchor", %{conn: conn} do
+    did = "did:plc:verified"
+    {pubkey, privkey} = :crypto.generate_key(:eddsa, :ed25519)
+    timestamp = System.system_time(:second)
+    message = "GET:/api/inbox:#{timestamp}:#{did}"
+    signature = :crypto.sign(:eddsa, :none, message, [privkey, :ed25519])
+
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
+      {:ok, %{key: pubkey, verified: true, anchor_history: :not_replaced}}
+    end)
+
+    conn =
+      conn
+      |> put_req_header(
+        "authorization",
+        "Opake-Ed25519 #{did}:#{timestamp}:#{Base.encode64(signature)}"
+      )
+      |> get("/api/inbox?did=#{did}")
+
+    assert json_response(conn, 200)
+    assert conn.assigns.authenticated_did == did
+    assert conn.assigns.authenticated_verified
+    assert conn.assigns.authenticated_anchor_history == :not_replaced
+  end
+
   # An account without a DID-document #opake method keeps the existing
   # record-signing-key authentication path.
   test "accepts an unverified account", %{conn: conn} do
@@ -60,7 +95,7 @@ defmodule OpakeIndexer.Auth.PlugTest do
     message = "GET:/api/inbox:#{timestamp}:#{did}"
     signature = :crypto.sign(:eddsa, :none, message, [private_key, :ed25519])
 
-    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_signing_key, fn ^did ->
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
       {:error, "invalid account public-key signature"}
     end)
 
@@ -75,12 +110,59 @@ defmodule OpakeIndexer.Auth.PlugTest do
     assert json_response(conn, 401)["error"] =~ "signature"
   end
 
-  test "authentication never reuses a prior DID verification decision" do
+  # An account that declares #opake but whose published record is not signed
+  # under it is refused through the real cache and plug, not just at the
+  # resolver boundary.
+  test "refuses an anchored-but-unsigned account with a sanitized 401", %{conn: conn} do
+    did = "did:plc:invalid-decision"
+    {_pubkey, private_key} = :crypto.generate_key(:eddsa, :ed25519)
+    timestamp = System.system_time(:second)
+    message = "GET:/api/inbox:#{timestamp}:#{did}"
+    signature = :crypto.sign(:eddsa, :none, message, [private_key, :ed25519])
+
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
+      {:error, {:invalid, :account_public_key_signature}}
+    end)
+
+    conn =
+      conn
+      |> put_req_header(
+        "authorization",
+        "Opake-Ed25519 #{did}:#{timestamp}:#{Base.encode64(signature)}"
+      )
+      |> get("/api/inbox?did=#{did}")
+
+    assert json_response(conn, 401) == %{"error" => "authentication key resolution invalid"}
+  end
+
+  test "returns 503 for DID or PDS transport failure without internal details", %{conn: conn} do
+    did = "did:plc:unavailable"
+    {_pubkey, private_key} = :crypto.generate_key(:eddsa, :ed25519)
+    timestamp = System.system_time(:second)
+    message = "GET:/api/inbox:#{timestamp}:#{did}"
+    signature = :crypto.sign(:eddsa, :none, message, [private_key, :ed25519])
+
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
+      {:error, {:unavailable, :did_document}}
+    end)
+
+    conn =
+      conn
+      |> put_req_header(
+        "authorization",
+        "Opake-Ed25519 #{did}:#{timestamp}:#{Base.encode64(signature)}"
+      )
+      |> get("/api/inbox?did=#{did}")
+
+    assert json_response(conn, 503) == %{"error" => "authentication key resolution unavailable"}
+  end
+
+  test "authentication reuses a complete decision until its short expiry" do
     did = "did:plc:changed-anchor"
     {pubkey, _private_key} = :crypto.generate_key(:eddsa, :ed25519)
 
-    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_signing_key, 2, fn ^did ->
-      {:ok, pubkey}
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
+      {:ok, %{key: pubkey, verified: true, anchor_history: :not_replaced}}
     end)
 
     assert {:ok, ^pubkey} = OpakeIndexer.Auth.KeyCache.get_key(did)

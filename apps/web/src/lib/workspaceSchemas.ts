@@ -14,7 +14,6 @@ export interface KeyringMemberEntry {
   readonly did: string;
   readonly role: WorkspaceRole;
   readonly hasCurrentWrap: boolean;
-  readonly hasUnverifiedApproval: boolean;
 }
 
 /** Project a raw `WorkspaceMember` onto the UI-facing `KeyringMemberEntry`. */
@@ -23,7 +22,6 @@ export function toMemberEntry(member: WorkspaceMember): KeyringMemberEntry {
     did: member.did,
     role: member.role,
     hasCurrentWrap: member.wrappedKey !== undefined,
-    hasUnverifiedApproval: member.unverifiedKeyApproval !== undefined,
   };
 }
 

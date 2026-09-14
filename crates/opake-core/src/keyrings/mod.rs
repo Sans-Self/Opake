@@ -5,18 +5,20 @@
 // their content key wrapped under GK. Adding a member gives them access to
 // all documents under that keyring without per-document changes.
 
+#[cfg(test)]
 mod add_member;
 mod create;
 mod list;
+#[cfg(test)]
 mod remove_member;
 
-pub use add_member::{add_member, AddMemberParams};
 pub use create::{create_keyring, CreateKeyringParams};
 pub use list::{list_keyrings, KeyringEntry};
-pub use remove_member::remove_member;
 
 use crate::crypto::{self, KeyringMetadata, PrivateKeyBundle};
+#[cfg(test)]
 use crate::error::Error;
+#[cfg(test)]
 use crate::records::{Keyring, SCHEMA_VERSION};
 
 pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
@@ -34,7 +36,8 @@ pub const KEYRING_COLLECTION: &str = "at.opake.keyring";
 ///
 /// A structurally corrupt keyring never reaches this guard — it fails the
 /// typed parse at fetch and the write is refused there, before any re-wrap.
-pub(crate) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(), Error> {
+#[cfg(test)]
+pub(super) fn guard_keyring_writable(uri: &str, keyring: &Keyring) -> Result<(), Error> {
     if keyring.opake_version > SCHEMA_VERSION {
         return Err(Error::ChainLinkNeedsNewerClient {
             uri: uri.to_owned(),

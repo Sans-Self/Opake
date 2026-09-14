@@ -22,7 +22,7 @@ import { getOpake, useAuthStore } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { rkeyFromUri } from "@/lib/atUri";
 import { resolveMemberProfile, type MemberProfile } from "@/lib/profileResolution";
-import { resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
+import { toastWriteVerificationNotice, resolveRecipient, RecipientNotReadyError } from "@/lib/sharing";
 import {
   memberAccessLabel,
   missingCurrentWrapLabel,
@@ -106,8 +106,13 @@ function WorkspaceSettingsPage() {
 
   const role = useMemo(() => members.find((m) => m.did === myDid)?.role ?? null, [members, myDid]);
   const isManager = role === "manager";
-  const currentKeyStatusKnown = members.length === 0 || members.some((member) => memberStatuses[member.did]);
-  const hasCurrentWorkspaceKey = isManager && members.some((member) => memberStatuses[member.did]?.canRepair);
+  // Authority to mutate comes from this manager's own current-key capability.
+  // Peer status probes describe their repair state; a slow or failed probe
+  // must not grant or revoke this account's management controls.
+  const ownStatus = myDid !== null ? memberStatuses[myDid] : undefined;
+  const currentKeyStatusKnown = !isManager || (ownStatus !== undefined && ownStatus !== null);
+  const ownStatusUnavailable = isManager && ownStatus === null;
+  const hasCurrentWorkspaceKey = isManager && ownStatus?.canRepair === true;
   // Federation has no distinct "owner" role; manager == authoritative.
   // Pre-federation `isOwner` was used to allow workspace deletion + some
   // settings — collapse to manager-only for now.
@@ -264,6 +269,9 @@ function WorkspaceSettingsPage() {
         try {
           const removal = await getOpake().removeWorkspaceMember(uri, memberDid);
           toastSuccess("Member removed, key rotated");
+          removal.verificationNotices.forEach((notice) => {
+            toastWriteVerificationNotice(notice.did, notice.verification);
+          });
           removal.excludedMembers.forEach((excluded) => {
             const reason = excluded.reason === "verificationFailed"
               ? "verification failed; no override is available"
@@ -339,8 +347,9 @@ function WorkspaceSettingsPage() {
             identity.handle ?? identity.did,
             window.confirm,
           );
-          if (result === "cancelled") return;
+          if (result.status !== "written") return;
           toastSuccess(`Added ${identity.handle ?? identity.did}`);
+          if (result.verification) toastWriteVerificationNotice(result.verification.did, result.verification.verification);
           await refreshAfterMemberChange(uri);
         } catch (err) {
           if (err instanceof RecipientNotReadyError) {
@@ -364,17 +373,18 @@ function WorkspaceSettingsPage() {
     if (!keyringUri) return;
     try {
       const result = await repairWorkspaceMember(getOpake(), keyringUri, member.did, window.confirm);
-      if (result === "verificationRefused") {
+      if (result.status === "verificationRefused") {
         toastError("This member's current keys cannot be used. Verification must resolve before access can change.");
         return;
       }
-      if (result === "currentKeyUnavailable") {
+      if (result.status === "currentKeyUnavailable") {
         toastError("You do not hold the current workspace key, so you cannot repair access.");
         return;
       }
-      if (result === "cancelled") return;
+      if (result.status !== "written") return;
       await refreshAfterMemberChange(keyringUri);
       toastSuccess("Member access repaired");
+      if (result.verification) toastWriteVerificationNotice(result.verification.did, result.verification.verification);
     } catch (err) { toastError(err instanceof Error ? err.message : "Failed to repair member access"); }
   }, [keyringUri, refreshAfterMemberChange]);
 
@@ -393,9 +403,10 @@ function WorkspaceSettingsPage() {
       const approval = await getOpake().workspaceMemberApprovalChallenge(keyringUri, member.did);
       if (!approval) { toastError("This member is verified and needs no approval."); return; }
       if (!window.confirm(`Approve ${member.did}'s currently resolved unverified keys? This does not grant a key until a manager repairs access.`)) return;
-      await getOpake().approvePendingWorkspaceMember(keyringUri, member.did, approval);
+      const write = await getOpake().approvePendingWorkspaceMember(keyringUri, member.did, approval);
       await refreshAfterMemberChange(keyringUri);
       toastSuccess("Current keys approved; a manager with the workspace key can repair access.");
+      toastWriteVerificationNotice(write.verificationNotice.did, write.verificationNotice.verification);
     } catch (err) { toastError(err instanceof Error ? err.message : "Failed to approve member keys"); }
   }, [keyringUri, refreshAfterMemberChange]);
 
@@ -550,9 +561,10 @@ function WorkspaceSettingsPage() {
             <h2 className="text-base-content text-sm font-semibold">Members ({members.length})</h2>
             {isManager && (
               <button
+                type="button"
                 onClick={() => addMemberDialogRef.current?.show()}
                 disabled={!canManage || !currentKeyStatusKnown}
-                title={canManage ? undefined : "You need the current workspace key to add members"}
+                aria-describedby={!canManage ? "workspace-add-member-unavailable" : undefined}
                 className="btn btn-ghost btn-xs gap-1 rounded-lg"
               >
                 <UserPlusIcon size={13} />
@@ -560,6 +572,16 @@ function WorkspaceSettingsPage() {
               </button>
             )}
           </div>
+          {isManager && currentKeyStatusKnown && !canManage && (
+            <p id="workspace-add-member-unavailable" className="text-caption text-warning mb-2">
+              You need the current workspace key to add members.
+            </p>
+          )}
+          {ownStatusUnavailable && (
+            <p id="workspace-add-member-unavailable" className="text-caption text-warning mb-2" role="status">
+              Your access to the current workspace key could not be checked. Member controls stay unavailable until that check succeeds.
+            </p>
+          )}
           {loadError && <p className="text-caption text-error mb-2">{loadError}</p>}
           {isManager && currentKeyStatusKnown && !hasCurrentWorkspaceKey && (
             <p className="text-caption text-warning mb-2" role="status">
@@ -715,19 +737,40 @@ function MemberRow({
             {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
           </span>
         )}
-        <span className="text-caption text-text-muted" role="status">
+        <span className="text-caption text-text-muted">
           {memberAccessLabel(status)}
         </span>
       </div>
       {missingCurrentWrap && (
-        <div className="text-caption text-warning max-w-52" role="status">
+        <div className="text-caption text-warning max-w-52">
           {missingCurrentWrapLabel(status)}
         </div>
       )}
-      {canRepair && <button onClick={onRepair} className="btn btn-xs">Repair access</button>}
-      {canApproveCurrentKeys && <button onClick={onApprove} className="btn btn-ghost btn-xs">Approve current keys</button>}
+      {canRepair && (
+        <button
+          type="button"
+          onClick={onRepair}
+          className="btn btn-xs"
+          aria-label={`Repair current-key access for ${member.did}`}
+          title={`Repair current-key access for ${member.did}`}
+        >
+          Repair access
+        </button>
+      )}
+      {canApproveCurrentKeys && (
+        <button
+          type="button"
+          onClick={onApprove}
+          className="btn btn-ghost btn-xs"
+          aria-label={`Approve current keys for ${member.did}`}
+          title={`Approve current keys for ${member.did}`}
+        >
+          Approve current keys
+        </button>
+      )}
       {canRemove && (
         <button
+          type="button"
           onClick={onRemove}
           className="btn btn-confirm-danger btn-xs rounded-lg"
           data-confirming={confirmingRemove || undefined}

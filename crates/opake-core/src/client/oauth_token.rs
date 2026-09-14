@@ -351,6 +351,7 @@ pub(crate) async fn revoke_temporary_token(
     transport: &impl Transport,
     revocation_endpoint: &str,
     token: &str,
+    client_id: &str,
     dpop_key: &DpopKeyPair,
     dpop_nonce: &mut Option<String>,
     timestamp: i64,
@@ -360,7 +361,10 @@ pub(crate) async fn revoke_temporary_token(
         transport,
         revocation_endpoint,
         "POST",
-        vec![("token".into(), token.into())],
+        vec![
+            ("token".into(), token.into()),
+            ("client_id".into(), client_id.into()),
+        ],
         dpop_key,
         dpop_nonce,
         None,
@@ -390,7 +394,61 @@ pub(crate) async fn authenticated_json_post(
     timestamp: i64,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<HttpResponse, Error> {
-    let response = send_authenticated_json(
+    authenticated_post(
+        transport,
+        url,
+        body.map(RequestBody::Json),
+        access_token,
+        dpop_key,
+        dpop_nonce,
+        timestamp,
+        rng,
+    )
+    .await
+}
+
+/// POST pre-serialized JSON with a temporary DPoP-bound access token.
+///
+/// The caller owns the serialized bytes, so a body carrying owner-supplied
+/// secrets can live in a zeroizing buffer until the transport copies it.
+/// The transport-side copy is protocol I/O and makes no zeroization claim.
+pub(crate) async fn authenticated_bytes_post(
+    transport: &impl Transport,
+    url: &str,
+    body: &[u8],
+    access_token: &str,
+    dpop_key: &DpopKeyPair,
+    dpop_nonce: &mut Option<String>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<HttpResponse, Error> {
+    authenticated_post(
+        transport,
+        url,
+        Some(RequestBody::Bytes {
+            data: body.to_vec(),
+            content_type: "application/json".into(),
+        }),
+        access_token,
+        dpop_key,
+        dpop_nonce,
+        timestamp,
+        rng,
+    )
+    .await
+}
+
+async fn authenticated_post(
+    transport: &impl Transport,
+    url: &str,
+    body: Option<RequestBody>,
+    access_token: &str,
+    dpop_key: &DpopKeyPair,
+    dpop_nonce: &mut Option<String>,
+    timestamp: i64,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<HttpResponse, Error> {
+    let response = send_authenticated(
         transport,
         url,
         body.clone(),
@@ -407,7 +465,7 @@ pub(crate) async fn authenticated_json_post(
     if !is_use_dpop_nonce_error(&response) {
         return Ok(response);
     }
-    let retry = send_authenticated_json(
+    let retry = send_authenticated(
         transport,
         url,
         body,
@@ -424,10 +482,10 @@ pub(crate) async fn authenticated_json_post(
     Ok(retry)
 }
 
-async fn send_authenticated_json(
+async fn send_authenticated(
     transport: &impl Transport,
     url: &str,
-    body: Option<serde_json::Value>,
+    body: Option<RequestBody>,
     access_token: &str,
     dpop_key: &DpopKeyPair,
     nonce: Option<&str>,
@@ -451,7 +509,7 @@ async fn send_authenticated_json(
                 ("Authorization".into(), format!("DPoP {access_token}")),
                 ("DPoP".into(), proof),
             ],
-            body: body.map(RequestBody::Json),
+            body,
         })
         .await
 }

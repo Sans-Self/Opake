@@ -14,6 +14,14 @@
 //
 // spec:key-rotation § The re-wrap sweep is hygiene under the background-work contract
 // spec:background-work § Concurrency is resolved per record by compare-and-swap
+//
+// No daemon schedules this sweep. Since members may be admitted without a
+// current wrap, a document sweep cannot infer from a `Workspace` key alone that
+// every admitted member holds the live key, and replacing a document's sole
+// wrap would strip historical-only members of access they legitimately have.
+// Re-enabling it requires a fresh-head, per-item exclusion guard at the write
+// boundary; until then the planner is kept for its tests and nothing else.
+// spec:workspace-membership § Membership state is the keyring head's member list
 
 use base64::Engine;
 use log::trace;
