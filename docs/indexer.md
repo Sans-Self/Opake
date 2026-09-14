@@ -49,6 +49,26 @@ docker compose --profile full up --build
 
 This starts postgres and the indexer container. The entrypoint (`apps/indexer/rel/entrypoint.sh`) creates the database if needed and runs migrations before booting the release.
 
+### Pre-v1 verified-account data transition
+
+The verified-accounts record shape redefines the pre-v1 draft in place. Old
+wrap-only keyrings and pending records cannot be made valid by rebuilding the
+indexer: replaying the same source records still lacks the required member DID
+and role, and cannot represent an approval commitment where one is needed.
+Coordinate an approved source-data migration or
+regenerate the affected records with clients that implement the new format.
+
+Only after every writer and source record uses that format, rebuild or backfill
+the indexer so its projections and chain heads match the regenerated source
+data. A database reset alone is not a migration and must not be used to deploy
+this change to an existing live Scaleway installation; no production migration
+automation is supplied here.
+
+The disposable local dev-env is the exception: `just dev-env-reset` recreates
+its entire isolated PLC/PDS/relay/indexer stack and then bootstraps new fixture
+records. It is safe only for that local stack, never as an instruction for a
+shared or production environment.
+
 ## Database Schema
 
 Three tables. Records are stored as one row per AT-URI regardless of collection, with the verbatim PDS record JSON in `record_jsonb` — the structural columns are projections of that JSON, maintained by the firehose dispatch so lookups can be index-driven.
@@ -111,7 +131,9 @@ GET:/api/inbox:1709330400:did:plc:abc123
 4. Resolve the DID document and fetch `at.opake.publicKey/self` from the user's PDS
 5. Without an `#opake` verification method, use the record's `signingKey` as before. With one, require the record's versioned account-bound Ed25519 signature to verify against the DID method.
 6. Verify the request signature with Erlang `:crypto` (Ed25519)
-7. Resolve this decision freshly for each request. The DID document can add or remove `#opake` independently of the PDS record, so a cached success must not outlive a changed verification state.
+7. Cache the complete DID document, signed-record, and PLC audit-history decision for a short bounded lifetime. Entries are keyed by DID and are fetched directly on a miss, so one slow account cannot block authentication for another. A fetch failure returns `503` without exposing the resolved URL; invalid credentials or records return `401`. An unreachable audit log is the exception: a signature that already verified keeps the account authenticated, and the decision reports its anchor history as unavailable rather than as unreplaced. A transport failure is never cached, so the service stops returning `503` as soon as the PLC directory or PDS recovers; a refusal is cached, since it will not change until the record is rewritten.
+
+   This is also where a replaced anchor surfaces for operators. The indexer has no response channel for a resolution notice, so an account that authenticates against an `#opake` verification method the DID document's history shows was replaced is logged at `warning`, naming the DID; an anchor history the transport could not deliver is logged at `info`. Both fire on the resolution path, so each account produces at most one line per cache lifetime.
 
 ## API Endpoints
 

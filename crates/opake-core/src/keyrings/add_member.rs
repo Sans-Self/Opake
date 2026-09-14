@@ -22,7 +22,7 @@ pub struct AddMemberParams<'a> {
 ///
 /// The caller must provide the raw group key (loaded from local storage) —
 /// it's needed to wrap a copy for the new member.
-pub async fn add_member(
+async fn add_member(
     client: &mut XrpcClient<impl Transport>,
     params: &AddMemberParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),

@@ -27,9 +27,9 @@ Exclusion from re-wrapping SHALL retain the member's DID, role, and existing key
 
 ### Requirement: Keyring supersede authority is manager-only, except pure self-removal
 
-A keyring supersede SHALL be valid iff the author is currently a manager, OR the author is a non-manager member and the supersede is a pure self-removal: the new member list equals the head's list minus the author, compared on `{did, role}` pairs. Under the exception, dropping anyone else, adding anyone, changing any remaining member's role, or keeping oneself in the list SHALL be rejected. Wrapped-key bytes are not compared — they legitimately differ across supersedes.
+A keyring supersede SHALL be valid iff the author is currently a manager, OR the author is a non-manager member and the supersede is a pure self-removal. Under that exception, the new record SHALL equal the head after removing only the author's current member entry and changing the chain-edge transport fields (`supersedes`, its content pin, lineage, and record timestamps). The rotation counter, key history, encrypted metadata, every remaining member field, and any other record field SHALL be preserved. Equality of `$bytes` values is equality of decoded bytes, so a representation change alone does not reject a leave. Dropping anyone else, adding anyone, changing any remaining member's role, wrap, approval, or another record field, or keeping oneself in the list SHALL be rejected.
 
-The self-removal exception SHALL additionally preserve each remaining member's wrap presence and key-bound approval exactly. A non-manager SHALL NOT use a leave to add, replace, or erase approval, or to change whether another member has a current wrap. Capturing renewed approval and repairing a missing group-key wrap SHALL be manager-authored supersedes, subject to the same authority checks as admission (`spec:account-verification § Key-bound approval is carried by the relationship's records`). A background runner has only its acting account's authority, never a separate repair privilege.
+Renewing approval, repairing a missing group-key wrap, and all other keyring mutations SHALL be manager-authored supersedes, subject to the same authority checks as admission (`spec:account-verification § Key-bound approval is carried by the relationship's records`). A background runner has only its acting account's authority, never a separate repair privilege.
 
 The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_self_removal?`, authority.ex) and re-checked client-side for a fast, clear error before the write. The two checks express the same rule; the indexer's is authoritative.
 
@@ -49,7 +49,7 @@ The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_s
 #### Scenario: leaving does not authorize replacement keys
 
 - **GIVEN** bob is an editor and carol's current entry has a missing wrap and approval for encryption bundle A
-- **WHEN** bob leaves while changing carol's approval to bundle B or adding a wrap for her
+- **WHEN** bob leaves while changing carol's approval to bundle B, adding a wrap for her, changing the rotation/history/metadata, or adding an unknown record field
 - **THEN** the supersede is rejected as more than pure self-removal
 
 ### Requirement: Adding a member is a manager-authored supersede

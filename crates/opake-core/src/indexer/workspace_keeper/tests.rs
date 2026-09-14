@@ -284,9 +284,8 @@ fn make_keyring_envelope(
     }
 }
 
-/// A malformed current wrap with no usable rotation-0 historical material
-/// cannot prove the declared workspace identity. It must not render a
-/// placeholder entry keyed by that declaration.
+/// A malformed current wrap is surfaced as unreadable rather than becoming an
+/// empty key that happens to fail later identity adoption.
 #[test]
 fn try_build_entry_unwrap_failure_without_genesis_proof_is_dropped() {
     use crate::crypto::OsRng;
@@ -305,7 +304,7 @@ fn try_build_entry_unwrap_failure_without_genesis_proof_is_dropped() {
 
     assert!(matches!(
         try_build_entry(&envelope, "did:plc:alice", &wrong_keys.private_keys()),
-        EntryOutcome::IdentityMismatch
+        EntryOutcome::Unreadable { .. }
     ));
 }
 

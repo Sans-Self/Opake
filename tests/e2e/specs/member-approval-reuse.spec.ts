@@ -193,18 +193,25 @@ test("a fresh web manager repairs a CLI-approved unchanged bundle without anothe
     await workspaceLink.click();
     await web.page.getByRole("link", { name: "Workspace settings" }).click();
 
-    const repair = web.page.getByRole("button", { name: "Repair access", exact: true });
-    await expect(repair).toBeVisible({ timeout: 60_000 });
+    // The fresh manager's own opportunistic daemon may repair the wrap from
+    // the recorded approval before a person reaches the button; both routes
+    // consume the same evidence and neither may prompt. Accept whichever
+    // lands first, but if the button is offered, drive it.
     const confirmations: Dialog[] = [];
     const recordUnexpectedConfirmation = (dialog: Dialog) => {
       confirmations.push(dialog);
       void dialog.dismiss();
     };
     web.page.on("dialog", recordUnexpectedConfirmation);
-    await repair.click();
-    await expect(web.page.getByText("Member access repaired").first()).toBeVisible({
-      timeout: 60_000,
-    });
+    const repair = web.page.getByRole("button", { name: "Repair access", exact: true });
+    const memberRow = web.page.getByRole("button", { name: `Remove ${memberDid}` });
+    await expect(repair.or(memberRow)).toBeVisible({ timeout: 60_000 });
+    if (await repair.isVisible().catch(() => false)) {
+      await repair.click();
+      await expect(web.page.getByText("Member access repaired").first()).toBeVisible({
+        timeout: 60_000,
+      });
+    }
     web.page.off("dialog", recordUnexpectedConfirmation);
     expect(confirmations).toHaveLength(0);
     expect(

@@ -110,7 +110,7 @@ Bounded history is explicitly implementation-gated on its separate storage-desig
 
 - [x] 10.1 Accept an authenticating account that publishes no verification method, unchanged from today
 - [x] 10.2 Refuse an authenticating account whose verification method is present and whose published record does not verify under it
-- [x] 10.3 Ensure the key cache cannot serve a stale decision across a change in verification state
+- [x] 10.3 Bound the key cache to the resolution expiry so a change in verification state is observed within one TTL, and cache the complete decision as one unit
 - [x] 10.4 Add controller tests for the accept and refuse paths
 
 - [x] 10.5 Update indexer membership lookup, list/subscription fan-out, and self-removal validation for explicit DID/role independent of wraps; verify admitted missing-wrap members are served, removed DIDs receive 403, and self-removal cannot mutate remaining approvals
@@ -149,3 +149,41 @@ Bounded history is explicitly implementation-gated on its separate storage-desig
 - [x] 13.9 Align `docs/AUTH.md` and `docs/ARCHITECTURE.md` with the transient injected-transport allowance, operation-only credential custody, and interruption/cleanup limits; verify the docs promise neither persisted identity continuation nor secrecy from browser-managed I/O or guaranteed revocation after termination
 
 - [x] 13.10 Document member versus wrap state, key-bound approval, same-repository first-use consumption, and pre-v1 reset policy; verify docs make no new walk-free authority, missed-generation recovery, or automatic grant-rewrap claim
+
+## 14. Review remediation
+
+- [x] B1 Preserve the complete keyring state on a non-manager leave, except the author entry and validated chain transport fields; prove poisoned rotation, history, metadata, remaining wraps, and approvals are rejected for known Rust schema fields and for the indexer's whole raw JSON record. Future-version records remain refused rather than silently interpreted.
+- [x] B2 Resolve a queued-share recipient inside the security boundary and bind the resulting DID once; prove handle reassignment cannot redirect execution.
+- [x] B3 Require explicit first-publication approval in web as well as CLI, with a test that no default grants consent.
+- [x] B4 Cache a bounded, complete DID verification/history decision per DID without serialising unrelated network resolution; prove expiry observes a state change and slow DID does not delay healthy DID.
+- [x] B5 Carry anchor-replacement observations through every mutation result and display path, distinguishing no history from no replacement.
+- [x] B6 Bootstrap verified federation fixtures and execute all resolution outcomes plus unverified-publication refusal.
+- [x] B7 Prove indexer authentication with real signed records and adversarial signatures rather than mocked fetch outcomes; include the actual rollback and consumed-intent checks for the related mutation paths.
+- [x] H1 Use PLC audit history, including nullified accepted operations, only as an ever-replaced notice while the current DID document remains authoritative.
+- [x] H2 Classify transient DID/PLC transport failure as a typed unavailable anchor-history outcome, separately from a verification error: the account stays verified, the wrap is written, and the unavailable history is reported without downgrade or confirmation override.
+- [x] H3 Return a transport-unavailable response for DID/PDS fetch failure without leaking request internals, while preserving compatible authentication for parseable newer unverified records.
+- [x] H4 Surface identity-operation cancellation, timeout, unknown-submission, and cleanup outcomes and refresh state before retry.
+- [x] H5 Provide a web repair route for substitution consistent with the core mutation constraints.
+- [x] H6 Restrict or remove low-level caller-supplied wrapping APIs that bypass recipient resolution and approval.
+- [x] H7 Keep workspace metadata management authorization independent of member key-resolution availability and explain degraded member state.
+- [x] H8 Bound own-account DID lookup at bootstrap and report an unavailable directory distinctly.
+- [x] M1 Select approval commitment version from its containing relationship record in every path.
+- [x] M2 Give pending metadata a distinct AAD type and prove completion binds the intended approval.
+- [x] M3 Retain daemon retry verification errors and TTL-expiry causes for presentation.
+- [x] M4 Remove or visibly disable the unimplemented rewrap sweep; never report successful migration without work.
+- [x] M5 Make corrupt current wraps fail consistently across every adoption path.
+- [x] M6 Bound and back off repeated intermediate-resolution failures and avoid needless re-resolution of human-decision work.
+- [x] M7 Apply current-authority plus audit-history semantics to every resolver, including indexer authentication.
+- [x] M8 Revoke identity credentials with the required client binding and prove post-cleanup token replay fails.
+- [x] M9 Exercise standing-login consent with an identity-scoped client identifier.
+- [x] M10 Preserve distinct refusal and verification-error reasons in web presentation.
+- [x] M11 Route public-key vocabulary through the registry, make missing-record errors accurate, and align schema documentation with byte validation.
+- [x] M12 Document the coordinated pre-v1 source-data replacement and matched-reader/indexer transition; do not claim a tested production reset or supplied production migration.
+- [x] M13 Repair the identified member-action and identity-flow accessibility semantics.
+- [x] M14 Export membership mutation DTOs, use their shared task/error vocabulary, and type-check web tests.
+- [x] M15 Measure and bound federation test execution rather than relying on serial long timeouts.
+- [x] M16 Display the DID authorized by each queued share.
+- [x] M17 Require an exact 64-byte public-key signature and refuse unsupported declared signature algorithms.
+- [x] M18 Assert the literal conditional-write conflict contract used by Rust.
+- [x] M19 Prove Rust strict Ed25519 and indexer verification agree on valid, malformed, low-order, and non-canonical signature vectors.
+- [x] Low: correct remaining error classification, wire serialization, secret handling, stale UI state, navigation/origin, copy, and accessibility observations from the review with focused regressions where behavior is security-relevant.

@@ -13,19 +13,15 @@
 // designated rkey, but the PDS accepts only the runner whose observed
 // repository revision still matches; the loser reconciles the durable pair.
 //
-// ── RUN-TIME DEPENDENCIES (this spec is prepared, not yet wired to run) ───────
+// ── RUN-TIME DEPENDENCIES ────────────────────────────────────────────────────
 //  1. Full stack: the dev-env docker stack (PDS-a/b/c, relay, jetstream, indexer)
 //     AND the web dev server AND a browser. This is the heaviest orchestration in
-//     the suite. Gate with OPAKE_TEST_ENV=devenv, same as the federation tier.
-//  2. Web-drain entry point: the web runner's maintenance must be invocable from
+//     the suite.
+//  2. Web-drain entry point: the web runner's maintenance is invocable from
 //     the page so the race is deterministic (the share-retry timer is 300s with
 //     no leading tick — far too slow to overlap a test). The SDK method already
-//     exists (`opake.retryPendingShares()`); it needs a browser-reachable handle.
-//     This spec calls `window.__opakeMaintenance.retryPendingShares()`. Exposing
-//     that one-line test hook lives in apps/web (the cabinet route / auth store),
-//     which is outside this change's edit scope — it must be added there and
-//     coordinated with whoever owns the web components. Until it lands, the
-//     `drainViaWeb` call below throws and the test is correctly red.
+//     exists (`opake.retryPendingShares()`) and is exposed as
+//     `window.__opakeMaintenance.retryPendingShares()` by the cabinet route.
 //
 // Cites the concurrency contract this fix satisfies.
 
@@ -53,8 +49,6 @@ const RECIPIENT = actorOnPds("pds-c").name; // eve
 
 const SHARE_COUNT = 5;
 const uniqueName = (i: number): string => `xtier-${Date.now().toString(36)}-${i}.txt`;
-
-const runDevenv = process.env.OPAKE_TEST_ENV === "devenv";
 
 async function ownerPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext({
@@ -100,9 +94,7 @@ function grantCountForDoc(inboxLongStdout: string, docUri: string): number {
   return count;
 }
 
-test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-tier (skipped: set OPAKE_TEST_ENV=devenv)", () => {
-  test.skip(!runDevenv, "requires the dev-env stack + web server");
-
+test.describe("background-work cross-tier", () => {
   test(`web and CLI race the pending-share queue and complete each share exactly once ${cite(
     "background-work",
     "Duplicate execution is harmless",

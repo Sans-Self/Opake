@@ -27,7 +27,7 @@ use super::KEYRING_COLLECTION;
 /// remain *after* removal (including the owner). This is required because
 /// the existing wrapped keys in the record are encrypted to *old* ephemeral
 /// keys and can't be reused for the new group key.
-pub async fn remove_member(
+async fn remove_member(
     client: &mut XrpcClient<impl Transport>,
     keyring_uri: &str,
     remove_did: &str,

@@ -129,7 +129,7 @@ impl<'de> Deserialize<'de> for KeyringMember {
             unverified_key_approval: Option<AtBytes>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        if !wire.did.starts_with("did:") || wire.did.len() < 7 {
+        if !crate::atproto::is_valid_did(&wire.did) {
             return Err(serde::de::Error::custom("invalid member DID"));
         }
         if wire
@@ -323,6 +323,39 @@ mod tests {
             "did": "did:plc:bob", "ciphertext": {"$bytes": "AAAA"}, "algo": "x25519-mlkem768-hkdf-a256kw-v2"
         });
         assert!(serde_json::from_value::<KeyringMember>(mismatched).is_err());
+    }
+
+    #[test]
+    fn member_did_requires_a_well_formed_did_core_identifier() {
+        for did in [
+            "did:plc:alice",
+            "did:web:example.com",
+            "did:peer:2.Ez6LSfoo:service",
+            "did:example:abc%3Adef",
+        ] {
+            let mut member = member_json();
+            member["did"] = serde_json::json!(did);
+            assert!(
+                serde_json::from_value::<KeyringMember>(member).is_ok(),
+                "{did}"
+            );
+        }
+
+        for did in [
+            "did:PLC:alice",
+            "did::alice",
+            "did:plc:",
+            "did:plc::alice",
+            "did:plc:alice smith",
+            "did:plc:alice%Q1",
+        ] {
+            let mut member = member_json();
+            member["did"] = serde_json::json!(did);
+            assert!(
+                serde_json::from_value::<KeyringMember>(member).is_err(),
+                "{did}"
+            );
+        }
     }
 
     #[test]

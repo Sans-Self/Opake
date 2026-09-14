@@ -13,6 +13,12 @@ import {
 import { repositoryCommit, repositoryRecord } from "../pds-admin";
 import { actorNamespace } from "../namespace";
 import { gotoCabinetRoot, uploadFile } from "../cabinet-helpers";
+// Generated from `opake_core::scope` by `just ts-bindings`, so a widened
+// collection registry cannot silently widen what a standing session holds.
+import {
+  CLIENT_METADATA_SCOPE,
+  OAUTH_SCOPE,
+} from "../../../packages/opake-sdk/src/generated/OauthScope";
 
 const APP_ORIGIN = "http://127.0.0.1:5199";
 const PUBLIC_KEY_COLLECTION = "at.opake.publicKey";
@@ -189,6 +195,12 @@ async function submitOwnerCode(page: Page, name: string, requestedAfter: number)
   await page.getByRole("button", { name: "Confirm", exact: true }).click();
 }
 
+/** The scope a loopback client_id declares, as the PDS recorded it. */
+function standingDeclaredScope(clientId: string | null): string | null {
+  if (clientId === null) return null;
+  return new URL(clientId).searchParams.get("scope");
+}
+
 /**
  * Inspect browser storage shape and key names. The browser hashes its standing
  * refresh value locally solely to join the matching PDS row; only that
@@ -262,7 +274,7 @@ test("a namespaced account publishes then removes #opake through real OAuth and 
   browser,
 }) => {
   test.setTimeout(150_000);
-  expect(actorNamespace()).not.toBe("");
+  test.skip(actorNamespace() === "", "requires a namespaced actor population");
   const owner = actor("eve");
   const context = await browser.newContext({
     storageState: authFile(owner.name),
@@ -294,6 +306,10 @@ test("a namespaced account publishes then removes #opake through real OAuth and 
     );
     expect(initialScopes.standingTokenFound).toBe(true);
     expect(initialScopes.standingHasIdentityScope).toBe(false);
+    // The narrow standing grant and the wider declared union are both pinned to
+    // the Rust registry: metadata may declare `identity:*`, the session may not.
+    expect(initialScopes.standingScope).toBe(OAUTH_SCOPE);
+    expect(standingDeclaredScope(initialScopes.standingClientId)).toBe(CLIENT_METADATA_SCOPE);
     const initialLog = await plcOperationLog(owner.name);
     const initialOperation = currentOperation(initialLog);
     expect(currentHasOpake(initialLog)).toBe(false);
@@ -374,7 +390,19 @@ test("a namespaced account publishes then removes #opake through real OAuth and 
     }
     expect(opakeKeyFromDocument(await plcDidDocument(owner.name))).toEqual(publicKey);
 
+    const scopesBeforeRemoval = await pdsOAuthScopeSummary(
+      owner.name,
+      standingBefore.standingRefreshFingerprint!,
+    );
     const removal = await beginConfirmation(page, "Remove verification", owner);
+    const scopesDuringRemoval = await pdsOAuthScopeSummary(
+      owner.name,
+      standingBefore.standingRefreshFingerprint!,
+    );
+    const removalGrantRows = scopesDuringRemoval.identityTokenIds.filter(
+      (id) => !scopesBeforeRemoval.identityTokenIds.includes(id),
+    );
+    expect(removalGrantRows).not.toEqual([]);
     const submitted = page.getByText("Verification operation was submitted.").first();
     const revocationsBeforeRemoval = revocationPaths.length;
     await submitOwnerCode(page, owner.name, removal.requestedAfter);
@@ -397,15 +425,15 @@ test("a namespaced account publishes then removes #opake through real OAuth and 
     }
     expect(opakeKeyFromDocument(await plcDidDocument(owner.name))).toBeNull();
 
-    // The UI reports submission, never a server-revocation guarantee. This
-    // aggregate-only PDS read independently shows why: the
-    // provider can retain the identity grant after handling its endpoint.
+    // Cleanup must revoke this operation's identity authority. Compare opaque
+    // PDS row ids with the pre-attempt snapshot: old grants cannot make a
+    // successful cleanup look like a leak, and no credential leaves the PDS.
     const scopesAfterRemoval = await pdsOAuthScopeSummary(
       owner.name,
       standingBefore.standingRefreshFingerprint!,
     );
     expect(scopesAfterRemoval.tokenCount).toBeGreaterThan(0);
-    expect(scopesAfterRemoval.hasIdentityScope).toBe(true);
+    expect(scopesAfterRemoval.identityTokenIds).toEqual(scopesBeforeRemoval.identityTokenIds);
     expect(scopesAfterRemoval.standingTokenFound).toBe(true);
     expect(scopesAfterRemoval.standingHasIdentityScope).toBe(false);
 

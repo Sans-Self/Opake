@@ -127,6 +127,7 @@ mod keyring_supersede {
     use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
     use crate::records::{AtBytes, Keyring, KeyringMember, Role, WrappedKey, SCHEMA_VERSION};
     use crate::test_utils::dummy_encrypted_metadata;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     const ALICE_DID: &str = "did:plc:alice";
     const BOB_DID: &str = "did:plc:bob";
@@ -1140,29 +1141,48 @@ mod keyring_supersede {
                 (carol_did, Role::Editor, &carol),
             ],
         );
-        restored_head
+        let original_wrap = restored_head
             .members
             .iter_mut()
             .find(|member| member.did() == carol_did)
             .unwrap()
-            .wrapped_key = None;
+            .wrapped_key
+            .take();
 
-        // A subsequently deleted repair had a matching approval, but it is
-        // not the live head and must contribute nothing to a fresh status.
+        // First observe a repair head with a matching approval. The indexer
+        // then rolls that distinct superseding head back to the prior genesis
+        // record. Fresh status must be rebuilt from the restored record, not
+        // from the now-deleted repair snapshot.
         let mut deleted_repair = restored_head.clone();
-        deleted_repair
+        let repaired_member = deleted_repair
             .members
             .iter_mut()
             .find(|member| member.did() == carol_did)
-            .unwrap()
-            .unverified_key_approval = Some(AtBytes::from_raw(&approval_for_unverified_member(
-            &workspace_uri,
-            carol_did,
-            &carol,
-        )));
+            .unwrap();
+        repaired_member.wrapped_key = original_wrap;
+        repaired_member.unverified_key_approval = Some(AtBytes::from_raw(
+            &approval_for_unverified_member(&workspace_uri, carol_did, &carol),
+        ));
+        deleted_repair.supersedes = Some(workspace_uri.clone());
+        deleted_repair.supersedes_cid = Some("bafygenesis".into());
+        deleted_repair.lineage = Some(workspace_uri.clone());
+        let repair_uri = format!("at://{ALICE_DID}/at.opake.keyring/3repair");
 
         let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
         let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &repair_uri,
+            "bafyrepair",
+            &deleted_repair,
+            &restored_head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
         enqueue_real_head(
             &mock,
             &workspace_uri,
@@ -1178,6 +1198,20 @@ mod keyring_supersede {
         ));
 
         let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let repaired_status = opake
+            .workspace_member_access_status(&workspace_id, carol_did)
+            .await
+            .unwrap();
+        assert_eq!(
+            repaired_status.verification,
+            MemberVerificationStatus::UnverifiedApproved,
+            "the pre-rollback repair genuinely carried an approval"
+        );
+        assert!(
+            repaired_status.has_current_wrap,
+            "the repair genuinely restored Carol's current wrap"
+        );
+
         let status = opake
             .workspace_member_access_status(&workspace_id, carol_did)
             .await
@@ -1189,12 +1223,6 @@ mod keyring_supersede {
             MemberVerificationStatus::UnverifiedApprovalRequired
         );
         assert!(status.can_repair);
-        assert!(
-            mock.requests()
-                .iter()
-                .all(|request| !request.url.contains("repair")),
-            "the inspection reads only the restored live head, never a deleted repair"
-        );
     }
 
     // spec:account-verification § Key-bound approval is carried by the relationship's records
@@ -1639,6 +1667,116 @@ mod keyring_supersede {
             ),
             Err(crate::error::Error::NotFound(_))
         ));
+    }
+
+    // A transient PLC audit outage for a beneficiary leaves her signature
+    // verified against the current DID document; only the replacement question
+    // goes unanswered. She keeps her re-wrap and the operator is told the
+    // history could not be read.
+    // spec: account-verification § Resolution reads the anchor's history and reports a replacement
+    #[tokio::test]
+    async fn removal_rewraps_beneficiary_whose_plc_audit_is_temporarily_unavailable() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let bob = Identity::generate(BOB_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, group_key, head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (BOB_DID, Role::Editor, &bob),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        let workspace_id = WorkspaceId::from_resolved(workspace_uri.clone());
+        let mock = MockTransport::new();
+        enqueue_real_head(
+            &mock,
+            &workspace_uri,
+            &workspace_uri,
+            "bafyhead",
+            &head,
+            &head,
+        );
+        let signing = crate::crypto::Ed25519SigningKey::from_bytes(&[73; 32]);
+        let anchor = signing.verifying_key().to_bytes();
+        mock.enqueue(anchored_did_doc_response(
+            carol_did,
+            "https://pds.carol",
+            &anchor,
+        ));
+        let mut signed_record = crate::records::PublicKeyRecord::new(
+            &carol.x25519_public_key_bytes().unwrap(),
+            &carol.ml_kem_public_key_bytes().unwrap(),
+            "2026-04-01T00:00:00Z",
+        );
+        signed_record.sign(carol_did, &signing).unwrap();
+        mock.enqueue(HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "uri": format!("at://{carol_did}/at.opake.publicKey/self"),
+                "cid": "bafypubkey",
+                "value": signed_record,
+            }))
+            .unwrap(),
+        });
+        mock.enqueue(HttpResponse {
+            status: 503,
+            headers: vec![],
+            body: b"temporary PLC audit outage".to_vec(),
+        });
+        mock.enqueue(create_record_response(
+            &format!("at://{ALICE_DID}/at.opake.keyring/3removal"),
+            "bafyremoval",
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake
+            .remove_workspace_member(&workspace_id, &group_key, BOB_DID)
+            .await
+            .unwrap();
+
+        assert!(
+            outcome.excluded_members.is_empty(),
+            "an unreadable audit history is a notice, not an exclusion: {:?}",
+            outcome.excluded_members,
+        );
+        assert!(
+            outcome
+                .verification_notices
+                .iter()
+                .any(|notice| notice.did == carol_did
+                    && notice.verification
+                        == crate::resolve::VerificationState::Verified {
+                            anchor_history: crate::resolve::AnchorHistory::Unavailable
+                        }),
+            "the operator is told the replacement history could not be read"
+        );
+        let written = written_keyring(&mock);
+        assert!(written.members.iter().all(|member| member.did() != BOB_DID));
+        let carol_after = written
+            .members
+            .iter()
+            .find(|member| member.did() == carol_did)
+            .expect("a verified beneficiary stays admitted");
+        assert!(
+            carol_after.wrapped_key.is_some(),
+            "a verified beneficiary is re-wrapped even when the audit history is unavailable"
+        );
+        assert!(
+            written
+                .key_history
+                .iter()
+                .any(|entry| entry.members.iter().any(|member| member.did() == carol_did)),
+            "the completed removal preserves Carol's historical wrap record"
+        );
+        assert!(
+            mock.requests()
+                .iter()
+                .any(|request| request.url.ends_with(&format!("/{carol_did}/log/audit"))),
+            "the transient failure must be the PLC audit request, not the recipient PDS lookup"
+        );
     }
 
     // spec:key-rotation § The rotation event is synchronous and self-sufficient
@@ -2221,6 +2359,295 @@ mod keyring_supersede {
         assert_eq!(result.rotation, 0);
         assert_eq!(result.group_key.0, historical_group_key.0);
     }
+    // -----------------------------------------------------------------
+    // Unattended member-wrap repair sweep
+    // -----------------------------------------------------------------
+
+    /// `/api/keyrings` answering with the caller's member workspaces.
+    fn member_workspaces_response(workspaces: Vec<serde_json::Value>) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({ "workspaces": workspaces })).unwrap(),
+        }
+    }
+
+    fn workspace_envelope(uri: &str, keyring: &Keyring) -> serde_json::Value {
+        serde_json::json!({
+            "uri": uri,
+            "record": keyring,
+            "indexedAt": "2026-09-12T00:00:01Z",
+        })
+    }
+
+    /// A chain-head answer for a workspace the indexer has not consumed yet —
+    /// the visibility gap the repair path retries and eventually times out on.
+    fn unindexed_chain_head_response() -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&serde_json::json!({
+                "workspace_id": WORKSPACE_ID,
+                "keyring": null,
+                "root_directory": null,
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn not_found_response() -> HttpResponse {
+        HttpResponse {
+            status: 404,
+            headers: vec![],
+            body: br#"{"error":"NotFound","message":"no such DID"}"#.to_vec(),
+        }
+    }
+
+    /// `fn() -> u64` carries no state, so each sweep test that needs a moving
+    /// clock owns a static only it writes.
+    static HUMAN_DEFERRAL_CLOCK_MICROS: AtomicU64 = AtomicU64::new(1_700_000_000_000_000);
+    static VISIBILITY_CLOCK_MICROS: AtomicU64 = AtomicU64::new(1_700_000_000_000_000);
+
+    fn human_deferral_now_micros() -> u64 {
+        HUMAN_DEFERRAL_CLOCK_MICROS.load(Ordering::SeqCst)
+    }
+
+    fn visibility_now_micros() -> u64 {
+        VISIBILITY_CLOCK_MICROS.load(Ordering::SeqCst)
+    }
+
+    /// The unattended runner never supplies a confirmation, so a member whose
+    /// keys need one is not work the next tick can make progress on. Re-asking
+    /// the network every pass would spend a resolution round-trip per member
+    /// per tick for an answer only a human changes.
+    // spec:workspace-membership § Keyring supersede authority is manager-only, except pure self-removal
+    #[tokio::test]
+    async fn sweep_holds_a_member_awaiting_a_decision_until_the_backoff_expires() {
+        HUMAN_DEFERRAL_CLOCK_MICROS.store(1_700_000_000_000_000, Ordering::SeqCst);
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+        let (workspace_uri, _, mut head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        // Admitted, no current wrap, and no recorded approval for the keys the
+        // resolver will return: exactly the state a manager must decide on.
+        head.members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let mock = MockTransport::new();
+        let enqueue_candidate_pass = |mock: &MockTransport| {
+            mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+                &workspace_uri,
+                &head,
+            )]));
+            enqueue_real_head(
+                mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+            mock.enqueue(public_key_response(
+                &format!("at://{carol_did}/at.opake.publicKey/self"),
+                &carol,
+            ));
+        };
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake.now_micros_fn = human_deferral_now_micros;
+
+        enqueue_candidate_pass(&mock);
+        let first = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(first.attempted, 1);
+        assert_eq!(first.awaiting_approval, 1);
+        assert_eq!(first.deferred_human_decision, 0);
+        let after_first = mock.requests().len();
+
+        mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+            &workspace_uri,
+            &head,
+        )]));
+        let second = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(second.attempted, 0, "deferred member is not re-resolved");
+        assert_eq!(second.deferred_human_decision, 1);
+        assert_eq!(
+            mock.requests().len(),
+            after_first + 1,
+            "a held member costs the discovery call and nothing else"
+        );
+
+        HUMAN_DEFERRAL_CLOCK_MICROS.fetch_add(
+            MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS + 1,
+            Ordering::SeqCst,
+        );
+        enqueue_candidate_pass(&mock);
+        let third = opake.sweep_member_wrap_repairs().await.unwrap();
+        assert_eq!(
+            third.attempted, 1,
+            "the hold expires rather than persisting"
+        );
+        assert_eq!(third.awaiting_approval, 1);
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains("createRecord")),
+            "the unattended runner never writes without a decision"
+        );
+    }
+
+    /// One workspace whose head the indexer has not caught up on must not cost
+    /// every other workspace its pass — the runner's unit of deferral is the
+    /// head, not the sweep.
+    // spec:background-work § Remaining work is derived from records, never stored
+    #[tokio::test]
+    async fn sweep_defers_only_the_head_whose_visibility_window_expires() {
+        VISIBILITY_CLOCK_MICROS.store(1_700_000_000_000_000, Ordering::SeqCst);
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let dave_did = "did:plc:dave";
+        let dave = Identity::generate(dave_did, &mut OsRng);
+        let carol_did = "did:plc:carol";
+        let carol = Identity::generate(carol_did, &mut OsRng);
+
+        let (stuck_uri, _, mut stuck_head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (dave_did, Role::Editor, &dave),
+            ],
+        );
+        stuck_head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == dave_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let (healthy_uri, _, mut healthy_head) = real_genesis_keyring(
+            ALICE_DID,
+            vec![
+                (ALICE_DID, Role::Manager, &alice),
+                (carol_did, Role::Editor, &carol),
+            ],
+        );
+        healthy_head
+            .members
+            .iter_mut()
+            .find(|member| member.did() == carol_did)
+            .unwrap()
+            .wrapped_key = None;
+
+        let mock = MockTransport::new();
+        mock.enqueue(member_workspaces_response(vec![
+            workspace_envelope(&stuck_uri, &stuck_head),
+            workspace_envelope(&healthy_uri, &healthy_head),
+        ]));
+        // The stuck head answers "not indexed yet" until the retry window is
+        // spent; the injected sleeper is what advances the clock past it.
+        mock.enqueue(unindexed_chain_head_response());
+        mock.enqueue(unindexed_chain_head_response());
+        enqueue_real_head(
+            &mock,
+            &healthy_uri,
+            &healthy_uri,
+            "bafyhealthy",
+            &healthy_head,
+            &healthy_head,
+        );
+        mock.enqueue(did_doc_response(carol_did, "https://pds.carol"));
+        mock.enqueue(public_key_response(
+            &format!("at://{carol_did}/at.opake.publicKey/self"),
+            &carol,
+        ));
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        opake.now_micros_fn = visibility_now_micros;
+        opake.set_sleep_fn(Box::new(|_| {
+            VISIBILITY_CLOCK_MICROS.fetch_add(20 * 1_000_000, Ordering::SeqCst);
+            Box::pin(async {})
+        }));
+
+        let outcome = opake.sweep_member_wrap_repairs().await.unwrap();
+
+        assert_eq!(outcome.deferred_visibility, 1);
+        assert_eq!(
+            outcome.attempted, 2,
+            "the timed-out head does not end the pass"
+        );
+        assert_eq!(
+            outcome.awaiting_approval, 1,
+            "the second workspace was still resolved"
+        );
+        assert!(
+            mock.requests()
+                .iter()
+                .any(|request| request.url.contains(carol_did)),
+            "the workspace behind the stuck one must still be reached"
+        );
+    }
+
+    /// The count limit is what keeps one large workspace from monopolizing a
+    /// pass. Beyond it the remaining candidates are reported as deferred work,
+    /// not attempted and not dropped.
+    // spec:background-work § Remaining work is derived from records, never stored
+    #[tokio::test]
+    async fn sweep_stops_at_the_per_pass_count_limit_and_reports_the_remainder() {
+        let alice = Identity::generate(ALICE_DID, &mut OsRng);
+        let (workspace_uri, _, mut head) =
+            real_genesis_keyring(ALICE_DID, vec![(ALICE_DID, Role::Manager, &alice)]);
+        let overflow_did = format!("did:plc:pending{MAX_MEMBER_WRAP_REPAIRS_PER_PASS}");
+        for index in 0..=MAX_MEMBER_WRAP_REPAIRS_PER_PASS {
+            head.members.push(KeyringMember {
+                did: format!("did:plc:pending{index}"),
+                role: Role::Editor,
+                wrapped_key: None,
+                unverified_key_approval: None,
+            });
+        }
+
+        let mock = MockTransport::new();
+        mock.enqueue(member_workspaces_response(vec![workspace_envelope(
+            &workspace_uri,
+            &head,
+        )]));
+        // Each attempt re-reads the head, then fails to resolve the member.
+        // What the attempt costs is irrelevant here; that a 33rd is never
+        // started is the property.
+        for _ in 0..MAX_MEMBER_WRAP_REPAIRS_PER_PASS {
+            enqueue_real_head(
+                &mock,
+                &workspace_uri,
+                &workspace_uri,
+                "bafyhead",
+                &head,
+                &head,
+            );
+            mock.enqueue(not_found_response());
+        }
+
+        let mut opake = opake_for_identity(ALICE_DID, alice, mock.clone());
+        let outcome = opake.sweep_member_wrap_repairs().await.unwrap();
+
+        assert_eq!(outcome.attempted, MAX_MEMBER_WRAP_REPAIRS_PER_PASS);
+        assert_eq!(outcome.deferred_by_budget, 1);
+        assert!(
+            !mock
+                .requests()
+                .iter()
+                .any(|request| request.url.contains(&overflow_did)),
+            "the candidate past the limit must not be touched this pass"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2391,5 +2818,240 @@ mod workspace_resolution {
             }
             other => panic!("expected VisibilityTimeout, got {other:?}"),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pending-share listing
+// ---------------------------------------------------------------------------
+
+mod pending_share_listing {
+    use super::*;
+    use crate::client::{HttpResponse, LegacySession, Session, XrpcClient};
+    use crate::crypto::PendingShareMetadata;
+    use crate::records::{
+        AtBytes, BlobRef, CidLink, DirectEncryption, Document, Encryption, EncryptionEnvelope,
+        PendingShare, WrappedKey,
+    };
+    use crate::storage::Identity;
+    use crate::test_utils::{dummy_encrypted_metadata, TestKeys};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+    const OWNER_DID: &str = "did:plc:pendingowner";
+    const DOC_URI: &str = "at://did:plc:pendingowner/at.opake.document/3doc";
+
+    fn opake_for_identity(
+        identity: Identity,
+        mock: MockTransport,
+    ) -> Opake<MockTransport, OsRng, NoopStorage> {
+        let session = Session::Legacy(LegacySession {
+            did: OWNER_DID.into(),
+            handle: "test.handle".into(),
+            access_jwt: "test-jwt".into(),
+            refresh_jwt: "test-refresh".into(),
+        });
+        let client = XrpcClient::with_session(mock, format!("https://pds.{OWNER_DID}"), session);
+        Opake::new(
+            client,
+            OWNER_DID.into(),
+            identity,
+            OsRng,
+            NoopStorage,
+            test_now_micros,
+        )
+        .unwrap()
+    }
+
+    fn json_response(body: serde_json::Value) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: serde_json::to_vec(&body).unwrap(),
+        }
+    }
+
+    fn list_response(records: Vec<(&str, PendingShare)>) -> HttpResponse {
+        json_response(serde_json::json!({
+            "records": records
+                .into_iter()
+                .map(|(uri, record)| serde_json::json!({
+                    "uri": uri,
+                    "cid": "bafypending",
+                    "value": record,
+                }))
+                .collect::<Vec<_>>(),
+        }))
+    }
+
+    fn document_response(wrapped_key: WrappedKey) -> HttpResponse {
+        let doc = Document::new(
+            BlobRef {
+                blob_type: "blob".into(),
+                reference: CidLink {
+                    cid: "bafyblob".into(),
+                },
+                mime_type: "application/octet-stream".into(),
+                size: 16,
+            },
+            Encryption::Direct(DirectEncryption {
+                envelope: EncryptionEnvelope {
+                    algo: "aes-256-gcm".into(),
+                    nonce: AtBytes {
+                        encoded: BASE64.encode([0u8; 12]),
+                    },
+                    keys: vec![wrapped_key],
+                },
+            }),
+            dummy_encrypted_metadata(),
+            "2026-03-01T00:00:00Z".into(),
+        );
+        json_response(serde_json::json!({
+            "uri": DOC_URI,
+            "cid": "bafydoc",
+            "value": doc,
+        }))
+    }
+
+    fn pending_share(content_key: &crate::crypto::ContentKey, recipient_did: &str) -> PendingShare {
+        let metadata = PendingShareMetadata {
+            permissions: Some("read".into()),
+            note: None,
+            recipient_did: recipient_did.into(),
+            allow_unverified_first_publication: true,
+        };
+        let context =
+            crate::crypto::SealContext::new(DOC_URI, crate::crypto::SealType::PendingShareMetadata);
+        let encrypted_metadata =
+            crate::crypto::encrypt_metadata(content_key, &metadata, &context, &mut OsRng).unwrap();
+        PendingShare::new(
+            DOC_URI.into(),
+            recipient_did.into(),
+            encrypted_metadata,
+            "2026-03-01T00:00:00Z".into(),
+        )
+    }
+
+    /// Queued intents against the same document share one content key. Fetching
+    /// it per entry turns a queue of n shares on one file into n PDS round
+    /// trips for a listing the owner asked for once.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_fetches_one_content_key_per_document() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+        let wrapped_key = crate::crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            OWNER_DID,
+            &crate::crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3one",
+                pending_share(&content_key, "did:plc:first"),
+            ),
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3two",
+                pending_share(&content_key, "did:plc:second"),
+            ),
+        ]));
+        mock.enqueue(document_response(wrapped_key));
+
+        let mut opake = opake_for_identity(keys.identity, mock.clone());
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].recipient_did.as_deref(), Some("did:plc:first"));
+        assert_eq!(entries[1].recipient_did.as_deref(), Some("did:plc:second"));
+        assert!(entries.iter().all(|e| e.recipient_did_error.is_none()));
+
+        let fetches = mock
+            .requests()
+            .iter()
+            .filter(|request| request.url.contains("getRecord"))
+            .count();
+        assert_eq!(fetches, 1, "expected one content-key fetch per document");
+    }
+
+    /// A single corrupt intent must not silently vanish from the listing, nor
+    /// take its siblings' readable DIDs with it.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_reports_a_cause_for_an_unreadable_intent() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+        let wrapped_key = crate::crypto::wrap_key(
+            &content_key,
+            &keys.public_keys(),
+            OWNER_DID,
+            &crate::crypto::WrapContext::Document { uri: DOC_URI },
+            &mut OsRng,
+        )
+        .unwrap();
+
+        // Sealed under a key that is not this document's: a well-formed
+        // envelope the owner's content key cannot open.
+        let foreign_key = crate::crypto::generate_content_key(&mut OsRng);
+        let corrupt = pending_share(&foreign_key, "did:plc:unreadable");
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3bad",
+                corrupt,
+            ),
+            (
+                "at://did:plc:pendingowner/at.opake.pendingShare/3good",
+                pending_share(&content_key, "did:plc:sibling"),
+            ),
+        ]));
+        mock.enqueue(document_response(wrapped_key));
+
+        let mut opake = opake_for_identity(keys.identity, mock);
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].recipient_did, None);
+        assert_eq!(
+            entries[0].recipient_did_error.as_deref(),
+            Some("the queued intent metadata could not be decrypted")
+        );
+        assert_eq!(entries[1].recipient_did.as_deref(), Some("did:plc:sibling"));
+        assert_eq!(entries[1].recipient_did_error, None);
+    }
+
+    /// A PDS that will not serve the document leaves the queue readable but
+    /// the DIDs unknown; the owner is told which of the two happened.
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
+    #[tokio::test]
+    async fn listing_distinguishes_a_transport_failure_from_a_corrupt_intent() {
+        let keys = TestKeys::generate(OWNER_DID);
+        let content_key = crate::crypto::generate_content_key(&mut OsRng);
+
+        let mock = MockTransport::new();
+        mock.enqueue(list_response(vec![(
+            "at://did:plc:pendingowner/at.opake.pendingShare/3one",
+            pending_share(&content_key, "did:plc:first"),
+        )]));
+        mock.enqueue(HttpResponse {
+            status: 500,
+            headers: vec![],
+            body: br#"{"error":"InternalServerError","message":"boom"}"#.to_vec(),
+        });
+
+        let mut opake = opake_for_identity(keys.identity, mock);
+        let entries = opake.list_pending_shares().await.unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].recipient_did, None);
+        let reason = entries[0].recipient_did_error.as_deref().unwrap();
+        assert!(
+            reason.starts_with("the document record could not be fetched"),
+            "got: {reason}"
+        );
     }
 }

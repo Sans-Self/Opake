@@ -113,7 +113,6 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
             let mut pair_tick = tokio::time::interval(task_interval("pair-cleanup"));
             let mut grant_tick = tokio::time::interval(task_interval("grant-healing"));
             let mut share_tick = tokio::time::interval(task_interval("share-retry"));
-            let mut rewrap_tick = tokio::time::interval(task_interval("rotation-rewrap"));
             let mut member_repair_tick = tokio::time::interval(task_interval("member-wrap-repair"));
 
             loop {
@@ -129,10 +128,6 @@ async fn run_daemon(storage: &FileStorage, _args: RunArgs) -> Result<()> {
                     _ = share_tick.tick() => {
                         info!("running: share-retry");
                         run_share_retry(storage).await;
-                    }
-                    _ = rewrap_tick.tick() => {
-                        info!("running: rotation-rewrap");
-                        run_rotation_rewrap(storage).await;
                     }
                     _ = member_repair_tick.tick() => {
                         info!("running: member-wrap-repair");
@@ -228,39 +223,27 @@ async fn run_share_retry(storage: &FileStorage) {
         };
 
         let transport = ReqwestTransport::new();
-        if let Err(e) = opake.retry_pending_shares(&transport).await {
-            warn!("share-retry: failed for {did}: {e}");
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Task: rotation re-wrap sweep
-// ---------------------------------------------------------------------------
-
-async fn run_rotation_rewrap(storage: &FileStorage) {
-    let Some(config) = load_config_or_warn(storage, "rotation-rewrap") else {
-        return;
-    };
-
-    for did in config.accounts.keys() {
-        let mut opake = match build_opake(storage, did).await {
-            Ok(o) => o,
-            Err(e) => {
-                warn!("rotation-rewrap: failed to build opake for {did}: {e}");
-                continue;
+        match opake.retry_pending_shares(&transport).await {
+            Ok(result) => {
+                if result.expired > 0 {
+                    warn!(
+                        "share-retry: {did}: {} queued share(s) expired after their TTL",
+                        result.expired
+                    );
+                }
+                for issue in result.verification_errors {
+                    let ttl = if issue.expired {
+                        " and was discarded at TTL"
+                    } else {
+                        " and remains queued"
+                    };
+                    warn!(
+                        "share-retry: {did}: queued share {} for {} failed key verification{}: {}",
+                        issue.uri, issue.recipient_did, ttl, issue.reason
+                    );
+                }
             }
-        };
-
-        match opake.sweep_owned_documents_rewrap().await {
-            Ok(outcome) if outcome.rewrapped > 0 => {
-                info!(
-                    "rotation-rewrap: {} document(s) migrated for {did} ({} conflicts)",
-                    outcome.rewrapped, outcome.conflicts
-                );
-            }
-            Ok(_) => {}
-            Err(e) => warn!("rotation-rewrap: failed for {did}: {e}"),
+            Err(e) => warn!("share-retry: failed for {did}: {e}"),
         }
     }
 }
@@ -284,11 +267,51 @@ async fn run_member_wrap_repair(storage: &FileStorage) {
         };
 
         match opake.sweep_member_wrap_repairs().await {
-            Ok(outcome) if outcome.repaired > 0 => {
+            Ok(outcome)
+                if outcome.repaired > 0
+                    || outcome.deferred_visibility > 0
+                    || outcome.deferred_by_budget > 0
+                    || outcome.discovery_deferred =>
+            {
                 info!(
-                    "member-wrap-repair: repaired {} member wrap(s) for {did}; {} awaiting approval, {} verification failures",
-                    outcome.repaired, outcome.awaiting_approval, outcome.verification_failed,
+                    "member-wrap-repair: repaired {} member wrap(s) for {did}; {} awaiting approval, {} human-deferred, {} visibility-deferred, {} budget-deferred, discovery deferred={}, {} verification failures",
+                    outcome.repaired,
+                    outcome.awaiting_approval,
+                    outcome.deferred_human_decision,
+                    outcome.deferred_visibility,
+                    outcome.deferred_by_budget,
+                    outcome.discovery_deferred,
+                    outcome.verification_failed,
                 );
+                for notice in &outcome.verification_notices {
+                    match notice.verification {
+                        opake_core::resolve::VerificationState::Unverified => info!(
+                            "member-wrap-repair: {} retained an explicitly approved unverified key bundle",
+                            notice.did
+                        ),
+                        opake_core::resolve::VerificationState::Verified {
+                            anchor_history: opake_core::resolve::AnchorHistory::Replaced,
+                        } => info!(
+                            "member-wrap-repair: {}'s DID verification method has changed",
+                            notice.did
+                        ),
+                        opake_core::resolve::VerificationState::Verified {
+                            anchor_history: opake_core::resolve::AnchorHistory::NoHistory,
+                        } => info!(
+                            "member-wrap-repair: {}'s DID method publishes no verification history",
+                            notice.did
+                        ),
+                        opake_core::resolve::VerificationState::Verified {
+                            anchor_history: opake_core::resolve::AnchorHistory::Unavailable,
+                        } => info!(
+                            "member-wrap-repair: {}'s verification history could not be read; a replacement cannot be ruled out",
+                            notice.did
+                        ),
+                        opake_core::resolve::VerificationState::Verified {
+                            anchor_history: opake_core::resolve::AnchorHistory::NotReplaced,
+                        } => {}
+                    }
+                }
             }
             Ok(_) => {}
             Err(e) => warn!("member-wrap-repair: failed for {did}: {e}"),
@@ -463,9 +486,6 @@ async fn list_tasks(storage: &FileStorage) -> Result<()> {
                 ("grant-healing", format!("{healed} healed"))
             }
             DaemonTaskKind::ShareRetry { retried } => ("share-retry", format!("{retried} retried")),
-            DaemonTaskKind::RotationRewrap { rewrapped } => {
-                ("rotation-rewrap", format!("{rewrapped} re-wrapped"))
-            }
             DaemonTaskKind::MemberWrapRepair { repaired } => {
                 ("member-wrap-repair", format!("{repaired} repaired"))
             }

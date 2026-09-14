@@ -12,7 +12,7 @@
 //   methods on `Opake` that wrap the WASM handle's corresponding methods.
 
 import type { Storage } from "./storage";
-import type { PendingPairRequest, PairRequestResult } from "./types";
+import type { PairCompletionResult, PendingPairRequest, PairRequestResult } from "./types";
 import { pairRequestResultSchema } from "./schemas";
 import { createStorageAdapter } from "./storage-adapter";
 import { initWasm } from "./wasm";
@@ -56,7 +56,7 @@ export async function awaitPairCompletion(
   did: string,
   requestRkey: string,
   options: AwaitPairOptions = {},
-): Promise<void> {
+): Promise<PairCompletionResult> {
   const wasm = await initWasm();
   const interval = options.pollIntervalMs ?? 3000;
   const deadline =
@@ -68,8 +68,12 @@ export async function awaitPairCompletion(
     }
 
     const adapter = createStorageAdapter(storage);
-    const done = await wasm.tryCompletePair(did, adapter, requestRkey);
-    if (done) return;
+    const completion = (await wasm.tryCompletePair(
+      did,
+      adapter,
+      requestRkey,
+    )) as PairCompletionResult;
+    if (completion.completed) return completion;
 
     if (deadline !== undefined && Date.now() >= deadline) {
       throw new Error("pairing timed out before the other device responded");

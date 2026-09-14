@@ -93,10 +93,13 @@ fn invalid_swap_returns_cas_conflict() {
         r#"{"error":"InvalidSwap","message":"Record was at a different CID"}"#,
     );
     let err = check_response(&r).unwrap_err();
-    assert!(
-        matches!(err, Error::CasConflict(_)),
-        "expected CasConflict, got: {err}"
-    );
+    match err {
+        Error::CasConflict(message) => assert!(
+            message.starts_with("InvalidSwap:"),
+            "CAS mapping must preserve the PDS InvalidSwap code, got: {message}"
+        ),
+        other => panic!("expected CasConflict from InvalidSwap, got: {other}"),
+    }
 }
 
 // -- Non-JSON error bodies --

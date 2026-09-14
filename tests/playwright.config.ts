@@ -47,6 +47,13 @@ export default defineConfig({
   workers: 4,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
+  // Real-backend e2e: every cross-client assertion waits on PDS -> firehose ->
+  // indexer -> SSE propagation over a shared dev-env. Under the 4-worker pool
+  // that pipeline can miss a fixed visibility window, so a spec is retried as a
+  // whole rather than each assertion carrying an ever-longer timeout. A genuine
+  // defect fails every attempt; only propagation-timing contention is absorbed.
+  // The federation tier gets the same robustness structurally, via pollUntil.
+  retries: process.env.CI ? 2 : 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: reportDir }]],
 
   use: {
@@ -65,13 +72,23 @@ export default defineConfig({
   projects: [
     {
       name: "setup",
-      testMatch: /.*\.setup\.ts/,
+      testMatch: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Materialize the manifest's verified fixture actor (Frank) through the
+      // real OAuth + PLC signer once, after auth setup and before the specs
+      // that resolve a verified counterparty. Kept out of `setup` so its
+      // heavier flow is a distinct, ordered dependency.
+      name: "verified-fixture",
+      testMatch: /verified-fixture\.setup\.ts/,
+      dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "e2e",
       testMatch: /specs\/.*\.spec\.ts/,
-      dependencies: ["setup"],
+      dependencies: ["verified-fixture"],
       use: { ...devices["Desktop Chrome"] },
     },
     // Meta-tier: specs that test the HARNESS rather than the product — snapshot

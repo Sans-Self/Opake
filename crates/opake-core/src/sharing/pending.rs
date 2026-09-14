@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use log::{info, trace, warn};
+use sha2::{Digest, Sha256};
 
 use crate::atproto;
 use crate::client::{time, ApplyWriteOp, Transport, XrpcClient};
@@ -16,9 +17,24 @@ use crate::documents;
 use crate::error::Error;
 use crate::records::vocabulary::{self, RecordKind};
 use crate::records::{EncryptedMetadata, PendingShare, UnreadableReason, PENDING_SHARE_COLLECTION};
-use crate::resolve::{self, VerificationState};
+use crate::resolve::{self, RecipientVerificationNotice, VerificationState};
 
 use super::create::{build_grant, GrantParams};
+
+/// Commit the precise durable intent consumed by an atomic queue handoff.
+/// The URI alone is not enough: a replacement can reuse its rkey. We include
+/// the canonical serialized record (including encrypted metadata and creation
+/// time) under a domain-separated hash so an older matching grant cannot be
+/// mistaken for completion of the replacement intent.
+fn pending_intent_commitment(entry: &PendingShareEntry) -> Result<[u8; 32], Error> {
+    let raw = serde_json::to_vec(&entry.raw_record)?;
+    let mut hash = Sha256::new();
+    hash.update(b"opake.pending-share-intent.v1\0");
+    hash.update(entry.uri.as_bytes());
+    hash.update([0]);
+    hash.update(raw);
+    Ok(hash.finalize().into())
+}
 
 /// Enqueue a pending share for a recipient that hasn't set up Opake yet.
 ///
@@ -27,7 +43,7 @@ use super::create::{build_grant, GrantParams};
 /// when the recipient publishes their public key. Returns the AT-URI of
 /// the created pendingShare record.
 #[allow(clippy::too_many_arguments)]
-pub async fn create_pending_share(
+pub(crate) async fn create_pending_share(
     client: &mut XrpcClient<impl Transport>,
     content_key: &ContentKey,
     document_uri: &str,
@@ -39,7 +55,7 @@ pub async fn create_pending_share(
     now: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<String, Error> {
-    if !recipient_did.starts_with("did:") {
+    if !atproto::is_valid_did(recipient_did) {
         return Err(Error::InvalidRecord(
             "pending share recipient DID must be a DID, not a handle".into(),
         ));
@@ -56,7 +72,7 @@ pub async fn create_pending_share(
         recipient_did: recipient_did.to_string(),
         allow_unverified_first_publication,
     };
-    let context = crypto::SealContext::new(document_uri, crypto::SealType::GrantMetadata);
+    let context = crypto::SealContext::new(document_uri, crypto::SealType::PendingShareMetadata);
     let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, &context, rng)?;
     let record = PendingShare::new(
         document_uri.to_string(),
@@ -85,6 +101,10 @@ pub struct RetryResult {
     /// deliberately separate from ordinary transport failures: a host is
     /// serving a key record that fails its own account verification.
     pub verification_errors: Vec<PendingShareVerificationError>,
+    /// Verification state observed for an intent that this runner actually
+    /// consumed and turned into a grant. Owner-facing clients must not infer
+    /// this from a stale queue warning.
+    pub completion_notices: Vec<RecipientVerificationNotice>,
 }
 
 /// An owner-visible verification problem while retrying a queued share.
@@ -106,6 +126,14 @@ pub struct PendingShareEntry {
     pub recipient: String,
     pub encrypted_metadata: EncryptedMetadata,
     pub created_at: String,
+    /// The DID authorized by the encrypted queue-time intent. Populated for
+    /// owner-facing listings after decrypting with the document content key.
+    pub recipient_did: Option<String>,
+    /// Why `recipient_did` could not be read, when an owner-facing listing
+    /// tried and failed. An unreadable DID is not the same as an intent the
+    /// listing never attempted to open, and the owner cannot act on either
+    /// without the cause.
+    pub recipient_did_error: Option<String>,
     /// `true` when the record declares a schema version newer than this client
     /// supports. Retry leaves it queued rather than completing a share it does
     /// not fully understand.
@@ -155,6 +183,8 @@ pub async fn list_pending_shares(
                 recipient: record.recipient,
                 encrypted_metadata: record.encrypted_metadata,
                 created_at: record.created_at,
+                recipient_did: None,
+                recipient_did_error: None,
                 needs_newer,
                 raw_record: entry.value,
             });
@@ -287,21 +317,23 @@ pub async fn retry_pending_shares(
         };
 
         // Decrypt the original grant metadata (permissions + note) from the pending share
-        let grant_context =
-            crypto::SealContext::new(&entry.document, crypto::SealType::GrantMetadata);
-        let metadata: PendingShareMetadata =
-            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata, &grant_context)
-            {
-                Ok(m) => m,
-                Err(e) => {
-                    warn!(
-                        "pending share {}: failed to decrypt metadata: {e}",
-                        entry.uri
-                    );
-                    result.failed += 1;
-                    continue;
-                }
-            };
+        let pending_context =
+            crypto::SealContext::new(&entry.document, crypto::SealType::PendingShareMetadata);
+        let metadata: PendingShareMetadata = match crypto::decrypt_metadata(
+            &content_key,
+            &entry.encrypted_metadata,
+            &pending_context,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(
+                    "pending share {}: failed to decrypt metadata: {e}",
+                    entry.uri
+                );
+                result.failed += 1;
+                continue;
+            }
+        };
 
         if !metadata.recipient_did.starts_with("did:")
             || !metadata.allow_unverified_first_publication
@@ -431,9 +463,10 @@ pub async fn retry_pending_shares(
         );
         let unverified_key_approval = match recipient.verification {
             VerificationState::Verified { .. } => None,
-            VerificationState::Unverified => {
-                Some(recipient.unverified_key_approval(&entry.document))
-            }
+            VerificationState::Unverified => Some(recipient.unverified_key_approval_for_version(
+                crate::records::Grant::RECORD_VERSION,
+                &entry.document,
+            )),
         };
         let grant_params = GrantParams {
             document_uri: &entry.document,
@@ -446,14 +479,23 @@ pub async fn retry_pending_shares(
             permissions,
             note: metadata.note.as_deref(),
             unverified_key_approval,
+            pending_share_uri: Some(&entry.uri),
+            pending_share_commitment: Some(pending_intent_commitment(entry)?),
             created_at: &entry.created_at,
         };
 
         match complete_pending_atomically(client, params.owner_did, entry, &grant_params, rng).await
         {
-            Ok(grant_uri) => {
+            Ok(completion) => {
+                let grant_uri = completion.uri();
                 info!("pending share {}: grant written → {grant_uri}", entry.uri);
                 result.completed += 1;
+                if completion.created() {
+                    result.completion_notices.push(RecipientVerificationNotice {
+                        did: recipient.did.clone(),
+                        verification: recipient.verification.clone(),
+                    });
+                }
             }
             Err(e) => {
                 warn!(
@@ -527,7 +569,7 @@ async fn complete_pending_atomically(
     entry: &PendingShareEntry,
     params: &GrantParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
-) -> Result<String, Error> {
+) -> Result<CompletionResult, Error> {
     let pending_uri = atproto::parse_at_uri(&entry.uri)?;
     let commit = client.repository_commit().await?;
 
@@ -536,7 +578,7 @@ async fn complete_pending_atomically(
     // replacement intent is never consumed by stale decrypted metadata.
     match completion_state(client, owner_did, entry, params).await? {
         CompletionState::Ready => {}
-        CompletionState::Completed(uri) => return Ok(uri),
+        CompletionState::Completed(uri) => return Ok(CompletionResult::Existing(uri)),
     }
 
     let grant = build_grant(params, rng)?;
@@ -560,21 +602,39 @@ async fn complete_pending_atomically(
         .apply_writes_conditional(&writes, Some(&commit))
         .await
     {
-        Ok(_) => Ok(grant_uri),
+        Ok(_) => Ok(CompletionResult::Created(grant_uri)),
         Err(original_error) => {
             // A lost response is an unknown result. Reconcile the two durable
             // records; never retry this write or fall back to an upsert.
             match completion_state(client, owner_did, entry, params).await {
-                Ok(CompletionState::Completed(uri)) => Ok(uri),
+                Ok(CompletionState::Completed(uri)) => Ok(CompletionResult::Existing(uri)),
                 Ok(CompletionState::Ready) | Err(_) => Err(original_error),
             }
         }
     }
 }
 
+#[derive(Debug)]
 enum CompletionState {
     Ready,
     Completed(String),
+}
+
+enum CompletionResult {
+    Created(String),
+    Existing(String),
+}
+
+impl CompletionResult {
+    fn uri(&self) -> &str {
+        match self {
+            Self::Created(uri) | Self::Existing(uri) => uri,
+        }
+    }
+
+    fn created(&self) -> bool {
+        matches!(self, Self::Created(_))
+    }
 }
 
 /// Reconcile the intent and its deterministic grant identity. If the intent
@@ -626,6 +686,8 @@ async fn completion_state(
             })?;
             if metadata.permissions.as_deref() != Some(params.permissions)
                 || metadata.note.as_deref() != params.note
+                || metadata.pending_share_uri.as_deref() != Some(entry.uri.as_str())
+                || metadata.pending_share_commitment != Some(pending_intent_commitment(entry)?)
             {
                 return Err(Error::AlreadyExists(
                     "designated grant metadata does not match pending-share intent".into(),

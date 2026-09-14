@@ -45,8 +45,6 @@ defmodule OpakeIndexer.Lexicon.Validator do
 
   @key_wrap_algo "keyWrapAlgo"
   @content_encryption_algo "contentEncryptionAlgo"
-  @public_key_algo "publicKeyAlgo"
-  @public_key_signature_algo "publicKeySignatureAlgo"
   @keyring_member_role "keyringMemberRole"
 
   @doc """
@@ -113,13 +111,6 @@ defmodule OpakeIndexer.Lexicon.Validator do
       |> Enum.flat_map(fn entry -> member_pairs(entry["members"]) end)
 
     content ++ members ++ history
-  end
-
-  defp vocabulary_pairs("at.opake.publicKey", record) do
-    string_pair(@public_key_algo, record["x25519Algo"]) ++
-      string_pair(@public_key_algo, record["mlKemAlgo"]) ++
-      string_pair(@public_key_algo, record["signingAlgo"]) ++
-      string_pair(@public_key_signature_algo, record["signatureAlgo"])
   end
 
   defp vocabulary_pairs("at.opake.directory", record) do

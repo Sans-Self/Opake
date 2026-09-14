@@ -49,6 +49,54 @@ pub fn parse_at_uri(uri: &str) -> Result<AtUri, Error> {
 }
 
 // ---------------------------------------------------------------------------
+// DID syntax
+// ---------------------------------------------------------------------------
+
+/// Check that a string is a syntactically valid DID.
+///
+/// This deliberately performs no resolution: record decoding must remain local
+/// and deterministic. There is no canonical DID parser in the current Rust
+/// dependency set, so this is the DID Core method/method-specific-id grammar
+/// rather than a network-dependent DID-method validator: `did:` followed by a
+/// lowercase-alphanumeric method name, a colon, and an identifier of
+/// unreserved characters, `%`-escapes and `:` separators with no empty segment.
+pub fn is_valid_did(did: &str) -> bool {
+    let Some(rest) = did.strip_prefix("did:") else {
+        return false;
+    };
+    let Some((method, id)) = rest.split_once(':') else {
+        return false;
+    };
+    if method.is_empty() || id.is_empty() || id.starts_with(':') || id.ends_with(':') {
+        return false;
+    }
+    if !method
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    {
+        return false;
+    }
+
+    let mut bytes = id.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let Some(high) = bytes.next() else {
+                return false;
+            };
+            let Some(low) = bytes.next() else {
+                return false;
+            };
+            if !high.is_ascii_hexdigit() || !low.is_ascii_hexdigit() {
+                return false;
+            }
+        } else if !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':')) {
+            return false;
+        }
+    }
+    !id.contains("::")
+}
+
+// ---------------------------------------------------------------------------
 // JSON serialization wrappers
 // ---------------------------------------------------------------------------
 
@@ -74,6 +122,46 @@ pub struct BlobRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- DID syntax --
+
+    // spec:workspace-membership § Membership state is the keyring head's member list
+    #[test]
+    fn is_valid_did_accepts_well_formed_dids() {
+        for did in [
+            "did:plc:wydyrngmxbcsqdvhmd7whmye",
+            "did:web:example.com",
+            "did:web:localhost%3A3000",
+            "did:web:example.com:user:alice",
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        ] {
+            assert!(is_valid_did(did), "expected {did} to be accepted");
+        }
+    }
+
+    /// A member identity that is not a syntactically valid DID cannot be bound
+    /// to a wrapped key, so record decoding must reject it rather than carry a
+    /// handle or a path-shaped string into membership state.
+    // spec:workspace-membership § Membership state is the keyring head's member list
+    #[test]
+    fn is_valid_did_rejects_malformed_dids() {
+        for did in [
+            "did:x:",
+            "did::abc",
+            "did:plc:abc/def",
+            "did:PLC:abc",
+            "did:plc:ab%zz",
+            "did:plc:ab%z",
+            "did:plc:",
+            "did:plc",
+            "did:plc:abc:",
+            "did:plc:a::b",
+            "alice.example.com",
+            "",
+        ] {
+            assert!(!is_valid_did(did), "expected {did} to be rejected");
+        }
+    }
 
     // -- AT-URI parsing: valid inputs --
 

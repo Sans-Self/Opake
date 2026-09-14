@@ -16,6 +16,10 @@ pub struct GrantParams<'a> {
     pub note: Option<&'a str>,
     /// Present only after an explicit decision for an unverified bundle.
     pub unverified_key_approval: Option<[u8; 32]>,
+    /// Exact queued intent consumed for this grant, if any.
+    pub pending_share_uri: Option<&'a str>,
+    /// Domain-separated commitment to that exact pending record, if any.
+    pub pending_share_commitment: Option<[u8; 32]>,
     pub created_at: &'a str,
 }
 
@@ -44,6 +48,8 @@ pub(crate) fn build_grant(
         permissions: Some(params.permissions.to_string()),
         note: params.note.map(|n| n.to_string()),
         unverified_key_approval: params.unverified_key_approval,
+        pending_share_uri: params.pending_share_uri.map(str::to_owned),
+        pending_share_commitment: params.pending_share_commitment,
     };
     let context = crypto::SealContext::new(params.document_uri, crypto::SealType::GrantMetadata);
     let encrypted_metadata =
@@ -60,7 +66,7 @@ pub(crate) fn build_grant(
 
 /// Wrap the content key to the recipient and create a grant record at a
 /// PDS-allocated rkey. Returns the AT-URI of the created grant.
-pub async fn create_grant(
+pub(crate) async fn create_grant(
     client: &mut XrpcClient<impl Transport>,
     params: &GrantParams<'_>,
     rng: &mut (impl CryptoRng + RngCore),
@@ -122,6 +128,8 @@ mod tests {
             permissions: "read",
             note: Some("here you go"),
             unverified_key_approval: None,
+            pending_share_uri: None,
+            pending_share_commitment: None,
             created_at: "2026-03-01T12:00:00Z",
         };
 
@@ -172,6 +180,8 @@ mod tests {
             permissions: "read",
             note: None,
             unverified_key_approval: None,
+            pending_share_uri: None,
+            pending_share_commitment: None,
             created_at: "2026-03-01T12:00:00Z",
         };
 

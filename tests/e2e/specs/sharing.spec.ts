@@ -211,8 +211,20 @@ test(`warns before queuing a share to a not-ready recipient and never queues sil
     await input.fill(frank.handle);
     await shareButton.click();
     await expect(queueButton).toBeVisible({ timeout: 60_000 });
+    // Queuing is one explicit first-publication consent: the confirmation must
+    // disclose that the keys it authorizes may be unverified, and nothing is
+    // written until the owner accepts it.
+    // spec:account-verification § Wrapping a key to an unverified account requires explicit confirmation
+    const consents: string[] = [];
+    alicePage.once("dialog", (dialog) => {
+      consents.push(dialog.message());
+      void dialog.accept();
+    });
     await queueButton.click();
     await expect(alicePage.getByText(/^Share queued/).first()).toBeVisible({ timeout: 30_000 });
+    expect(consents).toHaveLength(1);
+    expect(consents[0]).toContain(frank.handle);
+    expect(consents[0]).toMatch(/unverified/);
   } finally {
     await restore();
     await alicePage.context().close();

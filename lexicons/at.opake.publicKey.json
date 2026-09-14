@@ -54,6 +54,7 @@
           },
           "signature": {
             "type": "bytes",
+            "minLength": 64,
             "maxLength": 64,
             "description": "Ed25519 signature over the versioned account-bound public-key transcript."
           },

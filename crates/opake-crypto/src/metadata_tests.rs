@@ -178,6 +178,8 @@ fn grant_metadata_roundtrip() {
         permissions: Some("read".into()),
         note: Some("shared for review".into()),
         unverified_key_approval: Some([7; 32]),
+        pending_share_uri: None,
+        pending_share_commitment: None,
     };
 
     let encrypted = encrypt_metadata(
@@ -202,6 +204,8 @@ fn grant_metadata_minimal() {
         permissions: None,
         note: None,
         unverified_key_approval: None,
+        pending_share_uri: None,
+        pending_share_commitment: None,
     };
 
     let encrypted = encrypt_metadata(
@@ -272,12 +276,24 @@ fn pending_share_metadata_roundtrips_bound_did_and_explicit_permission() {
         recipient_did: "did:plc:recipient".into(),
         allow_unverified_first_publication: true,
     };
-    let encrypted =
-        encrypt_metadata(&key, &metadata, &seal(SealType::GrantMetadata), &mut OsRng).unwrap();
+    let encrypted = encrypt_metadata(
+        &key,
+        &metadata,
+        &seal(SealType::PendingShareMetadata),
+        &mut OsRng,
+    )
+    .unwrap();
 
     let decrypted: PendingShareMetadata =
-        decrypt_metadata(&key, &encrypted, &seal(SealType::GrantMetadata)).unwrap();
+        decrypt_metadata(&key, &encrypted, &seal(SealType::PendingShareMetadata)).unwrap();
     assert_eq!(decrypted, metadata);
+
+    let replay_as_grant: Result<GrantMetadata, _> =
+        decrypt_metadata(&key, &encrypted, &seal(SealType::GrantMetadata));
+    assert!(
+        replay_as_grant.is_err(),
+        "a pending intent must not authenticate as a completed grant"
+    );
 }
 
 #[test]
@@ -345,4 +361,27 @@ fn bug__blob_metadata_swap_under_shared_key_fails_authentication() {
             .unwrap(),
     };
     assert!(decrypt_blob(&key, &metadata_as_blob, &seal(SealType::DocumentBlob)).is_err());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn bug__wrong_length_nonce_panicked_instead_of_erroring() {
+    let key = generate_content_key(&mut OsRng);
+    let mut encrypted = encrypt_metadata(
+        &key,
+        &sample_metadata(),
+        &seal(SealType::DocumentMetadata),
+        &mut OsRng,
+    )
+    .unwrap();
+    // A served record is untrusted input: a truncated nonce must surface as a
+    // decryption error, never unwind the caller (fatal in WASM).
+    encrypted.nonce = crate::AtBytes::from_raw(&[1, 2, 3]);
+    let err =
+        decrypt_metadata::<DocumentMetadata>(&key, &encrypted, &seal(SealType::DocumentMetadata))
+            .unwrap_err();
+    assert!(
+        err.to_string().contains("nonce length"),
+        "expected a nonce-length error, got: {err}"
+    );
 }

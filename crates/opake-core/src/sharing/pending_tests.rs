@@ -1,6 +1,5 @@
 use super::{
-    create_pending_share, retry_pending_shares, RetryParams, RetryResult,
-    DEFAULT_PENDING_SHARE_TTL_SECONDS,
+    create_pending_share, retry_pending_shares, RetryParams, DEFAULT_PENDING_SHARE_TTL_SECONDS,
 };
 use crate::client::{HttpResponse, LegacySession, RequestBody, Session, XrpcClient};
 use crate::crypto::{self, generate_content_key, OsRng, PendingShareMetadata};
@@ -121,7 +120,7 @@ fn fixture(owner: &TestKeys, display: &str, created_at: &str) -> Fixture {
     let encrypted = crypto::encrypt_metadata(
         &content_key,
         &metadata,
-        &crypto::SealContext::new(DOC_URI, crypto::SealType::GrantMetadata),
+        &crypto::SealContext::new(DOC_URI, crypto::SealType::PendingShareMetadata),
         &mut OsRng,
     )
     .unwrap();
@@ -174,13 +173,26 @@ fn enqueue_ready_resolution(mock: &MockTransport, fixture: &Fixture, recipient: 
     mock.enqueue(ok(br#"{"cid":"bafyobserved"}"#.to_vec()));
 }
 
-fn grant_with_metadata(content_key: &crypto::ContentKey, permissions: &str) -> Grant {
+fn grant_with_metadata(fixture: &Fixture, permissions: &str) -> Grant {
+    let entry = super::PendingShareEntry {
+        uri: PENDING_URI.into(),
+        document: fixture.pending.document.clone(),
+        recipient: fixture.pending.recipient.clone(),
+        encrypted_metadata: fixture.pending.encrypted_metadata.clone(),
+        created_at: fixture.pending.created_at.clone(),
+        recipient_did: None,
+        recipient_did_error: None,
+        needs_newer: false,
+        raw_record: serde_json::to_value(&fixture.pending).unwrap(),
+    };
     let metadata = crypto::encrypt_metadata(
-        content_key,
+        &fixture.content_key,
         &crypto::GrantMetadata {
             permissions: Some(permissions.into()),
             note: Some("queued note".into()),
             unverified_key_approval: Some([9; 32]),
+            pending_share_uri: Some(PENDING_URI.into()),
+            pending_share_commitment: Some(super::pending_intent_commitment(&entry).unwrap()),
         },
         &crypto::SealContext::new(DOC_URI, crypto::SealType::GrantMetadata),
         &mut OsRng,
@@ -244,6 +256,53 @@ async fn queue_requires_explicit_did_bound_consent() {
 }
 
 #[tokio::test]
+async fn queued_intent_encrypts_the_bound_did_with_pending_only_aad() {
+    let mock = MockTransport::new();
+    mock.enqueue(ok(
+        br#"{"uri":"at://did:plc:owner/at.opake.pendingShare/tid001","cid":"bafypending"}"#
+            .to_vec(),
+    ));
+    let mut pds = client(mock.clone());
+    let key = generate_content_key(&mut OsRng);
+
+    create_pending_share(
+        &mut pds,
+        &key,
+        DOC_URI,
+        "recipient.test",
+        RECIPIENT_DID,
+        true,
+        "read",
+        Some("first publication only"),
+        "2026-04-01T00:00:00Z",
+        &mut OsRng,
+    )
+    .await
+    .unwrap();
+
+    let requests = mock.requests();
+    let RequestBody::Json(body) = requests[0].body.as_ref().unwrap() else {
+        panic!("queued intent must be a JSON record write");
+    };
+    let queued: PendingShare = serde_json::from_value(body["record"].clone()).unwrap();
+    let metadata: PendingShareMetadata = crypto::decrypt_metadata(
+        &key,
+        &queued.encrypted_metadata,
+        &crypto::SealContext::new(DOC_URI, crypto::SealType::PendingShareMetadata),
+    )
+    .unwrap();
+    assert_eq!(metadata.recipient_did, RECIPIENT_DID);
+    assert!(metadata.allow_unverified_first_publication);
+    assert_eq!(metadata.note.as_deref(), Some("first publication only"));
+    assert!(crypto::decrypt_metadata::<crypto::GrantMetadata>(
+        &key,
+        &queued.encrypted_metadata,
+        &crypto::SealContext::new(DOC_URI, crypto::SealType::GrantMetadata),
+    )
+    .is_err());
+}
+
+#[tokio::test]
 async fn retry_uses_bound_did_and_atomic_create_delete_with_actual_approval() {
     let owner = TestKeys::generate(OWNER_DID);
     let recipient = TestKeys::generate(RECIPIENT_DID);
@@ -256,7 +315,13 @@ async fn retry_uses_bound_did_and_atomic_create_delete_with_actual_approval() {
     let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
         .await
         .unwrap();
-    assert_eq!(result.completed, 1);
+    assert_eq!(result.completed, 1, "{result:?}");
+    assert_eq!(result.completion_notices.len(), 1);
+    assert_eq!(result.completion_notices[0].did, RECIPIENT_DID);
+    assert!(matches!(
+        result.completion_notices[0].verification,
+        crate::resolve::VerificationState::Unverified
+    ));
     let requests = mock.requests();
     assert!(requests
         .iter()
@@ -311,7 +376,7 @@ async fn retry_never_defaults_missing_intent_permissions() {
             recipient_did: RECIPIENT_DID.into(),
             allow_unverified_first_publication: true,
         },
-        &crypto::SealContext::new(DOC_URI, crypto::SealType::GrantMetadata),
+        &crypto::SealContext::new(DOC_URI, crypto::SealType::PendingShareMetadata),
         &mut OsRng,
     )
     .unwrap();
@@ -375,13 +440,17 @@ async fn lost_response_reconciles_completion_without_a_second_handoff() {
     mock.enqueue(not_found());
     mock.enqueue(record(
         "at://did:plc:owner/at.opake.grant/tid001",
-        grant_with_metadata(&data.content_key, "write"),
+        grant_with_metadata(&data, "write"),
     ));
     let mut pds = client(mock.clone());
     let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
         .await
         .unwrap();
     assert_eq!(result.completed, 1, "{result:?}");
+    assert!(
+        result.completion_notices.is_empty(),
+        "a later observer must not report its own fresh bundle as the completed grant"
+    );
     assert_eq!(
         mock.requests()
             .iter()
@@ -422,7 +491,7 @@ async fn unknown_missing_or_conflicting_state_never_replays_or_consumes() {
     mock.enqueue(record(PENDING_URI, &data.pending));
     mock.enqueue(record(
         "at://did:plc:owner/at.opake.grant/tid001",
-        grant_with_metadata(&data.content_key, "write"),
+        grant_with_metadata(&data, "write"),
     ));
     let mut pds = client(mock.clone());
     let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
@@ -442,7 +511,7 @@ async fn unknown_missing_or_conflicting_state_never_replays_or_consumes() {
     mock.enqueue(record(PENDING_URI, &data.pending));
     mock.enqueue(record(
         "at://did:plc:owner/at.opake.grant/tid001",
-        grant_with_metadata(&data.content_key, "read"),
+        grant_with_metadata(&data, "read"),
     ));
     let mut pds = client(mock.clone());
     let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
@@ -456,24 +525,67 @@ async fn unknown_missing_or_conflicting_state_never_replays_or_consumes() {
 }
 
 #[tokio::test]
-async fn second_runner_with_replacement_bundle_cannot_overwrite_first_handoff() {
+async fn later_resolution_preserves_a_completed_handoff_for_a_different_fresh_bundle() {
     let owner = TestKeys::generate(OWNER_DID);
     let replacement_bundle = TestKeys::generate(RECIPIENT_DID);
     let data = fixture(&owner, "recipient.test", "2026-04-01T00:00:00Z");
     let mock = MockTransport::new();
     mock.enqueue(list(&[(PENDING_URI, data.pending.clone())]));
-    // This runner observes a different current bundle than the one whose
-    // approval was stored with the already-created designated grant.
+    // A second runner can resolve a later bundle after the first runner has
+    // already completed. The consumed intent is the authorization, so this
+    // runner must preserve the valid winner rather than re-authorizing it
+    // against its own later observation.
     enqueue_ready_resolution(&mock, &data, &replacement_bundle);
-    mock.enqueue(record(PENDING_URI, &data.pending));
+    mock.enqueue(not_found()); // first runner consumed the intent
     mock.enqueue(record(
         "at://did:plc:owner/at.opake.grant/tid001",
-        grant_with_metadata(&data.content_key, "write"),
+        grant_with_metadata(&data, "write"),
     ));
     let mut pds = client(mock.clone());
     let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
         .await
         .unwrap();
+    assert_eq!(result.completed, 1, "{result:?}");
+    assert!(
+        result.completion_notices.is_empty(),
+        "a later observer must not report its own fresh bundle as the completed grant"
+    );
+    assert!(mock
+        .requests()
+        .iter()
+        .all(|request| !request.url.contains("applyWrites")));
+}
+
+/// A replacement pending record keeps its URI/rkey. A grant completed from the
+/// earlier record is still not evidence that this replacement was consumed.
+#[tokio::test]
+async fn prior_intent_grant_at_same_rkey_cannot_complete_replacement_intent() {
+    let owner = TestKeys::generate(OWNER_DID);
+    let recipient = TestKeys::generate(RECIPIENT_DID);
+    let data = fixture(&owner, "recipient.test", "2026-04-01T00:00:00Z");
+    let mut old_pending = data.pending.clone();
+    old_pending.created_at = "2026-04-01T00:00:01Z".into();
+    let old_intent = Fixture {
+        content_key: data.content_key.clone(),
+        document: data.document.clone(),
+        pending: old_pending,
+    };
+    let planted = grant_with_metadata(&old_intent, "write");
+
+    let mock = MockTransport::new();
+    mock.enqueue(list(&[(PENDING_URI, data.pending.clone())]));
+    enqueue_ready_resolution(&mock, &data, &recipient);
+    mock.enqueue(not_found()); // the pending intent is already gone
+    mock.enqueue(record("at://did:plc:owner/at.opake.grant/tid001", planted));
+    let mut pds = client(mock.clone());
+    let result = retry_pending_shares(&mut pds, &mock, &params(&owner, RETRY_NOW), &mut OsRng)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.completed, 0,
+        "an earlier intent must not impersonate replacement completion"
+    );
     assert_eq!(result.failed, 1);
     assert!(mock
         .requests()
@@ -543,14 +655,49 @@ async fn cancellation_wins_against_stale_expiry_cleanup() {
 }
 
 #[tokio::test]
-async fn later_grant_revocation_cannot_reuse_a_consumed_intent() {
+async fn revoked_grant_cannot_replay_a_consumed_intent() {
     let owner = TestKeys::generate(OWNER_DID);
+    let recipient = TestKeys::generate(RECIPIENT_DID);
+    let data = fixture(&owner, "recipient.test", "2026-04-01T00:00:00Z");
     let mock = MockTransport::new();
-    mock.enqueue(list(&[]));
+    // A successful first runner deleted the one-use intent. Its grant was
+    // subsequently revoked, so both designated records are absent. This must
+    // be a conflict, never permission to reconstruct the revoked grant.
+    mock.enqueue(not_found());
+    mock.enqueue(not_found());
     let mut pds = client(mock.clone());
-    let result = retry_pending_shares(&mut pds, &mock, &params(&owner, 1_743_465_600), &mut OsRng)
+    let entry = super::PendingShareEntry {
+        uri: PENDING_URI.into(),
+        document: data.pending.document.clone(),
+        recipient: data.pending.recipient.clone(),
+        encrypted_metadata: data.pending.encrypted_metadata.clone(),
+        created_at: data.pending.created_at.clone(),
+        recipient_did: None,
+        recipient_did_error: None,
+        needs_newer: false,
+        raw_record: serde_json::to_value(&data.pending).unwrap(),
+    };
+    let grant = super::GrantParams {
+        document_uri: DOC_URI,
+        recipient_did: RECIPIENT_DID,
+        content_key: &data.content_key,
+        recipient_public_keys: recipient.public_keys(),
+        permissions: "write",
+        note: Some("queued note"),
+        unverified_key_approval: Some([7; 32]),
+        pending_share_uri: Some(PENDING_URI),
+        pending_share_commitment: Some(super::pending_intent_commitment(&entry).unwrap()),
+        created_at: &data.pending.created_at,
+    };
+
+    let error = super::completion_state(&mut pds, OWNER_DID, &entry, &grant)
         .await
-        .unwrap();
-    assert_eq!(result, RetryResult::default());
-    assert_eq!(mock.requests().len(), 1);
+        .unwrap_err();
+    assert!(matches!(error, crate::error::Error::CasConflict(_)));
+    assert!(
+        mock.requests()
+            .iter()
+            .all(|request| !request.url.contains("applyWrites")),
+        "reconciliation must refuse replay before any write"
+    );
 }

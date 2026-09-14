@@ -23,13 +23,34 @@ defmodule OpakeIndexer.Auth.Plug do
   @impl true
   def call(conn, _opts) do
     case authenticate(conn) do
-      {:ok, did} ->
-        assign(conn, :authenticated_did, did)
+      {:ok, did, verified, anchor_history} ->
+        conn
+        |> assign(:authenticated_did, did)
+        |> assign(:authenticated_verified, verified)
+        |> assign(:authenticated_anchor_history, anchor_history)
 
-      {:error, message} ->
+      {:error, {:unavailable, _source}} ->
+        conn
+        |> put_status(503)
+        |> Phoenix.Controller.json(%{error: "authentication key resolution unavailable"})
+        |> halt()
+
+      {:error, {:invalid, _reason}} ->
+        conn
+        |> put_status(401)
+        |> Phoenix.Controller.json(%{error: "authentication key resolution invalid"})
+        |> halt()
+
+      {:error, message} when is_binary(message) ->
         conn
         |> put_status(401)
         |> Phoenix.Controller.json(%{error: message})
+        |> halt()
+
+      {:error, _reason} ->
+        conn
+        |> put_status(401)
+        |> Phoenix.Controller.json(%{error: "authentication failed"})
         |> halt()
     end
   end
@@ -41,13 +62,14 @@ defmodule OpakeIndexer.Auth.Plug do
          :ok <- check_timestamp_drift(timestamp),
          :ok <- check_did_scope(conn, did),
          {:ok, signature} <- OpakeIndexer.Auth.Base64.decode(signature_b64),
-         {:ok, pubkey} <- OpakeIndexer.Auth.KeyCache.get_key(did) do
+         {:ok, %{key: pubkey, verified: verified, anchor_history: anchor_history}} <-
+           OpakeIndexer.Auth.KeyCache.get_decision(did) do
       method = conn.method
       path = conn.request_path
       message = "#{method}:#{path}:#{timestamp}:#{did}"
 
       case verify_signature(pubkey, message, signature) do
-        :ok -> {:ok, did}
+        :ok -> {:ok, did, verified, anchor_history}
         {:error, _} = err -> err
       end
     end

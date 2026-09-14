@@ -56,7 +56,15 @@ case "$cmd" in
       "$did" "$did" "$base" "$handle" > "$dir/config.toml"
     printf '%s\n' "$base" > "$dir/.pds"
     printf '%s\n' "$did" > "$dir/.did"
-    printf '%s\n' "$mnemonic" | OPAKE_DATA_DIR="$dir" opake recover >/dev/null 2>&1
+    # A second login for the same actor in one container life finds the
+    # identity already recovered; that is the steady state, not a failure.
+    # Every other recover failure is surfaced instead of swallowed.
+    if ! out=$(printf '%s\n' "$mnemonic" | OPAKE_DATA_DIR="$dir" opake recover 2>&1); then
+      case "$out" in
+        *"already exists"*) ;;
+        *) printf '%s\n' "$out" >&2; exit 1 ;;
+      esac
+    fi
     echo "$did"
     ;;
   delkr)

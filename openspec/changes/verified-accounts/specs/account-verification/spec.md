@@ -171,13 +171,17 @@ A signature verifies against whatever key the DID document currently names, so a
 holder can replace the verification method with a key it controls, re-sign a
 substituted bundle under it, and resolve as verified. The signature is sound; the anchor moved.
 
-Where the DID method provides an operation history, resolving a verified account SHALL read it and
+Where the DID method provides an operation audit history, resolving a verified account SHALL read it and
 determine whether the `#opake` verification method has ever been replaced with a different key. A
 replacement SHALL be reported alongside the verified state: verification succeeds, and the caller
 is told the anchor changed. The signing key derives from the seed phrase, so re-anchoring after
 migration republishes the same value — a removal and re-addition of the same key is not a
 replacement, and today no legitimate cause for a genuine replacement exists.
 
+For `did:plc`, the audit read SHALL include accepted operations on nullified branches: a
+replacement is an ever-observed security notice, while the current DID document remains
+authoritative for verification. If the audit transport is unavailable, resolution SHALL remain
+verified and report that replacement history is unavailable rather than claiming no replacement.
 The history SHALL be read at resolution time and cached under the same expiry as the rest of
 resolution. No record of previously observed verification methods SHALL be kept: the history is
 public and authoritative, and reading it covers replacements that predate the caller's first

@@ -109,7 +109,7 @@ fn ed25519_did_key_encoding_round_trips() {
 }
 
 #[tokio::test]
-async fn plc_history_uses_active_operations_and_detects_replacement() {
+async fn plc_audit_history_detects_a_nullified_branch_replacement() {
     let did = "did:plc:test";
     let first = ed25519_dalek::SigningKey::from_bytes(&[9; 32])
         .verifying_key()
@@ -120,20 +120,20 @@ async fn plc_history_uses_active_operations_and_detects_replacement() {
     let mock = MockTransport::new();
     mock.enqueue(success_response(
         &serde_json::json!([
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&first)}},
-            {"type": "plc_operation", "verificationMethods": {}},
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
+            {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&first)}}},
+            {"nullified": true, "operation": {"type": "plc_operation", "verificationMethods": {}}},
+            {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}}},
         ])
         .to_string(),
     ));
 
     assert_eq!(
-        opake_key_replaced(&mock, did, &current).await.unwrap(),
-        Some(true)
+        opake_anchor_history(&mock, did, &current).await.unwrap(),
+        AnchorHistory::Replaced
     );
     let requests = mock.requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].url.ends_with("/did:plc:test/log"));
+    assert!(requests[0].url.ends_with("/did:plc:test/log/audit"));
 }
 
 #[tokio::test]
@@ -145,16 +145,16 @@ async fn plc_history_removal_and_same_key_readdition_is_not_replacement() {
     let mock = MockTransport::new();
     mock.enqueue(success_response(
         &serde_json::json!([
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
-            {"type": "plc_operation", "verificationMethods": {}},
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}},
+            {"operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}}},
+            {"operation": {"type": "plc_operation", "verificationMethods": {}}},
+            {"operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current)}}},
         ])
         .to_string(),
     ));
 
     assert_eq!(
-        opake_key_replaced(&mock, did, &current).await.unwrap(),
-        Some(false)
+        opake_anchor_history(&mock, did, &current).await.unwrap(),
+        AnchorHistory::NotReplaced
     );
 }
 
@@ -165,15 +165,48 @@ async fn did_web_has_no_plc_history_and_malformed_history_refuses() {
         .to_bytes();
     let mock = MockTransport::new();
     assert_eq!(
-        opake_key_replaced(&mock, "did:web:example.test", &key)
+        opake_anchor_history(&mock, "did:web:example.test", &key)
             .await
             .unwrap(),
-        None
+        AnchorHistory::NoHistory
     );
     assert!(mock.requests().is_empty());
 
     mock.enqueue(success_response(r#"[{"verificationMethods": []}]"#));
-    assert!(opake_key_replaced(&mock, "did:plc:test", &key)
+    assert!(opake_anchor_history(&mock, "did:plc:test", &key)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn unavailable_plc_audit_reports_unavailable_rather_than_no_replacement() {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[13; 32])
+        .verifying_key()
+        .to_bytes();
+    for status in [0, 429, 500, 503] {
+        let mock = MockTransport::new();
+        mock.enqueue(HttpResponse {
+            status,
+            headers: vec![],
+            body: b"directory unavailable".to_vec(),
+        });
+        assert_eq!(
+            opake_anchor_history(&mock, "did:plc:test", &key)
+                .await
+                .unwrap(),
+            AnchorHistory::Unavailable,
+            "HTTP {status} must leave the replacement question open",
+        );
+    }
+
+    // A directory that answers "no such DID" is not an availability failure.
+    let mock = MockTransport::new();
+    mock.enqueue(HttpResponse {
+        status: 404,
+        headers: vec![],
+        body: b"{}".to_vec(),
+    });
+    assert!(opake_anchor_history(&mock, "did:plc:test", &key)
         .await
         .is_err());
 }
@@ -453,6 +486,49 @@ fn did_document_url_plc() {
 fn did_document_url_web() {
     let url = did_document_url("did:web:example.com").unwrap();
     assert_eq!(url, "https://example.com/.well-known/did.json");
+}
+
+/// A `did:web` identifier with extra colon-separated segments addresses a
+/// path, and the path form carries no `.well-known` prefix.
+#[test]
+fn did_document_url_web_path_segments() {
+    let url = did_document_url("did:web:example.com:user:alice").unwrap();
+    assert_eq!(url, "https://example.com/user/alice/did.json");
+}
+
+/// A port travels through the identifier percent-encoded and must be decoded
+/// back into an authority the transport can reach.
+#[test]
+fn did_document_url_web_percent_encoded_port() {
+    let url = did_document_url("did:web:localhost%3A3000").unwrap();
+    assert_eq!(url, "https://localhost:3000/.well-known/did.json");
+}
+
+#[test]
+fn did_document_url_web_percent_encoded_port_with_path() {
+    let url = did_document_url("did:web:localhost%3A3000:user:alice").unwrap();
+    assert_eq!(url, "https://localhost:3000/user/alice/did.json");
+}
+
+/// A decoded segment that smuggles URL structure would redirect resolution at
+/// a host the DID never named.
+#[test]
+fn did_document_url_web_rejects_structural_characters() {
+    for did in [
+        "did:web:example.com%2Fevil.test",
+        "did:web:example.com%3Fq",
+        "did:web:example.com%23frag",
+        "did:web:user%40example.com",
+        "did:web:",
+        "did:web:example.com::alice",
+        "did:web:example.com%zz",
+        "did:web:example.com%3",
+    ] {
+        assert!(
+            did_document_url(did).is_err(),
+            "expected {did} to be rejected"
+        );
+    }
 }
 
 #[test]

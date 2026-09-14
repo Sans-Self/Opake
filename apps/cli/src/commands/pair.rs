@@ -98,7 +98,12 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
 
     let interval = std::time::Duration::from_secs(args.interval);
     loop {
-        if pairing::try_complete_pair(&mut client, &ctx.storage, &ctx.did, &info.rkey).await? {
+        let completion =
+            pairing::try_complete_pair(&mut client, &ctx.storage, &ctx.did, &info.rkey).await?;
+        if completion.completed {
+            if let Some(notice) = completion.verification {
+                print_pair_verification_notice(&notice);
+            }
             break;
         }
         debug!("no matching response yet, sleeping {}s", args.interval);
@@ -107,6 +112,34 @@ async fn request(ctx: &CommandContext, args: RequestArgs) -> Result<Option<Sessi
 
     println!("Pairing complete.");
     Ok(None)
+}
+
+fn print_pair_verification_notice(notice: &opake_core::resolve::RecipientVerificationNotice) {
+    use opake_core::resolve::{AnchorHistory, VerificationState};
+
+    match notice.verification {
+        VerificationState::Unverified => {
+            println!("Pairing completed with an unverified DID key for {}.", notice.did);
+        }
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::Replaced,
+        } => println!("Pairing completed. {}'s DID verification key was replaced.", notice.did),
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::NotReplaced,
+        } => println!("Pairing completed with a verified DID key for {}.", notice.did),
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::NoHistory,
+        } => println!(
+            "Pairing completed. {}'s DID method publishes no verification history.",
+            notice.did
+        ),
+        VerificationState::Verified {
+            anchor_history: AnchorHistory::Unavailable,
+        } => println!(
+            "Pairing completed. {}'s verification history could not be read, so a replacement cannot be ruled out.",
+            notice.did
+        ),
+    }
 }
 
 async fn approve(ctx: &CommandContext) -> Result<Option<Session>> {

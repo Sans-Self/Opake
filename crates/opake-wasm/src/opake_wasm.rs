@@ -60,7 +60,27 @@ enum OwnVerificationView {
     Absent,
     Verified,
     Substitution,
+    Malformed,
     Unavailable { reason: String },
+}
+
+/// Reason string for a self-check that timed out rather than failed. Stable so
+/// the UI can offer a retry for a slow directory without parsing prose.
+const DIRECTORY_TIMEOUT_REASON: &str = "directory request timed out";
+
+impl OwnVerificationView {
+    /// A bounded self-check reports a stalled directory and a failed
+    /// resolution through the same error kind. Collapsing both into the raw
+    /// message leaves the account view unable to distinguish a retry from a
+    /// refusal, so the timeout gets its own stable reason.
+    fn unavailable(error: &opake_core::error::Error) -> Self {
+        let reason = if opake_core::client::identity_operation::is_identity_network_timeout(error) {
+            DIRECTORY_TIMEOUT_REASON.to_string()
+        } else {
+            error.to_string()
+        };
+        Self::Unavailable { reason }
+    }
 }
 
 impl From<opake_core::resolve::SelfVerificationState> for OwnVerificationView {
@@ -69,6 +89,7 @@ impl From<opake_core::resolve::SelfVerificationState> for OwnVerificationView {
             opake_core::resolve::SelfVerificationState::Absent => Self::Absent,
             opake_core::resolve::SelfVerificationState::Verified => Self::Verified,
             opake_core::resolve::SelfVerificationState::Substitution => Self::Substitution,
+            opake_core::resolve::SelfVerificationState::Malformed => Self::Malformed,
         }
     }
 }
@@ -227,12 +248,10 @@ impl WasmOpakeHandle {
         let opake = make_opake_from_storage(did.as_deref(), storage_adapter).await?;
         let did_owned = opake.did().to_string();
         let boot_verification = opake
-            .check_own_verification()
+            .check_own_verification_bounded()
             .await
             .map(OwnVerificationView::from)
-            .unwrap_or_else(|error| OwnVerificationView::Unavailable {
-                reason: error.to_string(),
-            });
+            .unwrap_or_else(|error| OwnVerificationView::unavailable(&error));
         Ok(Self {
             inner: Rc::new(Mutex::new(opake)),
             boot_verification,
@@ -387,7 +406,7 @@ impl WasmOpakeHandle {
                     .map_err(|_| JsError::new("unverified approval must be 32 bytes"))
             })
             .transpose()?;
-        let _outcome = opake
+        let outcome = opake
             .add_workspace_member(
                 &ws.id(),
                 ws.current_key().map_err(wasm_err)?,
@@ -398,7 +417,7 @@ impl WasmOpakeHandle {
             )
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto { uri: None })
+        to_js(&outcome)
     }
 
     /// Resolve the current bundle and return the one-operation approval
@@ -463,7 +482,7 @@ impl WasmOpakeHandle {
                     .map_err(|_| JsError::new("unverified approval must be 32 bytes"))
             })
             .transpose()?;
-        opake
+        let outcome = opake
             .repair_workspace_member_wrap(
                 &ws.id(),
                 ws.current_key().map_err(wasm_err)?,
@@ -472,7 +491,7 @@ impl WasmOpakeHandle {
             )
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto { uri: None })
+        to_js(&outcome)
     }
 
     #[wasm_bindgen(js_name = approvePendingWorkspaceMember)]
@@ -490,11 +509,11 @@ impl WasmOpakeHandle {
         let confirmed = confirmed
             .try_into()
             .map_err(|_| JsError::new("unverified approval must be 32 bytes"))?;
-        opake
+        let outcome = opake
             .approve_pending_workspace_member(&ws.id(), member_did, confirmed)
             .await
             .map_err(wasm_err)?;
-        to_js(&MutationResultDto { uri: None })
+        to_js(&outcome)
     }
 
     /// Leave a workspace. Resolves the head URI to the stable genesis id
@@ -541,10 +560,12 @@ impl WasmOpakeHandle {
         struct R {
             rotation: u64,
             excluded_members: Vec<opake_core::opake::ExcludedMember>,
+            verification_notices: Vec<opake_core::resolve::RecipientVerificationNotice>,
         }
         serde_wasm_bindgen::to_value(&R {
             rotation: removal.rotation,
             excluded_members: removal.excluded_members,
+            verification_notices: removal.verification_notices,
         })
         .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -672,6 +693,8 @@ impl WasmOpakeHandle {
             document: String,
             recipient: String,
             created_at: String,
+            recipient_did: Option<String>,
+            recipient_did_error: Option<String>,
         }
 
         let out: Vec<Entry> = entries
@@ -681,6 +704,8 @@ impl WasmOpakeHandle {
                 document: e.document,
                 recipient: e.recipient,
                 created_at: e.created_at,
+                recipient_did: e.recipient_did,
+                recipient_did_error: e.recipient_did_error,
             })
             .collect();
         to_js(&out)
@@ -709,23 +734,7 @@ impl WasmOpakeHandle {
             "still_pending": result.still_pending,
             "failed": result.failed,
             "verificationErrors": result.verification_errors,
-        }))
-    }
-
-    /// Re-wrap the caller's documents from historical group keys to the
-    /// current rotation. Opportunistic background hygiene — exposes the
-    /// operation only; no key material crosses to JS.
-    #[wasm_bindgen(js_name = sweepRotationRewrap)]
-    pub async fn sweep_rotation_rewrap(&self) -> Result<JsValue, JsError> {
-        let mut opake = self.opake().await?;
-        let outcome = opake
-            .sweep_owned_documents_rewrap()
-            .await
-            .map_err(wasm_err)?;
-        to_js(&serde_json::json!({
-            "rewrapped": outcome.rewrapped,
-            "already_current": outcome.already_current,
-            "conflicts": outcome.conflicts,
+            "completionNotices": result.completion_notices,
         }))
     }
 
@@ -822,9 +831,7 @@ impl WasmOpakeHandle {
             .check_own_verification()
             .await
             .map(OwnVerificationView::from)
-            .unwrap_or_else(|error| OwnVerificationView::Unavailable {
-                reason: error.to_string(),
-            });
+            .unwrap_or_else(|error| OwnVerificationView::unavailable(&error));
         to_js(&state)
     }
 

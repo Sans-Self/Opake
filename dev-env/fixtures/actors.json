@@ -40,6 +40,7 @@
       "name": "frank",
       "handle": "frank.pds-c.test",
       "pds": "pds-c",
+      "verified": true,
       "mnemonic": "access curve able suspect dutch august trigger face gospel lunar coast wood finger evoke define trade foam pen reject shiver melody isolate assault family",
       "password": "opake-devenv-pw"
     }

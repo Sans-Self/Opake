@@ -36,9 +36,10 @@ pub struct ResolvedIdentity {
     pub x25519_algo: String,
     pub ml_kem_public_key: MlKemPublicKey,
     pub ml_kem_algo: String,
-    /// Declared version of the validated public-key record.  Consumers bind
-    /// approval transcripts to this record scheme instead of a build-wide
-    /// constant.
+    // Declared version of the validated public-key record. Consumers bind
+    // approval transcripts to this record scheme instead of a build-wide
+    // constant. This is an ordinary comment because ts-rs emits `///` inside
+    // its object literal, producing invalid generated TypeScript.
     pub opake_version: u32,
     /// Ed25519 signing key — present if the user has published one.
     pub signing_key: Option<Ed25519PublicKeyBytes>,
@@ -46,11 +47,16 @@ pub struct ResolvedIdentity {
 }
 
 impl ResolvedIdentity {
-    /// The exact commitment a caller must present after explicitly approving
-    /// an unverified recipient for this document relationship.
-    pub fn unverified_key_approval(&self, document_uri: &str) -> [u8; 32] {
+    /// Build approval with the version of the relationship record that will
+    /// carry it, rather than the recipient's independently-versioned key
+    /// record.
+    pub fn unverified_key_approval_for_version(
+        &self,
+        opake_version: u32,
+        document_uri: &str,
+    ) -> [u8; 32] {
         crate::crypto::unverified_key_approval(
-            self.opake_version,
+            opake_version,
             document_uri,
             &self.did,
             &crate::crypto::EncryptionKeyFields {
@@ -73,7 +79,37 @@ impl ResolvedIdentity {
 )]
 pub enum VerificationState {
     Unverified,
-    Verified { key_replaced: Option<bool> },
+    Verified { anchor_history: AnchorHistory },
+}
+
+/// What the DID method's operation history says about the `#opake`
+/// verification method a verified record was signed under.
+///
+/// A method that publishes no history and a history that could not be read
+/// are distinct from a history that shows no replacement: neither of them
+/// rules a replacement out, and reporting either as "not replaced" would
+/// claim a guarantee resolution never obtained.
+// spec: account-verification § Resolution reads the anchor's history and reports a replacement
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AnchorHistory {
+    /// The history was read and the anchor never carried a different key.
+    NotReplaced,
+    /// The history was read and the anchor once carried a different key.
+    Replaced,
+    /// The DID method publishes no operation history to read (`did:web`).
+    NoHistory,
+    /// The audit transport was unavailable. Verification still holds; whether
+    /// the anchor was ever replaced is unknown.
+    Unavailable,
+}
+
+/// A freshly resolved recipient's verification notice, retained by callers
+/// that write key material so a valid but replaced anchor is not discarded.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecipientVerificationNotice {
+    pub did: String,
+    pub verification: VerificationState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -82,6 +118,8 @@ pub enum SelfVerificationState {
     Absent,
     Verified,
     Substitution,
+    /// `#opake` exists but is malformed or uses an unsupported key encoding.
+    Malformed,
 }
 
 /// Read the actual DID document; only absence permits offering republication.
@@ -94,7 +132,8 @@ pub async fn check_own_verification(
     Ok(match document.opake_key() {
         Ok(None) => SelfVerificationState::Absent,
         Ok(Some(key)) if key == *own_key => SelfVerificationState::Verified,
-        Ok(Some(_)) | Err(_) => SelfVerificationState::Substitution,
+        Ok(Some(_)) => SelfVerificationState::Substitution,
+        Err(_) => SelfVerificationState::Malformed,
     })
 }
 
@@ -115,8 +154,8 @@ pub async fn verify_public_key_record(
             record
                 .verify_signature(did, &key)
                 .map_err(|e| Error::VerificationFailed(format!("{did}: {e}")))?;
-            let key_replaced = crate::client::opake_key_replaced(transport, did, &key).await?;
-            Ok(VerificationState::Verified { key_replaced })
+            let anchor_history = crate::client::opake_anchor_history(transport, did, &key).await?;
+            Ok(VerificationState::Verified { anchor_history })
         }
     }
 }
@@ -352,7 +391,7 @@ mod tests {
     use super::*;
     use crate::client::HttpResponse;
     use crate::records::{PublicKeyRecord, SCHEMA_VERSION};
-    use crate::test_utils::MockTransport;
+    use crate::test_utils::{MockTransport, TestKeys};
 
     fn success(body: &str) -> HttpResponse {
         HttpResponse {
@@ -395,6 +434,55 @@ mod tests {
             "value": record,
         });
         entry.to_string()
+    }
+
+    #[test]
+    fn approval_can_bind_the_containing_grant_version_not_key_record_version() {
+        let did = "did:plc:target";
+        let keys = TestKeys::generate(did);
+        let identity = ResolvedIdentity {
+            did: did.into(),
+            handle: None,
+            pds_url: "https://pds.target.test".into(),
+            x25519_public_key: keys.x25519_pub,
+            x25519_algo: "x25519".into(),
+            ml_kem_public_key: keys.ml_kem_pub,
+            ml_kem_algo: "ml-kem-768".into(),
+            opake_version: SCHEMA_VERSION + 1,
+            signing_key: None,
+            verification: VerificationState::Unverified,
+        };
+        let document = "at://did:plc:owner/at.opake.document/report";
+
+        assert_eq!(
+            identity.unverified_key_approval_for_version(SCHEMA_VERSION, document),
+            crate::crypto::unverified_key_approval(
+                SCHEMA_VERSION,
+                document,
+                did,
+                &crate::crypto::EncryptionKeyFields {
+                    x25519_public_key: &identity.x25519_public_key,
+                    x25519_algo: &identity.x25519_algo,
+                    ml_kem_public_key: &identity.ml_kem_public_key,
+                    ml_kem_algo: &identity.ml_kem_algo,
+                },
+            )
+        );
+        assert_ne!(
+            identity.unverified_key_approval_for_version(SCHEMA_VERSION, document),
+            crate::crypto::unverified_key_approval(
+                identity.opake_version,
+                document,
+                did,
+                &crate::crypto::EncryptionKeyFields {
+                    x25519_public_key: &identity.x25519_public_key,
+                    x25519_algo: &identity.x25519_algo,
+                    ml_kem_public_key: &identity.ml_kem_public_key,
+                    ml_kem_algo: &identity.ml_kem_algo,
+                },
+            ),
+            "a recipient public-key record version must not silently select grant approval version"
+        );
     }
 
     fn base58btc(bytes: &[u8]) -> String {
@@ -978,7 +1066,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verified_record_reports_active_history_and_rejects_stripped_signature() {
+    async fn verified_record_reports_audit_history_and_rejects_stripped_signature() {
         let did = "did:plc:verified";
         let signing = crate::crypto::Ed25519SigningKey::from_bytes(&[33; 32]);
         let anchor = signing.verifying_key().to_bytes();
@@ -999,7 +1087,7 @@ mod tests {
         let mock = MockTransport::new();
         mock.enqueue(success(
             &serde_json::json!([
-                {"type": "plc_operation", "verificationMethods": {"opake": did_key(&anchor)}}
+                {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&anchor)}}}
             ])
             .to_string(),
         ));
@@ -1008,7 +1096,7 @@ mod tests {
                 .await
                 .unwrap(),
             VerificationState::Verified {
-                key_replaced: Some(false)
+                anchor_history: AnchorHistory::NotReplaced
             },
         );
 
@@ -1020,7 +1108,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verified_record_reports_replaced_anchor_from_active_chain() {
+    async fn verified_record_reports_replaced_anchor_from_audit_chain() {
         let did = "did:plc:verified";
         let original = crate::crypto::Ed25519SigningKey::from_bytes(&[34; 32]);
         let current = crate::crypto::Ed25519SigningKey::from_bytes(&[35; 32]);
@@ -1041,18 +1129,84 @@ mod tests {
 
         let mock = MockTransport::new();
         mock.enqueue(success(&serde_json::json!([
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&original.verifying_key().to_bytes())}},
-            {"type": "plc_operation", "verificationMethods": {}},
-            {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current_key)}},
+            {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&original.verifying_key().to_bytes())}}},
+            {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {}}},
+            {"nullified": false, "operation": {"type": "plc_operation", "verificationMethods": {"opake": did_key(&current_key)}}},
         ]).to_string()));
         assert_eq!(
             verify_public_key_record(&mock, did, &doc, &record)
                 .await
                 .unwrap(),
             VerificationState::Verified {
-                key_replaced: Some(true)
+                anchor_history: AnchorHistory::Replaced
             },
         );
+    }
+
+    #[tokio::test]
+    async fn verified_record_reports_unavailable_history_rather_than_failing() {
+        let did = "did:plc:verified";
+        let signing = crate::crypto::Ed25519SigningKey::from_bytes(&[37; 32]);
+        let anchor = signing.verifying_key().to_bytes();
+        let doc: crate::client::DidDocument = serde_json::from_str(&anchored_did_document_json(
+            did,
+            "verified.test",
+            "https://pds.verified.test",
+            &anchor,
+        ))
+        .unwrap();
+        let mut record = PublicKeyRecord::new(
+            &[47; 32],
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-09-12T00:00:00Z",
+        );
+        record.sign(did, &signing).unwrap();
+
+        let mock = MockTransport::new();
+        mock.enqueue(crate::client::HttpResponse {
+            status: 503,
+            headers: vec![],
+            body: b"temporary PLC audit outage".to_vec(),
+        });
+        assert_eq!(
+            verify_public_key_record(&mock, did, &doc, &record)
+                .await
+                .unwrap(),
+            VerificationState::Verified {
+                anchor_history: AnchorHistory::Unavailable
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn verified_did_web_reports_no_history_without_reading_a_log() {
+        let did = "did:web:example.test";
+        let signing = crate::crypto::Ed25519SigningKey::from_bytes(&[38; 32]);
+        let anchor = signing.verifying_key().to_bytes();
+        let doc: crate::client::DidDocument = serde_json::from_str(&anchored_did_document_json(
+            did,
+            "example.test",
+            "https://pds.example.test",
+            &anchor,
+        ))
+        .unwrap();
+        let mut record = PublicKeyRecord::new(
+            &[48; 32],
+            &dummy_ml_kem_pubkey(0xAA),
+            "2026-09-12T00:00:00Z",
+        );
+        record.sign(did, &signing).unwrap();
+
+        let mock = MockTransport::new();
+        assert_eq!(
+            verify_public_key_record(&mock, did, &doc, &record)
+                .await
+                .unwrap(),
+            VerificationState::Verified {
+                anchor_history: AnchorHistory::NoHistory
+            },
+        );
+        assert!(mock.requests().is_empty());
     }
 
     #[tokio::test]
@@ -1133,12 +1287,20 @@ mod tests {
             SelfVerificationState::Substitution
         );
 
+        mock.enqueue(success(&format!(
+            r#"{{"id":"{did}","verificationMethod":[{{"id":"{did}#opake","type":"Multikey","controller":"{did}","publicKeyMultibase":"z1"}}]}}"#
+        )));
+        assert_eq!(
+            check_own_verification(&mock, did, &own).await.unwrap(),
+            SelfVerificationState::Malformed
+        );
+
         mock.enqueue(success(
             r##"{"id":"did:plc:self","verificationMethod":[{"id":"#opake"}]}"##,
         ));
         assert_eq!(
             check_own_verification(&mock, did, &own).await.unwrap(),
-            SelfVerificationState::Substitution
+            SelfVerificationState::Malformed
         );
     }
 }

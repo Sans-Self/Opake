@@ -30,8 +30,135 @@ use crate::keyrings::{self, CreateKeyringParams, KEYRING_COLLECTION};
 use crate::manager::MutationOutcome;
 use crate::manager::{FileContext, FileManager, WorkspaceAdmin};
 use crate::records::Role;
+use crate::resolve::RecipientVerificationNotice;
 use crate::storage::{Identity, Storage};
 use crate::workspace::{Workspace, WorkspaceId};
+use futures_util::future::{select, Either, FutureExt};
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+/// Bound unattended repair work so a large workspace cannot monopolize a
+/// daemon pass. An explicit user-triggered repair does not use this limit.
+const MAX_MEMBER_WRAP_REPAIRS_PER_PASS: usize = 32;
+/// Retry a transient indexer visibility gap on a later pass, rather than on
+/// every daemon tick for the same observed keyring head.
+const MEMBER_WRAP_VISIBILITY_BACKOFF_MICROS: u64 = 20 * 60 * 1_000_000;
+const MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS: u64 = 20 * 60 * 1_000_000;
+/// Upper wall-clock budget for one unattended repair scan. An individual
+/// network operation retains its own bounded visibility retry; this prevents
+/// a pass from starting further work once earlier candidates used the budget.
+const MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS: u64 = 2 * 60 * 1_000_000;
+/// A slow beneficiary directory must not prevent a manager from revoking a
+/// different member. Timed-out beneficiaries remain admitted without a new
+/// wrap and retain their historical entry for a later repair.
+const MEMBER_REMOVAL_RECIPIENT_RESOLUTION_BUDGET_MICROS: u64 = 10 * 1_000_000;
+
+fn rotate_member_wrap_workspaces<T>(workspaces: &mut [T], cursor: &mut usize) {
+    if workspaces.is_empty() {
+        return;
+    }
+    let start = *cursor % workspaces.len();
+    workspaces.rotate_left(start);
+    *cursor = (start + 1) % workspaces.len();
+}
+
+fn member_wrap_deferral_is_active(
+    deferrals: &HashMap<String, u64>,
+    key: &str,
+    now_micros: u64,
+) -> bool {
+    deferrals
+        .get(key)
+        .is_some_and(|retry_at| *retry_at > now_micros)
+}
+
+fn retain_live_member_wrap_deferrals(
+    deferrals: &mut HashMap<String, u64>,
+    live_heads: &HashSet<String>,
+) {
+    deferrals.retain(|member_key, _| {
+        live_heads
+            .iter()
+            .any(|head| member_key.starts_with(&format!("{head}\u{1f}")))
+    });
+}
+
+async fn within_member_wrap_budget<F>(
+    timer: Option<crate::client::identity_operation::IdentitySleepFn>,
+    remaining: Duration,
+    future: F,
+) -> Option<F::Output>
+where
+    F: std::future::Future,
+{
+    let Some(timer) = timer else {
+        return Some(future.await);
+    };
+    match select(future.boxed_local(), timer(remaining).boxed_local()).await {
+        Either::Left((result, _)) => Some(result),
+        Either::Right((_, _)) => None,
+    }
+}
+
+#[cfg(test)]
+mod member_wrap_repair_scheduler_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[test]
+    fn next_pass_starts_at_next_workspace_after_early_failures() {
+        let mut cursor = 0;
+        let mut first_pass = vec!["stuck", "healthy"];
+        rotate_member_wrap_workspaces(&mut first_pass, &mut cursor);
+        assert_eq!(first_pass, ["stuck", "healthy"]);
+
+        let mut next_pass = vec!["stuck", "healthy"];
+        rotate_member_wrap_workspaces(&mut next_pass, &mut cursor);
+        assert_eq!(next_pass, ["healthy", "stuck"]);
+    }
+
+    #[test]
+    fn human_cooldown_expires_and_allows_recheck() {
+        let key = "at://owner/kr/head\u{1f}did:plc:member";
+        let mut deferrals = HashMap::new();
+        deferrals.insert(key.to_owned(), 1_000);
+
+        assert!(member_wrap_deferral_is_active(&deferrals, key, 999));
+        assert!(!member_wrap_deferral_is_active(&deferrals, key, 1_000));
+    }
+
+    #[test]
+    fn changed_head_invalidates_human_cooldown() {
+        let old_key = "at://owner/kr/old\u{1f}did:plc:member";
+        let mut deferrals = HashMap::new();
+        deferrals.insert(old_key.to_owned(), u64::MAX);
+        let live_heads = HashSet::from(["at://owner/kr/new".to_owned()]);
+
+        retain_live_member_wrap_deferrals(&mut deferrals, &live_heads);
+        assert!(!member_wrap_deferral_is_active(&deferrals, old_key, 0));
+    }
+
+    #[tokio::test]
+    async fn pass_timer_defers_a_stuck_discovery_or_candidate() {
+        let observed_micros = Rc::new(Cell::new(0_u64));
+        let observed_for_timer = Rc::clone(&observed_micros);
+        let timer: crate::client::identity_operation::IdentitySleepFn = Rc::new(move |duration| {
+            observed_for_timer.set(duration.as_micros() as u64);
+            Box::pin(async {})
+        });
+
+        let result: Option<()> = within_member_wrap_budget(
+            Some(timer),
+            Duration::from_micros(123),
+            std::future::pending(),
+        )
+        .await;
+
+        assert_eq!(result, None);
+        assert_eq!(observed_micros.get(), 123);
+    }
+}
 
 /// Pick the head URI of the workspace whose decrypted name is `name`.
 ///
@@ -103,6 +230,15 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     /// operations. Unlike the indexer retry sleeper, an operation must retain
     /// this after it leaves `Opake`, so the callback uses an `Rc`-backed type.
     pub(crate) identity_sleep_fn: Option<crate::client::identity_operation::IdentitySleepFn>,
+    /// Ephemeral scheduling-only cache for missing wraps that need a human
+    /// confirmation. It is keyed by the observed head and never authorizes
+    /// membership or survives an `Opake` instance.
+    member_wrap_human_deferrals: HashMap<String, u64>,
+    /// Earliest retry time for a head that was temporarily not visible.
+    member_wrap_visibility_backoff: HashMap<String, u64>,
+    /// Start each background pass at the next workspace so a repeatedly
+    /// failing early workspace cannot consume every bounded slot forever.
+    member_wrap_workspace_cursor: usize,
 }
 
 /// Indexer URL baked into the binary at compile time.
@@ -212,6 +348,19 @@ pub struct WorkspaceMemberRemoval {
     pub group_key: ContentKey,
     pub rotation: u64,
     pub excluded_members: Vec<ExcludedMember>,
+    /// Fresh verification states observed while producing the new member
+    /// wraps. These are notices only; verified replacement/no-history states
+    /// never create a second approval requirement.
+    pub verification_notices: Vec<RecipientVerificationNotice>,
+}
+
+/// Result of a membership write that resolved a recipient bundle at its final
+/// write boundary. The notice is intentionally the full verification state so
+/// clients can distinguish no history from an unverified bundle.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMemberWriteResult {
+    pub verification_notice: RecipientVerificationNotice,
 }
 
 /// Aggregate result of an unattended missing-member-wrap repair pass. It
@@ -225,6 +374,14 @@ pub struct MemberWrapRepairOutcome {
     pub awaiting_approval: usize,
     pub verification_failed: usize,
     pub stale: usize,
+    pub deferred_human_decision: usize,
+    pub deferred_visibility: usize,
+    pub deferred_by_budget: usize,
+    /// The full-list discovery itself exceeded the pass timer, so no repair
+    /// candidates were started this pass.
+    pub discovery_deferred: bool,
+    /// Final resolver states for wraps actually repaired in this pass.
+    pub verification_notices: Vec<RecipientVerificationNotice>,
     pub skipped_not_manager: usize,
     pub skipped_without_current_key: usize,
     pub errors: usize,
@@ -266,6 +423,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             cached_private_keys,
             sleep_fn: None,
             identity_sleep_fn: None,
+            member_wrap_human_deferrals: HashMap::new(),
+            member_wrap_visibility_backoff: HashMap::new(),
+            member_wrap_workspace_cursor: 0,
         })
     }
 
@@ -300,6 +460,18 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .verify_key_bytes()?
             .ok_or(Error::IdentityMissing)?;
         crate::resolve::check_own_verification(self.client.transport(), &self.did, &key).await
+    }
+
+    /// The bootstrap path must not wait indefinitely on the public DID
+    /// directory. Platforms that install an identity timer receive an explicit
+    /// timeout error which clients surface as an unavailable self-check.
+    pub async fn check_own_verification_bounded(
+        &self,
+    ) -> Result<crate::resolve::SelfVerificationState, Error> {
+        let sleep = self.identity_sleep_fn.clone().ok_or_else(|| {
+            Error::Auth("identity self-check requires an injected platform timer".into())
+        })?;
+        crate::client::identity_operation::bounded(&sleep, self.check_own_verification()).await?
     }
 
     /// Create an opaque, unpersisted operation that will publish this device's
@@ -1364,7 +1536,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         member_did: &str,
         role: Role,
         confirmed_unverified_keys: Option<[u8; 32]>,
-    ) -> Result<MutationOutcome, Error> {
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
         let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
         // The caller's Workspace can lag the live head. Never label an old
@@ -1391,7 +1563,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 "{member_did} is already a member of this workspace"
             )));
         }
-        let approval = match resolved.verification {
+        let approval = match &resolved.verification {
             crate::resolve::VerificationState::Verified { .. } => None,
             crate::resolve::VerificationState::Unverified => {
                 let expected = crate::crypto::unverified_key_approval(
@@ -1467,7 +1639,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         }
 
         self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
-            .await
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: member_did.to_owned(),
+                verification: resolved.verification,
+            },
+        })
     }
 
     /// Fill a missing *current* wrap for an admitted member. Repair is a
@@ -1481,7 +1659,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         key: &ContentKey,
         member_did: &str,
         confirmed_unverified_keys: Option<[u8; 32]>,
-    ) -> Result<MutationOutcome, Error> {
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
         let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
         let private_keys = self.private_keys_from_cache();
@@ -1516,7 +1694,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 "member DID changed during repair".into(),
             ));
         }
-        let approval = match resolved.verification {
+        let approval = match &resolved.verification {
             crate::resolve::VerificationState::Verified { .. } => {
                 prior.members[position].unverified_key_approval.clone()
             }
@@ -1573,7 +1751,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         new_record.members[position].wrapped_key = Some(wrapped);
         new_record.members[position].unverified_key_approval = approval;
         self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
-            .await
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: resolved_did.to_owned(),
+                verification: resolved.verification,
+            },
+        })
     }
 
     /// Record an explicit approval for an admitted unverified member without
@@ -1585,7 +1769,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         workspace_id: &WorkspaceId,
         member_did: &str,
         confirmed_unverified_keys: [u8; 32],
-    ) -> Result<MutationOutcome, Error> {
+    ) -> Result<WorkspaceMemberWriteResult, Error> {
         let (prior_uri, prior_cid, prior) = self.fetch_keyring_chain_head(workspace_id).await?;
         self.require_manager(&prior)?;
         let position = prior
@@ -1595,7 +1779,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             .ok_or_else(|| Error::NotFound(format!("no member entry for DID {member_did}")))?;
         let resolved = self.resolve_identity(member_did).await?;
         if !matches!(
-            resolved.verification,
+            &resolved.verification,
             crate::resolve::VerificationState::Unverified
         ) {
             return Err(Error::InvalidRecord(
@@ -1628,7 +1812,13 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         new_record.members[position].unverified_key_approval =
             Some(crate::records::AtBytes::from_raw(&expected));
         self.write_keyring_supersede(workspace_id, prior_uri, prior_cid, new_record)
-            .await
+            .await?;
+        Ok(WorkspaceMemberWriteResult {
+            verification_notice: RecipientVerificationNotice {
+                did: resolved.did,
+                verification: resolved.verification,
+            },
+        })
     }
 
     /// Re-derive and repair missing current member wraps for every workspace
@@ -1639,11 +1829,41 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     /// verified bundle or an unchanged recorded approval only, and rejects a
     /// head that changed while the recipient was resolved. Work that cannot
     /// run remains represented by the missing head wrap for a later pass.
+    /// Deferrals are in-memory scheduling hints keyed by the observed head:
+    /// a changed head or an explicit repair always re-evaluates authority.
     // spec:background-work § Remaining work is derived from records, never stored
     pub async fn sweep_member_wrap_repairs(&mut self) -> Result<MemberWrapRepairOutcome, Error> {
-        let workspaces = self.discover_member_workspaces().await?;
+        let pass_started = (self.now_micros_fn)();
+        let discovery_timer = self.identity_sleep_fn.clone();
+        let discovery = self.discover_member_workspaces();
+        let Some(discovery) = within_member_wrap_budget(
+            discovery_timer,
+            Duration::from_micros(MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS),
+            discovery,
+        )
+        .await
+        else {
+            return Ok(MemberWrapRepairOutcome {
+                discovery_deferred: true,
+                ..MemberWrapRepairOutcome::default()
+            });
+        };
+        let workspaces = discovery?;
         let private_keys = self.private_keys_from_cache();
         let mut outcome = MemberWrapRepairOutcome::default();
+        let now = pass_started;
+        let live_heads: HashSet<String> = workspaces
+            .iter()
+            .map(|workspace| workspace.uri.clone())
+            .collect();
+        retain_live_member_wrap_deferrals(&mut self.member_wrap_human_deferrals, &live_heads);
+        self.member_wrap_visibility_backoff
+            .retain(|head, _| live_heads.contains(head));
+        let mut repair_budget = MAX_MEMBER_WRAP_REPAIRS_PER_PASS;
+        let mut workspaces = workspaces;
+        if !workspaces.is_empty() {
+            rotate_member_wrap_workspaces(&mut workspaces, &mut self.member_wrap_workspace_cursor);
+        }
 
         for workspace in workspaces {
             let workspace_id = workspace.workspace_id();
@@ -1677,17 +1897,65 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 .map(|member| member.did().to_owned())
                 .collect();
 
-            for member_did in missing_members {
-                outcome.attempted += 1;
-                match self
-                    .repair_workspace_member_wrap(&workspace_id, &key, &member_did, None)
-                    .await
+            let head_uri = workspace.uri.clone();
+            if member_wrap_deferral_is_active(&self.member_wrap_visibility_backoff, &head_uri, now)
+            {
+                outcome.deferred_visibility += missing_members.len();
+                continue;
+            }
+
+            for (member_index, member_did) in missing_members.iter().enumerate() {
+                if repair_budget == 0
+                    || (self.now_micros_fn)().saturating_sub(now)
+                        >= MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS
                 {
-                    Ok(_) => outcome.repaired += 1,
+                    outcome.deferred_by_budget += missing_members.len() - member_index;
+                    break;
+                }
+                let member_key = format!("{head_uri}\u{1f}{member_did}");
+                if member_wrap_deferral_is_active(
+                    &self.member_wrap_human_deferrals,
+                    &member_key,
+                    now,
+                ) {
+                    outcome.deferred_human_decision += 1;
+                    continue;
+                }
+                repair_budget -= 1;
+                outcome.attempted += 1;
+                let remaining = MEMBER_WRAP_REPAIR_PASS_BUDGET_MICROS
+                    .saturating_sub((self.now_micros_fn)().saturating_sub(now));
+                let timer = self.identity_sleep_fn.clone();
+                let repair =
+                    self.repair_workspace_member_wrap(&workspace_id, &key, member_did, None);
+                let repair_result =
+                    within_member_wrap_budget(timer, Duration::from_micros(remaining), repair)
+                        .await;
+                let Some(repair_result) = repair_result else {
+                    outcome.deferred_by_budget += missing_members.len() - member_index;
+                    break;
+                };
+                match repair_result {
+                    Ok(write) => {
+                        outcome.repaired += 1;
+                        outcome.verification_notices.push(write.verification_notice);
+                    }
                     Err(Error::UnverifiedKeyApprovalRequired { .. }) => {
-                        outcome.awaiting_approval += 1
+                        outcome.awaiting_approval += 1;
+                        self.member_wrap_human_deferrals.insert(
+                            member_key,
+                            now.saturating_add(MEMBER_WRAP_HUMAN_DECISION_BACKOFF_MICROS),
+                        );
                     }
                     Err(Error::VerificationFailed(_)) => outcome.verification_failed += 1,
+                    Err(Error::VisibilityTimeout { .. }) => {
+                        outcome.deferred_visibility += missing_members.len() - member_index;
+                        self.member_wrap_visibility_backoff.insert(
+                            head_uri.clone(),
+                            now.saturating_add(MEMBER_WRAP_VISIBILITY_BACKOFF_MICROS),
+                        );
+                        break;
+                    }
                     // A changed head, including a removed member, is never
                     // rebased by the runner. The next pass re-derives it.
                     Err(Error::CasConflict(_)) | Err(Error::NotFound(_)) => outcome.stale += 1,
@@ -1816,6 +2084,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
         let new_rotation = prior.rotation + 1;
 
         let mut excluded_members = Vec::new();
+        let mut verification_notices = Vec::new();
         let mut new_members: Vec<KeyringMember> = Vec::with_capacity(prior.members.len() - 1);
         for prior_member in prior
             .members
@@ -1849,9 +2118,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                 new_members.push(member);
                 continue;
             }
-            let resolved = match self.resolve_identity(member.did()).await {
-                Ok(resolved) => resolved,
-                Err(error) => {
+            let timer = self.identity_sleep_fn.clone();
+            let resolution = within_member_wrap_budget(
+                timer,
+                Duration::from_micros(MEMBER_REMOVAL_RECIPIENT_RESOLUTION_BUDGET_MICROS),
+                self.resolve_identity(member.did()),
+            )
+            .await;
+            let resolved = match resolution {
+                Some(Ok(resolved)) => resolved,
+                Some(Err(error)) => {
                     let reason = if matches!(error, Error::VerificationFailed(_)) {
                         ExcludedMemberReason::VerificationFailed
                     } else {
@@ -1864,8 +2140,16 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                     new_members.push(member);
                     continue;
                 }
+                None => {
+                    excluded_members.push(ExcludedMember {
+                        did: member.did.clone(),
+                        reason: ExcludedMemberReason::ResolutionFailed,
+                    });
+                    new_members.push(member);
+                    continue;
+                }
             };
-            let permitted = match resolved.verification {
+            let permitted = match &resolved.verification {
                 crate::resolve::VerificationState::Verified { .. } => true,
                 crate::resolve::VerificationState::Unverified => {
                     let expected = crate::crypto::unverified_key_approval(
@@ -1886,6 +2170,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
                         .is_some_and(|approval| approval.as_slice() == expected)
                 }
             };
+            verification_notices.push(RecipientVerificationNotice {
+                did: resolved.did.clone(),
+                verification: resolved.verification.clone(),
+            });
             if !permitted {
                 excluded_members.push(ExcludedMember {
                     did: member.did.clone(),
@@ -1958,6 +2246,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             group_key: new_group_key,
             rotation: new_rotation,
             excluded_members,
+            verification_notices,
         })
     }
 
@@ -2253,10 +2542,62 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     // -- Sharing (pending shares) --
 
     /// List pending (queued) outgoing shares.
+    ///
+    /// The authorized DID lives inside each intent's encrypted metadata, so
+    /// exposing it costs a content-key fetch per document. Entries whose DID
+    /// cannot be read are still listed, carrying the cause: an owner deciding
+    /// whether to cancel a queued share needs to know whether the PDS was
+    /// unreachable, the key is gone, or the intent itself is corrupt.
+    ///
+    // spec:sharing-grants § A share to a not-yet-ready recipient is queued, not dropped
     pub async fn list_pending_shares(
         &mut self,
     ) -> Result<Vec<crate::sharing::PendingShareEntry>, Error> {
-        let result = crate::sharing::list_pending_shares(&mut self.client).await;
+        let private_keys = self.private_keys_from_cache();
+        let mut result = crate::sharing::list_pending_shares(&mut self.client).await;
+        if let Ok(entries) = &mut result {
+            // Several intents routinely queue against the same document, and
+            // each content-key fetch is its own PDS round trip.
+            let mut content_keys: std::collections::HashMap<
+                String,
+                Result<crate::crypto::ContentKey, String>,
+            > = std::collections::HashMap::new();
+            for entry in entries {
+                if !content_keys.contains_key(&entry.document) {
+                    let fetched = crate::documents::fetch_content_key(
+                        &mut self.client,
+                        &self.did,
+                        &private_keys.bundle(),
+                        &entry.document,
+                    )
+                    .await
+                    .map_err(|error| describe_content_key_failure(&error));
+                    content_keys.insert(entry.document.clone(), fetched);
+                }
+                let content_key = match &content_keys[&entry.document] {
+                    Ok(content_key) => content_key,
+                    Err(reason) => {
+                        entry.recipient_did_error = Some(reason.clone());
+                        continue;
+                    }
+                };
+                let context = crate::crypto::SealContext::new(
+                    &entry.document,
+                    crate::crypto::SealType::PendingShareMetadata,
+                );
+                match crate::crypto::decrypt_metadata::<crate::crypto::PendingShareMetadata>(
+                    content_key,
+                    &entry.encrypted_metadata,
+                    &context,
+                ) {
+                    Ok(metadata) => entry.recipient_did = Some(metadata.recipient_did),
+                    Err(_) => {
+                        entry.recipient_did_error =
+                            Some("the queued intent metadata could not be decrypted".into());
+                    }
+                }
+            }
+        }
         self.signoff(result).await
     }
 
@@ -2504,49 +2845,6 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
 
     // -- Re-wrap sweep (background hygiene) --
 
-    /// Re-wrap sweep entrypoint.
-    ///
-    /// This destructive document migration is deliberately disabled while
-    /// member-wrap exclusions are rolling out. A document sweep cannot safely
-    /// infer that every admitted member holds the live key from a `Workspace`
-    /// key alone; enabling it again requires a fresh-head, per-item exclusion
-    /// guard at the write boundary. Returning an empty outcome preserves the
-    /// daemon contract without allowing a caller to migrate documents through
-    /// the old unsafe helper.
-    pub async fn sweep_owned_documents_rewrap(
-        &mut self,
-    ) -> Result<crate::rewrap::RewrapOutcome, Error> {
-        Ok(crate::rewrap::RewrapOutcome::default())
-    }
-
-    /// List the AT-URIs of every `at.opake.document` record in the caller's
-    /// own repo. The re-wrap sweep's candidate set is derived from these.
-    /// spec:background-work § Remaining work is derived from records, never stored
-    pub async fn list_own_document_uris(&mut self) -> Result<Vec<String>, Error> {
-        let mut uris = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = self
-                .client
-                .list_records(
-                    crate::documents::DOCUMENT_COLLECTION,
-                    Some(100),
-                    cursor.as_deref(),
-                )
-                .await?;
-            if page.records.is_empty() {
-                break;
-            }
-            uris.extend(page.records.iter().map(|r| r.uri.clone()));
-            match page.cursor {
-                Some(next) => cursor = Some(next),
-                None => break,
-            }
-        }
-        self.auto_persist_session().await?;
-        Ok(uris)
-    }
-
     // -- Purge --
 
     /// Delete all records in a collection. Returns the number of records deleted.
@@ -2593,6 +2891,23 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
     ) -> Result<crate::client::RecordEntry, Error> {
         let result = self.client.get_record(did, collection, rkey).await;
         self.signoff(result).await
+    }
+}
+
+/// Short owner-facing cause for a content key a listing could not obtain.
+///
+/// The distinction that matters to the owner is retry-shaped: a transport
+/// failure is worth trying again, an unavailable key is not.
+fn describe_content_key_failure(error: &Error) -> String {
+    match error {
+        Error::Xrpc { .. }
+        | Error::Indexer { .. }
+        | Error::Auth(_)
+        | Error::NotFound(_)
+        | Error::VisibilityTimeout { .. } => {
+            format!("the document record could not be fetched: {error}")
+        }
+        _ => format!("the document content key is unavailable: {error}"),
     }
 }
 

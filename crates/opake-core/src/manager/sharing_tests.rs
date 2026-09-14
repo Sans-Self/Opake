@@ -144,8 +144,12 @@ async fn create_pending_share_from_workspace_context_is_refused_and_writes_nothi
     let err = mgr
         .create_pending_share(
             DOC_URI,
-            "alice.bsky.social",
-            "did:plc:alice",
+            &crate::manager::PendingShareRecipient {
+                recipient: "alice.bsky.social".into(),
+                did: "did:plc:alice".into(),
+                document_uri: DOC_URI.into(),
+                owner_did: OWNER_DID.into(),
+            },
             true,
             "read",
             None,
@@ -174,8 +178,12 @@ async fn declined_first_publication_permission_does_not_enqueue() {
     let err = mgr
         .create_pending_share(
             DOC_URI,
-            "recipient.test",
-            "did:plc:recipient",
+            &crate::manager::PendingShareRecipient {
+                recipient: "recipient.test".into(),
+                did: "did:plc:recipient".into(),
+                document_uri: DOC_URI.into(),
+                owner_did: CALLER_DID.into(),
+            },
             false,
             "read",
             None,

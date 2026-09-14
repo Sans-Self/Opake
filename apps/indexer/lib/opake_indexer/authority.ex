@@ -8,10 +8,10 @@ defmodule OpakeIndexer.Authority do
       keyring supersede is valid iff the author is a manager of the
       workspace per the current head keyring's member list, OR the author
       is a non-manager member and the supersede is a pure *leave*: the
-      new member list is exactly the prior list minus the author, with
-      every remaining member's role unchanged. Anything else a
-      non-manager writes — adding members, dropping someone else,
-      re-roling, smuggling changes alongside the self-removal — is
+      complete record is the prior record minus the author, with only
+      chain-edge transport fields changed. Anything else a non-manager
+      writes — adding members, replacing wraps or approvals, changing key
+      state, or smuggling future fields alongside the self-removal — is
       rejected. For first-fault simplicity we use the current view;
       cross-chain time-travel verification is deferred.
 
@@ -75,13 +75,15 @@ defmodule OpakeIndexer.Authority do
   of the workspace, or a non-manager member authoring a pure self-removal
   (see the moduledoc). Genesis records (no prior head) skip the check.
 
-  `new_members` is the list parsed straight from `record_jsonb["members"]`
-  — each entry has an explicit `"did"` and `"role"`.
+  `new_record` is the complete parsed keyring record. A non-manager leave may
+  remove only its author; all keyring state apart from supersede/time transport
+  fields must be preserved.
   """
-  @spec check_keyring_supersede(String.t(), String.t() | nil, String.t(), [map()]) :: result()
-  def check_keyring_supersede(_workspace_id, nil, _author_did, _new_members), do: :ok
+  @spec check_keyring_supersede(String.t(), String.t() | nil, String.t(), map()) ::
+          result()
+  def check_keyring_supersede(_workspace_id, nil, _author_did, _new_record), do: :ok
 
-  def check_keyring_supersede(workspace_id, _prior_uri, author_did, new_members) do
+  def check_keyring_supersede(workspace_id, _prior_uri, author_did, new_record) do
     case classify_role(RecordQueries.member_role(workspace_id, author_did),
            workspace_id: workspace_id
          ) do
@@ -92,7 +94,7 @@ defmodule OpakeIndexer.Authority do
         {:rejected, :not_a_member}
 
       _ ->
-        if pure_self_removal?(workspace_id, author_did, new_members) do
+        if pure_self_removal?(workspace_id, author_did, new_record) do
           :ok
         else
           {:rejected, :insufficient_role}
@@ -100,48 +102,54 @@ defmodule OpakeIndexer.Authority do
     end
   end
 
-  # A non-manager supersede is a valid leave iff the new member list is
-  # exactly the head's list minus the author: author absent, nobody else
-  # added or dropped, every remaining role unchanged. Compared on
-  # {did, role, wrap presence, approval} tuples — a self-removal may not alter a
-  # remaining member's key availability or approval while leaving.
-  defp pure_self_removal?(workspace_id, author_did, new_members) do
-    case RecordQueries.head_member_states(workspace_id) do
+  # A leave is valid only when the complete head record equals the new record
+  # after removal of the author and normalisation of byte encodings.  This
+  # protects rotation, key history, metadata, remaining ciphertexts and future
+  # record fields from being smuggled through a members-only comparison.
+  defp pure_self_removal?(workspace_id, author_did, new_record) do
+    case RecordQueries.workspace_keyring_head(workspace_id) do
       nil ->
         false
 
-      prior_roles ->
-        expected = Map.delete(prior_roles, author_did)
-        member_state(new_members) == expected
-    end
-  end
-
-  defp member_state(members) when is_list(members) do
-    Map.new(members, fn
-      %{"did" => did, "role" => role} = member ->
-        {did,
-         {role, is_map(member["wrappedKey"]), approval_bytes(member["unverifiedKeyApproval"])}}
+      %{record_jsonb: %{"members" => prior_members} = prior_record} when is_list(prior_members) ->
+        with %{"members" => new_members} when is_list(new_members) <- new_record,
+             expected_members <- Enum.reject(prior_members, &(&1["did"] == author_did)),
+             true <- length(expected_members) + 1 == length(prior_members),
+             true <- length(new_members) == length(expected_members) do
+          normalise_record(Map.put(prior_record, "members", expected_members)) ==
+            normalise_record(new_record)
+        else
+          _ -> false
+        end
 
       _ ->
-        {nil, nil}
-    end)
-  end
-
-  defp member_state(_), do: %{}
-
-  # Canonical JSON bytes can be padded or unpadded base64.  Approval equality
-  # is over the decoded commitment, while a malformed declaration can never
-  # satisfy a self-removal comparison.
-  defp approval_bytes(nil), do: nil
-
-  defp approval_bytes(%{"$bytes" => encoded}) when is_binary(encoded) do
-    case OpakeIndexer.Auth.Base64.decode(encoded) do
-      {:ok, bytes} when byte_size(bytes) == 32 -> bytes
-      _ -> :invalid
+        false
     end
   end
 
-  defp approval_bytes(_), do: :invalid
+  # These fields identify or timestamp the chain edge. `lineage` itself is
+  # separately immutable under `check_lineage/2`; omitting it here does not
+  # permit a lineage flip.
+  @leave_transport_fields ~w(supersedes supersedesCid lineage createdAt modifiedAt)
+
+  defp normalise_record(record) do
+    record
+    |> Map.drop(@leave_transport_fields)
+    |> normalise_json()
+  end
+
+  defp normalise_json(%{"$bytes" => encoded}) when is_binary(encoded) do
+    case OpakeIndexer.Auth.Base64.decode(encoded) do
+      {:ok, bytes} -> {:bytes, bytes}
+      {:error, _} -> :invalid_bytes
+    end
+  end
+
+  defp normalise_json(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {k, normalise_json(v)} end)
+
+  defp normalise_json(list) when is_list(list), do: Enum.map(list, &normalise_json/1)
+  defp normalise_json(value), do: value
 
   # -- Directory authority --
 
