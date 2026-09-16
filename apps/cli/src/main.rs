@@ -42,7 +42,7 @@ Quick start:
   opake ls
   opake share new secret.pdf bob.bsky.social
 
-https://opake.app",
+https://opake.at",
 )]
 struct Cli {
     /// Act as a specific account (handle or DID)

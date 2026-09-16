@@ -38,11 +38,13 @@ spec:
                   key: secret-key-base
             - name: PHX_SERVER
               value: "true"
-            # jetstream2 us-east is deliberate: the Frankfurt instance has
-            # served silent zero-frame streams before. Overlays do not
-            # override this.
+            # Eurosky's jetstream keeps the firehose on European
+            # infrastructure and speaks the same zstd dictionary as the
+            # upstream one. Bluesky's Frankfurt instance is still not an
+            # option: it has served silent zero-frame streams before.
+            # Overlays do not override this.
             - name: JETSTREAM_URL
-              value: wss://jetstream2.us-east.bsky.network/subscribe
+              value: wss://jetstream1.eurosky.network/subscribe
             # PHX_HOST, CORS_ORIGIN, OPAKE_FRONTEND_URL are set per overlay.
           startupProbe:
             httpGet:

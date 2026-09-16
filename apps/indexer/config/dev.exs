@@ -18,7 +18,7 @@ config :opake_indexer, OpakeIndexerWeb.Endpoint,
   watchers: []
 
 config :opake_indexer,
-  jetstream_url: "wss://jetstream2.us-east.bsky.network/subscribe",
+  jetstream_url: "wss://jetstream1.eurosky.network/subscribe",
   firehose_mode: :opake_only,
   cors_origin: "*"
 

@@ -1,4 +1,4 @@
-const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined) ?? "https://opake.app";
+const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined) ?? "https://opake.at";
 
 interface OgMeta {
   readonly title: string;

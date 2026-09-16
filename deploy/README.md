@@ -11,8 +11,7 @@ deploy/k8s/
   base/           web (static frontend), indexer (Elixir, Phoenix)
   overlays/
     staging/      staging.opake.at + indexer.staging.opake.at, basic-auth gated
-    prod/         opake.at + indexer.opake.at, plus the opake.app → opake.at
-                  permanent redirect (domain being phased out)
+    prod/         opake.at + indexer.opake.at
 ```
 
 Images are built for amd64 by the GitHub Actions workflows and pushed to
