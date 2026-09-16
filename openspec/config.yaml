@@ -1,20 +1,88 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Shown to the agent whenever it writes a change artefact.
+context: |
+  Claims about how existing code behaves are verified by reading it, not
+  asserted from memory. The repo is the source of truth; a spec that
+  contradicts it is a defect, and `just spec-lint` (`scripts/spec_lint.py`)
+  verifies that cited paths, test names, hashes and requirement names
+  resolve.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Cite evidence inline: a repo path (`crates/opake-core/src/directories/chain.rs`),
+  a symbol pinned to its file (`verify_keyring_chain_authority`
+  (crates/opake-core/src/directories/chain.rs)), a `bug__` regression-test
+  name, a backticked commit hash, or another requirement as
+  `spec:<capability> § <requirement name>`. A commit in a sibling repository
+  is qualified — `Infrastructure@b4f2a4a` — because the lint can only
+  resolve hashes in this one.
+
+  Artefacts are written in plain language (ISO 24495-1:2023): the reader is
+  an engineer who opens the spec to settle a question six months from now,
+  having not read the discussion that produced it. Read the
+  `plain-language` skill in `.claude/skills/plain-language/` before writing
+  prose. Nothing checks this mechanically: `just spec-lint` is referential
+  only, so plainness is settled in review.
+
+# Per-artefact rules. Constraints on what gets written, not content to copy.
+rules:
+  design:
+    - >-
+      A question that can be settled by reading the codebase is not a design
+      decision. Read the code, state the finding with a citation, move on.
+      Decisions are for genuine alternatives that no cheap experiment resolves
+      - irreversible record formats, key hierarchies, federation boundaries, a
+      convention every client must agree on.
+    - >-
+      Every assertion about existing behaviour carries a `symbol` (path.rs)
+      citation. An uncited assertion about current code is rejected in review:
+      it has not been checked, and review cannot check it cheaply.
+    - >-
+      Prefer specifying observable behaviour and contract over mechanism. "A
+      removed member cannot decrypt records written after the removal" is a
+      requirement; "wrap the new group key to every remaining member" is an
+      implementation choice that belongs in the code, where it is executable
+      and testable.
+  proposal:
+    - >-
+      Name the capabilities and crates or apps the change touches, with paths.
+    - >-
+      State what is deliberately out of scope, not just what is included.
+    - >-
+      Lead with what changes. The history that led here is context for the
+      design doc, not the opening paragraph.
+    - >-
+      Size a change so its artefacts fit one sitting of writing - two to four
+      hours - and its implementation lands in pull requests a reviewer can
+      read in one. A design that cannot split without leaving canon
+      incoherent between changes is a design pass first and a sequence of
+      changes second.
+  spec:
+    - >-
+      One rule per sentence. A sentence carrying two SHALLs is two sentences,
+      or two requirements.
+    - >-
+      Name the actor, then the modal: "The client SHALL recompute the CID from
+      the fetched bytes", not "The CID SHALL be recomputed from the fetched
+      bytes". A requirement without an actor cannot be tested.
+    - >-
+      Keep argument out of the requirement body. Why the rule exists belongs
+      in design.md or a `> Note:` under it; a requirement that spends three
+      clauses fending off an objection no longer reads as law.
+    - >-
+      Requirement names are citation keys as well as headings: a short plain
+      claim ("Removal rotates the group key; leave does not"), no backticks,
+      no paths, no code identifiers. A symbol in a name rots the moment it is
+      renamed and takes every citing test with it.
+    - >-
+      One condition per scenario keyword line; a second condition gets its own
+      `- **AND**` line. Never compound a WHEN with "and".
+  tasks:
+    - >-
+      Each task states the check that proves it done - a test name, a lint, a
+      command and its expected output. Name files only where the work is a
+      known edit to a known place; where the code will land is discovered
+      while writing it, not planned.
+    - >-
+      Tasks describe implementation. Spec-workflow steps - archiving, syncing,
+      validating a change - belong to the opsx skills and the CLI's own status
+      tracking, never to the task list.
