@@ -1,3 +1,5 @@
+# account-verification Specification
+
 ## Purpose
 
 Verification is how a client learns that an account's published encryption keys are vouched for by
@@ -7,7 +9,7 @@ signing an operation the log records permanently. This capability owns the DID-d
 the signature over the published key record, the three-valued resolution every consumer performs,
 and what each outcome obliges the caller to do.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: A verified account publishes its signing key as a DID-document verification method
 
@@ -411,9 +413,8 @@ of one without authenticating the submitter. An account holding its own PLC rota
 publishes its verification method with no other party's participation. An account holding none must
 ask a rotation-key holder to sign, and that party may decline — leaving no record of the refusal
 anywhere, since no operation is ever submitted. Such an account cannot escape the refusal from
-inside, because acquiring a PLC rotation key is itself an operation the same party must sign
-(`spec:terminology § The parties behind an account are named by what they control`). A client SHALL report a
-refused publication to the owner rather than retrying silently.
+inside, because acquiring a PLC rotation key is itself an operation the same party must sign.
+A client SHALL report a refused publication to the owner rather than retrying silently.
 
 #### Scenario: an account whose anchor is gone is told it is no longer verified
 

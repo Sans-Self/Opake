@@ -63,6 +63,8 @@ The check runs on every resolution, own and foreign alike — it is a single off
 
 An outsider consequently cannot construct a keyring that resolves as another workspace: producing wrapped key material whose rotation-0 key derives the victim's tag is a preimage attack. Key-holders (members and ex-members) can mint identity-valid records; forks by key-holders remain the jurisdiction of chain authority enforcement, and the parties able to forge a workspace's identity are exactly the parties already trusted with its content.
 
+A missing current-rotation wrap SHALL NOT bypass this check or require a current key when usable historical material already supplies rotation 0. Every adopting path SHALL derive and verify identity from that historical material before adopting a historical-only workspace. Failure to obtain the rotation-0 key SHALL not be replaced by trust in the declared lineage, the member list, or approval evidence: direct resolution reports unavailable identity-verification material, and keeper/listing paths adopt nothing. The no-current-wrap state is not itself an identity mismatch.
+
 #### Scenario: impersonating keyring fails derivation
 
 - **GIVEN** a keyring record on an attacker's PDS declaring `lineage` equal to another workspace's genesis URI, with the attacker's own group key wrapped to the target
@@ -92,6 +94,18 @@ An outsider consequently cannot construct a keyring that resolves as another wor
 - **GIVEN** a keyring delete whose outcome restores an earlier record as head (`spec:keyring-tombstones § Rollback restores the newest live record and re-broadcasts it`)
 - **WHEN** a member re-resolves the workspace from the restored head
 - **THEN** the derivation check passes identically — verification is direction-agnostic and holds no head-position state
+
+#### Scenario: historical-only adoption still verifies identity
+
+- **GIVEN** a head listing the local member without a current wrap but with a usable rotation-0 historical wrap
+- **WHEN** direct resolution, keeper bootstrap, SSE adoption, or daemon sync processes it
+- **THEN** the genesis derivation check runs before historical-only state is adopted, and a forged identity still adopts nothing
+
+#### Scenario: membership alone cannot replace identity proof
+
+- **GIVEN** a head names the local DID but supplies no usable material from which that client can obtain rotation 0
+- **WHEN** the client attempts identity adoption
+- **THEN** it does not create workspace-keyed state merely because membership or approval is present
 
 ### Requirement: Group-key wraps are AEAD-bound to genesis
 
@@ -177,6 +191,8 @@ The SSE dispatch layer SHALL derive the workspace identity from the event's reco
 
 For keyring delete events the record is gone, so the identity SHALL come from the payload's `workspace_id`, and whether any keeper operation runs at all is governed by the payload's outcome (`spec:keyring-tombstones § Clients act on the outcome, never on URI matching`): only `torn_down` removes an entry, keyed by the payload's `workspace_id` — never by the deleted `uri`.
 
+For upserts, removal SHALL be decided by absence of the local DID from the explicit current member list, never by absence of `wrappedKey`. A retained member without a current wrap SHALL take the identity-verified historical-only adoption path, preserving the workspace entry when that path succeeds rather than handling the event as removal.
+
 #### Scenario: removed member's sidebar drops the workspace
 
 - **GIVEN** member B of a workspace whose SSE consumer is connected
@@ -197,6 +213,12 @@ For keyring delete events the record is gone, so the identity SHALL come from th
 - **WHEN** it is fed a keyring delete payload whose `uri` equals the tracked `workspace_id` and whose outcome is `unchanged`
 - **THEN** the keeper entry survives — the delete is record cleanup, not destruction
 - Regression: `bug__genesis_delete_tombstone_drops_living_workspace` (crates/opake-core/src/indexer/workspace_keeper/tests.rs)
+
+#### Scenario: a withheld wrap is not a sidebar removal
+
+- **GIVEN** the local member remains in the new head with a missing current wrap and usable rotation-0 history
+- **WHEN** the keyring upsert is consumed
+- **THEN** the identity-verified workspace entry remains, retains the member's role, and signals current-key unavailability separately
 
 ### Requirement: Membership authority is the live chain head
 
