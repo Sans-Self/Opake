@@ -192,6 +192,7 @@ pub struct IdentityOperation<T: Transport> {
     transport: T,
     pds_url: String,
     did: String,
+    login_hint: String,
     redirect_uri: String,
     change: VerificationMethodChange,
     dpop_key: DpopKeyPair,
@@ -211,6 +212,9 @@ pub struct IdentityOperation<T: Transport> {
 pub struct IdentityOperationConfig {
     pub pds_url: String,
     pub did: String,
+    /// What the provider's account selector is pre-filled with. A handle where
+    /// one is known, else the DID; authority is always `did`, never this.
+    pub login_hint: String,
     pub redirect_uri: String,
     pub change: VerificationMethodChange,
     pub now_micros: fn() -> u64,
@@ -251,6 +255,7 @@ impl<T: Transport> IdentityOperation<T> {
             transport,
             pds_url: config.pds_url,
             did: config.did,
+            login_hint: config.login_hint,
             redirect_uri: config.redirect_uri,
             change: config.change,
             dpop_key: DpopKeyPair::generate(rng),
@@ -313,7 +318,10 @@ impl<T: Transport> IdentityOperation<T> {
                 &self.pkce,
                 "atproto identity:*",
                 self.state.as_str(),
-                None,
+                // The operation already knows which account it acts on, so the
+                // provider's account selector is pre-filled rather than asking
+                // the owner to re-enter what the client just resolved.
+                Some(self.login_hint.as_str()),
                 &self.dpop_key,
                 &mut self.dpop_nonce,
                 (self.now_micros)() as i64 / 1_000_000,
@@ -556,11 +564,20 @@ impl<T: Transport> IdentityOperation<T> {
         self.pre_submit_opake = current;
         let state = bounded(&self.sleep, resolve_plc_state(&self.transport, &self.did))
             .await
-            .map_err(|_| IdentityRefusal::PreparationFailed)?
-            .map_err(|_| IdentityRefusal::PreparationFailed)?;
+            .map_err(|_| {
+                log::warn!("PLC state read did not complete within the operation deadline");
+                IdentityRefusal::PreparationFailed
+            })?
+            .map_err(|error| {
+                log::warn!("PLC state read failed: {error}");
+                IdentityRefusal::PreparationFailed
+            })?;
         let body = self
             .sign_request_body(state, confirmation.as_str())
-            .map_err(|_| IdentityRefusal::PreparationFailed)?;
+            .map_err(|error| {
+                log::warn!("PLC operation body could not be built: {error}");
+                IdentityRefusal::PreparationFailed
+            })?;
         self.ensure_live()
             .map_err(|_| IdentityRefusal::SignerRefused)?;
         let sign_url = format!(
@@ -583,9 +600,19 @@ impl<T: Transport> IdentityOperation<T> {
         .await;
         let response = match signer_response {
             Ok(Ok(response)) => response,
-            Ok(Err(_)) | Err(_) => return Err(IdentityRefusal::SignerResponseUnknown),
+            Ok(Err(error)) => {
+                log::warn!("signPlcOperation transport failure: {error}");
+                return Err(IdentityRefusal::SignerResponseUnknown);
+            }
+            Err(_) => {
+                log::warn!("signPlcOperation did not complete within the operation deadline");
+                return Err(IdentityRefusal::SignerResponseUnknown);
+            }
         };
-        require_success(&response).map_err(|_| IdentityRefusal::SignerRefused)?;
+        require_success(&response).map_err(|error| {
+            log::warn!("signPlcOperation refused: {error}");
+            IdentityRefusal::SignerRefused
+        })?;
         let operation = serde_json::from_slice::<serde_json::Value>(&response.body)
             .map_err(|_| IdentityRefusal::SignerResponseUnknown)?
             .get("operation")
@@ -612,9 +639,18 @@ impl<T: Transport> IdentityOperation<T> {
             ),
         )
         .await
-        .map_err(|_| IdentityRefusal::SignerRefused)?
-        .map_err(|_| IdentityRefusal::SignerRefused)?;
-        require_success(&response).map_err(|_| IdentityRefusal::SignerRefused)
+        .map_err(|_| {
+            log::warn!("submitPlcOperation did not complete within the operation deadline");
+            IdentityRefusal::SignerRefused
+        })?
+        .map_err(|error| {
+            log::warn!("submitPlcOperation transport failure: {error}");
+            IdentityRefusal::SignerRefused
+        })?;
+        require_success(&response).map_err(|error| {
+            log::warn!("submitPlcOperation refused: {error}");
+            IdentityRefusal::SignerRefused
+        })
     }
 
     async fn reconcile(&self) -> IdentityReconciliation {
@@ -682,6 +718,9 @@ impl<T: Transport> IdentityOperation<T> {
         let methods = serde_json::Value::Object(methods.clone());
         let mut public_fields = serde_json::Map::new();
         public_fields.insert("verificationMethods".into(), methods);
+        // `signPlcOperation` merges each absent field from the account's last
+        // operation, so omitting one leaves it unchanged rather than deleting
+        // it. Copying whatever the directory reported is therefore safe.
         for field in ["rotationKeys", "alsoKnownAs", "services"] {
             if let Some(value) = state.get(field).cloned() {
                 public_fields.insert(field.into(), value);
@@ -830,8 +869,39 @@ fn require_success(response: &super::transport::HttpResponse) -> Result<(), Erro
     } else {
         Err(Error::Xrpc {
             status: response.status,
-            message: "identity endpoint refused request".into(),
+            message: describe_identity_failure(&response.body),
         })
+    }
+}
+
+/// The identity endpoints answer a refusal with an XRPC error body. Carrying it
+/// into the error is what lets an operator tell a rejected confirmation from a
+/// directory that bounced the operation; without it every failure reads alike.
+/// Bodies are bounded and the confirmation token is never echoed back in them.
+fn describe_identity_failure(body: &[u8]) -> String {
+    const LIMIT: usize = 512;
+    let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let described = parsed.as_ref().and_then(|value| {
+        let error = value.get("error").and_then(serde_json::Value::as_str);
+        let message = value.get("message").and_then(serde_json::Value::as_str);
+        match (error, message) {
+            (Some(error), Some(message)) => Some(format!("{error}: {message}")),
+            (Some(only), None) | (None, Some(only)) => Some(only.to_owned()),
+            (None, None) => None,
+        }
+    });
+    let described = described.unwrap_or_else(|| match std::str::from_utf8(body) {
+        Ok(text) if !text.trim().is_empty() => text.trim().to_owned(),
+        _ => "identity endpoint refused request".into(),
+    });
+    if described.len() > LIMIT {
+        let cut = (0..=LIMIT)
+            .rev()
+            .find(|&i| described.is_char_boundary(i))
+            .unwrap_or(0);
+        format!("{}…", &described[..cut])
+    } else {
+        described
     }
 }
 
@@ -865,6 +935,7 @@ mod tests {
             IdentityOperationConfig {
                 pds_url: "https://pds.example.test".into(),
                 did: "did:plc:alice".into(),
+                login_hint: "did:plc:alice".into(),
                 redirect_uri: "https://app.example.test/callback".into(),
                 change: VerificationMethodChange::Remove,
                 now_micros: now,
@@ -1134,6 +1205,57 @@ mod tests {
         assert!(!operation.did().is_empty());
     }
 
+    /// The provider's account selector is labelled for a handle. Sending the
+    /// DID when a handle is known leaves the owner reading an opaque string
+    /// back at themselves, so the hint follows whatever the client resolved.
+    #[tokio::test]
+    async fn authorization_hints_the_account_the_operation_acts_on() {
+        let transport = MockTransport::new();
+        transport.enqueue(response(serde_json::json!({
+            "resource": "https://pds.example.test",
+            "authorization_servers": ["https://auth.example.test"]
+        })));
+        transport.enqueue(response(serde_json::json!({
+            "issuer": "https://auth.example.test",
+            "authorization_endpoint": "https://auth.example.test/authorize",
+            "token_endpoint": "https://auth.example.test/token",
+            "pushed_authorization_request_endpoint": "https://auth.example.test/par"
+        })));
+        transport.enqueue(response(serde_json::json!({
+            "request_uri": "urn:request:opaque",
+            "expires_in": 60
+        })));
+
+        let mut rng = crate::crypto::OsRng;
+        let (mut operation, _cancel) = IdentityOperation::new(
+            transport.clone(),
+            IdentityOperationConfig {
+                pds_url: "https://pds.example.test".into(),
+                did: "did:plc:alice".into(),
+                login_hint: "alice.test".into(),
+                redirect_uri: "https://app.example.test/callback".into(),
+                change: VerificationMethodChange::Publish([7; 32]),
+                now_micros: now,
+                sleep: immediate_sleep(),
+            },
+            &mut rng,
+        );
+        operation.start_authorization().await.unwrap();
+
+        let requests = transport.requests();
+        let RequestBody::Form(params) = requests[2].body.as_ref().unwrap() else {
+            panic!("PAR must be form encoded");
+        };
+        assert_eq!(
+            params
+                .iter()
+                .find(|(name, _)| name == "login_hint")
+                .unwrap()
+                .1,
+            "alice.test"
+        );
+    }
+
     #[tokio::test]
     async fn separate_identity_operations_use_fresh_state_pkce_and_dpop_keys() {
         let transport = MockTransport::new();
@@ -1272,6 +1394,7 @@ mod tests {
             IdentityOperationConfig {
                 pds_url: "https://pds.example.test".into(),
                 did: "did:plc:alice".into(),
+                login_hint: "did:plc:alice".into(),
                 redirect_uri: "https://app.example.test/callback".into(),
                 change: VerificationMethodChange::Remove,
                 now_micros: now,
@@ -1359,6 +1482,7 @@ mod tests {
             IdentityOperationConfig {
                 pds_url: "https://pds.example.test".into(),
                 did: "did:plc:alice".into(),
+                login_hint: "did:plc:alice".into(),
                 redirect_uri: "https://app.example.test/callback".into(),
                 change: VerificationMethodChange::Publish([9; 32]),
                 now_micros: now,
@@ -1563,6 +1687,7 @@ mod tests {
             IdentityOperationConfig {
                 pds_url: "https://pds.example.test".into(),
                 did: "did:plc:alice".into(),
+                login_hint: "did:plc:alice".into(),
                 redirect_uri: "https://app.example.test/callback".into(),
                 change: VerificationMethodChange::Remove,
                 now_micros: now,
@@ -1632,6 +1757,7 @@ mod tests {
                 IdentityOperationConfig {
                     pds_url: "https://pds.example.test".into(),
                     did: "did:plc:alice".into(),
+                    login_hint: "did:plc:alice".into(),
                     redirect_uri: "https://app.example.test/callback".into(),
                     change: VerificationMethodChange::Publish([9; 32]),
                     now_micros: now,
@@ -1718,6 +1844,7 @@ mod tests {
             IdentityOperationConfig {
                 pds_url: "https://pds.example.test".into(),
                 did: "did:plc:alice".into(),
+                login_hint: "did:plc:alice".into(),
                 redirect_uri: "https://app.example.test/callback".into(),
                 change: VerificationMethodChange::Publish([7; 32]),
                 now_micros: now,

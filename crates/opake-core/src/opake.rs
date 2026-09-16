@@ -230,6 +230,9 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
     /// operations. Unlike the indexer retry sleeper, an operation must retain
     /// this after it leaves `Opake`, so the callback uses an `Rc`-backed type.
     pub(crate) identity_sleep_fn: Option<crate::client::identity_operation::IdentitySleepFn>,
+    /// The account's handle when one is known locally. It is display and
+    /// hint material only — never authority, which is always the DID.
+    pub(crate) handle: Option<String>,
     /// Ephemeral scheduling-only cache for missing wraps that need a human
     /// confirmation. It is keyed by the observed head and never authorizes
     /// membership or survives an `Opake` instance.
@@ -423,6 +426,7 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             cached_private_keys,
             sleep_fn: None,
             identity_sleep_fn: None,
+            handle: None,
             member_wrap_human_deferrals: HashMap::new(),
             member_wrap_visibility_backoff: HashMap::new(),
             member_wrap_workspace_cursor: 0,
@@ -562,6 +566,9 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             crate::client::identity_operation::IdentityOperationConfig {
                 pds_url: self.client.base_url().to_owned(),
                 did: self.did.clone(),
+                // The provider's account selector is labelled for a handle, so
+                // hint with one where it is known and fall back to the DID.
+                login_hint: self.handle.clone().unwrap_or_else(|| self.did.clone()),
                 redirect_uri,
                 change,
                 now_micros: self.now_micros_fn,
@@ -621,8 +628,10 @@ impl<T: Transport, R: CryptoRng + RngCore, S: Storage> Opake<T, R, S> {
             let _ = storage.save_identity(&target_did, &identity).await;
         }
 
+        let handle = account.handle.clone();
         let client = XrpcClient::with_session(transport, account.pds_url.clone(), session);
         let mut opake = Self::new(client, target_did, identity, rng, storage, now_micros)?;
+        opake.handle = Some(handle).filter(|h| !h.is_empty());
         // Seed `config_indexer_url` (priority 2 of `resolve_indexer_url`) from
         // the user's PDS accountConfig so the priority chain actually works on
         // cold start. Best-effort — offline, missing record, or auth blips

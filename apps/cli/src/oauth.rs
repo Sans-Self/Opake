@@ -120,16 +120,7 @@ pub async fn try_oauth_login(
     println!("If the browser doesn't open, visit:\n  {auth_url}");
     open_browser(&auth_url);
 
-    // Frontend callback URL - used when redirecting after OAuth.
-    // Can be overridden via OPAKE_FRONTEND_URL env var.
-    let frontend_callback_url = if no_redirect {
-        None
-    } else {
-        let prefix =
-            std::env::var("OPAKE_FRONTEND_URL").unwrap_or_else(|_| "https://opake.app".to_string());
-
-        Some(format!("{}/devices/cli-callback", prefix))
-    };
+    let frontend_callback_url = frontend_callback_url(no_redirect);
 
     // Step 6: Wait for the callback (PAR request_uri expires)
     let callback = wait_for_callback(
@@ -246,6 +237,19 @@ pub async fn try_oauth_login(
         .ok_or_else(|| anyhow::anyhow!("XRPC client lost its session during login"))?;
 
     Ok(final_session)
+}
+
+/// The page a completed authorization lands on. Every browser leg of every
+/// flow uses it, so an owner authorizing a DID operation sees the same page as
+/// one logging in rather than the bare fallback markup.
+/// Overridable via `OPAKE_FRONTEND_URL`; `no_redirect` opts out entirely.
+pub fn frontend_callback_url(no_redirect: bool) -> Option<String> {
+    if no_redirect {
+        return None;
+    }
+    let prefix =
+        std::env::var("OPAKE_FRONTEND_URL").unwrap_or_else(|_| "https://opake.at".to_string());
+    Some(format!("{prefix}/devices/cli-callback"))
 }
 
 /// Wait for the OAuth callback on the loopback server.

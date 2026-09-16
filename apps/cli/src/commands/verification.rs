@@ -13,7 +13,9 @@ use tokio::sync::oneshot;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::commands::Execute;
-use crate::oauth::{bind_loopback_callback, open_browser, wait_for_callback};
+use crate::oauth::{
+    bind_loopback_callback, frontend_callback_url, open_browser, wait_for_callback,
+};
 use crate::session::CommandContext;
 
 /// Manage this account's `#opake` DID verification method.
@@ -93,15 +95,24 @@ async fn run_identity_operation(ctx: &CommandContext, action: IdentityAction) ->
             anyhow::bail!("Verification operation cancelled")
         }
     };
-    println!("Open this URL to authorize the verification operation:");
-    println!("  {authorization_url}");
+    let purpose = match action {
+        IdentityAction::Setup => "verify your account",
+        IdentityAction::Remove => "remove your account's verification",
+    };
     println!(
-        "This uses a separate authorization for this operation. Your provider may reuse prior approval; Opake does not require a new consent screen for every operation."
+        "To {purpose}, Opake requires temporary access to your account's identity document. Because of this, you need to sign in again."
     );
+    println!();
+    println!(
+        "After clicking the link below, you will receive a one-time use code in your e-mail inbox."
+    );
+    println!();
+    println!("  {authorization_url}");
     open_browser(&authorization_url);
 
+    let callback_page = frontend_callback_url(false);
     let callback = tokio::select! {
-        result = wait_for_callback(listener, 10 * 60, None) => result?,
+        result = wait_for_callback(listener, 10 * 60, callback_page.as_deref()) => result?,
         _ = tokio::signal::ctrl_c() => {
             cancellation.cancel();
             anyhow::bail!("Verification operation cancelled")
@@ -146,8 +157,8 @@ async fn run_identity_operation(ctx: &CommandContext, action: IdentityAction) ->
 async fn read_owner_confirmation(
     cancellation: IdentityOperationCancellation,
 ) -> Result<OwnerConfirmation, OwnerConfirmationFailure> {
-    println!("Your provider accepted the confirmation request.");
-    print!("Enter the confirmation supplied by the account owner (or press Enter to refuse): ");
+    println!();
+    print!("Enter confirmation code (or press Enter to refuse): ");
     io::stdout()
         .flush()
         .map_err(|_| OwnerConfirmationFailure::DeliveryUnknown)?;
@@ -264,6 +275,7 @@ mod tests {
             opake_core::client::identity_operation::IdentityOperationConfig {
                 pds_url: "https://pds.test".into(),
                 did: "did:plc:test".into(),
+                login_hint: "did:plc:test".into(),
                 redirect_uri: "http://127.0.0.1/callback".into(),
                 change: opake_core::client::identity_operation::VerificationMethodChange::Remove,
                 now_micros: || 0,
