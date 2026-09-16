@@ -15,7 +15,7 @@ use crate::session::CommandContext;
 Examples:
   opake config
   opake config set telemetry-enabled true
-  opake config set indexer-url https://indexer.opake.app")]
+  opake config set indexer-url https://indexer.opake.at")]
 pub struct ConfigCommand {
     #[command(subcommand)]
     action: Option<ConfigAction>,

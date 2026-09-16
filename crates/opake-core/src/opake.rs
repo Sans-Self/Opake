@@ -250,7 +250,7 @@ pub struct Opake<T: Transport, R: CryptoRng + RngCore, S: Storage> {
 /// the production URL if unset. Dev builds pick it up from `.envrc`.
 pub const DEFAULT_INDEXER_URL: &str = match option_env!("OPAKE_INDEXER_URL") {
     Some(url) => url,
-    None => "https://indexer.opake.app",
+    None => "https://indexer.opake.at",
 };
 
 /// Build an authenticated XrpcClient for an already-logged-in account.

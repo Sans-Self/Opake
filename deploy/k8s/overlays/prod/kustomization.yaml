@@ -9,7 +9,6 @@ resources:
   - ../../base/indexer
   - cert.yaml
   - ingress.yaml
-  - redirect-opake-app.yaml
   - network-policy.yaml
 
 patches:
