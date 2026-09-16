@@ -21,6 +21,26 @@ use crate::commands::login::ensure_identity_and_publish;
 use crate::config::{AccountEntry, FileStorage};
 use opake_core::client::ReqwestTransport;
 
+/// Values returned to a native loopback redirect. Keeping this separate from
+/// the login flow lets short-lived identity operations bind their callback to
+/// the same listener without ever persisting a code or state value.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LoopbackCallback {
+    pub code: Option<String>,
+    pub state: Option<String>,
+    pub issuer: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Bind a fresh loopback redirect endpoint for one OAuth attempt.
+pub async fn bind_loopback_callback() -> Result<(TcpListener, String)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    debug!("loopback server on port {port}");
+    Ok((listener, redirect_uri))
+}
+
 /// Attempt a full OAuth login flow. Returns `Err` if the PDS doesn't support
 /// OAuth discovery, so the caller can fall back to password auth.
 ///
@@ -48,10 +68,7 @@ pub async fn try_oauth_login(
     );
 
     // Step 2: Bind loopback server to get the redirect URI
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
-    debug!("loopback server on port {port}");
+    let (listener, redirect_uri) = bind_loopback_callback().await?;
 
     // Step 3: Generate DPoP keypair and PKCE challenge
     let dpop_key = DpopKeyPair::generate(&mut OsRng);
@@ -66,7 +83,7 @@ pub async fn try_oauth_login(
     // Must be http://localhost (not 127.0.0.1) — the AS recognizes this as a
     // loopback client and uses hardcoded metadata instead of fetching it.
     let scope = opake_core::scope::oauth_scope();
-    let client_id = opake_core::client::oauth_token::build_client_id(&redirect_uri, &scope);
+    let client_id = opake_core::client::oauth_token::build_client_id(&redirect_uri);
 
     let par_endpoint = asm.par_endpoint();
     debug!("PAR endpoint: {par_endpoint}");
@@ -103,38 +120,32 @@ pub async fn try_oauth_login(
     println!("If the browser doesn't open, visit:\n  {auth_url}");
     open_browser(&auth_url);
 
-    // Frontend callback URL - used when redirecting after OAuth.
-    // Can be overridden via OPAKE_FRONTEND_URL env var.
-    let frontend_callback_url = if no_redirect {
-        None
-    } else {
-        let prefix =
-            std::env::var("OPAKE_FRONTEND_URL").unwrap_or_else(|_| "https://opake.app".to_string());
-
-        Some(format!("{}/devices/cli-callback", prefix))
-    };
+    let frontend_callback_url = frontend_callback_url(no_redirect);
 
     // Step 6: Wait for the callback (PAR request_uri expires)
-    let (code, callback_state, error) = wait_for_callback(
+    let callback = wait_for_callback(
         listener,
         par_response.expires_in,
         frontend_callback_url.as_deref(),
     )
     .await?;
 
-    let callback_state =
-        callback_state.ok_or_else(|| anyhow::anyhow!("callback missing state parameter"))?;
+    let callback_state = callback
+        .state
+        .ok_or_else(|| anyhow::anyhow!("callback missing state parameter"))?;
     anyhow::ensure!(
         callback_state == state,
         "OAuth state mismatch — possible CSRF attack"
     );
 
     // Check for AS errors (user denied, etc.) after CSRF validation
-    if let Some(err) = error {
+    if let Some(err) = callback.error {
         anyhow::bail!("OAuth error from AS: {err}");
     }
 
-    let code = code.ok_or_else(|| anyhow::anyhow!("callback missing authorization code"))?;
+    let code = callback
+        .code
+        .ok_or_else(|| anyhow::anyhow!("callback missing authorization code"))?;
     info!("received authorization code");
 
     // Step 7: Exchange code for tokens
@@ -159,6 +170,7 @@ pub async fn try_oauth_login(
 
     let did = token_response
         .sub
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("token response missing `sub` claim"))?;
     info!("authenticated as {did}");
 
@@ -177,9 +189,10 @@ pub async fn try_oauth_login(
     let oauth_session = OAuthSession {
         did: did.clone(),
         handle: handle.clone(),
-        access_token: token_response.access_token,
+        access_token: token_response.access_token.clone(),
         refresh_token: token_response
             .refresh_token
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("token response missing refresh_token"))?,
         dpop_key,
         token_endpoint: asm.token_endpoint.clone(),
@@ -226,17 +239,30 @@ pub async fn try_oauth_login(
     Ok(final_session)
 }
 
+/// The page a completed authorization lands on. Every browser leg of every
+/// flow uses it, so an owner authorizing a DID operation sees the same page as
+/// one logging in rather than the bare fallback markup.
+/// Overridable via `OPAKE_FRONTEND_URL`; `no_redirect` opts out entirely.
+pub fn frontend_callback_url(no_redirect: bool) -> Option<String> {
+    if no_redirect {
+        return None;
+    }
+    let prefix =
+        std::env::var("OPAKE_FRONTEND_URL").unwrap_or_else(|_| "https://opake.at".to_string());
+    Some(format!("{prefix}/devices/cli-callback"))
+}
+
 /// Wait for the OAuth callback on the loopback server.
 /// Returns `(code, state, error)` from the query parameters.
 /// Times out after `expires_in` seconds (the PAR request_uri lifetime).
 ///
 /// If `frontend_callback_url` is `Some`, redirects to that URL after OAuth.
 /// If `None`, serves inline HTML instead (used with `--no-redirect`).
-async fn wait_for_callback(
+pub async fn wait_for_callback(
     listener: TcpListener,
     expires_in: u64,
     frontend_callback_url: Option<&str>,
-) -> Result<(Option<String>, Option<String>, Option<String>)> {
+) -> Result<LoopbackCallback> {
     let timeout = std::time::Duration::from_secs(expires_in);
     let (mut stream, _addr) = tokio::time::timeout(timeout, listener.accept())
         .await
@@ -262,26 +288,13 @@ async fn wait_for_callback(
         .map(|(_, q)| q)
         .ok_or_else(|| anyhow::anyhow!("callback missing query params"))?;
 
-    let mut code = None;
-    let mut state = None;
-    let mut error = None;
-
-    for pair in query.split('&') {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let value = urlencoding::decode(value)?.into_owned();
-        match key {
-            "code" => code = Some(value),
-            "state" => state = Some(value),
-            "error" => error = Some(value),
-            _ => {}
-        }
-    }
+    let callback = parse_loopback_query(query)?;
 
     // Build response: redirect to frontend or inline HTML
     let response = if let Some(callback_url) = frontend_callback_url {
         // Redirect to frontend callback — no OAuth params, they're already
         // handled by CLI. Only pass error for display if present.
-        let location = if let Some(ref err) = error {
+        let location = if let Some(ref err) = callback.error {
             let err = urlencoding::encode(err);
             format!("{callback_url}?error={err}")
         } else {
@@ -290,10 +303,16 @@ async fn wait_for_callback(
         format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\nConnection: close\r\n\r\n",)
     } else {
         // Inline HTML response (--no-redirect)
-        let (status, body) = if error.is_some() {
-            ("400 Bad Request", "<html><body><h1>Authentication failed</h1><p>You can close this tab.</p></body></html>")
+        let (status, body) = if callback.error.is_some() {
+            (
+                "400 Bad Request",
+                "<html><body><h1>Authentication failed</h1><p>You can close this tab.</p></body></html>",
+            )
         } else {
-            ("200 OK", "<html><body><h1>Authentication successful</h1><p>You can close this tab and return to your terminal.</p></body></html>")
+            (
+                "200 OK",
+                "<html><body><h1>Authentication successful</h1><p>You can close this tab and return to your terminal.</p></body></html>",
+            )
         };
         format!(
             "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -304,12 +323,38 @@ async fn wait_for_callback(
     stream.write_all(response.as_bytes()).await?;
     stream.shutdown().await?;
 
-    Ok((code, state, error))
+    Ok(callback)
+}
+
+fn parse_loopback_query(query: &str) -> Result<LoopbackCallback> {
+    let mut code = None;
+    let mut state = None;
+    let mut issuer = None;
+    let mut error = None;
+
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = urlencoding::decode(value)?.into_owned();
+        match key {
+            "code" => code = Some(value),
+            "state" => state = Some(value),
+            "iss" => issuer = Some(value),
+            "error" => error = Some(value),
+            _ => {}
+        }
+    }
+
+    Ok(LoopbackCallback {
+        code,
+        state,
+        issuer,
+        error,
+    })
 }
 
 /// Open a URL in the system browser. Best-effort — doesn't fail if the
 /// browser can't be opened (the URL is printed to stdout as a fallback).
-fn open_browser(url: &str) {
+pub fn open_browser(url: &str) {
     if let Err(e) = validate_web_url(url) {
         debug!("refusing to open browser: {e}");
         return;
@@ -355,7 +400,7 @@ use opake_core::crypto::RngCore;
 
 #[cfg(test)]
 mod tests {
-    use super::validate_web_url;
+    use super::{parse_loopback_query, validate_web_url};
 
     #[test]
     #[allow(non_snake_case)] // bug__ regression-naming convention
@@ -367,5 +412,15 @@ mod tests {
         assert!(validate_web_url("javascript:alert(1)").is_err());
         assert!(validate_web_url("file:///etc/passwd").is_err());
         assert!(validate_web_url("https://ok/\r\nmalicious").is_err());
+    }
+
+    #[test]
+    fn loopback_parser_preserves_identity_callback_binding() {
+        let callback =
+            parse_loopback_query("code=the%20code&state=bound-state&iss=https%3A%2F%2Fas.test")
+                .unwrap();
+        assert_eq!(callback.code.as_deref(), Some("the code"));
+        assert_eq!(callback.state.as_deref(), Some("bound-state"));
+        assert_eq!(callback.issuer.as_deref(), Some("https://as.test"));
     }
 }

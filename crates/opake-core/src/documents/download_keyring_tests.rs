@@ -127,7 +127,7 @@ fn keyring_document(fixture: &KeyringFixture) -> Document {
 fn current_keys(current_rotation: u64, key: &ContentKey) -> GroupKeys<'_> {
     GroupKeys {
         current_rotation,
-        current: key,
+        current: Some(key),
         historical: &[],
     }
 }
@@ -287,7 +287,7 @@ async fn download_from_previous_rotation_via_history() {
     }];
     let group_keys = GroupKeys {
         current_rotation: 1,
-        current: &current,
+        current: Some(&current),
         historical: &historical,
     };
 

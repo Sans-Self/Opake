@@ -6,6 +6,7 @@ import { PanelShell } from "@/components/cabinet/PanelShell";
 import { getOpake, useAuthStore } from "@/stores/auth";
 import { truncateDid } from "@/lib/format";
 import { toastSuccess, toastError } from "@/stores/toast";
+import { VerificationSettings } from "@/components/cabinet/VerificationSettings";
 
 function SettingsPage() {
   const session = useAuthStore((s) => s.session);
@@ -123,6 +124,8 @@ function SettingsPage() {
             </div>
           </div>
         </section>
+
+        <VerificationSettings />
 
         {/* Indexer URL */}
         <section>

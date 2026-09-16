@@ -1,7 +1,12 @@
 // @opake/sdk — public API
 
 // Main entry point
-export { Opake, type WorkspaceWatcher, type ChainForkWatcher } from "./opake";
+export {
+  Opake,
+  IdentityOperation,
+  type WorkspaceWatcher,
+  type ChainForkWatcher,
+} from "./opake";
 export { FileManager, type DirectoryWatcher } from "./file-manager";
 
 // Schema-driven derived types
@@ -51,6 +56,11 @@ export {
   type AccountConfig,
   type AccountConfigPatch,
   type MutationResult,
+  type IdentityMutation,
+  type IdentityRefusal,
+  type IdentityReconciliation,
+  type IdentityOperationResult,
+  type OwnVerification,
   type UploadResult,
   type DownloadResult,
   type DirectoryTreeSnapshot,
@@ -60,13 +70,21 @@ export {
   type DeleteRecursiveResult,
   type WorkspaceRole,
   type WorkspaceMember,
+  type WorkspaceMemberAccessStatus,
+  type WorkspaceMemberRemoval,
+  type WorkspaceMemberWriteResult,
+  type ExcludedWorkspaceMember,
+  type ExcludedMemberReason,
   type WorkspaceEntry,
   type ResolvedIdentity,
+  type AnchorHistory,
   type WorkspaceSyncResult,
+  type PairCompletionResult,
   type PairRequestResult,
   type PendingPairRequest,
 } from "./types";
 export type { AwaitPairOptions } from "./pairing";
+export { PendingShareRecipient } from "./file-manager";
 export {
   type TaskDef,
   type GrantEntry,
@@ -74,6 +92,9 @@ export {
   type InboxSnapshot,
   type ResolvedGrantMetadata,
   type PendingShareEntry,
+  type PendingShareVerificationError,
+  type RecipientVerificationNotice,
+  type ShareWriteResult,
 } from "./types";
 
 // Real-time event streaming is WASM-owned:

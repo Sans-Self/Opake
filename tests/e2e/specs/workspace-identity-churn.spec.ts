@@ -17,14 +17,7 @@
 //
 // Driven as alice (pds-a) with carol (pds-b) added mid-chain, so the add
 // crosses a federation boundary as well as a supersede.
-import {
-  blockadeTest as test,
-  expect,
-  cite,
-  ACTORS,
-  authFile,
-  installBlockade,
-} from "../fixtures";
+import { blockadeTest as test, expect, cite, ACTORS, authFile, installBlockade } from "../fixtures";
 import type { Page } from "@playwright/test";
 
 const actor = (name: string) => {
@@ -101,7 +94,13 @@ test(`mutates a workspace whose head has churned past genesis ${cite(
     await page.getByRole("button", { name: "Add", exact: true }).click();
     const addDialog = page.getByRole("dialog", { name: "Add member" });
     await addDialog.getByLabel("Member handle").fill(carol.handle);
+    const consent = page.waitForEvent("dialog");
     await addDialog.getByRole("button", { name: "Add", exact: true }).click();
+    const confirmation = await consent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("is unverified");
+    expect(confirmation.message()).toContain("expose every workspace file");
+    await confirmation.accept();
     const memberList = page.getByRole("list", { name: "Member list" });
     await expect(memberList.getByRole("button", { name: /^Remove/ })).toHaveCount(1, {
       timeout: 30_000,

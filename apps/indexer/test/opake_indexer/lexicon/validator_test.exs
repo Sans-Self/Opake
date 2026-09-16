@@ -41,7 +41,7 @@ defmodule OpakeIndexer.Lexicon.ValidatorTest do
       %{
         "opakeVersion" => 1,
         "algo" => "aes-256-gcm",
-        "members" => [%{"wrappedKey" => wrapped_key(), "role" => "manager"}],
+        "members" => [%{"did" => "did:plc:x", "wrappedKey" => wrapped_key(), "role" => "manager"}],
         "encryptedMetadata" => encrypted_metadata(),
         "createdAt" => "2026-01-01T00:00:00Z"
       },
@@ -197,7 +197,12 @@ defmodule OpakeIndexer.Lexicon.ValidatorTest do
 
   describe "vocabulary violations are refused for known versions" do
     test "unknown keyring member role" do
-      bad = keyring(%{"members" => [%{"wrappedKey" => wrapped_key(), "role" => "superuser"}]})
+      bad =
+        keyring(%{
+          "members" => [
+            %{"did" => "did:plc:x", "wrappedKey" => wrapped_key(), "role" => "superuser"}
+          ]
+        })
 
       assert {:refused, {:vocabulary, {"keyringMemberRole", "superuser"}}} =
                Validator.validate("at.opake.keyring", bad)
@@ -235,6 +240,50 @@ defmodule OpakeIndexer.Lexicon.ValidatorTest do
 
       assert {:refused, {:vocabulary, {"keyWrapAlgo", "rot13"}}} =
                Validator.validate("at.opake.directory", dir)
+    end
+  end
+
+  describe "explicit member validation" do
+    test "rejects the prior pre-v1 wrap-only member shape" do
+      prior_draft = %{"wrappedKey" => wrapped_key(), "role" => "manager"}
+
+      assert {:refused, {:malformed, {"members", _}}} =
+               Validator.validate("at.opake.keyring", keyring(%{"members" => [prior_draft]}))
+    end
+
+    test "accepts an admitted member without a current wrap" do
+      assert :ok =
+               Validator.validate(
+                 "at.opake.keyring",
+                 keyring(%{"members" => [%{"did" => "did:plc:offline", "role" => "viewer"}]})
+               )
+    end
+
+    test "rejects duplicate DIDs, a wrap for another DID, and malformed approval bytes" do
+      member = %{"did" => "did:plc:alice", "role" => "viewer"}
+
+      assert {:refused, {:malformed, :duplicate_member_did}} =
+               Validator.validate("at.opake.keyring", keyring(%{"members" => [member, member]}))
+
+      mismatch = %{
+        "did" => "did:plc:alice",
+        "role" => "viewer",
+        "wrappedKey" => wrapped_key()
+      }
+
+      assert {:refused, {:malformed, :member_wrap_did_mismatch}} =
+               Validator.validate("at.opake.keyring", keyring(%{"members" => [mismatch]}))
+
+      malformed_approval =
+        Map.put(member, "unverifiedKeyApproval", %{"$bytes" => Base.encode64(<<0::248>>)})
+
+      assert {:refused,
+              {:malformed,
+               {"members", {"unverifiedKeyApproval", {:below_minimum_byte_length, 31}}}}} =
+               Validator.validate(
+                 "at.opake.keyring",
+                 keyring(%{"members" => [malformed_approval]})
+               )
     end
   end
 end

@@ -168,12 +168,14 @@ defmodule OpakeIndexerWeb.EventsController do
 
     member_dids =
       (record["members"] || [])
-      |> Enum.map(fn entry -> get_in(entry, ["wrappedKey", "did"]) end)
+      |> Enum.map(& &1["did"])
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
 
     is_member = MapSet.member?(member_dids, state.did)
-    was_subscribed = is_binary(workspace_id) and MapSet.member?(state.subscribed_workspaces, workspace_id)
+
+    was_subscribed =
+      is_binary(workspace_id) and MapSet.member?(state.subscribed_workspaces, workspace_id)
 
     cond do
       is_member and is_binary(workspace_id) and not was_subscribed ->

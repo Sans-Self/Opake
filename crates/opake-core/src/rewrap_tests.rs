@@ -112,7 +112,7 @@ fn plan_rewrap_migrates_trailing_wrap_to_head() {
     }];
     let head = GroupKeys {
         current_rotation: 1,
-        current: &k1,
+        current: Some(&k1),
         historical: &historical,
     };
 
@@ -141,7 +141,7 @@ fn plan_rewrap_leaves_head_and_foreign_docs_alone() {
     }];
     let head = GroupKeys {
         current_rotation: 1,
-        current: &k1,
+        current: Some(&k1),
         historical: &historical,
     };
 
@@ -176,7 +176,7 @@ fn plan_rewrap_targets_the_head_resolved_at_write_time() {
     }];
     let head_2 = GroupKeys {
         current_rotation: 2,
-        current: &k2,
+        current: Some(&k2),
         historical: &hist_2,
     };
     let RewrapPlan::Rewrap(at_2) = plan_rewrap(&doc, WS_URI, head_2).unwrap() else {
@@ -198,7 +198,7 @@ fn plan_rewrap_targets_the_head_resolved_at_write_time() {
     ];
     let head_3 = GroupKeys {
         current_rotation: 3,
-        current: &k3,
+        current: Some(&k3),
         historical: &hist_3,
     };
     let RewrapPlan::Rewrap(at_3) = plan_rewrap(&doc, WS_URI, head_3).unwrap() else {
@@ -223,7 +223,7 @@ fn sweep_derives_only_the_trailing_remainder() {
     }];
     let head = GroupKeys {
         current_rotation: 1,
-        current: &k1,
+        current: Some(&k1),
         historical: &historical,
     };
 
@@ -268,7 +268,7 @@ async fn rewrap_document_skips_on_cas_conflict() {
     }];
     let head = GroupKeys {
         current_rotation: 1,
-        current: &k1,
+        current: Some(&k1),
         historical: &historical,
     };
 
@@ -303,7 +303,7 @@ async fn rewrap_document_conditions_write_on_read_cid() {
     }];
     let head = GroupKeys {
         current_rotation: 1,
-        current: &k1,
+        current: Some(&k1),
         historical: &historical,
     };
 

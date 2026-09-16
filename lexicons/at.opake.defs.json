@@ -5,7 +5,11 @@
     "wrappedKey": {
       "type": "object",
       "description": "A symmetric key encrypted (wrapped) to a specific DID's public key. The recipient can decrypt this with their private key to recover the underlying symmetric key.",
-      "required": ["did", "ciphertext", "algo"],
+      "required": [
+        "did",
+        "ciphertext",
+        "algo"
+      ],
       "properties": {
         "did": {
           "type": "string",
@@ -26,11 +30,13 @@
         }
       }
     },
-
     "keyringMember": {
       "type": "object",
-      "description": "A keyring member: a wrapped group key paired with the member's workspace role. Role is plaintext because the indexer needs it for authorization decisions.",
-      "required": ["wrappedKey", "role"],
+      "description": "An admitted member with an optional current group-key wrap and key-bound unverified approval.",
+      "required": [
+        "did",
+        "role"
+      ],
       "properties": {
         "wrappedKey": {
           "type": "ref",
@@ -45,19 +51,33 @@
             "editor",
             "viewer"
           ]
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "unverifiedKeyApproval": {
+          "type": "bytes",
+          "minLength": 32,
+          "maxLength": 32
         }
       }
     },
-
     "encryptionEnvelope": {
       "type": "object",
       "description": "Describes how a blob's content was encrypted. Contains the algorithm, nonce/IV, and one or more wrapped copies of the content encryption key.",
-      "required": ["algo", "nonce", "keys"],
+      "required": [
+        "algo",
+        "nonce",
+        "keys"
+      ],
       "properties": {
         "algo": {
           "type": "string",
           "description": "Symmetric encryption algorithm used on the blob content.",
-          "knownValues": ["aes-256-gcm"]
+          "knownValues": [
+            "aes-256-gcm"
+          ]
         },
         "nonce": {
           "type": "bytes",
@@ -67,17 +87,23 @@
         "keys": {
           "type": "array",
           "description": "One or more wrapped copies of the content encryption key, each encrypted to a different DID.",
-          "items": { "type": "ref", "ref": "#wrappedKey" },
+          "items": {
+            "type": "ref",
+            "ref": "#wrappedKey"
+          },
           "minLength": 1,
           "maxLength": 100
         }
       }
     },
-
     "keyringRef": {
       "type": "object",
       "description": "Instead of per-document key wrapping, references a keyring whose group key was used to encrypt the content key. The content key is stored encrypted under the group key.",
-      "required": ["keyring", "wrappedContentKey", "rotation"],
+      "required": [
+        "keyring",
+        "wrappedContentKey",
+        "rotation"
+      ],
       "properties": {
         "keyring": {
           "type": "string",
@@ -96,11 +122,13 @@
         }
       }
     },
-
     "encryptedMetadata": {
       "type": "object",
       "description": "AES-256-GCM encrypted metadata payload. The ciphertext contains a JSON object with the real record metadata. Encrypted with the symmetric key that protects the parent record (content key for documents/grants, group key for keyrings).",
-      "required": ["ciphertext", "nonce"],
+      "required": [
+        "ciphertext",
+        "nonce"
+      ],
       "properties": {
         "ciphertext": {
           "type": "bytes",
@@ -113,26 +141,31 @@
         }
       }
     },
-
     "directKeyWrapping": {
       "type": "object",
-      "description": "Content key wrapped directly to individual DIDs. Used by records without blobs (directories, grants) where only the key material is needed — no cipher algorithm or nonce.",
-      "required": ["keys"],
+      "description": "Content key wrapped directly to individual DIDs. Used by records without blobs (directories, grants) where only the key material is needed \u2014 no cipher algorithm or nonce.",
+      "required": [
+        "keys"
+      ],
       "properties": {
         "keys": {
           "type": "array",
           "description": "One or more wrapped copies of the content key, each encrypted to a different DID.",
-          "items": { "type": "ref", "ref": "#wrappedKey" },
+          "items": {
+            "type": "ref",
+            "ref": "#wrappedKey"
+          },
           "minLength": 1,
           "maxLength": 100
         }
       }
     },
-
     "keyringKeyWrapping": {
       "type": "object",
-      "description": "Content key wrapped under a keyring's group key. Used by records without blobs (directories) where only the keyring reference is needed — no cipher algorithm or nonce.",
-      "required": ["keyringRef"],
+      "description": "Content key wrapped under a keyring's group key. Used by records without blobs (directories) where only the keyring reference is needed \u2014 no cipher algorithm or nonce.",
+      "required": [
+        "keyringRef"
+      ],
       "properties": {
         "keyringRef": {
           "type": "ref",

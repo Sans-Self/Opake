@@ -35,7 +35,7 @@ defmodule OpakeIndexerWeb.WorkspaceControllerTest do
         record_jsonb: %{
           "members" =>
             Enum.map(members_dids, fn did ->
-              %{"wrappedKey" => %{"did" => did}, "role" => "manager"}
+              %{"did" => did, "role" => "manager"}
             end)
         }
       })

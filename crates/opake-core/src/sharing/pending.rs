@@ -6,20 +6,35 @@
 // record is deleted.
 
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use log::{info, trace, warn};
+use sha2::{Digest, Sha256};
 
 use crate::atproto;
-use crate::client::{list_collection, time, DegradationPolicy, Transport, XrpcClient};
-use crate::crypto::{self, ContentKey, CryptoRng, GrantMetadata, PrivateKeyBundle, RngCore};
+use crate::client::{time, ApplyWriteOp, Transport, XrpcClient};
+use crate::crypto::{self, ContentKey, CryptoRng, PendingShareMetadata, PrivateKeyBundle, RngCore};
 use crate::documents;
 use crate::error::Error;
-use crate::records::vocabulary::RecordKind;
-use crate::records::{EncryptedMetadata, PendingShare, PENDING_SHARE_COLLECTION};
-use crate::resolve::{self, ResolvedIdentity};
+use crate::records::vocabulary::{self, RecordKind};
+use crate::records::{EncryptedMetadata, PendingShare, UnreadableReason, PENDING_SHARE_COLLECTION};
+use crate::resolve::{self, RecipientVerificationNotice, VerificationState};
 
-use super::create::{put_grant_at, GrantParams};
+use super::create::{build_grant, GrantParams};
+
+/// Commit the precise durable intent consumed by an atomic queue handoff.
+/// The URI alone is not enough: a replacement can reuse its rkey. We include
+/// the canonical serialized record (including encrypted metadata and creation
+/// time) under a domain-separated hash so an older matching grant cannot be
+/// mistaken for completion of the replacement intent.
+fn pending_intent_commitment(entry: &PendingShareEntry) -> Result<[u8; 32], Error> {
+    let raw = serde_json::to_vec(&entry.raw_record)?;
+    let mut hash = Sha256::new();
+    hash.update(b"opake.pending-share-intent.v1\0");
+    hash.update(entry.uri.as_bytes());
+    hash.update([0]);
+    hash.update(raw);
+    Ok(hash.finalize().into())
+}
 
 /// Enqueue a pending share for a recipient that hasn't set up Opake yet.
 ///
@@ -28,21 +43,36 @@ use super::create::{put_grant_at, GrantParams};
 /// when the recipient publishes their public key. Returns the AT-URI of
 /// the created pendingShare record.
 #[allow(clippy::too_many_arguments)]
-pub async fn create_pending_share(
+pub(crate) async fn create_pending_share(
     client: &mut XrpcClient<impl Transport>,
     content_key: &ContentKey,
     document_uri: &str,
     recipient: &str,
+    recipient_did: &str,
+    allow_unverified_first_publication: bool,
     permissions: &str,
     note: Option<&str>,
     now: &str,
     rng: &mut (impl CryptoRng + RngCore),
 ) -> Result<String, Error> {
-    let metadata = GrantMetadata {
+    if !atproto::is_valid_did(recipient_did) {
+        return Err(Error::InvalidRecord(
+            "pending share recipient DID must be a DID, not a handle".into(),
+        ));
+    }
+    if !allow_unverified_first_publication {
+        return Err(Error::UnverifiedKeyApprovalRequired {
+            did: recipient_did.to_owned(),
+        });
+    }
+
+    let metadata = PendingShareMetadata {
         permissions: Some(permissions.to_string()),
         note: note.map(str::to_string),
+        recipient_did: recipient_did.to_string(),
+        allow_unverified_first_publication,
     };
-    let context = crypto::SealContext::new(document_uri, crypto::SealType::GrantMetadata);
+    let context = crypto::SealContext::new(document_uri, crypto::SealType::PendingShareMetadata);
     let encrypted_metadata = crypto::encrypt_metadata(content_key, &metadata, &context, rng)?;
     let record = PendingShare::new(
         document_uri.to_string(),
@@ -67,6 +97,25 @@ pub struct RetryResult {
     pub expired: usize,
     pub still_pending: usize,
     pub failed: usize,
+    /// Verification failures that require the owner's attention. These are
+    /// deliberately separate from ordinary transport failures: a host is
+    /// serving a key record that fails its own account verification.
+    pub verification_errors: Vec<PendingShareVerificationError>,
+    /// Verification state observed for an intent that this runner actually
+    /// consumed and turned into a grant. Owner-facing clients must not infer
+    /// this from a stale queue warning.
+    pub completion_notices: Vec<RecipientVerificationNotice>,
+}
+
+/// An owner-visible verification problem while retrying a queued share.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingShareVerificationError {
+    pub uri: String,
+    pub recipient_did: String,
+    pub reason: String,
+    /// The queue item was discarded at TTL after this verification failure.
+    pub expired: bool,
 }
 
 /// A pending share entry with its AT-URI and encrypted metadata.
@@ -77,10 +126,23 @@ pub struct PendingShareEntry {
     pub recipient: String,
     pub encrypted_metadata: EncryptedMetadata,
     pub created_at: String,
+    /// The DID authorized by the encrypted queue-time intent. Populated for
+    /// owner-facing listings after decrypting with the document content key.
+    pub recipient_did: Option<String>,
+    /// Why `recipient_did` could not be read, when an owner-facing listing
+    /// tried and failed. An unreadable DID is not the same as an intent the
+    /// listing never attempted to open, and the owner cannot act on either
+    /// without the cause.
+    pub recipient_did_error: Option<String>,
     /// `true` when the record declares a schema version newer than this client
     /// supports. Retry leaves it queued rather than completing a share it does
     /// not fully understand.
     pub needs_newer: bool,
+    // The complete list-record value is retained only by the retry state
+    // machine. Comparing it to the post-commit read prevents a stale runner
+    // from consuming a replacement intent, including fields this client does
+    // not understand yet.
+    raw_record: serde_json::Value,
 }
 
 /// List all pending share records for the authenticated account.
@@ -90,22 +152,49 @@ pub struct PendingShareEntry {
 pub async fn list_pending_shares(
     client: &mut XrpcClient<impl Transport>,
 ) -> Result<Vec<PendingShareEntry>, Error> {
-    let outcome = list_collection(
-        client,
-        PENDING_SHARE_COLLECTION,
-        RecordKind::PendingShare,
-        DegradationPolicy::Counted,
-        |uri, record: PendingShare, needs_newer| PendingShareEntry {
-            uri: uri.to_owned(),
-            document: record.document,
-            recipient: record.recipient,
-            encrypted_metadata: record.encrypted_metadata,
-            created_at: record.created_at,
-            needs_newer,
-        },
-    )
-    .await?;
-    Ok(outcome.entries)
+    let mut entries = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = client
+            .list_records(PENDING_SHARE_COLLECTION, Some(100), cursor.as_deref())
+            .await?;
+        for entry in page.records {
+            let (record, needs_newer) = match vocabulary::classify_record::<PendingShare>(
+                RecordKind::PendingShare,
+                &entry.value,
+            ) {
+                Ok(record) => (record, false),
+                Err(UnreadableReason::NeedsNewerClient) => {
+                    let Ok(record) = serde_json::from_value::<PendingShare>(entry.value.clone())
+                    else {
+                        warn!("skipping unreadable future pending share {}", entry.uri);
+                        continue;
+                    };
+                    (record, true)
+                }
+                Err(UnreadableReason::Corrupt) => {
+                    warn!("skipping corrupt pending share {}", entry.uri);
+                    continue;
+                }
+            };
+            entries.push(PendingShareEntry {
+                uri: entry.uri,
+                document: record.document,
+                recipient: record.recipient,
+                encrypted_metadata: record.encrypted_metadata,
+                created_at: record.created_at,
+                recipient_did: None,
+                recipient_did_error: None,
+                needs_newer,
+                raw_record: entry.value,
+            });
+        }
+        cursor = page.cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    Ok(entries)
 }
 
 /// Cancel (delete) a pending share by its AT-URI.
@@ -137,11 +226,9 @@ pub struct RetryParams<'a> {
 
 /// Retry all pending shares for the authenticated account.
 ///
-/// For each pending share:
-/// 1. Check TTL — delete if expired
-/// 2. Try to resolve the recipient's public key
-/// 3. If found — fetch content key, create grant (with original note), delete pending record
-/// 4. If still missing — leave in queue
+/// The encrypted queue-time DID is the only authority input. The entered
+/// recipient string remains a display value and is never resolved here: a
+/// handle reassignment must not redirect a first-publication permission.
 pub async fn retry_pending_shares(
     client: &mut XrpcClient<impl Transport>,
     transport: &impl Transport,
@@ -154,14 +241,6 @@ pub async fn retry_pending_shares(
         ..Default::default()
     };
 
-    // Cache resolved identities per recipient to avoid redundant cross-PDS
-    // fetches when sharing multiple documents with the same person.
-    // None = NotFound (still pending), Some(Err) would be transient but we
-    // use a three-state: present, NotFound, or absent (transient/unchecked).
-    // Rc keeps the 1184-byte ML-KEM public key alive without cloning it per
-    // document when one recipient has multiple pending shares.
-    let mut identity_cache: HashMap<String, Option<Rc<ResolvedIdentity>>> = HashMap::new();
-
     // Cache content keys per document URI to avoid redundant PDS fetches +
     // crypto unwrap when multiple pending shares reference the same document.
     let mut content_key_cache: HashMap<String, ContentKey> = HashMap::new();
@@ -173,15 +252,6 @@ pub async fn retry_pending_shares(
     let mut permanent_document_errors: HashSet<String> = HashSet::new();
 
     for entry in &entries {
-        let at_uri = match atproto::parse_at_uri(&entry.uri) {
-            Ok(u) => u,
-            Err(e) => {
-                warn!("pending share {}: invalid AT-URI: {e}", entry.uri);
-                result.failed += 1;
-                continue;
-            }
-        };
-
         // A future-version pending share is state this client cannot fully
         // understand. Completing it (writing a grant) or expiring it (deleting
         // the record) are both writes against misunderstood state, so leave it
@@ -194,69 +264,6 @@ pub async fn retry_pending_shares(
             result.still_pending += 1;
             continue;
         }
-
-        // Check expiry
-        if let Some(created_ts) = time::parse_rfc3339(&entry.created_at) {
-            if params.now - created_ts > params.ttl_seconds {
-                trace!("pending share {} expired, deleting", entry.uri);
-                match client
-                    .delete_record(PENDING_SHARE_COLLECTION, &at_uri.rkey)
-                    .await
-                {
-                    Ok(()) => result.expired += 1,
-                    Err(e) => {
-                        warn!("failed to delete expired pending share {}: {e}", entry.uri);
-                        result.failed += 1;
-                    }
-                }
-                continue;
-            }
-        }
-
-        // Try to resolve recipient (cached per pass)
-        let recipient = match identity_cache.get(&entry.recipient) {
-            Some(Some(id)) => Rc::clone(id),
-            Some(None) => {
-                // Previously confirmed NotFound in this pass
-                result.still_pending += 1;
-                continue;
-            }
-            None => {
-                match resolve::resolve_identity(transport, params.caller_pds_url, &entry.recipient)
-                    .await
-                {
-                    Ok(id) => {
-                        let rc = Rc::new(id);
-                        identity_cache.insert(entry.recipient.clone(), Some(Rc::clone(&rc)));
-                        rc
-                    }
-                    // Recipient exists but hasn't published their Opake key yet.
-                    // This is exactly the condition that triggered the pending share —
-                    // keep it queued so the next retry can try again.
-                    Err(Error::NotFound(_)) | Err(Error::RecipientNotReady(_)) => {
-                        identity_cache.insert(entry.recipient.clone(), None);
-                        result.still_pending += 1;
-                        continue;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "pending share {}: can't resolve {}: {e}",
-                            entry.uri, entry.recipient
-                        );
-                        // Transient errors (network, 5xx, etc.) are not cached so the
-                        // next retry will attempt resolution again.
-                        result.failed += 1;
-                        continue;
-                    }
-                }
-            }
-        };
-
-        // Recipient is ready — complete the share
-        info!(
-            "pending share {}: recipient {} is ready, completing",
-            entry.uri, entry.recipient
-        );
 
         // Fetch content key (cached per document).
         // Skip immediately for documents that already failed with a permanent
@@ -310,38 +317,157 @@ pub async fn retry_pending_shares(
         };
 
         // Decrypt the original grant metadata (permissions + note) from the pending share
-        let grant_context =
-            crypto::SealContext::new(&entry.document, crypto::SealType::GrantMetadata);
-        let metadata: GrantMetadata =
-            match crypto::decrypt_metadata(&content_key, &entry.encrypted_metadata, &grant_context)
-            {
-                Ok(m) => m,
-                Err(e) => {
-                    warn!(
-                        "pending share {}: failed to decrypt metadata: {e}",
-                        entry.uri
-                    );
-                    // Fall back to defaults
-                    GrantMetadata {
-                        permissions: Some("read".to_string()),
-                        note: None,
-                    }
-                }
-            };
+        let pending_context =
+            crypto::SealContext::new(&entry.document, crypto::SealType::PendingShareMetadata);
+        let metadata: PendingShareMetadata = match crypto::decrypt_metadata(
+            &content_key,
+            &entry.encrypted_metadata,
+            &pending_context,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(
+                    "pending share {}: failed to decrypt metadata: {e}",
+                    entry.uri
+                );
+                result.failed += 1;
+                continue;
+            }
+        };
 
-        // Create the grant with the original metadata.
-        //
-        // The grant is written at the pending share's own rkey via an
-        // idempotent `putRecord`, not at a fresh PDS-allocated rkey. This is
-        // what makes completion exactly-once under concurrent runners: a daemon
-        // and an open tab (or two devices) that both reach this share derive the
-        // same grant rkey and upsert there, so the repo converges on one grant
-        // instead of one-per-runner. The pending delete that follows is the
-        // cleanup, and it is idempotent too — a second runner (or a torn prior
-        // pass) finds the pending record already gone and treats that as done.
-        //
-        // spec:background-work § Duplicate execution is harmless
-        // spec:background-work § Tasks interrupt at item granularity
+        if !metadata.recipient_did.starts_with("did:")
+            || !metadata.allow_unverified_first_publication
+        {
+            warn!(
+                "pending share {}: invalid or unapproved bound intent",
+                entry.uri
+            );
+            result.failed += 1;
+            continue;
+        }
+
+        let expired = time::parse_rfc3339(&entry.created_at)
+            .is_some_and(|created_ts| params.now - created_ts > params.ttl_seconds);
+
+        // Resolve the queue-time DID, never `entry.recipient`. Resolving even
+        // at expiry lets us carry an unverifiable-host reason to the owner.
+        let recipient =
+            resolve::resolve_identity(transport, params.caller_pds_url, &metadata.recipient_did)
+                .await;
+
+        let recipient = match recipient {
+            Ok(identity) => identity,
+            Err(Error::RecipientNotReady(_)) => {
+                if expired {
+                    expire_pending_share(client, params.owner_did, entry)
+                        .await
+                        .map_or_else(
+                            |error| {
+                                warn!("failed to expire pending share {}: {error}", entry.uri);
+                                result.failed += 1;
+                            },
+                            |_| result.expired += 1,
+                        );
+                } else {
+                    result.still_pending += 1;
+                }
+                continue;
+            }
+            Err(Error::VerificationFailed(reason)) => {
+                warn!(
+                    "pending share {}: {}'s published key does not verify: {reason}",
+                    entry.uri, metadata.recipient_did
+                );
+                let discarded = if expired {
+                    match expire_pending_share(client, params.owner_did, entry).await {
+                        Ok(()) => {
+                            result.expired += 1;
+                            true
+                        }
+                        Err(error) => {
+                            warn!("failed to expire pending share {}: {error}", entry.uri);
+                            result.failed += 1;
+                            false
+                        }
+                    }
+                } else {
+                    result.still_pending += 1;
+                    false
+                };
+                result
+                    .verification_errors
+                    .push(PendingShareVerificationError {
+                        uri: entry.uri.clone(),
+                        recipient_did: metadata.recipient_did.clone(),
+                        reason,
+                        expired: discarded,
+                    });
+                continue;
+            }
+            Err(error) => {
+                warn!(
+                    "pending share {}: bound recipient {} cannot be used: {error}",
+                    entry.uri, metadata.recipient_did
+                );
+                if expired {
+                    expire_pending_share(client, params.owner_did, entry)
+                        .await
+                        .map_or_else(
+                            |delete_error| {
+                                warn!(
+                                    "failed to expire pending share {}: {delete_error}",
+                                    entry.uri
+                                );
+                                result.failed += 1;
+                            },
+                            |_| result.expired += 1,
+                        );
+                } else {
+                    result.failed += 1;
+                }
+                continue;
+            }
+        };
+
+        if recipient.did != metadata.recipient_did {
+            warn!(
+                "pending share {}: bound DID resolved to a different DID",
+                entry.uri
+            );
+            result.failed += 1;
+            continue;
+        }
+
+        if expired {
+            expire_pending_share(client, params.owner_did, entry)
+                .await
+                .map_or_else(
+                    |error| {
+                        warn!("failed to expire pending share {}: {error}", entry.uri);
+                        result.failed += 1;
+                    },
+                    |_| result.expired += 1,
+                );
+            continue;
+        }
+
+        let Some(permissions) = metadata.permissions.as_deref() else {
+            warn!("pending share {}: intent has no permissions", entry.uri);
+            result.failed += 1;
+            continue;
+        };
+
+        info!(
+            "pending share {}: bound recipient is ready, completing",
+            entry.uri
+        );
+        let unverified_key_approval = match recipient.verification {
+            VerificationState::Verified { .. } => None,
+            VerificationState::Unverified => Some(recipient.unverified_key_approval_for_version(
+                crate::records::Grant::RECORD_VERSION,
+                &entry.document,
+            )),
+        };
         let grant_params = GrantParams {
             document_uri: &entry.document,
             recipient_did: &recipient.did,
@@ -350,29 +476,26 @@ pub async fn retry_pending_shares(
                 x25519: &recipient.x25519_public_key,
                 ml_kem: &recipient.ml_kem_public_key,
             },
-            permissions: metadata.permissions.as_deref().unwrap_or("read"),
+            permissions,
             note: metadata.note.as_deref(),
+            unverified_key_approval,
+            pending_share_uri: Some(&entry.uri),
+            pending_share_commitment: Some(pending_intent_commitment(entry)?),
             created_at: &entry.created_at,
         };
 
-        match put_grant_at(client, &grant_params, &at_uri.rkey, rng).await {
-            Ok(grant_uri) => {
+        match complete_pending_atomically(client, params.owner_did, entry, &grant_params, rng).await
+        {
+            Ok(completion) => {
+                let grant_uri = completion.uri();
                 info!("pending share {}: grant written → {grant_uri}", entry.uri);
-                match client
-                    .delete_record(PENDING_SHARE_COLLECTION, &at_uri.rkey)
-                    .await
-                {
-                    // Already gone (another runner cleared it, or a prior torn
-                    // pass) is success, not failure — the grant exists either way.
-                    Ok(()) | Err(Error::NotFound(_)) => {}
-                    Err(e) => {
-                        warn!(
-                            "pending share {}: grant written but failed to delete pending record: {e}",
-                            entry.uri
-                        );
-                    }
-                }
                 result.completed += 1;
+                if completion.created() {
+                    result.completion_notices.push(RecipientVerificationNotice {
+                        did: recipient.did.clone(),
+                        verification: recipient.verification.clone(),
+                    });
+                }
             }
             Err(e) => {
                 warn!(
@@ -392,6 +515,200 @@ pub async fn retry_pending_shares(
     }
 
     Ok(result)
+}
+
+/// Expiry is a conditional intent deletion. A stale expiry runner cannot
+/// delete a replacement/cancelled/completed item, and an existing designated
+/// grant is a collision rather than permission to consume the intent.
+async fn expire_pending_share(
+    client: &mut XrpcClient<impl Transport>,
+    owner_did: &str,
+    entry: &PendingShareEntry,
+) -> Result<(), Error> {
+    let pending_uri = atproto::parse_at_uri(&entry.uri)?;
+    let commit = client.repository_commit().await?;
+    let pending = client
+        .get_record(owner_did, PENDING_SHARE_COLLECTION, &pending_uri.rkey)
+        .await?;
+    if pending.value != entry.raw_record {
+        return Err(Error::CasConflict(
+            "pending share changed before expiry".into(),
+        ));
+    }
+    match client
+        .get_record(owner_did, super::GRANT_COLLECTION, &pending_uri.rkey)
+        .await
+    {
+        Err(Error::NotFound(_)) => {}
+        Ok(_) => {
+            return Err(Error::AlreadyExists(
+                "designated grant already exists".into(),
+            ))
+        }
+        Err(error) => return Err(error),
+    }
+    client
+        .apply_writes_conditional(
+            &[ApplyWriteOp::Delete {
+                collection: PENDING_SHARE_COLLECTION.into(),
+                rkey: pending_uri.rkey,
+            }],
+            Some(&commit),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Consume one intent and create its designated grant in one repository-CAS
+/// transaction. There is intentionally no `putRecord` fallback: a conflict
+/// means the caller must re-derive the pending/grant pair rather than publish
+/// a second ciphertext or overwrite another runner's grant.
+async fn complete_pending_atomically(
+    client: &mut XrpcClient<impl Transport>,
+    owner_did: &str,
+    entry: &PendingShareEntry,
+    params: &GrantParams<'_>,
+    rng: &mut (impl CryptoRng + RngCore),
+) -> Result<CompletionResult, Error> {
+    let pending_uri = atproto::parse_at_uri(&entry.uri)?;
+    let commit = client.repository_commit().await?;
+
+    // These reads are after the observed repository revision. The raw JSON
+    // comparison includes createdAt, opakeVersion, and unknown fields, so a
+    // replacement intent is never consumed by stale decrypted metadata.
+    match completion_state(client, owner_did, entry, params).await? {
+        CompletionState::Ready => {}
+        CompletionState::Completed(uri) => return Ok(CompletionResult::Existing(uri)),
+    }
+
+    let grant = build_grant(params, rng)?;
+    let grant_uri = format!(
+        "at://{owner_did}/{}/{}",
+        super::GRANT_COLLECTION,
+        pending_uri.rkey
+    );
+    let writes = [
+        ApplyWriteOp::Create {
+            collection: super::GRANT_COLLECTION.into(),
+            rkey: Some(pending_uri.rkey.clone()),
+            record: serde_json::to_value(grant)?,
+        },
+        ApplyWriteOp::Delete {
+            collection: PENDING_SHARE_COLLECTION.into(),
+            rkey: pending_uri.rkey,
+        },
+    ];
+    match client
+        .apply_writes_conditional(&writes, Some(&commit))
+        .await
+    {
+        Ok(_) => Ok(CompletionResult::Created(grant_uri)),
+        Err(original_error) => {
+            // A lost response is an unknown result. Reconcile the two durable
+            // records; never retry this write or fall back to an upsert.
+            match completion_state(client, owner_did, entry, params).await {
+                Ok(CompletionState::Completed(uri)) => Ok(CompletionResult::Existing(uri)),
+                Ok(CompletionState::Ready) | Err(_) => Err(original_error),
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum CompletionState {
+    Ready,
+    Completed(String),
+}
+
+enum CompletionResult {
+    Created(String),
+    Existing(String),
+}
+
+impl CompletionResult {
+    fn uri(&self) -> &str {
+        match self {
+            Self::Created(uri) | Self::Existing(uri) => uri,
+        }
+    }
+
+    fn created(&self) -> bool {
+        matches!(self, Self::Created(_))
+    }
+}
+
+/// Reconcile the intent and its deterministic grant identity. If the intent
+/// is gone and the matching grant remains, a prior runner completed the one
+/// handoff. Both missing deliberately remains an error: there is no intent to
+/// replay. Both present is a collision, and a changed intent is never used.
+async fn completion_state(
+    client: &mut XrpcClient<impl Transport>,
+    owner_did: &str,
+    entry: &PendingShareEntry,
+    params: &GrantParams<'_>,
+) -> Result<CompletionState, Error> {
+    let pending_uri = atproto::parse_at_uri(&entry.uri)?;
+    let pending = client
+        .get_record(owner_did, PENDING_SHARE_COLLECTION, &pending_uri.rkey)
+        .await;
+    let grant = client
+        .get_record(owner_did, super::GRANT_COLLECTION, &pending_uri.rkey)
+        .await;
+
+    match (pending, grant) {
+        (Ok(pending), Err(Error::NotFound(_))) => {
+            if pending.value != entry.raw_record {
+                return Err(Error::CasConflict(
+                    "pending share changed during retry".into(),
+                ));
+            }
+            Ok(CompletionState::Ready)
+        }
+        (Err(Error::NotFound(_)), Ok(grant)) => {
+            let grant: crate::records::Grant =
+                vocabulary::classify_record(RecordKind::Grant, &grant.value).map_err(|_| {
+                    Error::AlreadyExists("designated grant is not a readable grant record".into())
+                })?;
+            if grant.document != params.document_uri || grant.recipient != params.recipient_did {
+                return Err(Error::AlreadyExists(
+                    "designated grant does not match pending-share intent".into(),
+                ));
+            }
+            let metadata: crate::crypto::GrantMetadata = crypto::decrypt_metadata(
+                params.content_key,
+                &grant.encrypted_metadata,
+                &crypto::SealContext::new(params.document_uri, crypto::SealType::GrantMetadata),
+            )
+            .map_err(|_| {
+                Error::AlreadyExists(
+                    "designated grant metadata cannot be verified against pending intent".into(),
+                )
+            })?;
+            if metadata.permissions.as_deref() != Some(params.permissions)
+                || metadata.note.as_deref() != params.note
+                || metadata.pending_share_uri.as_deref() != Some(entry.uri.as_str())
+                || metadata.pending_share_commitment != Some(pending_intent_commitment(entry)?)
+            {
+                return Err(Error::AlreadyExists(
+                    "designated grant metadata does not match pending-share intent".into(),
+                ));
+            }
+            Ok(CompletionState::Completed(format!(
+                "at://{owner_did}/{}/{}",
+                super::GRANT_COLLECTION,
+                pending_uri.rkey
+            )))
+        }
+        (Err(Error::NotFound(_)), Err(Error::NotFound(_))) => Err(Error::CasConflict(
+            "pending share disappeared without its designated grant; refusing replay".into(),
+        )),
+        (Ok(_), Ok(_)) => Err(Error::AlreadyExists(
+            "pending share and designated grant both exist".into(),
+        )),
+        (Err(error), _) if !matches!(error, Error::NotFound(_)) => Err(error),
+        (_, Err(error)) if !matches!(error, Error::NotFound(_)) => Err(error),
+        _ => unreachable!("all pending/grant states are handled"),
+    }
 }
 
 #[cfg(test)]

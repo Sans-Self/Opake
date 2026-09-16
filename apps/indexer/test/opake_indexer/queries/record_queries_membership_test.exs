@@ -24,7 +24,7 @@ defmodule OpakeIndexer.Queries.RecordQueriesMembershipTest do
         record_jsonb: %{
           "members" =>
             Enum.map(members, fn {did, role} ->
-              %{"wrappedKey" => %{"did" => did}, "role" => role}
+              %{"did" => did, "role" => role}
             end)
         }
       })

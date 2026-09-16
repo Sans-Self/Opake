@@ -7,14 +7,7 @@
 // Opake surfaces a warning and offers an explicit "Queue share" step, never a
 // silent queue, and editing the recipient dismisses it.
 import { readFileSync } from "node:fs";
-import {
-  blockadeTest as test,
-  expect,
-  cite,
-  ACTORS,
-  authFile,
-  installBlockade,
-} from "../fixtures";
+import { blockadeTest as test, expect, cite, ACTORS, authFile, installBlockade } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { unpublishPublicKey, clearGrantsTo, getDid } from "../pds-admin";
 import {
@@ -125,7 +118,14 @@ test(`shares a document cross-PDS, the recipient decrypts it over SSE, and revok
     // Alice shares with Carol by handle.
     const { input, shareButton } = await openShareDialog(alicePage, filename);
     await input.fill(carol.handle);
+    // The stock fixture's unsigned key needs the share operation's explicit
+    // acknowledgement. This remains scoped to this one share.
+    const consent = alicePage.waitForEvent("dialog");
     await shareButton.click();
+    const confirmation = await consent;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("unverified encryption key");
+    await confirmation.accept();
     await expect(alicePage.getByText(/^Shared /).first()).toBeVisible({ timeout: 60_000 });
 
     // The grant surfaces in Carol's inbox via the indexer fan-out — no reload.
@@ -211,8 +211,20 @@ test(`warns before queuing a share to a not-ready recipient and never queues sil
     await input.fill(frank.handle);
     await shareButton.click();
     await expect(queueButton).toBeVisible({ timeout: 60_000 });
+    // Queuing is one explicit first-publication consent: the confirmation must
+    // disclose that the keys it authorizes may be unverified, and nothing is
+    // written until the owner accepts it.
+    // spec:account-verification § Wrapping a key to an unverified account requires explicit confirmation
+    const consents: string[] = [];
+    alicePage.once("dialog", (dialog) => {
+      consents.push(dialog.message());
+      void dialog.accept();
+    });
     await queueButton.click();
     await expect(alicePage.getByText(/^Share queued/).first()).toBeVisible({ timeout: 30_000 });
+    expect(consents).toHaveLength(1);
+    expect(consents[0]).toContain(frank.handle);
+    expect(consents[0]).toMatch(/unverified/);
   } finally {
     await restore();
     await alicePage.context().close();

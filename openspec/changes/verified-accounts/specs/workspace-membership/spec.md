@@ -27,9 +27,9 @@ Exclusion from re-wrapping SHALL retain the member's DID, role, and existing key
 
 ### Requirement: Keyring supersede authority is manager-only, except pure self-removal
 
-A keyring supersede SHALL be valid iff the author is currently a manager, OR the author is a non-manager member and the supersede is a pure self-removal: the new member list equals the head's list minus the author, compared on `{did, role}` pairs. Under the exception, dropping anyone else, adding anyone, changing any remaining member's role, or keeping oneself in the list SHALL be rejected. Wrapped-key bytes are not compared — they legitimately differ across supersedes.
+A keyring supersede SHALL be valid iff the author is currently a manager, OR the author is a non-manager member and the supersede is a pure self-removal. Under that exception, the new record SHALL equal the head after removing only the author's current member entry and changing the chain-edge transport fields (`supersedes`, its content pin, lineage, and record timestamps). The rotation counter, key history, encrypted metadata, every remaining member field, and any other record field SHALL be preserved. Equality of `$bytes` values is equality of decoded bytes, so a representation change alone does not reject a leave. Dropping anyone else, adding anyone, changing any remaining member's role, wrap, approval, or another record field, or keeping oneself in the list SHALL be rejected.
 
-The self-removal exception SHALL additionally preserve each remaining member's wrap presence and key-bound approval exactly. A non-manager SHALL NOT use a leave to add, replace, or erase approval, or to change whether another member has a current wrap. Capturing renewed approval and repairing a missing group-key wrap SHALL be manager-authored supersedes, subject to the same authority checks as admission (`spec:account-verification § Key-bound approval is carried by the relationship's records`). A background runner has only its acting account's authority, never a separate repair privilege.
+Renewing approval, repairing a missing group-key wrap, and all other keyring mutations SHALL be manager-authored supersedes, subject to the same authority checks as admission (`spec:account-verification § Key-bound approval is carried by the relationship's records`). A background runner has only its acting account's authority, never a separate repair privilege.
 
 The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_self_removal?`, authority.ex) and re-checked client-side for a fast, clear error before the write. The two checks express the same rule; the indexer's is authoritative.
 
@@ -49,7 +49,7 @@ The rule SHALL be enforced in the indexer (`check_keyring_supersede/4` + `pure_s
 #### Scenario: leaving does not authorize replacement keys
 
 - **GIVEN** bob is an editor and carol's current entry has a missing wrap and approval for encryption bundle A
-- **WHEN** bob leaves while changing carol's approval to bundle B or adding a wrap for her
+- **WHEN** bob leaves while changing carol's approval to bundle B, adding a wrap for her, changing the rotation/history/metadata, or adding an unknown record field
 - **THEN** the supersede is rejected as more than pure self-removal
 
 ### Requirement: Adding a member is a manager-authored supersede
@@ -82,7 +82,7 @@ Direct manager add is the only admission channel: no invitation, request-to-join
 
 Removing a member SHALL rotate: the authoring manager mints a new group key, re-wraps it for every eligible remaining member, bumps `rotation`, and pushes the prior rotation's members into `keyHistory` so existing documents stay readable (`spec:document-crypto § Keyring reads select the group key by the document's rotation`). The removed member never sees the new key — that is the forward-secrecy contract, bounded by the no-historical-revocation posture (removed members keep whatever they already had).
 
-The authoring manager SHALL resolve each remaining member's verification state independently before re-wrapping (`spec:account-verification § Key resolution is three-valued, and an anchored account may not serve an unsigned record`). A remaining member who resolves to the error state SHALL be excluded from the re-wrap and reported, and SHALL NOT abort the removal (`spec:account-verification § Recipients are resolved independently and a multi-recipient operation never fails wholesale`). A removal is a withdrawal of access, and an account the removal is not withdrawing access from SHALL NOT be able to prevent it — otherwise one host serving an unverifiable record for its own user permanently blocks the removal of anyone else in the workspace.
+The authoring manager SHALL resolve each remaining member's verification state independently before re-wrapping (`spec:account-verification § Key resolution is three-valued, and an anchored account may not serve an unsigned record`). A remaining member who resolves to the error state SHALL be excluded from the re-wrap and reported, and SHALL NOT abort the removal (`spec:account-verification § Recipients are resolved independently and a multi-recipient operation never fails wholesale`). A removal is a withdrawal of access, and an account the removal is not withdrawing access from SHALL NOT be able to prevent it — otherwise one PDS operator serving an unverifiable record for its own user permanently blocks the removal of anyone else in the workspace.
 
 Re-wrapping an unverified member SHALL NOT ask for confirmation again when the resolved encryption keys match the head's key-bound approval. If those keys changed, or no applicable approval exists, the removal SHALL finish without that member's new wrap and report that a manager's fresh confirmation is needed. It SHALL NOT wait for that decision or silently fall back to formerly approved keys. The member remains admitted with their role and historical wraps. Resolution errors and missing approval SHALL be reported distinctly; the former offers no override, while the latter permits a subsequent explicit decision. The lifecycle of either missing wrap is `spec:key-rotation § The rotation event is synchronous and self-sufficient`.
 
@@ -102,7 +102,7 @@ Leave SHALL NOT rotate. The leaver authors the supersede, so any key minted in i
 
 #### Scenario: a remaining member's unverifiable record does not veto a removal
 
-- **GIVEN** a workspace with alice (manager), bob (editor) and carol (editor), where carol's host serves a record that does not verify under her verification method
+- **GIVEN** a workspace with alice (manager), bob (editor) and carol (editor), where carol's PDS serves a record that does not verify under her verification method
 - **WHEN** alice removes bob
 - **THEN** the supersede is written with a new group key wrapped to alice, carol is excluded from the re-wrap and reported to alice, and bob holds no wrap for the new rotation
 

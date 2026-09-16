@@ -26,6 +26,31 @@ fn from_keyring_preserves_fields() {
     assert_eq!(ws.rotation, 3);
 }
 
+#[test]
+fn historical_only_workspace_never_uses_a_retired_key_as_current() {
+    let rotation_zero = generate_content_key(&mut OsRng);
+    let ws = Workspace::from_keyring(
+        "at://did:plc:owner/at.opake.keyring/abc123".into(),
+        String::new(),
+        None,
+        "did:plc:owner".into(),
+        None,
+        1,
+        vec![HistoricalKey {
+            rotation: 0,
+            key: rotation_zero.clone(),
+        }],
+        vec![],
+    );
+
+    assert!(ws.key_for_rotation(0).is_some());
+    assert!(ws.key_for_rotation(1).is_none());
+    assert!(matches!(
+        ws.current_key(),
+        Err(crate::error::Error::CurrentGroupKeyUnavailable { .. })
+    ));
+}
+
 // `root_rkey` and `root_directory_uri` were removed in the lean federation
 // pivot. Workspace roots are now TID-rkeyed and discovered via the indexer's
 // `chain_heads` table; there's no deterministic derivation to assert against.

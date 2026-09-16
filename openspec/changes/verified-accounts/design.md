@@ -249,8 +249,9 @@ authenticity. Verifying the log would be additive later and requires no change t
 
 - **A host holding the account's rotation keys can replace the verification method itself, sign a
   substituted bundle under it, and resolve as verified.** → The replacement is an operation in a
-  public, append-only history, and resolution reads that history rather than only the current
-  document, so the replacement is reported at the moment a counterparty would act on it. This needs
+  public audit history that includes accepted nullified branches, and resolution reads that history
+  rather than only the current document, so the replacement is reported at the moment a counterparty
+  would act on it. This needs
   no monitoring infrastructure and no stored record of previously seen keys. Exposure is bounded by
   where the rotation key lives rather than by whose account it is: a key generated onto the machine
   that serves the PDS falls with it, while a key held off that infrastructure and listed at higher

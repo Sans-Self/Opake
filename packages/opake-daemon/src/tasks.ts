@@ -12,6 +12,7 @@
 // real-time event is missed.
 
 import { OpakeError } from "@opake/sdk";
+import type { RecipientVerificationNotice } from "@opake/sdk";
 import type { Opake } from "@opake/sdk";
 import type { DaemonOptions, TaskRecord, TaskStore } from "./types";
 
@@ -52,26 +53,63 @@ export function runTasks(
       tracked(
         taskStore,
         "share-retry",
-        { type: "shareRetry", retried: 0 },
+        { type: "shareRetry", retried: 0, verificationErrors: [], completionNotices: [] },
         async () => {
           const result = await opake.retryPendingShares();
           const retried = result.completed;
-          return { didWork: retried > 0, kind: { type: "shareRetry", retried } };
+          const verificationErrors = result.verificationErrors;
+          const completionNotices = result.completionNotices;
+          // A refusal is durable owner-visible work even when no grant was
+          // completed. Persist it so a browser timer cannot silently discard
+          // a verification failure (including the TTL expiry reason).
+          return {
+            didWork: retried > 0 || verificationErrors.length > 0 || completionNotices.length > 0,
+            kind: { type: "shareRetry", retried, verificationErrors, completionNotices },
+          };
         },
         options,
       ),
 
-    // Opportunistic tier: best-effort while a tab is open. Never promises
-    // completion — the committed CLI daemon is what drains the sweep.
-    "rotation-rewrap": () =>
+    "member-wrap-repair": () =>
       tracked(
         taskStore,
-        "rotation-rewrap",
-        { type: "rotationRewrap", rewrapped: 0 },
+        "member-wrap-repair",
+        {
+          type: "memberWrapRepair",
+          repaired: 0,
+          verificationNotices: [],
+          awaitingApproval: 0,
+          verificationFailed: 0,
+          deferredHumanDecision: 0,
+          deferredVisibility: 0,
+          deferredByBudget: 0,
+          discoveryDeferred: false,
+        },
         async () => {
-          const result = await opake.sweepRotationRewrap();
-          const rewrapped = result.rewrapped;
-          return { didWork: rewrapped > 0, kind: { type: "rotationRewrap", rewrapped } };
+          const result = await opake.sweepMemberWrapRepairs();
+          const repaired = result.repaired;
+          const didWork = repaired > 0
+            || result.verificationNotices.length > 0
+            || result.awaitingApproval > 0
+            || result.verificationFailed > 0
+            || result.deferredHumanDecision > 0
+            || result.deferredVisibility > 0
+            || result.deferredByBudget > 0
+            || result.discoveryDeferred;
+          return {
+            didWork,
+            kind: {
+              type: "memberWrapRepair",
+              repaired,
+              verificationNotices: result.verificationNotices,
+              awaitingApproval: result.awaitingApproval,
+              verificationFailed: result.verificationFailed,
+              deferredHumanDecision: result.deferredHumanDecision,
+              deferredVisibility: result.deferredVisibility,
+              deferredByBudget: result.deferredByBudget,
+              discoveryDeferred: result.discoveryDeferred,
+            },
+          };
         },
         options,
       ),

@@ -56,10 +56,7 @@ pub async fn create_keyring(
 
     let keyring_members: Vec<KeyringMember> = wrapped_keys
         .into_iter()
-        .map(|wk| KeyringMember {
-            wrapped_key: wk,
-            role: Role::Manager,
-        })
+        .map(|wk| KeyringMember::with_wrap(wk, Role::Manager))
         .collect();
 
     let metadata = KeyringMetadata {
@@ -156,12 +153,12 @@ mod tests {
                 assert_eq!(record.algo, "aes-256-gcm");
                 assert_eq!(record.rotation, 0);
                 assert_eq!(record.members.len(), 1);
-                assert_eq!(record.members[0].wrapped_key.did, TEST_DID);
+                assert_eq!(record.members[0].did, TEST_DID);
 
                 // Verify the wrapped group key is unwrappable under the
                 // same context the wrap used.
                 let unwrapped = crypto::unwrap_key(
-                    &record.members[0].wrapped_key,
+                    record.members[0].wrapped_key.as_ref().unwrap(),
                     &owner.private_keys(),
                     &crypto::WrapContext::Keyring { uri: &uri },
                     record.opake_version,

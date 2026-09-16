@@ -9,7 +9,7 @@ import { getOpake, useAuthStore } from "@/stores/auth";
 import { getStorage } from "@/stores/auth";
 import { formatFingerprint } from "@/lib/encoding";
 import { Opake } from "@opake/sdk";
-import type { PairRequestResult, AwaitPairOptions } from "@opake/sdk";
+import type { PairCompletionResult, PairRequestResult, AwaitPairOptions } from "@opake/sdk";
 
 // ---------------------------------------------------------------------------
 // Types (re-exported for UI consumption)
@@ -43,7 +43,7 @@ export async function createPairRequest(): Promise<PairRequestResult> {
 export async function awaitPairCompletion(
   requestRkey: string,
   options?: AwaitPairOptions,
-): Promise<void> {
+): Promise<PairCompletionResult> {
   const storage = await getStorage();
   return Opake.awaitPairCompletion(storage, requireActiveDid(), requestRkey, options);
 }

@@ -95,8 +95,7 @@ describe("pending shares", () => {
     // Grant should exist
     const grants = pds.listRecords("did:plc:alice", "at.opake.grant");
     const charlieGrants = grants.filter(
-      (r: { value: { recipient?: string } }) =>
-        r.value.recipient === "did:plc:nopake-test",
+      (r) => (r.value as { recipient?: string }).recipient === "did:plc:nopake-test",
     );
     expect(charlieGrants.length).toBeGreaterThanOrEqual(1);
   });

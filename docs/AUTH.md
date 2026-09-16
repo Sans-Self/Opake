@@ -6,7 +6,7 @@ Opake supports two authentication modes against the PDS. OAuth is the default; l
 
 ### OAuth Flow
 
-All token handling happens in WASM (opake-core). JS never parses token responses, constructs session objects, or holds DPoP private keys. The WASM exports `startOAuthLogin`, `completeOAuthLogin`, and `loginWithAppPasswordWasm` compose core primitives into complete login flows.
+Application-owned token handling happens in WASM (opake-core). JS never receives a token response, constructs a session object, or holds a DPoP private key. The injected browser transport can transiently carry protocol messages containing those values; that does not create a JavaScript credential API or guarantee secrecy from browser-managed I/O. The WASM exports `startOAuthLogin`, `completeOAuthLogin`, and `loginWithAppPasswordWasm` compose core primitives into complete login flows.
 
 1. Resolve handle to PDS URL (`resolve_pds_for_login` — .well-known, public API, DID document)
 2. Discover OAuth Authorization Server via `/.well-known/oauth-protected-resource` → `/.well-known/oauth-authorization-server`; PAR endpoint resolved via `AuthorizationServerMetadata::par_endpoint()`
@@ -15,7 +15,7 @@ All token handling happens in WASM (opake-core). JS never parses token responses
 5. Open browser to authorization URL; CLI starts a loopback HTTP server on `127.0.0.1`
 6. User authorizes in the browser; PDS redirects with `code` and `state`
 7. CSRF validation, authorization code exchange with DPoP proof + PKCE verifier — all in WASM
-8. WASM builds `OAuthSession` and saves to storage. Tokens never enter JS memory.
+8. WASM builds `OAuthSession` and saves to storage. Application code never receives the tokens; the browser transport can only carry them transiently for protocol I/O.
 9. Publish `at.opake.publicKey/self` via idempotent `putRecord`
 
 The web frontend uses a two-step flow: `Opake.startLogin()` returns the auth URL + serializable `PendingLogin` state. The consumer saves this via `Opake.savePendingLogin()` (sessionStorage with 10-minute TTL), redirects, then calls `Opake.completeLogin()` on the callback page. `Opake.loadPendingLogin()` auto-clears the DPoP key material from sessionStorage on read.
@@ -31,6 +31,20 @@ atproto repo:at.opake.accountConfig repo:at.opake.directory ... repo:at.opake.pu
 The scope string is built from `crate::scope::OPAKE_COLLECTIONS` (single source of truth). The same scope is embedded in the loopback client ID via `build_client_id(redirect_uri, scope)` and passed to the PAR body — they must match.
 
 A permission set lexicon (`at.opake.authFullAccess`) bundles all collections for when `include:` scopes are supported by PDSes.
+
+### DID verification operations
+
+Publishing or removing the account's `#opake` DID verification method uses a separate, one-shot OAuth authorization with `atproto identity:*`. The normal session never receives that scope. Each operation creates fresh DPoP, PKCE, and callback state. It owns issued credentials only for its lifetime; it is not serialized with a session or recoverable after a reload.
+
+Before publishing the method, Opake writes the signed `at.opake.publicKey/self` record through the ordinary session. A signer confirmation is then requested and supplied by the account owner before the PLC operation is signed and submitted. The operation carries the complete current PLC verification-method map forward, changing only `opake`. Removing the method follows the same separate authorization path and returns the account to the unverified state.
+
+PDS account-migration tooling can replace the DID verification-method map with the receiving PDS's recommended account key and drop `#opake`. The account then becomes unverified without action by its owner, even though a migration operation could preserve the complete map. At its next self-check, Opake reports an absent method and offers owner-authorized republication; it reports the state without guessing whether migration, removal, or another operation caused it. A malformed, mismatched, or substituted method is an error that refuses silent repair. An account with no PLC rotation key needs a rotation-key holder to authorize publication, and that holder may decline. The owner may remove a valid method to become unverified and later start a fresh setup operation.
+
+On every handled completion, refusal, cancellation, or uncertain submit, Opake independently attempts to revoke access and refresh credentials and discards them locally even if revocation fails. A successful revocation response does not prove server authority ended. If a process or page terminates before cleanup runs, Opake has no persisted grant to resume and makes no later revocation claim. A lost submit response is reconciled by reading the current DID document and reports only whether it now matches, is unchanged, conflicts, or is unavailable; retrying a mutation requires a fresh identity operation.
+
+The web binding injects a browser transport so WASM can make the protocol requests. OAuth codes, token values, PKCE verifiers, DPoP proofs, and access-token headers can transiently pass through browser-managed request and response handling as the protocol requires. That transport is not an application credential API: the identity operation never exports its tokens, PKCE verifier, or DPoP private key to JavaScript, never stores an identity continuation in `PendingLogin` or session storage, and cannot resume after navigation. This boundary does not promise secrecy from browser-managed I/O buffers.
+
+At account bootstrap the web context reads the DID document directly. `absent` can offer setup, `verified` is healthy, and a verification error refuses repair. A network failure is surfaced separately and is never represented as absence.
 
 ### Legacy Flow
 

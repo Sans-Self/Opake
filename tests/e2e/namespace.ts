@@ -23,6 +23,8 @@ export interface Actor {
   readonly name: string;
   readonly handle: string;
   readonly pds: string;
+  /** The fixture bootstrap publishes this actor's signed `#opake` method. */
+  readonly verified?: boolean;
   readonly mnemonic: string;
   readonly password: string;
 }
@@ -94,6 +96,7 @@ export function actorsFor(ns: string): readonly Actor[] {
     name: actor.name,
     handle: `${actor.name}-${ns}.${actor.pds}.test`,
     pds: actor.pds,
+    verified: actor.verified,
     mnemonic: deriveMnemonic(ns, actor.name),
     password: actor.password,
   }));

@@ -109,8 +109,8 @@ async function seedIndexerUrl(opake: import("@opake/sdk").Opake): Promise<void> 
 // Point the WASM did:plc resolver at a dev-env-local PLC directory when
 // configured (VITE_PLC_DIRECTORY_URL). The override is process-level set-once
 // (OnceLock in core), so this guards to a single effective call and must run
-// before any handle/DID resolution — seedIndexerUrl (its only caller) runs at
-// every Opake.init, ahead of login. Without it the browser WASM falls back to
+// before any handle/DID resolution — every Opake.init call below seeds it
+// first. Without it the browser WASM falls back to
 // production plc.directory; in the e2e harness the route blockade fails loudly
 // on that escape.
 // eslint-disable-next-line functional/no-let
@@ -351,6 +351,7 @@ async function classifyOpakeInit(
   did: string,
 ): Promise<OpakeInitResult> {
   try {
+    await seedPlcDirectoryUrl();
     const opake = await OpakeCtor.init({ storage });
     await seedIndexerUrl(opake);
     return await classifySession(opake, storage, did);
@@ -397,6 +398,7 @@ async function deriveAndPersistIdentity(seedPhrase: string, did: string): Promis
   const identity = await Opake.createIdentity(seedPhrase, did);
   await s.saveIdentity(did, identity);
 
+  await seedPlcDirectoryUrl();
   const opake = await Opake.init({ storage: s, did });
   await seedIndexerUrl(opake);
   opakeInstance?.destroy();
@@ -578,6 +580,7 @@ export const useAuthStore = create<AuthStore>()(
         // PDS-direct probe so the `/devices` route picks the right view
         // (`RecoverIdentityView` vs `FreshAccountView`).
         try {
+          await seedPlcDirectoryUrl();
           const opake = await Opake.init({ storage: s });
           await seedIndexerUrl(opake);
           opakeInstance = opake;
@@ -674,6 +677,7 @@ export const useAuthStore = create<AuthStore>()(
         const s = await getStorage();
         // `awaitPairCompletion` already wrote the identity to storage via
         // WASM — we just spin up an Opake handle and refresh store state.
+        await seedPlcDirectoryUrl();
         const opake = await Opake.init({ storage: s, did });
         await seedIndexerUrl(opake);
         opakeInstance?.destroy();

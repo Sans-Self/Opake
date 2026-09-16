@@ -19,6 +19,9 @@
 #                       jq → putRecord), preserving all other fields including
 #                       real encrypted payloads — ages a pending share past its
 #                       TTL without a 7-day wait or a hand-built fake record
+#   setpds <name> <url> rewrite the test CLI account's configured PDS URL.
+#                       Used only with a temporary response-drop proxy to make
+#                       a real applyWrites result unknown to the CLI process.
 set -euo pipefail
 
 FIXTURES=/fixtures/actors.json
@@ -53,7 +56,15 @@ case "$cmd" in
       "$did" "$did" "$base" "$handle" > "$dir/config.toml"
     printf '%s\n' "$base" > "$dir/.pds"
     printf '%s\n' "$did" > "$dir/.did"
-    printf '%s\n' "$mnemonic" | OPAKE_DATA_DIR="$dir" opake recover >/dev/null 2>&1
+    # A second login for the same actor in one container life finds the
+    # identity already recovered; that is the steady state, not a failure.
+    # Every other recover failure is surfaced instead of swallowed.
+    if ! out=$(printf '%s\n' "$mnemonic" | OPAKE_DATA_DIR="$dir" opake recover 2>&1); then
+      case "$out" in
+        *"already exists"*) ;;
+        *) printf '%s\n' "$out" >&2; exit 1 ;;
+      esac
+    fi
     echo "$did"
     ;;
   delkr)
@@ -100,6 +111,20 @@ case "$cmd" in
       | curl -fsS -X POST "$base/xrpc/com.atproto.repo.putRecord" \
         -H "authorization: Bearer $jwt" -H 'content-type: application/json' \
         -d @- >/dev/null
+    echo ok
+    ;;
+  setpds)
+    name="$1"; url="$2"; dir="/work/$name"
+    # URLs are passed as one exec argument by the TypeScript helper. jq owns
+    # quoting so an address cannot turn into shell syntax or malformed TOML.
+    tmp="$dir/config.toml.next"
+    jq -Rn --arg url "$url" '
+      reduce inputs as $line ("";
+        if ($line | startswith("pds_url = ")) then . + "pds_url = \"" + $url + "\"\n"
+        else . + $line + "\n" end
+      )
+    ' < "$dir/config.toml" | jq -r . > "$tmp"
+    mv "$tmp" "$dir/config.toml"
     echo ok
     ;;
   *)

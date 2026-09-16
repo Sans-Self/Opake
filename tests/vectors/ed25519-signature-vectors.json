@@ -1,0 +1,70 @@
+{
+  "$comment": "Adversarial Ed25519 signature forms for at.opake.publicKey account binding. Single source of truth, consumed by opake-core (Rust, compile time) and the indexer (Elixir, test boot) so both verifiers are held to one accept/reject boundary. Vectors are derived from the signing key seed 42 repeated 32 times: `valid_signature` is a genuine signature over the message, `noncanonical_s` adds the group order L to its S, `low_order_r` zeroes its R, `signature_over_a_different_message` signs the message plus a trailing full stop, and the identity-point vectors pair a small-order key with a small-order R and S = 0 — the forgery OTP's :crypto.verify accepts for any transcript. `smallOrderPointsHex` lists every encoding of the eight small-order points, including the non-canonical spellings a decoder reducing modulo p accepts.",
+  "smallOrderPointsHex": [
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    "0100000000000000000000000000000000000000000000000000000000000080",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  ],
+  "vectors": [
+    {
+      "expected": "accept",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "valid_signature",
+      "publicKeyHex": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "signatureHex": "f5d27e29cd8b27d49730a1f0f3b5585d93dac4965e6f09e043654c486a81488cea30518a98137a5c3c86b79f6354561a8535a333bc17ae193792ea539940a00e"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "zero_signature",
+      "publicKeyHex": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "signatureHex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "noncanonical_s",
+      "publicKeyHex": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "signatureHex": "f5d27e29cd8b27d49730a1f0f3b5585d93dac4965e6f09e043654c486a81488cd70447e7b2768cb41223af42424e352f8535a333bc17ae193792ea539940a01e"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "low_order_r",
+      "publicKeyHex": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "signatureHex": "0000000000000000000000000000000000000000000000000000000000000000ea30518a98137a5c3c86b79f6354561a8535a333bc17ae193792ea539940a00e"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "signature_over_a_different_message",
+      "publicKeyHex": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+      "signatureHex": "a6f0831bcd01b1a6b0c54cc5f92e0535c7c34670aa498dc11a4fbb3c22ee26681ee584521ff845b1151598894856555bb32b5bef546a57442447b62cdc845401"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "identity_point_key",
+      "publicKeyHex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "signatureHex": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "expected": "reject",
+      "messageHex": "61742e6f70616b652e7075626c69634b65792063726f73732d6c616e6775616765204564323535313920766563746f72",
+      "name": "identity_point_key_with_sign_bit",
+      "publicKeyHex": "0100000000000000000000000000000000000000000000000000000000000080",
+      "signatureHex": "01000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

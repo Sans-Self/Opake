@@ -5,9 +5,8 @@
 // logic has unit test coverage via MockTransport.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
+import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { startPds, stopPds, getPds } from "../../helpers/pds.js";
 import { setupAccount } from "../../helpers/account.js";

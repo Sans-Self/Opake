@@ -379,21 +379,20 @@ watcher.close();`;
 
 // -- sharing.mdx ------------------------------------------------------------
 
-export const shareDocument = `// Resolve the recipient first. This returns the recipient's hybrid public-key
-// bundle: x25519PublicKey (classical) + mlKemPublicKey (post-quantum), plus
-// the algo strings advertised on their at.opake.publicKey/self record.
-const recipient = await opake.resolveIdentity("bob.bsky.social");
+export const shareDocument = `const fm = await opake.cabinet();
+const recipient = "bob.bsky.social";
+const challenge = await fm.shareApprovalChallenge(documentUri, recipient);
+// Show the user challenge.did; use challenge.confirmation only after
+// they explicitly approve this exact unverified bundle.
 
 // Direct share. Writes an at.opake.grant record on YOUR PDS that wraps
 // the document's content key to BOTH halves of the recipient's hybrid
 // bundle. The grant lives under your repo; the recipient discovers it
 // via the indexer.
-const fm = await opake.cabinet();
 await fm.share(
   documentUri,
-  recipient.did,
-  recipient.x25519PublicKey,
-  recipient.mlKemPublicKey,
+  recipient,
+  challenge.confirmation,
   "read",
   "For your review — draft v2",
 );`;
@@ -401,20 +400,25 @@ await fm.share(
 export const handleRecipientNotReady = `import { OpakeError } from "@opake/sdk";
 
 try {
-  const recipient = await opake.resolveIdentity(handleOrDid);
+  const recipient = handleOrDid;
+  const challenge = await fm.shareApprovalChallenge(documentUri, recipient);
   await fm.share(
     documentUri,
-    recipient.did,
-    recipient.x25519PublicKey,
-    recipient.mlKemPublicKey,
+    recipient,
+    challenge.confirmation,
     "read",
   );
 } catch (err) {
   if (err instanceof OpakeError && err.kind === "RecipientNotReady") {
     // The target has a valid atproto identity but hasn't published an
-    // Opake public key yet (hasn't used Opake). Queue a pending share;
-    // the daemon will retry until they sign up or it expires (7 days).
-    await fm.createPendingShare(documentUri, handleOrDid, "read", null);
+    // Opake public key yet. Resolve and retain the exact DID inside WASM for
+    // the consent interaction; a handle cannot be rebound afterwards.
+    const pending = await fm.preparePendingShareRecipient(documentUri, handleOrDid);
+    if (window.confirm(\`Queue one automatic share for \${pending.did}'s first keys? They may be unverified.\`)) {
+      await fm.createPendingShare(documentUri, pending, true, "read", null);
+    } else {
+      pending.dispose();
+    }
     return;
   }
   throw err;

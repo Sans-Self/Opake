@@ -9,6 +9,7 @@ import { getOpake } from "@/stores/auth";
 import { toastError, toastSuccess } from "@/stores/toast";
 import { triggerBrowserDownload } from "@/lib/download";
 import { formatShortDate } from "@/lib/format";
+import { counterpartyVerificationBadge } from "@/lib/sharing";
 
 const METADATA_BATCH_SIZE = 5;
 
@@ -16,6 +17,8 @@ interface ResolvedEntry {
   readonly grant: InboxGrant;
   readonly metadata: ResolvedGrantMetadata | null;
   readonly ownerHandle: string | null;
+  /** Short verification label for the grant author, once resolved. */
+  readonly ownerVerification: string | null;
   readonly status: "resolving" | "resolved" | "error";
   readonly error?: string;
 }
@@ -26,6 +29,7 @@ function SharedWithMePage() {
     Readonly<Partial<Record<string, ResolvedGrantMetadata>>>
   >({});
   const [handleByDid, setHandleByDid] = useState<Readonly<Record<string, string>>>({});
+  const [verificationByDid, setVerificationByDid] = useState<Readonly<Record<string, string>>>({});
   const [failedByUri, setFailedByUri] = useState<Readonly<Record<string, string>>>({});
   const [downloading, setDownloading] = useState<string | null>(null);
 
@@ -97,6 +101,18 @@ function SharedWithMePage() {
           }),
         ),
       }));
+      // spec:account-verification § Key resolution is three-valued, and an anchored account may not serve an unsigned record
+      setVerificationByDid((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          ownerDids.flatMap((did, idx) => {
+            const r = ownerResults[idx];
+            return r.status === "fulfilled"
+              ? ([[did, counterpartyVerificationBadge(r.value)]] as const)
+              : ([[did, "verification failed"]] as const);
+          }),
+        ),
+      }));
 
       setMetadataByUri((prev) => ({
         ...prev,
@@ -144,12 +160,13 @@ function SharedWithMePage() {
     return grants.map((grant) => {
       const metadata = metadataByUri[grant.uri] ?? null;
       const ownerHandle = handleByDid[grant.authorDid] ?? null;
+      const ownerVerification = verificationByDid[grant.authorDid] ?? null;
       const err = failedByUri[grant.uri];
-      if (metadata) return { grant, metadata, ownerHandle, status: "resolved" as const };
-      if (err) return { grant, metadata: null, ownerHandle, status: "error" as const, error: err };
-      return { grant, metadata: null, ownerHandle, status: "resolving" as const };
+      if (metadata) return { grant, metadata, ownerHandle, ownerVerification, status: "resolved" as const };
+      if (err) return { grant, metadata: null, ownerHandle, ownerVerification, status: "error" as const, error: err };
+      return { grant, metadata: null, ownerHandle, ownerVerification, status: "resolving" as const };
     });
-  }, [grants, isLoading, metadataByUri, failedByUri, handleByDid]);
+  }, [grants, isLoading, metadataByUri, failedByUri, handleByDid, verificationByDid]);
 
   const handleDownload = useCallback(async (grantUri: string) => {
     setDownloading(grantUri);
@@ -226,7 +243,7 @@ interface SharedRowProps {
 }
 
 function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps) {
-  const { grant, metadata, ownerHandle, status, error } = entry;
+  const { grant, metadata, ownerHandle, ownerVerification, status, error } = entry;
   const displayName = metadata?.name ?? "Encrypted file";
   const ownerLabel = ownerHandle ? `@${ownerHandle}` : grant.authorDid;
 
@@ -252,7 +269,7 @@ function SharedRow({ entry, isDownloading, onDownload, onRetry }: SharedRowProps
             </div>
           ) : (
             <div className="text-text-faint truncate text-[11px]">
-              from {ownerLabel} · {formatShortDate(grant.createdAt)}
+              from {ownerLabel}{ownerVerification ? ` (${ownerVerification})` : ""} · {formatShortDate(grant.createdAt)}
             </div>
           )}
         </div>

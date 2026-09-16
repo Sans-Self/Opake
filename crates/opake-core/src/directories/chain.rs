@@ -337,15 +337,17 @@ where
     Ok(chain)
 }
 
-/// Verify that every supersede in a keyring chain was authored by a
-/// manager of the prior keyring.
+/// Verify that every supersede in a keyring chain was authored by a manager
+/// of the prior keyring, except for a non-manager's pure self-removal.
 ///
 /// `chain` must be in head→genesis order (as `walk_back_to_genesis` and
 /// `verify_and_walk_chain` return). The genesis is exempt — there's no
 /// prior to check against, and whoever wrote it is the workspace
 /// creator by definition. For each non-genesis node, the supersede's
 /// author DID (extracted from the AT-URI's authority) must appear as
-/// a `Role::Manager` in the prior keyring's members.
+/// a `Role::Manager` in the prior keyring's members. A non-manager may only
+/// remove their own entry while preserving every other member's DID, role,
+/// wrap presence, and decoded approval exactly.
 ///
 /// This complements `verify_and_walk_chain`: that one checks structural
 /// integrity ("the chain is well-formed and terminates at the expected
@@ -378,7 +380,7 @@ pub fn verify_keyring_chain_authority(
             .iter()
             .any(|m| m.did() == author_did && matches!(m.role, crate::records::Role::Manager));
 
-        if !is_manager {
+        if !is_manager && !pure_self_removal(&supersede.record, &prior.record, &author_did) {
             return Err(Error::ChainAuthorityViolation {
                 uri: supersede.uri.clone(),
                 author_did,
@@ -387,6 +389,117 @@ pub fn verify_keyring_chain_authority(
     }
 
     Ok(())
+}
+
+/// The read-side counterpart to the indexer's self-removal authority rule.
+/// A non-manager leave has precisely one data mutation: removing its own
+/// member entry.  Supersede lineage and timestamps are transport fields and
+/// naturally differ between records; every security-relevant keyring field is
+/// preserved.  Compare byte fields after decoding because a PDS may change
+/// base64 padding when it re-renders CBOR as JSON.
+fn pure_self_removal(supersede: &Keyring, prior: &Keyring, author_did: &str) -> bool {
+    let Some(author) = prior
+        .members
+        .iter()
+        .find(|member| member.did() == author_did)
+    else {
+        return false;
+    };
+    if matches!(author.role, crate::records::Role::Manager)
+        || supersede
+            .members
+            .iter()
+            .any(|member| member.did() == author_did)
+    {
+        return false;
+    }
+
+    let expected_members: Vec<_> = prior
+        .members
+        .iter()
+        .filter(|member| member.did() != author_did)
+        .collect();
+
+    supersede.members.len() == expected_members.len()
+        && supersede
+            .members
+            .iter()
+            .zip(expected_members)
+            .all(|(next, expected)| same_member(next, expected))
+        && supersede.opake_version == prior.opake_version
+        && supersede.algo == prior.algo
+        && supersede.rotation == prior.rotation
+        && same_metadata(&supersede.encrypted_metadata, &prior.encrypted_metadata)
+        && supersede.key_history.len() == prior.key_history.len()
+        && supersede
+            .key_history
+            .iter()
+            .zip(&prior.key_history)
+            .all(|(next, expected)| {
+                next.rotation == expected.rotation
+                    && next.members.len() == expected.members.len()
+                    && next.members.iter().zip(&expected.members).all(
+                        |(next_member, expected_member)| same_member(next_member, expected_member),
+                    )
+            })
+}
+
+fn same_member(
+    next: &crate::records::KeyringMember,
+    expected: &crate::records::KeyringMember,
+) -> bool {
+    next.did == expected.did
+        && next.role == expected.role
+        && same_optional_wrapped_key(next.wrapped_key.as_ref(), expected.wrapped_key.as_ref())
+        && same_optional_approval(
+            next.unverified_key_approval.as_ref(),
+            expected.unverified_key_approval.as_ref(),
+        )
+}
+
+fn same_optional_wrapped_key(
+    next: Option<&crate::records::WrappedKey>,
+    expected: Option<&crate::records::WrappedKey>,
+) -> bool {
+    match (next, expected) {
+        (None, None) => true,
+        (Some(next), Some(expected)) => {
+            next.did == expected.did
+                && next.algo == expected.algo
+                && matches!(
+                    (next.ciphertext.decode(), expected.ciphertext.decode()),
+                    (Ok(next), Ok(expected)) if next == expected
+                )
+        }
+        _ => false,
+    }
+}
+
+fn same_metadata(
+    next: &crate::records::EncryptedMetadata,
+    expected: &crate::records::EncryptedMetadata,
+) -> bool {
+    matches!(
+        (next.ciphertext.decode(), expected.ciphertext.decode()),
+        (Ok(next), Ok(expected)) if next == expected
+    ) && matches!(
+        (next.nonce.decode(), expected.nonce.decode()),
+        (Ok(next), Ok(expected)) if next == expected
+    )
+}
+
+fn same_optional_approval(
+    next: Option<&crate::records::AtBytes>,
+    expected: Option<&crate::records::AtBytes>,
+) -> bool {
+    match (next, expected) {
+        (None, None) => true,
+        (Some(next), Some(expected)) => matches!(
+            (next.decode(), expected.decode()),
+            (Ok(next), Ok(expected)) if next == expected
+        ),
+        _ => false,
+    }
 }
 
 /// Verify that every editor-authored directory supersede in `records` is

@@ -19,8 +19,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::opake_wasm::OpakeGuard;
 use crate::wasm_util::{
-    build_snapshot, pub_key_from_slice, to_js, wasm_err, DownloadResult, MutationResultDto,
-    WasmOpake,
+    build_snapshot, to_js, wasm_err, DownloadResult, MutationResultDto, WasmOpake,
 };
 
 /// WASM FileManager handle.
@@ -31,6 +30,23 @@ pub struct WasmFileManagerHandle {
     /// SSE-driven watcher registration.
     pub(crate) tree_keeper: Rc<Mutex<TreeKeeper>>,
     pub(crate) context: FileContext,
+}
+
+/// A queue-time recipient resolution held entirely by WASM. JavaScript can
+/// retain it for the consent interaction and display its DID, but cannot
+/// replace the bound target.
+#[wasm_bindgen(js_name = PendingShareRecipient)]
+pub struct WasmPendingShareRecipient {
+    recipient: opake_core::manager::PendingShareRecipient,
+}
+
+#[wasm_bindgen(js_class = PendingShareRecipient)]
+impl WasmPendingShareRecipient {
+    /// The exact DID bound by the WASM-held queue-time resolution.
+    #[wasm_bindgen(getter)]
+    pub fn did(&self) -> String {
+        self.recipient.did().to_owned()
+    }
 }
 
 #[wasm_bindgen(js_class = FileManager)]
@@ -300,31 +316,60 @@ impl WasmFileManagerHandle {
     pub async fn share(
         &self,
         document_uri: &str,
-        recipient_did: &str,
-        recipient_x25519_public_key: &[u8],
-        recipient_ml_kem_public_key: &[u8],
+        recipient: &str,
+        confirmed_unverified_keys: Option<Vec<u8>>,
         permissions: &str,
         note: Option<String>,
-    ) -> Result<String, JsError> {
-        let x25519_pub = pub_key_from_slice(recipient_x25519_public_key)?;
-        let ml_kem_pub: opake_core::crypto::MlKemPublicKey = recipient_ml_kem_public_key
-            .try_into()
-            .map_err(|_| JsError::new("recipient ML-KEM-768 public key must be 1184 bytes"))?;
-        let bundle = opake_core::crypto::PublicKeyBundle {
-            x25519: &x25519_pub,
-            ml_kem: &ml_kem_pub,
-        };
+    ) -> Result<JsValue, JsError> {
         let (mut opake, ctx) = self.parts().await?;
+        let confirmation = confirmed_unverified_keys
+            .as_deref()
+            .map(|bytes| {
+                bytes.try_into().map_err(|_| {
+                    JsError::new("unverified-key confirmation must be exactly 32 bytes")
+                })
+            })
+            .transpose()?;
         let mut mgr = opake.file_manager(ctx);
-        mgr.share(
-            document_uri,
-            recipient_did,
-            bundle,
-            permissions,
-            note.as_deref(),
-        )
-        .await
-        .map_err(wasm_err)
+        let result = mgr
+            .share(
+                document_uri,
+                recipient,
+                confirmation,
+                permissions,
+                note.as_deref(),
+            )
+            .await
+            .map_err(wasm_err)?;
+        to_js(&result)
+    }
+
+    /// Resolve once for display of the unverified-key confirmation, then pass
+    /// the returned bytes back to `share`. `share` always resolves again and
+    /// compares them to the fresh bundle before writing a grant.
+    #[wasm_bindgen(js_name = shareApprovalChallenge)]
+    pub async fn share_approval_challenge(
+        &self,
+        document_uri: &str,
+        recipient: &str,
+    ) -> Result<JsValue, JsError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Challenge {
+            did: String,
+            confirmation: Option<Vec<u8>>,
+        }
+
+        let (mut opake, ctx) = self.parts().await?;
+        let recipient = opake.resolve_identity(recipient).await.map_err(wasm_err)?;
+        let mgr = opake.file_manager(ctx);
+        let confirmation = mgr
+            .share_approval_challenge(document_uri, &recipient)
+            .map(|bytes| bytes.to_vec());
+        to_js(&Challenge {
+            did: recipient.did,
+            confirmation,
+        })
     }
 
     #[wasm_bindgen(js_name = revokeShare)]
@@ -342,19 +387,46 @@ impl WasmFileManagerHandle {
         to_js(&shares)
     }
 
+    /// Takes the recipient challenge by value: wasm-bindgen moves it out of
+    /// the JS wrapper, so one resolution can authorize at most one intent.
     #[wasm_bindgen(js_name = createPendingShare)]
     pub async fn create_pending_share(
         &self,
         document_uri: &str,
-        recipient: &str,
+        recipient: WasmPendingShareRecipient,
+        allow_unverified_first_publication: bool,
         permissions: &str,
         note: Option<String>,
     ) -> Result<String, JsError> {
         let (mut opake, ctx) = self.parts().await?;
         let mut mgr = opake.file_manager(ctx);
-        mgr.create_pending_share(document_uri, recipient, permissions, note.as_deref())
+        mgr.create_pending_share(
+            document_uri,
+            &recipient.recipient,
+            allow_unverified_first_publication,
+            permissions,
+            note.as_deref(),
+        )
+        .await
+        .map_err(wasm_err)
+    }
+
+    /// Resolve and retain the target behind the WASM boundary. The same opaque
+    /// challenge is later consumed by `createPendingShare`, so a handle cannot
+    /// be rebound between the warning and explicit consent.
+    #[wasm_bindgen(js_name = preparePendingShareRecipient)]
+    pub async fn prepare_pending_share_recipient(
+        &self,
+        document_uri: &str,
+        recipient: &str,
+    ) -> Result<WasmPendingShareRecipient, JsError> {
+        let (mut opake, ctx) = self.parts().await?;
+        let mgr = opake.file_manager(ctx);
+        let recipient = mgr
+            .prepare_pending_share_recipient(document_uri, recipient)
             .await
-            .map_err(wasm_err)
+            .map_err(wasm_err)?;
+        Ok(WasmPendingShareRecipient { recipient })
     }
 
     #[wasm_bindgen(js_name = deleteRecursive)]

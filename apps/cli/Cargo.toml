@@ -25,6 +25,7 @@ serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true
 urlencoding = "2"
+zeroize.workspace = true
 
 [dev-dependencies]
 opake-core = { path = "../../crates/opake-core", features = ["test-utils"] }

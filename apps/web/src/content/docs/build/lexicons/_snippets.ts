@@ -78,17 +78,17 @@ export const grantRecordShape = `{
 export const keyringRecordShape = `{
   "$type": "at.opake.keyring",
   "opakeVersion": 1,
-  "members": {
-    "did:plc:alice": { "wrappedKey": {...}, "role": "manager" },
-    "did:plc:bob":   { "wrappedKey": {...}, "role": "editor" },
-    "did:plc:carol": { "wrappedKey": {...}, "role": "viewer" }
-  },
+  "members": [
+    { "did": "did:plc:alice", "role": "manager", "wrappedKey": {...} },
+    { "did": "did:plc:bob", "role": "editor", "wrappedKey": {...}, "unverifiedKeyApproval": {"$bytes": "<base64 32-byte commitment>"} },
+    { "did": "did:plc:carol", "role": "viewer" } // current wrap and approval are optional
+  ],
   "rotation": 3,
-  "keyHistory": {
-    "0": { /* prior rotation's members, for historical decryption */ },
-    "1": { /* ... */ },
-    "2": { /* ... */ }
-  },
+  "keyHistory": [
+    { "rotation": 0, "members": [ /* prior members and historical wraps */ ] },
+    { "rotation": 1, "members": [ /* ... */ ] },
+    { "rotation": 2, "members": [ /* ... */ ] }
+  ],
   "encryptedMetadata": { /* name, description, icon */ },
   "createdAt": "2026-04-20T15:00:00Z"
 }`;

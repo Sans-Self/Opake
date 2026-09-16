@@ -8,26 +8,20 @@
 // on the other's completions.
 //
 // Why this is the regression for the completion fix: pending-share completion
-// writes the grant at the pending share's own rkey via idempotent `putRecord`
-// (crates/opake-core/src/sharing/create.rs::put_grant_at), not a fresh rkey via
-// createRecord. Both runners derive the same rkey and upsert there, so the repo
-// converges on one grant. Before the fix, two runners each created a grant at a
-// PDS-allocated rkey → two grants for one share. This test fails against the old
-// behaviour and passes against the new.
+// writes the grant at the pending share's own rkey in one conditional
+// `applyWrites(Create, Delete)` transaction. Both runners derive the same
+// designated rkey, but the PDS accepts only the runner whose observed
+// repository revision still matches; the loser reconciles the durable pair.
 //
-// ── RUN-TIME DEPENDENCIES (this spec is prepared, not yet wired to run) ───────
+// ── RUN-TIME DEPENDENCIES ────────────────────────────────────────────────────
 //  1. Full stack: the dev-env docker stack (PDS-a/b/c, relay, jetstream, indexer)
 //     AND the web dev server AND a browser. This is the heaviest orchestration in
-//     the suite. Gate with OPAKE_TEST_ENV=devenv, same as the federation tier.
-//  2. Web-drain entry point: the web runner's maintenance must be invocable from
+//     the suite.
+//  2. Web-drain entry point: the web runner's maintenance is invocable from
 //     the page so the race is deterministic (the share-retry timer is 300s with
 //     no leading tick — far too slow to overlap a test). The SDK method already
-//     exists (`opake.retryPendingShares()`); it needs a browser-reachable handle.
-//     This spec calls `window.__opakeMaintenance.retryPendingShares()`. Exposing
-//     that one-line test hook lives in apps/web (the cabinet route / auth store),
-//     which is outside this change's edit scope — it must be added there and
-//     coordinated with whoever owns the web components. Until it lands, the
-//     `drainViaWeb` call below throws and the test is correctly red.
+//     exists (`opake.retryPendingShares()`) and is exposed as
+//     `window.__opakeMaintenance.retryPendingShares()` by the cabinet route.
 //
 // Cites the concurrency contract this fix satisfies.
 
@@ -55,8 +49,6 @@ const RECIPIENT = actorOnPds("pds-c").name; // eve
 
 const SHARE_COUNT = 5;
 const uniqueName = (i: number): string => `xtier-${Date.now().toString(36)}-${i}.txt`;
-
-const runDevenv = process.env.OPAKE_TEST_ENV === "devenv";
 
 async function ownerPage(browser: Browser): Promise<Page> {
   const context = await browser.newContext({
@@ -102,9 +94,7 @@ function grantCountForDoc(inboxLongStdout: string, docUri: string): number {
   return count;
 }
 
-test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-tier (skipped: set OPAKE_TEST_ENV=devenv)", () => {
-  test.skip(!runDevenv, "requires the dev-env stack + web server");
-
+test.describe("background-work cross-tier", () => {
   test(`web and CLI race the pending-share queue and complete each share exactly once ${cite(
     "background-work",
     "Duplicate execution is harmless",
@@ -129,7 +119,14 @@ test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-
         // eslint-disable-next-line no-await-in-loop
         const docUri = await uploadTextToCabinet(OWNER, uniqueName(i), `xtier payload ${i}`);
         // eslint-disable-next-line no-await-in-loop
-        const queued = await cli(OWNER, ["share", "new", docUri, recipientDid, "--queue"]);
+        const queued = await cli(OWNER, [
+          "share",
+          "new",
+          docUri,
+          recipientDid,
+          "--queue",
+          "--allow-unverified-first-publication",
+        ]);
         expect(queued.code, queued.stderr).toBe(0);
         docUris.push(docUri);
       }
@@ -192,8 +189,8 @@ test.describe(runDevenv ? "background-work cross-tier" : "background-work cross-
       }
 
       // The owner's queue is drained of these docs: completion deleted each
-      // pending record (idempotently — a NotFound on the second runner's delete
-      // is success, not error).
+      // pending record. A losing runner reconciles the committed pair instead
+      // of issuing a second delete or an upsert.
       const pending = await cli(OWNER, ["share", "pending"]);
       for (const uri of docUris) {
         expect(pending.stdout).not.toContain(uri);

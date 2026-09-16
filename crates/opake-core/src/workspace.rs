@@ -95,8 +95,10 @@ pub struct Workspace {
     /// DID of the workspace owner (the keyring record's authority).
     #[zeroize(skip)]
     pub owner_did: String,
-    /// Symmetric group key, unwrapped for the current user at the current rotation.
-    pub key: ContentKey,
+    /// Symmetric group key for the current rotation. A member retained after
+    /// a verification-driven exclusion has no current wrap, but can still
+    /// hold historical keys.
+    pub key: Option<ContentKey>,
     /// Key rotation counter.
     #[zeroize(skip)]
     pub rotation: u64,
@@ -131,7 +133,7 @@ impl Workspace {
         name: String,
         description: Option<String>,
         owner_did: String,
-        key: ContentKey,
+        key: impl Into<Option<ContentKey>>,
         rotation: u64,
         historical_keys: Vec<HistoricalKey>,
         manager_dids: Vec<String>,
@@ -141,7 +143,7 @@ impl Workspace {
             name,
             description,
             owner_did,
-            key,
+            key: key.into(),
             rotation,
             historical_keys,
             manager_dids,
@@ -179,11 +181,22 @@ impl Workspace {
         self.group_keys().for_rotation(rotation)
     }
 
+    /// The current group key, required for any operation that authors new
+    /// workspace state. Historical material is deliberately never substituted
+    /// here: doing so would encrypt new content under a retired generation.
+    pub fn current_key(&self) -> Result<&ContentKey, crate::error::Error> {
+        self.key
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::CurrentGroupKeyUnavailable {
+                workspace_id: self.uri.clone(),
+            })
+    }
+
     /// Borrowed view of all key material for rotation-aware decryption.
     pub fn group_keys(&self) -> GroupKeys<'_> {
         GroupKeys {
             current_rotation: self.rotation,
-            current: &self.key,
+            current: self.key.as_ref(),
             historical: &self.historical_keys,
         }
     }
@@ -199,7 +212,7 @@ impl Workspace {
 #[derive(Clone, Copy, Debug)]
 pub struct GroupKeys<'a> {
     pub current_rotation: u64,
-    pub current: &'a ContentKey,
+    pub current: Option<&'a ContentKey>,
     pub historical: &'a [HistoricalKey],
 }
 
@@ -209,7 +222,7 @@ impl<'a> GroupKeys<'a> {
     /// `keyHistory`) or the rotation number is unknown.
     pub fn for_rotation(&self, rotation: u64) -> Option<&'a ContentKey> {
         if rotation == self.current_rotation {
-            return Some(self.current);
+            return self.current;
         }
         self.historical
             .iter()
@@ -230,7 +243,7 @@ impl<'a> GroupKeys<'a> {
 pub(crate) fn verify_workspace_identity(
     keyring: &Keyring,
     anchor: &str,
-    current_key: &ContentKey,
+    current_key: Option<&ContentKey>,
     historical: &[HistoricalKey],
 ) -> bool {
     // spec: lineage § Lineage never flips across a supersede
@@ -278,7 +291,7 @@ pub(crate) fn derive_historical_keys(
         .filter_map(|hist| {
             let member = hist.members.iter().find(|m| m.did() == did)?;
             let key = crypto::unwrap_key(
-                &member.wrapped_key,
+                member.wrapped_key.as_ref()?,
                 private_keys,
                 &crypto::WrapContext::Keyring { uri: anchor },
                 keyring.opake_version,

@@ -4,7 +4,6 @@
 // invalidation for the `useShares(documentUri)` query.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { OpakeError } from "@opake/sdk";
 import { useOpake } from "../provider";
 import { opakeKeys } from "../keys";
 
@@ -19,8 +18,8 @@ interface ShareFileInput {
  *
  * Resolves the recipient's identity, then:
  * - Recipient has a public key → creates a grant (immediate access).
- * - Recipient has no identity record → queues a pending share (the
- *   daemon completes it when the recipient publishes their key).
+ * - Recipient has no identity record → returns the resolver error. A caller
+ *   must collect explicit first-publication consent before it can queue.
  *
  * Invalidates `useShares(documentUri)` on success so the caller's
  * share list refreshes immediately.
@@ -32,33 +31,19 @@ export function useShareFile() {
   return useMutation({
     mutationFn: async (input: ShareFileInput) => {
       const fm = await opake.cabinet();
+      // A resolver failure propagates: a pending share can only be created by
+      // a UI that obtains explicit consent against its opaque WASM-held
+      // recipient challenge, never by this hook on the caller's behalf.
       try {
-        try {
-          const recipient = await opake.resolveIdentity(input.handleOrDid);
-          await fm.share(
-            input.documentUri,
-            recipient.did,
-            recipient.x25519PublicKey,
-            recipient.mlKemPublicKey,
-            "read",
-            input.note,
+        const recipient = await opake.resolveIdentity(input.handleOrDid);
+        const challenge = await fm.shareApprovalChallenge(input.documentUri, recipient.did);
+        if (challenge.confirmation) {
+          throw new Error(
+            "Sharing to an unverified encryption key requires explicit confirmation.",
           );
-          return { pending: false } as const;
-        } catch (err) {
-          // RecipientNotReady: valid identity, no publicKey/self record yet.
-          // Queue a pending share — the daemon retries once they publish their key.
-          // NotFound propagates as-is — the handle doesn't exist, not a pending-share case.
-          if (err instanceof OpakeError && err.kind === "RecipientNotReady") {
-            await fm.createPendingShare(
-              input.documentUri,
-              input.handleOrDid,
-              "read",
-              input.note ?? null,
-            );
-            return { pending: true } as const;
-          }
-          throw err;
         }
+        await fm.share(input.documentUri, recipient.did, null, "read", input.note);
+        return { pending: false } as const;
       } finally {
         fm.dispose();
       }

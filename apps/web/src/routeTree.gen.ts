@@ -17,6 +17,7 @@ import { Route as CabinetRouteRouteImport } from './routes/cabinet/route'
 import { Route as DevicesIndexRouteImport } from './routes/devices/index'
 import { Route as CabinetIndexRouteImport } from './routes/cabinet/index'
 import { Route as PublicIndexRouteImport } from './routes/_public/index'
+import { Route as DevicesVerificationCallbackRouteImport } from './routes/devices/verification-callback'
 import { Route as DevicesOauthCallbackRouteImport } from './routes/devices/oauth-callback'
 import { Route as DevicesLoginRouteImport } from './routes/devices/login'
 import { Route as CabinetTasksRouteImport } from './routes/cabinet/tasks'
@@ -85,6 +86,14 @@ const DevicesCliCallbackLazyRoute = DevicesCliCallbackLazyRouteImport.update({
 } as any).lazy(() =>
   import('./routes/devices/cli-callback.lazy').then((d) => d.Route),
 )
+const DevicesVerificationCallbackRoute =
+  DevicesVerificationCallbackRouteImport.update({
+    id: '/verification-callback',
+    path: '/verification-callback',
+    getParentRoute: () => DevicesRouteRoute,
+  } as any).lazy(() =>
+    import('./routes/devices/verification-callback.lazy').then((d) => d.Route),
+  )
 const DevicesOauthCallbackRoute = DevicesOauthCallbackRouteImport.update({
   id: '/oauth-callback',
   path: '/oauth-callback',
@@ -286,6 +295,7 @@ export interface FileRoutesByFullPath {
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/verification-callback': typeof DevicesVerificationCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/cabinet/': typeof CabinetIndexRoute
   '/devices/': typeof DevicesIndexRoute
@@ -316,6 +326,7 @@ export interface FileRoutesByTo {
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/verification-callback': typeof DevicesVerificationCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/': typeof PublicIndexRoute
   '/cabinet': typeof CabinetIndexRoute
@@ -352,6 +363,7 @@ export interface FileRoutesById {
   '/cabinet/tasks': typeof CabinetTasksRoute
   '/devices/login': typeof DevicesLoginRoute
   '/devices/oauth-callback': typeof DevicesOauthCallbackRoute
+  '/devices/verification-callback': typeof DevicesVerificationCallbackRoute
   '/devices/cli-callback': typeof DevicesCliCallbackLazyRoute
   '/_public/': typeof PublicIndexRoute
   '/cabinet/': typeof CabinetIndexRoute
@@ -390,6 +402,7 @@ export interface FileRouteTypes {
     | '/cabinet/tasks'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/verification-callback'
     | '/devices/cli-callback'
     | '/cabinet/'
     | '/devices/'
@@ -420,6 +433,7 @@ export interface FileRouteTypes {
     | '/cabinet/tasks'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/verification-callback'
     | '/devices/cli-callback'
     | '/'
     | '/cabinet'
@@ -455,6 +469,7 @@ export interface FileRouteTypes {
     | '/cabinet/tasks'
     | '/devices/login'
     | '/devices/oauth-callback'
+    | '/devices/verification-callback'
     | '/devices/cli-callback'
     | '/_public/'
     | '/cabinet/'
@@ -534,6 +549,13 @@ declare module '@tanstack/react-router' {
       path: '/cli-callback'
       fullPath: '/devices/cli-callback'
       preLoaderRoute: typeof DevicesCliCallbackLazyRouteImport
+      parentRoute: typeof DevicesRouteRoute
+    }
+    '/devices/verification-callback': {
+      id: '/devices/verification-callback'
+      path: '/verification-callback'
+      fullPath: '/devices/verification-callback'
+      preLoaderRoute: typeof DevicesVerificationCallbackRouteImport
       parentRoute: typeof DevicesRouteRoute
     }
     '/devices/oauth-callback': {
@@ -810,6 +832,7 @@ const CabinetRouteRouteWithChildren = CabinetRouteRoute._addFileChildren(
 interface DevicesRouteRouteChildren {
   DevicesLoginRoute: typeof DevicesLoginRoute
   DevicesOauthCallbackRoute: typeof DevicesOauthCallbackRoute
+  DevicesVerificationCallbackRoute: typeof DevicesVerificationCallbackRoute
   DevicesCliCallbackLazyRoute: typeof DevicesCliCallbackLazyRoute
   DevicesIndexRoute: typeof DevicesIndexRoute
   DevicesPairAcceptRoute: typeof DevicesPairAcceptRoute
@@ -819,6 +842,7 @@ interface DevicesRouteRouteChildren {
 const DevicesRouteRouteChildren: DevicesRouteRouteChildren = {
   DevicesLoginRoute: DevicesLoginRoute,
   DevicesOauthCallbackRoute: DevicesOauthCallbackRoute,
+  DevicesVerificationCallbackRoute: DevicesVerificationCallbackRoute,
   DevicesCliCallbackLazyRoute: DevicesCliCallbackLazyRoute,
   DevicesIndexRoute: DevicesIndexRoute,
   DevicesPairAcceptRoute: DevicesPairAcceptRoute,

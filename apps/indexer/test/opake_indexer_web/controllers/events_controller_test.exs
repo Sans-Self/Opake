@@ -56,7 +56,9 @@ defmodule OpakeIndexerWeb.EventsControllerTest do
   defp authed_conn_post(conn, did, path) do
     {pubkey, privkey} = :crypto.generate_key(:eddsa, :ed25519)
 
-    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_signing_key, fn ^did -> {:ok, pubkey} end)
+    Mox.expect(OpakeIndexer.Auth.KeyFetcherMock, :fetch_authentication_decision, fn ^did ->
+      {:ok, %{key: pubkey, verified: false, anchor_history: :no_history}}
+    end)
 
     timestamp = System.system_time(:second)
     message = "POST:#{path}:#{timestamp}:#{did}"

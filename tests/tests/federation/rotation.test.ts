@@ -24,6 +24,7 @@ import {
   actorByName,
   actorOnPds,
   cli,
+  cliApprovingUnverified,
   downloadAsMember,
   login,
   memberCount,
@@ -79,7 +80,9 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
       expect(created.code).toBe(0);
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
-      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid])).code,
+      ).toBe(0);
       expect(await pollUntil(async () => (await memberCount(OWNER, ws)) === 2)).toBe(true);
 
       // Remove the member → rotates the group key (0 → 1).
@@ -121,7 +124,9 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
       expect(await pollUntil(() => workspaceListed(OWNER, ws))).toBe(true);
 
       // A transient member exists so the removal has someone to rotate out.
-      expect((await cli(OWNER, ["workspace", "add-member", ws, memberDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, memberDid])).code,
+      ).toBe(0);
       expect(await pollUntil(async () => (await memberCount(OWNER, ws)) === 2)).toBe(true);
 
       // Upload UNDER rotation 0.
@@ -135,7 +140,9 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
 
       // Admit the late joiner AFTER the rotation. The admitting supersede wraps
       // both the current key and the retained rotation-0 key to them.
-      expect((await cli(OWNER, ["workspace", "add-member", ws, lateDid])).code).toBe(0);
+      expect(
+        (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, lateDid])).code,
+      ).toBe(0);
       expect(await pollUntil(async () => (await memberCount(OWNER, ws)) === 2)).toBe(true);
       expect(await pollUntil(() => workspaceListed(LATE, ws))).toBe(true);
 
@@ -171,7 +178,9 @@ describe.skipIf(testEnv() !== "devenv")("key rotation lifecycle", () => {
       // constant manager and retains every historical key.
       const churn = [memberDid, lateDid, memberDid];
       for (const [i, did] of churn.entries()) {
-        expect((await cli(OWNER, ["workspace", "add-member", ws, did])).code).toBe(0);
+        expect(
+          (await cliApprovingUnverified(OWNER, ["workspace", "add-member", ws, did])).code,
+        ).toBe(0);
         expect(await pollUntil(async () => (await memberCount(OWNER, ws)) === 2)).toBe(true);
         expect((await cli(OWNER, ["workspace", "remove-member", ws, did, "-y"])).code).toBe(0);
         expect(await pollUntil(async () => (await rotationCount(OWNER, ws)) === i + 1)).toBe(true);

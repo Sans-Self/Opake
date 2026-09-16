@@ -23,6 +23,10 @@ export function useSeedPhraseRecovery(): SeedPhraseRecovery {
     setError(null);
     try {
       await useAuthStore.getState().saveIdentity(phrase);
+      // Re-publish through the standing session just as the fresh-identity
+      // path does. This makes a recovered device authoritative even when its
+      // initial remote-key probe was unavailable during bootstrap.
+      await useAuthStore.getState().publishPublicKey();
       // If keys don't match remote, identity state will be "conflict"
       // and the parent view switches to ConflictView automatically.
       // If they match, identity → "ready".

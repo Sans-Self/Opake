@@ -83,7 +83,7 @@ pub async fn start_oauth_login(handle: &str, redirect_uri: &str) -> Result<JsVal
     let pkce = generate_pkce(&mut rng);
     let csrf_state = generate_csrf_state(&mut rng);
     let scope = opake_core::scope::oauth_scope();
-    let client_id = oauth_token::build_client_id(redirect_uri, &scope);
+    let client_id = oauth_token::build_client_id(redirect_uri);
 
     // 4. Pushed Authorization Request (with DPoP proof + nonce retry)
     let par_endpoint = asm.par_endpoint();
@@ -121,7 +121,7 @@ pub async fn start_oauth_login(handle: &str, redirect_uri: &str) -> Result<JsVal
         did,
         handle: handle_str,
         dpop_key,
-        pkce_verifier: pkce.verifier,
+        pkce_verifier: pkce.verifier.clone(),
         csrf_state,
         token_endpoint: asm.token_endpoint,
         client_id,
@@ -192,10 +192,13 @@ pub async fn complete_oauth_login(
     // 3. Build session (tokens stay in WASM)
     let now = opake_core::client::time::unix_now();
     let session = OAuthSession {
-        did: token_response.sub.unwrap_or_else(|| pending.did.clone()),
+        did: token_response
+            .sub
+            .clone()
+            .unwrap_or_else(|| pending.did.clone()),
         handle: pending.handle.clone(),
-        access_token: token_response.access_token,
-        refresh_token: token_response.refresh_token.unwrap_or_default(),
+        access_token: token_response.access_token.clone(),
+        refresh_token: token_response.refresh_token.clone().unwrap_or_default(),
         dpop_key: pending.dpop_key,
         token_endpoint: pending.token_endpoint,
         dpop_nonce,

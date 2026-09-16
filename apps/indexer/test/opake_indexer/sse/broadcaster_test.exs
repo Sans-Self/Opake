@@ -28,8 +28,8 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
         author_did: @alice,
         record_jsonb: %{
           "members" => [
-            %{"wrappedKey" => %{"did" => @alice}, "role" => "manager"},
-            %{"wrappedKey" => %{"did" => @bob}, "role" => "editor"}
+            %{"did" => @alice, "role" => "manager"},
+            %{"did" => @bob, "role" => "editor"}
           ]
         }
       }
@@ -54,7 +54,7 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
         collection: "at.opake.keyring",
         workspace_id: ws,
         author_did: @alice,
-        record_jsonb: %{"members" => [%{"wrappedKey" => %{"did" => @alice}, "role" => "manager"}]}
+        record_jsonb: %{"members" => [%{"did" => @alice, "role" => "manager"}]}
       }
 
       subscribe(Topics.personal(@carol))
@@ -177,8 +177,8 @@ defmodule OpakeIndexer.SSE.BroadcasterTest do
         workspace_id: ws,
         record_jsonb: %{
           "members" => [
-            %{"wrappedKey" => %{"did" => @alice}, "role" => "manager"},
-            %{"wrappedKey" => %{"did" => @bob}, "role" => "editor"}
+            %{"did" => @alice, "role" => "manager"},
+            %{"did" => @bob, "role" => "editor"}
           ]
         }
       }

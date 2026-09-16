@@ -44,9 +44,9 @@ pub const TASKS: &[TaskDef] = &[
         description: "Retry pending shares for recipients who haven't set up yet",
     },
     TaskDef {
-        name: "rotation-rewrap",
-        interval_seconds: 30 * 60,
-        description: "Re-wrap documents from historical group keys to the current rotation",
+        name: "member-wrap-repair",
+        interval_seconds: 10 * 60,
+        description: "Repair admitted members' missing current group-key wraps when authorized",
     },
     // Note: proposal sync is no longer a timer-polling task. The web
     // client runs a WASM-owned SSE consumer, the CLI daemon runs a
@@ -105,11 +105,11 @@ pub enum DaemonTaskKind {
     GrantHealing { healed: usize },
     /// Retried pending shares for recipients who hadn't set up yet.
     ShareRetry { retried: usize },
-    /// Re-wrapped documents from historical group keys to the current
-    /// rotation. Carries only the completed count — the sweep's remaining
-    /// work is always re-derived from records, never persisted.
+    /// Repaired missing current member wraps from the live keyring heads.
+    /// Pending approvals and verification failures remain derivable in those
+    /// heads and are never treated as completed work.
     /// spec:background-work § Remaining work is derived from records, never stored
-    RotationRewrap { rewrapped: usize },
+    MemberWrapRepair { repaired: usize },
 }
 
 /// Current lifecycle state of a daemon task.
