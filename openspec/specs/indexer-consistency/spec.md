@@ -78,6 +78,8 @@ Clients SHALL branch on the machine-readable error code, not the bare status int
 
 The split discloses only whether a keyring record from the public firehose has been consumed for a given workspace id. Keyring records are public ciphertext on the authoring PDS and workspace ids are unguessable genesis URIs, so the distinction reveals nothing membership-private beyond what the firehose already publishes.
 
+Membership SHALL be evaluated using explicit member DIDs and roles (`spec:workspace-membership § Membership state is the keyring head's member list`). A missing current wrap for a listed DID SHALL NOT produce 403 or remove the caller from workspace snapshots, listings, or subscriptions. The indexer authorizes record access; the client separately determines which generations it can decrypt.
+
 #### Scenario: creator queries before genesis is consumed
 
 - **WHEN** a client creates a workspace and requests a workspace-scoped indexer endpoint before the indexer has consumed the genesis keyring
@@ -104,6 +106,12 @@ The split discloses only whether a keyring record from the public firehose has b
 
 - **WHEN** a caller whose DID is present in the head keyring's `members[]` requests a workspace-scoped endpoint
 - **THEN** the request is served normally
+
+#### Scenario: an admitted member without a current wrap is served
+
+- **GIVEN** an indexed head retains the caller's DID and role with no current wrap
+- **WHEN** the caller requests a workspace-scoped endpoint
+- **THEN** the request is served normally under that role, not denied as non-membership; availability of plaintext remains a client-side key question
 
 ### Requirement: Dependent operations tolerate the visibility gap
 

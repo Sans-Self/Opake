@@ -40,7 +40,7 @@ Payload `workspace_id` is the indexer's row field, a *reference* to the workspac
 
 When a head delete resolves to `rolled_back`, the indexer SHALL select the newest live keyring record for the workspace (`deleted_at IS NULL`, latest `indexed_at`) as the restored head — not the tombstone's direct `supersedes` predecessor, whose row may already be purged (7-day tombstone TTL, apps/indexer/lib/opake_indexer/tombstone_cleanup.ex). `torn_down` is therefore equivalent to "no live record remains."
 
-After broadcasting the delete, the indexer SHALL re-broadcast the restored record as a normal `at.opake.keyring:upsert` on the same topics. A rollback changes the current member set, rotation, and metadata back to the restored record's contents; clients rebuild their projection through the ordinary upsert path rather than patching fields from the delete event.
+After broadcasting the delete, the indexer SHALL re-broadcast the restored record as a normal `at.opake.keyring:upsert` on the same topics. A rollback changes the current member set, optional wraps, key-bound approvals, rotation, and metadata back to the restored record's contents; clients rebuild their projection through the ordinary upsert path rather than patching fields from the delete event.
 
 #### Scenario: head delete rolls back to the predecessor
 
@@ -58,7 +58,19 @@ After broadcasting the delete, the indexer SHALL re-broadcast the restored recor
 
 - **GIVEN** a head record that removed member M from the previous head
 - **WHEN** that head is deleted and the previous head is restored and re-broadcast
-- **THEN** M's client rebuilds a workspace entry from the upsert (their wrap is present in the restored record) and the workspace reappears in their projection
+- **THEN** M's client evaluates their restored DID and role and rebuilds a workspace entry if identity verification succeeds using current or historical keys; membership restoration does not imply a current wrap exists
+
+#### Scenario: rollback reinstates historical-only membership
+
+- **GIVEN** the restored head admits M but supplies only usable historical wraps, including rotation 0
+- **WHEN** its upsert arrives
+- **THEN** M's workspace reappears after identity verification with its restored role and historical access, but no current-key readability is invented
+
+#### Scenario: rollback does not borrow approval from the deleted head
+
+- **GIVEN** the deleted head carried approval for bundle B but the restored head carries approval for bundle A
+- **WHEN** a runner evaluates a new wrap to unverified bundle B
+- **THEN** the deleted head's approval does not carry, and the item requires a fresh decision under the restored relationship state
 
 ### Requirement: Clients act on the outcome, never on URI matching
 
