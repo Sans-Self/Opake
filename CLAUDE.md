@@ -40,7 +40,7 @@ Specs and change artifacts are never hand-written. All spec work goes through th
 - `/opsx:sync` — merge delta specs into canon under `openspec/specs/`
 - `/opsx:archive` — archive a completed change (offers sync)
 
-Scaffolding a change dir by hand, writing a delta spec outside a change, or editing canon specs directly instead of syncing a delta are all workflow violations — the CLI's scaffolding and status tracking are the source of truth for what a change contains and whether it's apply-ready. Federation-class changes require the spec delta reviewed (red-penned) before implementation starts. `just spec-lint` guards citation integrity; it does not check semantics, so cite the requirement that actually governs the behavior under test.
+Scaffolding a change dir by hand, writing a delta spec outside a change, or editing canon specs directly instead of syncing a delta are all workflow violations — the CLI's scaffolding and status tracking are the source of truth for what a change contains and whether it's apply-ready. Federation-class changes require the spec delta reviewed (red-penned) before implementation starts. `just spec-lint` guards citation integrity; it does not check semantics, so cite the requirement that actually governs the behavior under test. Artefacts are written in plain language (ISO 24495-1:2023); `openspec/config.yaml` carries the per-artefact rules and the `plain-language` skill in `.claude/skills/plain-language/` carries the reasoning and the rewrite recipe. Nothing enforces plainness mechanically, so it is settled in review.
 
 ## Documentation
 
