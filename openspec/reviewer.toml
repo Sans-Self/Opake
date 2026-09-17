@@ -1,0 +1,20 @@
+[lint]
+# Where tests and other citing source live, and which files to read.
+source_roots    = ["apps", "packages", "crates", "tests"]
+source_globs    = ["**/*.css", "**/*.ex", "**/*.exs", "**/*.js", "**/*.md", "**/*.rs", "**/*.toml", "**/*.ts", "**/*.tsx"]
+skip_dirs       = ["node_modules", "target", "dist", "build", "_build", "deps"]
+
+# Evidence cited from canon specs: paths, regression test names, commits.
+path_prefixes   = ["apps", "packages", "crates", "tests", "docs"]
+path_extensions = ["css", "ex", "exs", "js", "json", "md", "rs", "toml", "ts", "tsx"]
+test_pattern    = "bug__\\w+"
+
+# A call helper that builds `spec:` tags at runtime, if the repository has one.
+# cite_helper   = "cite"
+
+# Change names must start with one of these scopes and a hyphen.
+# change_scopes = ["ui", "api"]
+# grandfathered = ["legacy-change"]
+
+[term_drift]
+max_common = 5
