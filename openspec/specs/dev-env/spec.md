@@ -32,7 +32,7 @@ At least one bootstrapped actor SHALL be verified: its published record carries 
 
 All three resolution outcomes SHALL therefore be reachable in the hermetic environment without a hostile component: unverified from any ordinary fixture, verified from the anchored one, and the error state by rewriting the anchored actor's published record so its signature is absent or no longer verifies while the verification method stays in place. The error state SHALL be producible against the anchored actor's own PDS through ordinary record writes; the dev-env SHALL NOT require a modified PDS to reach it (`spec:account-verification § Key resolution is three-valued, and an anchored account may not serve an unsigned record`).
 
-Beyond the checked-in set, test harnesses SHALL be able to provision namespace-scoped actors on demand against a running dev-env. A namespaced actor's handle SHALL embed its namespace, its mnemonic SHALL derive deterministically from the namespace and actor role (no randomness), and its provisioning SHALL yield the same guarantees as bootstrap: a live account on the role's designated PDS and a published public-key record derived from the mnemonic. The checked-in fixture set is the default namespace; provisioning a namespace SHALL NOT mutate the default actors or any other namespace's actors.
+Beyond the checked-in set, test harnesses SHALL be able to provision namespace-scoped actors on demand against a running dev-env. A namespaced actor's handle SHALL embed its namespace, its mnemonic SHALL derive deterministically from the namespace and actor role (no randomness), and its provisioning SHALL yield the same guarantees as bootstrap: a live account on the role's designated PDS and a published key record derived from the mnemonic. The checked-in fixture set is the default namespace; provisioning a namespace SHALL NOT mutate the default actors or any other namespace's actors.
 
 A namespace SHALL be individually disposable: a deprovision operation removes that namespace's actors and their accumulated state (accounts, records, blobs) from the dev-env without touching the default actors, any other namespace, or the environment's lifecycle — full `reset` remains the pristine-baseline path, but SHALL NOT be the only cleanup available, since it destroys state shared with concurrent consumers.
 
@@ -44,7 +44,7 @@ A namespace SHALL be individually disposable: a deprovision operation removes th
 #### Scenario: every PDS is inhabited
 
 - **WHEN** the default fixture set is bootstrapped
-- **THEN** each PDS instance hosts at least one actor, and any actor can resolve any other actor's public key record
+- **THEN** each PDS instance hosts at least one actor, and any actor can resolve any other actor's published key record
 
 #### Scenario: the anchored fixture resolves as verified
 

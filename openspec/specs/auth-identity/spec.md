@@ -62,7 +62,7 @@ Recovery (apps/cli/src/commands/recover.rs; web: apps/web/src/components/devices
 - **GIVEN** an account whose documents were encrypted under the identity derived from phrase P
 - **WHEN** a new device runs recovery with P
 - **THEN** the re-derived identity decrypts the existing documents
-- Verified end to end in "recover from plain text seed phrase → decrypt works" (tests/tests/cli/recover.test.ts); refusals in "recover rejects invalid seed phrase" / "when identity already exists" (same file)
+- Verified end to end in "recover from plain text seed phrase → decrypt works" (tests/tests/cli/recover.test.ts); refusals in "recover rejects invalid seed phrase" / "when identity already exists" (tests/tests/cli/recover.test.ts)
 
 ### Requirement: The encryption public keys are published as the publicKey self-record
 

@@ -69,7 +69,7 @@ Deleting a cabinet document SHALL batch the record delete and the parent-listing
 
 ### Requirement: A missing root is created on demand
 
-An operation that needs the cabinet root when no root record exists SHALL create it rather than fail or silently do nothing (`FileManager::ensure_root` → `get_or_create_root`, crates/opake-core/src/manager/directory.rs). A missing root is a normal state, not an error: a fresh account has never written one, and a recursive root delete removes it deliberately. Clients SHALL NOT treat a missing root as "nothing to do" — a client that short-circuits a write on a missing root strands the user in a cabinet that can never receive its first file.
+An operation that needs the cabinet root when no root record exists SHALL create it rather than fail or silently do nothing (`FileManager::ensure_root` → `get_or_create_root`, crates/opake-core/src/manager/directory.rs). A missing root is a normal state, not an error: a fresh account has never written one, and a recursive root delete removes it deliberately. Clients SHALL NOT treat a missing root as "nothing to do" — a client that short-circuits a write on a missing root strands the user in a cabinet that can never receive its first document.
 
 #### Scenario: first write on a fresh cabinet creates the root
 

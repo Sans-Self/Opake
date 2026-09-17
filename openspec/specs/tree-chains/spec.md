@@ -30,7 +30,7 @@ The `targetCid` pin exists so a consumer can content-address a subtree and so th
 
 - **GIVEN** a directory record stored on a member's PDS
 - **WHEN** the PDS or any unauthorized reader inspects the record
-- **THEN** it sees a list of `(target, targetCid)` pairs and an encrypted metadata blob, and no entry name or type
+- **THEN** it sees a list of `(target, targetCid)` pairs and encrypted metadata, and no entry name or type
 - Verified in `lexicons/at.opake.directory.json` (`entries` → `#listingEntry`) and `DirectoryTree::from_records`, which projects entries to bare target URIs
 
 ### Requirement: A path's canonical state is the head of a supersede chain
@@ -101,7 +101,7 @@ The client's exemption predicate SHALL account for former managers: a manager's 
 
 An indexer snapshot SHALL be treated as containing whole chains — every superseded predecessor alongside the head. Any consumer building live tree state (root detection, parent/child indexing, snapshot construction, reachability) SHALL consider chain-head records only and exclude any record another record supersedes. Whole-chain operations that intentionally need predecessors are the exception and SHALL be explicit about it.
 
-The head-only set is `DirectoryTree::canonical_directory_uris()`; the unfiltered set is `all_directory_uris()` and is correct only for whole-chain work. `find_parent` SHALL skip superseded records so it returns the canonical parent rather than an arbitrary prior version whose ancestors walk up to a stale root.
+The head-only set is `DirectoryTree::canonical_directory_uris()`; the unfiltered set is `all_directory_uris()` and is correct only for whole-chain work. `find_parent` SHALL skip superseded records so it returns the canonical parent rather than an arbitrary superseded record whose ancestors walk up to a stale root.
 
 Head adoption is subject to verifiability: when a chain walk cannot verify a proposed head — because a link is corrupt (see record-validity), or because a link's reported CID disagrees with the successor's `supersedesCid` content pin (`spec:lineage § Supersede references carry a content pin`) — the consumer SHALL NOT adopt the proposed head and SHALL continue presenting the newest head it can fully verify. This knowingly-stale presentation is a deliberate degradation state, not an error: the consumer SHALL surface that a newer, unverifiable head exists, and SHALL re-attempt verification when the chain changes. An unverifiable head never silently becomes canonical.
 

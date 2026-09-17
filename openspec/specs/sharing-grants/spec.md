@@ -102,7 +102,7 @@ The daemon SHALL NOT prompt and SHALL NOT proceed on a default (`spec:background
 
 Pending shares are the owner's own outgoing queue and are not indexed: retry SHALL be driven by the daemon listing the owner's `pendingShare` records, resolving each bound recipient DID, and — once a recipient publishes eligible keys — fetching the content key and conditionally completing that intent as above. A recipient still without a key SHALL leave the record queued; a document that fails permanently (deleted, corrupt, undecryptable) SHALL be skipped for its siblings in the same pass.
 
-A recipient who resolves to the error state SHALL NOT be treated as an ordinary retry failure. The record SHALL be left queued and no grant written, and the owner SHALL be told that the recipient's published record does not verify under the recipient's own verification method — distinctly from the not-ready case, since a not-ready recipient has published nothing and is waiting on themselves, while the error state is a statement about a PDS operator's behaviour. Should such a share reach its TTL it SHALL be discarded carrying that reason to the owner, never dropped as an unremarkable expiry: a PDS operator that serves an unverifiable record for longer than the TTL would otherwise be indistinguishable from a recipient who never set Opake up.
+A recipient who resolves to the error state SHALL NOT be treated as an ordinary retry failure. The record SHALL be left queued and no grant written, and the owner SHALL be told that the recipient's published record does not verify under the recipient's own verification method — distinctly from the not-ready case, since a not-ready recipient has published nothing and is waiting on themselves, while the error state is a statement about a PDS operator's behaviour. Should such a share reach its TTL it SHALL be discarded carrying that reason to the owner, never dropped as an unremarkable expiry: a PDS operator that serves a record in the error state for longer than the TTL would otherwise be indistinguishable from a recipient who never set Opake up.
 
 #### Scenario: sharing to a not-ready recipient warns before queuing
 
@@ -182,7 +182,7 @@ Grant creation and the pending-share queue SHALL be available only from `FileCon
 
 #### Scenario: sharing from a workspace context is refused
 
-- **GIVEN** a file manager bound to a workspace context
+- **GIVEN** a `FileManager` bound to a workspace context
 - **WHEN** `share` or `create_pending_share` is called
 - **THEN** it returns an error stating sharing is cabinet-only, without writing any record
 

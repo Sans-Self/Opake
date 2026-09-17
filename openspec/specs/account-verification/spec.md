@@ -195,10 +195,10 @@ account resolves as cleanly verified. First contact is outside what any in-band 
 establish.
 
 Where the DID method publishes no operation history, no replacement is reported and the account
-resolves as verified on its current document alone. `did:web` is such a method: its document is a
-served file with no log behind it. Resolution SHALL NOT represent the absence of a history as the
-absence of a replacement, and SHALL distinguish an account whose history shows no replacement from
-one whose method offers no history to read.
+resolves as verified on its current document alone. `did:web` is such a method: its document is
+served over HTTPS with no log behind it. Resolution SHALL NOT represent the absence of a history
+as the absence of a replacement, and SHALL distinguish an account whose history shows no
+replacement from one whose method offers no history to read.
 
 When identity rotation exists, a legitimate change of signing key will need a statement signed by
 the outgoing key rather than a bare substitution; until then the distinction does not arise.
@@ -237,9 +237,9 @@ pair — the error state SHALL refuse the operation before any wrap is computed.
 Where an operation wraps to **every remaining member** — a group-key rotation — the error state
 SHALL exclude that member from the wrap and SHALL NOT prevent the operation. An operation whose
 purpose is to withdraw access MUST NOT be blockable by any account it is not withdrawing access
-from; otherwise a single PDS operator serving an unverifiable record for its own user would permanently
-prevent the removal of anyone else. The excluded member SHALL be reported to the operator, and
-SHALL be eligible for repair once their record verifies
+from; otherwise a single PDS operator serving its own user a record that resolves to the
+error state would permanently prevent the removal of anyone else. The excluded member SHALL
+be reported to the operator, and SHALL be eligible for repair once their record verifies
 (`spec:background-work § Remaining work is derived from records, never stored`).
 
 An unverified remaining member whose resolved encryption keys lack applicable key-bound approval
